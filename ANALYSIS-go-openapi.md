@@ -330,6 +330,47 @@ No criticism intended — this is simply where the risk sits for the changes pro
 
 ---
 
+## 8b. Reusing go-openapi/core's scanning machinery
+
+`core`'s JSON lexer carries hand-optimised scanning: SWAR byte-class masks, AVX2 kernels for
+string stops and UTF-8 validation, and zero-copy tokens. On comparable documents (~300 KB):
+
+| | throughput | allocations |
+|---|---|---|
+| `core`'s JSON lexer `L` | **661 MB/s** | **2 per document** |
+| go-yaml `lexer.Tokenize` | 19.7 MB/s | ~150 000 per document |
+
+**The transferable win is mostly not the SIMD — it is the zero-copy token design.** Two
+allocations per document versus 150 000 is what Finding B (GC at 45% of CPU) is measuring
+from the other side. Tokens that alias the input buffer instead of owning strings, and
+positions carried by value, get most of the distance with no assembly at all.
+
+What maps across:
+
+| primitive | verdict |
+|---|---|
+| `utf8x.Valid` (AVX2 lookup4) | **Direct.** UTF-8 is content-agnostic, and byte-based scanning (S1) *needs* explicit validation once `[]rune` stops doing it implicitly. |
+| `swar` masks — `Broadcast`, `MaskEqual/Less/Greater`, `FirstByte`, `LanesBelow` | **Direct.** Generic byte-class machinery, nothing JSON-specific. |
+| `scan.Unhex` / `Hex4` | **Direct** for `\uXXXX` in double-quoted scalars — identical to JSON. |
+| `strscan.ScanStop` (AVX2 stop-set + fused non-ASCII flag) | **Near drop-in for double-quoted scalars** (same stop set as JSON: `"`, `\`, control). Single-quoted needs only `'` — a simpler variant of the same kernel. |
+| `ConsumeWhitespaceTracked` → `(n, lines, afterLastNL)` | **Idea, not the code.** YAML cannot skip whitespace blindly (indentation is structural), but that line/column tracking shape is exactly what the scanner needs. |
+| number scanning | **No.** YAML does not lex numbers; scalars are resolved later. `YL` already normalises YAML-only spellings on its own side. |
+| plain (unquoted) scalars | **Technique only.** Stop conditions are multi-byte and context-dependent (`": "`, `" #"`, flow `,]}`, newline plus indentation). A SWAR mask can find *candidates* cheaply, with a scalar check to confirm — a filter, not a port. |
+
+**Structural prerequisite.** All of it is `internal/`: `json/internal/utf8x`,
+`json/lexers/default-lexer/internal/{strscan,swar}`. The fork cannot import them, and must
+not depend on `core` in any case — `core` depends on the YAML library, so that would be a
+cycle. Reuse therefore requires **extracting the primitives into a small standalone module**
+that both sides import. That is a prerequisite, not a detail.
+
+**Sequencing.** After the `parseMap` fix the scanner is roughly half the remaining time, so
+this is the right next frontier — but take the allocation work (Finding B) before the
+kernels. It addresses the 45% GC cost, needs no assembly, and no AVX2 kernel will pay for
+itself while the profile is dominated by object churn. Reach for the kernels once the
+profile actually points at byte scanning. Note the kernels bring amd64 assembly, a CPUID
+gate, `avo` generators and pure-Go fallbacks — real maintenance surface to take into a YAML
+library, cheap for `utf8x`/`swar`, less obviously worth it for a YAML-specific stop kernel.
+
 ## 9. Roadmap
 
 Ordering is driven by dependency, not by value:
