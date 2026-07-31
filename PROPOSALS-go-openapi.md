@@ -82,10 +82,32 @@ OpenAPI specification's `paths:` mapping.
 ### What we would propose
 
 Accumulate siblings into a single `MappingNode` in a loop instead of recursing and
-concatenating, plus a benchmark asserting near-linear scaling so it cannot regress.
-We are happy to send this as a PR with the benchmark — it is API-neutral and
-behaviour-preserving, and it is the change we would most like to see land upstream
-rather than carry in a fork.
+concatenating: extract "parse one `key: value` pair" from `parseMap`, and call that
+from the sibling loop.
+
+**We have prototyped this and it works.** On our side it measures:
+
+| | before | after |
+|---|---|---|
+| 16 000 keys | 408 ms | **43.7 ms** |
+| 64 000 keys (1.4 MB) | 3.85 s | **157 ms** (24.5×) |
+| per-key cost, 1k → 16k | 2.8 → 25.5 µs | **1.5 → 2.7 µs** (flat) |
+| allocation, 0.32 MB doc | 42 MB/parse | **24.8 MB/parse** |
+
+**Your entire test suite passes unchanged**, and we separately ran it through the
+YAML Test Suite (406 cases, comparing token streams) with an identical result, so
+it appears to be performance-only.
+
+One detail worth flagging for review: foot comments currently attach to the last
+*entry* rather than to the mapping, because the innermost recursive call always
+held exactly one value. Parsing siblings in a loop puts every value in one node, so
+that choice has to be made explicitly — without it, `TestComment/map_with_comment`
+loses a trailing comment. That was the only test the change disturbed, and the
+prototype preserves the existing behaviour.
+
+We would be glad to send this as a PR with the benchmark. It is the change we would
+most like to see land upstream rather than carry in a fork, and we are happy to
+adjust it to whatever shape you prefer.
 
 We would also gently flag the availability angle: anything parsing untrusted YAML
 (we parse user-supplied OpenAPI documents) currently spends seconds of CPU on a

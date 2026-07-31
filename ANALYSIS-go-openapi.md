@@ -29,6 +29,9 @@ performance and the streaming.
 
 A is the one to fix first: it blocks the streaming goal outright (no amount of streaming
 rescues a parser that takes seconds on a megabyte) and it is a contained, API-neutral bug.
+**It has been prototyped** — see §3: 24.5× faster on a 1.4 MB document, whole upstream test
+suite green, conformance unchanged. The parsing layer does not need refurbishing; one
+function needed its recursion turned into a loop.
 
 ---
 
@@ -111,12 +114,42 @@ parse** of a 0.32 MB document, against yaml.v3's 126 k and 7 MB for the same inp
 Invisible on small fixtures — a few milliseconds at 1 000 keys. It needs a **wide, shallow**
 document to show, which is exactly the shape of a large OpenAPI `paths:` mapping.
 
-### Fix
+### Fix — prototyped and measured
 
 Accumulate siblings into a single `MappingNode` in a loop rather than recursing and
-concatenating; check whether sequences share the shape. Add a benchmark asserting
-near-linear scaling so it cannot regress silently. API-neutral and behaviour-preserving,
-so it is the first thing to offer upstream.
+concatenating. **This was built as a proof of concept and it works** — branch
+`perf/iterative-parse-map`. It is a proof of concept, not a finished implementation:
+sequences have not been checked for the same shape, and it wants review rather than merging.
+
+The change is small: extract "parse one `key: value` pair" out of `parseMap` as
+`parseMapEntry`, then call that in the sibling loop instead of recursing.
+
+| | before | after | |
+|---|---|---|---|
+| 16 000 keys | 408 ms | **43.7 ms** | 9.3× faster |
+| 32 000 keys | 1.17 s | **93 ms** | 12.6× faster |
+| 64 000 keys (1.4 MB) | 3.85 s | **157 ms** | **24.5× faster** |
+| per-key cost, 1k → 16k | 2.8 → 25.5 µs | **1.5 → 2.7 µs** | super-linearity gone |
+| ratio to yaml.v3 | 2× → 42×, widening | **flat 2×** | |
+| allocation (0.32 MB nested doc) | 42 MB/parse | **24.8 MB/parse** | −41% |
+
+Validation:
+
+- **The entire upstream test suite passes** (root, `ast`, `lexer`, `parser`, `printer`,
+  `token`).
+- **The YAML Test Suite is unchanged**: run through go-openapi's 406-case conformance
+  harness, which compares a projected JSON token stream per case, the result is identical —
+  `accept+match=226, reject=85, record-only=63, xfail=32, unexpected-pass=0`. So the fix
+  changes performance and nothing else.
+
+One semantic detail needed care, and is commented in the code: foot comments used to attach
+to the last *entry* rather than to the mapping, because the innermost recursive call always
+held exactly one value. Parsing siblings in a loop puts every value in one node, so that
+choice has to be made explicitly. Without it, `TestComment/map_with_comment` drops a
+trailing comment — it was the only failure the refactor caused.
+
+**The residual 2× against yaml.v3 is now allocation density, not algorithm** — Finding B.
+That is the next piece of work, and it is ordinary optimisation rather than a defect.
 
 ### Security relevance
 
