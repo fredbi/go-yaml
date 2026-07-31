@@ -363,13 +363,23 @@ not depend on `core` in any case — `core` depends on the YAML library, so that
 cycle. Reuse therefore requires **extracting the primitives into a small standalone module**
 that both sides import. That is a prerequisite, not a detail.
 
-**Sequencing.** After the `parseMap` fix the scanner is roughly half the remaining time, so
-this is the right next frontier — but take the allocation work (Finding B) before the
-kernels. It addresses the 45% GC cost, needs no assembly, and no AVX2 kernel will pay for
-itself while the profile is dominated by object churn. Reach for the kernels once the
-profile actually points at byte scanning. Note the kernels bring amd64 assembly, a CPUID
-gate, `avo` generators and pure-Go fallbacks — real maintenance surface to take into a YAML
-library, cheap for `utf8x`/`swar`, less obviously worth it for a YAML-specific stop kernel.
+**Sequencing** (agreed 2026-07-31):
+
+1. **Parsing** — the `parseMap` defect. Prototyped; see §3.
+2. **Lexing** — the byte/reader-based scanner (S1). Structural, and it is what unlocks
+   streaming.
+3. **Allocation and memory churn** — Finding B. Zero-copy tokens, positions by value, slab
+   allocation. This is where the remaining 2× against yaml.v3 lives, and it needs no
+   assembly.
+4. **Eventually, possibly, SWAR-like techniques** — and most likely *re-derived for YAML's
+   stop conditions rather than literal reuse of `core`'s kernels*. Plain scalars in
+   particular are context-sensitive in a way JSON strings are not, so the kernels would not
+   port as-is. We are a long way from this being the constraint.
+
+The honest read on §8b is therefore: the **expertise** transfers (zero-copy token design,
+byte-class masking, fused validation), and `utf8x` transfers literally because UTF-8 is
+UTF-8. The rest is a reference to learn from, not a library to import — which also means
+the standalone-module extraction above is only worth doing if and when step 4 arrives.
 
 ## 9. Roadmap
 
@@ -377,10 +387,12 @@ Ordering is driven by dependency, not by value:
 
 | phase | work | why here |
 |---|---|---|
-| **P** | Fix the super-linear `parseMap` (§3); then object-count reduction (§4). | Blocks everything. Also the first upstream PR. |
+| **P** | Fix the super-linear `parseMap` (§3). | Blocks everything. Also the first upstream PR. |
 | **S** | Reader-fed byte scanner; grouping as an iterator pipeline; per-document parse. | The streaming goal. Needs P to be worth anything. |
 | **Y** | Consumer-side: the JSON-projecting lexer becomes a streaming projection. | Needs S. |
 | **B** | The defect series: block spans, BOM, the 12 conformance items. | Independent, upstreamable individually. |
+| **M** | Allocation and memory churn (§4): zero-copy tokens, positions by value. | After S — it is where the residual 2× lives. |
+| **(SWAR)** | Byte-class scanning kernels. | Only if the profile still points there. Far off; see §8b. |
 
 One coupling that is easy to miss: the consumer currently gives block containers correct
 positions by **back-patching** them after seeing the contents. A streaming consumer cannot
