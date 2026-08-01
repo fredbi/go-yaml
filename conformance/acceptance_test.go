@@ -7,8 +7,8 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
 	"github.com/go-openapi/go-yaml/parser"
-	yamltestsuite "github.com/go-openapi/go-yaml/testdata/yaml-test-suite"
 )
 
 // verdict is what happened to a case, compared with what the suite says should

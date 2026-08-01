@@ -58,15 +58,15 @@ This file exists only to record the components below, which come from other
 projects under their own terms.
 
 
-github.com/yaml/yaml-test-suite -- testdata/yaml-test-suite/
+github.com/yaml/yaml-test-suite -- internal/yamltestsuite/testdata/
 ------------------------------------------------------------
 
-The conformance fixtures under testdata/yaml-test-suite are used unmodified from
+The conformance fixtures under internal/yamltestsuite/testdata are used unmodified from
 https://github.com/yaml/yaml-test-suite, under the MIT License. A copy of that
 license is provided verbatim below and vendored alongside the fixtures at
-testdata/yaml-test-suite/LICENSE.
+internal/yamltestsuite/testdata/LICENSE.
 
-(testdata/yaml-test-suite/yaml.go is not part of the suite: it is this project's
+(internal/yamltestsuite/testdata/yaml.go is not part of the suite: it is this project's
 loader for the fixtures, and is covered by the root LICENSE.)
 
 MIT License

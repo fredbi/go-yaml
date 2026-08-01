@@ -1,7 +1,7 @@
 # go-yaml: analysis for the go-openapi fork
 
 Working document. Everything below was **measured**, not inferred, against
-`edee2f9` (`v1.19.2-5`) on 2026-07-31. Reproduce with `cd analysis && go test -v ./...`
+`edee2f9` (`v1.19.2-5`) on 2026-07-31. Reproduce with `cd internal/analysis && go test -v ./...`
 (see §10).
 
 Companion document: `PROPOSALS-go-openapi.md` — the subset of this that is worth
@@ -405,11 +405,11 @@ Add parser/scanner fuzzing **before** starting P or S, not after.
 
 ## 10. Reproducing
 
-Benchmarks live in `analysis/`, a **nested module** so the root module keeps its zero
-external dependencies (it needs `go.yaml.in/yaml/v3` for comparison).
+Benchmarks live in `internal/analysis/`, a **nested module** so the library keeps its zero
+runtime dependencies (the measurements need `go.yaml.in/yaml/v3` for comparison).
 
 ```sh
-cd analysis
+cd internal/analysis
 go test -v -run 'TestFlatMapScaling|TestStageAttribution|TestMemoryFootprint' ./...
 go test -run XXX -bench . -benchtime 2s ./...
 go test -run XXX -bench Parse -cpuprofile cpu.out -memprofile mem.out ./...

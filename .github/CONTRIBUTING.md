@@ -23,8 +23,13 @@ exceptions are documentation changes and typo fixes. Aim for at least 80% covera
 go test ./...
 ```
 
-Test code that needs third-party libraries goes under `testdata/` (which has its own `go_test.mod`), so the root
-module does not take on dependencies for the sake of tests.
+Test code that needs third-party libraries goes in `internal/testintegration`, a module of its own, so those
+dependencies never reach the published `go.mod`. It and the measurement modules (`internal/analysis`,
+`internal/benchmarks`) are all in `go.work`:
+
+```sh
+go test work ./...
+```
 
 Conformance matters here more than in most libraries. If your change affects what the parser accepts or rejects,
 say so explicitly in the pull request — a change in acceptance is a behaviour change even when it is a fix.

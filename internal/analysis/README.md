@@ -1,10 +1,10 @@
 # analysis
 
-Reproducible measurements behind [`../ANALYSIS-go-openapi.md`](../ANALYSIS-go-openapi.md).
+Reproducible measurements behind [`../../ANALYSIS-go-openapi.md`](../../ANALYSIS-go-openapi.md).
 
-A **separate module**: it needs `go.yaml.in/yaml/v3` as a comparison baseline, and the root
-module has zero external dependencies, which is worth preserving. `go test ./...` from the
-repository root does not descend into it.
+A **separate module**: it needs `go.yaml.in/yaml/v3` as a comparison baseline, and the library
+takes no runtime dependencies, which is worth preserving. It is in `go.work`, so `go test ./...`
+from the repository root does not descend into it but `go test work ./...` does.
 
 ```sh
 # the findings, as readable output

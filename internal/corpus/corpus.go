@@ -91,7 +91,7 @@ var Shapes = []struct {
 }
 
 // Sizes are held small enough that a full benchmark set runs in seconds. The
-// super-linear behaviour of wide mappings is charted in the analysis module,
+// super-linear behavior of wide mappings is charted in the analysis module,
 // which is free to be slow; this set exists to notice a change, not to draw a
 // curve.
 var Sizes = []int{100, 1000}

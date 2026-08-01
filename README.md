@@ -146,7 +146,7 @@ better; for a config file read once, the former is easier to write.
 
 ### 2. Reference elements declared in another file
 
-The `testdata` directory contains an `anchor.yml` file:
+Given a directory -- `testdata` here -- holding an `anchor.yml` file:
 
 ```yaml
 a: &a
@@ -371,16 +371,19 @@ The library itself has **no runtime dependencies**, and that is a property worth
 depends on this module, so anything we add here propagates.
 
 Tests use [`go-openapi/testify/v2`](https://github.com/go-openapi/testify/v2), which is itself dependency-free —
-so the only entry in `go.mod` is a test dependency that never reaches your binary. Test code needing heavier
-third-party libraries lives under `testdata/`, which has its own `go_test.mod`:
+so the only entry in `go.mod` is a test dependency that never reaches your binary. Everything that needs more
+than that lives under `internal/`, in modules of its own listed in `go.work`:
+
+| | |
+|---|---|
+| `internal/analysis` | the reproducible measurements behind `ANALYSIS-go-openapi.md` |
+| `internal/benchmarks` | comparisons against other YAML libraries |
+| `internal/testintegration` | tests needing third-party libraries |
 
 ```sh
-go test ./...                                # the library
-cd testdata && go test -modfile=go_test.mod ./...   # tests with third-party dependencies
+go test ./...          # the library
+go test work ./...     # the library and every module in the workspace
 ```
-
-Benchmarks and measurement code live in their own nested modules (`benchmarks/`, `analysis/`) for the same
-reason. `analysis/` holds the reproducible measurements behind `ANALYSIS-go-openapi.md`.
 
 ## Credits
 

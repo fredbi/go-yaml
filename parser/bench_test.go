@@ -5,9 +5,9 @@ import (
 
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
-	"github.com/go-openapi/go-yaml/testdata/corpus"
 )
 
 // The benchmarks below are the regression baseline for the parser. They measure
