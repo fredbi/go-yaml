@@ -564,8 +564,14 @@ func (d *DocumentNode) Read(p []byte) (int, error) {
 // Type returns DocumentNodeType
 func (d *DocumentNode) Type() NodeType { return DocumentType }
 
-// GetToken returns token instance
+// GetToken returns token instance.
+//
+// It returns nil for a document with no content, such as the one an empty
+// source produces: an empty document has no token to point at.
 func (d *DocumentNode) GetToken() *token.Token {
+	if d.Body == nil {
+		return nil
+	}
 	return d.Body.GetToken()
 }
 
