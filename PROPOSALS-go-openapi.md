@@ -85,18 +85,22 @@ Accumulate siblings into a single `MappingNode` in a loop instead of recursing a
 concatenating: extract "parse one `key: value` pair" from `parseMap`, and call that
 from the sibling loop.
 
-**We have prototyped this and it works.** On our side it measures:
+**We have implemented this and it works.** On our side it measures:
 
 | | before | after |
 |---|---|---|
-| 16 000 keys | 408 ms | **43.7 ms** |
-| 64 000 keys (1.4 MB) | 3.85 s | **157 ms** (24.5×) |
-| per-key cost, 1k → 16k | 2.8 → 25.5 µs | **1.5 → 2.7 µs** (flat) |
-| allocation, 0.32 MB doc | 42 MB/parse | **24.8 MB/parse** |
+| 16 000 keys | 340 ms | **45.3 ms** |
+| 64 000 keys (1.4 MB) | 3.98 s | **151 ms** (26×) |
+| per-key cost, 1k → 64k | 2.8 → 62.2 µs | **1.4 → 2.4 µs** (flat) |
+| allocation per key, 500 → 8 000 keys | 4 167 → 36 744 B | **1 937 → 2 138 B** (flat) |
 
-**Your entire test suite passes unchanged**, and we separately ran it through the
-YAML Test Suite (406 cases, comparing token streams) with an identical result, so
-it appears to be performance-only.
+`parseSequence` needs no equivalent change: it already appends in a loop, and measures
+flat before and after.
+
+**Your entire test suite passes unchanged.** We also compared a canonical dump of every
+AST node — type, path, position, rendered text, and head/line/foot comments — over the
+whole YAML Test Suite in both parse modes, before and after: byte for byte identical. So
+this is a performance change and nothing else.
 
 One detail worth flagging for review: foot comments currently attach to the last
 *entry* rather than to the mapping, because the innermost recursive call always

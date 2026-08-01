@@ -35,6 +35,19 @@ func FlatMap(n int) string {
 	return b.String()
 }
 
+// FlatSequence builds a sequence of n entries at one level, the sequence
+// counterpart of FlatMap.
+func FlatSequence(n int) string {
+	var b strings.Builder
+	b.Grow(n * 16)
+
+	for i := range n {
+		fmt.Fprintf(&b, "- value%06d\n", i)
+	}
+
+	return b.String()
+}
+
 // NestedDoc builds an OpenAPI-shaped document with n sibling paths, each a
 // small nested mapping.
 func NestedDoc(n int) string {

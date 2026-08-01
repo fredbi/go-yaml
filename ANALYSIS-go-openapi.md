@@ -19,7 +19,7 @@ performance and the streaming.
 
 | # | finding | severity |
 |---|---|---|
-| **A** | `parser.parseMap` is **super-linear in sibling-key count** (structurally O(N²) copying). 1.4 MB file → 3.85 s, 42× yaml.v3. | critical |
+| **A** | ~~`parser.parseMap` is **super-linear in sibling-key count**~~ — **fixed**, see §3. Was: 1.4 MB file → 3.85 s. Now 151 ms. | ~~critical~~ |
 | **B** | GC dominates CPU (45%) — millions of small pointer-rich allocations. | high |
 | **C** | AST retains **32× the source**; nothing can be emitted before the whole document is parsed. | high |
 | **D** | The scanner indexes `[]rune`, so `Position.Offset` is a rune index (and 4× memory). | medium |
@@ -27,11 +27,11 @@ performance and the streaming.
 | **F** | 12 conformance divergences against the YAML Test Suite. | medium |
 | **G** | `scanner/` has **zero test files**; the only fuzz target is at `Unmarshal` level. | high |
 
-A is the one to fix first: it blocks the streaming goal outright (no amount of streaming
-rescues a parser that takes seconds on a megabyte) and it is a contained, API-neutral bug.
-**It has been prototyped** — see §3: 24.5× faster on a 1.4 MB document, whole upstream test
-suite green, conformance unchanged. The parsing layer does not need refurbishing; one
-function needed its recursion turned into a loop.
+A was the one to fix first: it blocked the streaming goal outright (no amount of streaming
+rescues a parser that takes seconds on a megabyte) and it was a contained, API-neutral bug.
+**It is fixed** — see §3: 26× faster on a 1.4 MB document, every test green, all four ledgers
+unchanged. The parsing layer did not need refurbishing; one function needed its recursion
+turned into a loop.
 
 ---
 
@@ -114,39 +114,49 @@ parse** of a 0.32 MB document, against yaml.v3's 126 k and 7 MB for the same inp
 Invisible on small fixtures — a few milliseconds at 1 000 keys. It needs a **wide, shallow**
 document to show, which is exactly the shape of a large OpenAPI `paths:` mapping.
 
-### Fix — prototyped and measured
+### Fix — landed
 
 Accumulate siblings into a single `MappingNode` in a loop rather than recursing and
-concatenating. **This was built as a proof of concept and it works** — branch
-`perf/iterative-parse-map`. It is a proof of concept, not a finished implementation:
-sequences have not been checked for the same shape, and it wants review rather than merging.
+concatenating. The change is small: extract "parse one `key: value` pair" out of `parseMap`
+as `parseMapEntry`, then call that in the sibling loop instead of recursing.
 
-The change is small: extract "parse one `key: value` pair" out of `parseMap` as
-`parseMapEntry`, then call that in the sibling loop instead of recursing.
+Measured on one machine, best of 5, `key%06d: value%06d` × N:
 
-| | before | after | |
+| keys | before | after | |
 |---|---|---|---|
-| 16 000 keys | 408 ms | **43.7 ms** | 9.3× faster |
-| 32 000 keys | 1.17 s | **93 ms** | 12.6× faster |
-| 64 000 keys (1.4 MB) | 3.85 s | **157 ms** | **24.5× faster** |
-| per-key cost, 1k → 16k | 2.8 → 25.5 µs | **1.5 → 2.7 µs** | super-linearity gone |
-| ratio to yaml.v3 | 2× → 42×, widening | **flat 2×** | |
-| allocation (0.32 MB nested doc) | 42 MB/parse | **24.8 MB/parse** | −41% |
+| 1 000 | 2.83 ms (2.82 µs/key) | **1.42 ms** (1.42 µs/key) | 2.0× |
+| 4 000 | 32.5 ms (8.12 µs/key) | **7.13 ms** (1.78 µs/key) | 4.6× |
+| 16 000 | 340 ms (21.2 µs/key) | **45.3 ms** (2.83 µs/key) | 7.5× |
+| 64 000 (1.4 MB) | 3.98 s (62.2 µs/key) | **151 ms** (2.36 µs/key) | **26×** |
+
+**Per-key cost is the signal, and it is now flat**: 2.82 → 62.2 µs before, 1.42 → 2.36 µs
+after. Allocation says the same thing deterministically — 4 167 → 36 744 B/key before,
+**1 937 → 2 138 B/key after** across a 16× size range. That is the property
+`parser/scaling_test.go` now guards, and it fails on the old parser with a 8.8× reading.
+
+Across the benchmark set (parse only, benchstat, n=6): **−25% time, −35% bytes, −8%
+allocations** by geometric mean; on the widest fixture, −67% time and −81% bytes.
+
+**`parseSequence` was checked and needs no change.** It already appends entries in a loop,
+and measures flat both before and after (1 118 → 1 262 B/entry, unchanged by this work). The
+defect was `parseMap` alone.
 
 Validation:
 
-- **The entire upstream test suite passes** (root, `ast`, `lexer`, `parser`, `printer`,
-  `token`).
-- **The YAML Test Suite is unchanged**: run through go-openapi's 406-case conformance
-  harness, which compares a projected JSON token stream per case, the result is identical —
-  `accept+match=226, reject=85, record-only=63, xfail=32, unexpected-pass=0`. So the fix
-  changes performance and nothing else.
+- **Every test passes**, in every module of the workspace.
+- **All four ledgers are unchanged**: parser acceptance (88.3%), round trip (90.4%), decoder
+  (88.6%), token positions.
+- **The AST is byte-for-byte identical.** A canonical dump of every node — type, path,
+  position, rendered text, head/line/foot comments — over the 402 suite documents plus 22
+  comment-focused cases, in both parse modes, is unchanged. That is the real evidence that
+  this is a performance change and nothing else.
 
-One semantic detail needed care, and is commented in the code: foot comments used to attach
-to the last *entry* rather than to the mapping, because the innermost recursive call always
-held exactly one value. Parsing siblings in a loop puts every value in one node, so that
-choice has to be made explicitly. Without it, `TestComment/map_with_comment` drops a
-trailing comment — it was the only failure the refactor caused.
+One semantic detail needed care, and is commented in the code: foot comments attach to the
+last *entry* rather than to the mapping, because the innermost recursive call always held
+exactly one value and so took that branch. Parsing siblings in a loop puts every value in one
+node, so the choice has to be made explicitly. Without it, `TestComment/map_with_comment`
+drops a trailing comment — it was the only failure the refactor caused, and the AST
+differential above is what confirms the rest of the attribution is untouched.
 
 **The residual 2× against yaml.v3 is now allocation density, not algorithm** — Finding B.
 That is the next piece of work, and it is ordinary optimisation rather than a defect.
@@ -387,7 +397,7 @@ Ordering is driven by dependency, not by value:
 
 | phase | work | why here |
 |---|---|---|
-| **P** | Fix the super-linear `parseMap` (§3). | Blocks everything. Also the first upstream PR. |
+| ~~**P**~~ | ~~Fix the super-linear `parseMap` (§3).~~ **Done.** | Blocked everything. Also the first upstream PR. |
 | **S** | Reader-fed byte scanner; grouping as an iterator pipeline; per-document parse. | The streaming goal. Needs P to be worth anything. |
 | **Y** | Consumer-side: the JSON-projecting lexer becomes a streaming projection. | Needs S. |
 | **B** | The defect series: block spans, BOM, the 12 conformance items. | Independent, upstreamable individually. |
