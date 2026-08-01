@@ -23,8 +23,16 @@ exceptions are documentation changes and typo fixes. Aim for at least 80% covera
 go test ./...
 ```
 
-Test code that needs third-party libraries goes under `testdata/` (which has its own `go_test.mod`), so the root
-module does not take on dependencies for the sake of tests.
+Test code that needs third-party libraries goes under `internal/testdata/`, which carries a `go_test.mod` rather
+than a `go.mod` so those dependencies never reach the published `go.mod`. `-modfile` cannot be combined with a
+workspace, so run it with the workspace off:
+
+```sh
+cd internal/testdata && GOWORK=off go test -modfile=go_test.mod ./...
+```
+
+Measurement modules (`internal/analysis`, `internal/benchmarks`) are in `go.work`, so `go test work ./...` covers
+them along with the library.
 
 Conformance matters here more than in most libraries. If your change affects what the parser accepts or rejects,
 say so explicitly in the pull request — a change in acceptance is a behaviour change even when it is a fix.

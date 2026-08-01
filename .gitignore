@@ -1,6 +1,7 @@
 bin/
 .idea/
 *.out
+*.pprof
 go.work.sum
-.mcp.json
 .worktrees
+.mcp.json

@@ -1,12 +1,12 @@
 // Module analysis holds the measurements behind ANALYSIS-go-openapi.md.
 //
 // It is a separate module on purpose: it depends on go.yaml.in/yaml/v3 for comparison, and
-// the root module has zero external dependencies -- a property worth keeping.
-module github.com/go-openapi/go-yaml/analysis
+// the library itself takes no runtime dependencies -- a property worth keeping.
+module github.com/go-openapi/go-yaml/internal/analysis
 
 go 1.25.0
 
-replace github.com/go-openapi/go-yaml => ../
+replace github.com/go-openapi/go-yaml => ../..
 
 require (
 	github.com/go-openapi/go-yaml v0.0.0-00010101000000-000000000000

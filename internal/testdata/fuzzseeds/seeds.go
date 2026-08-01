@@ -11,7 +11,7 @@ package fuzzseeds
 import (
 	"fmt"
 
-	yamltestsuite "github.com/go-openapi/go-yaml/testdata/yaml-test-suite"
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/testdata/yaml-test-suite"
 )
 
 // All returns every seed document: the whole YAML Test Suite, valid and invalid

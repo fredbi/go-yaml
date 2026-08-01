@@ -5,8 +5,8 @@ import (
 	"io"
 	"testing"
 
+	"github.com/go-openapi/go-yaml/internal/testdata/corpus"
 	"github.com/go-openapi/go-yaml/scanner"
-	"github.com/go-openapi/go-yaml/testdata/corpus"
 	"github.com/go-openapi/go-yaml/token"
 )
 

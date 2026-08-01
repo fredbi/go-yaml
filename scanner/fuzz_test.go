@@ -8,8 +8,8 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml/internal/testdata/fuzzseeds"
 	"github.com/go-openapi/go-yaml/scanner"
-	"github.com/go-openapi/go-yaml/testdata/fuzzseeds"
 	"github.com/go-openapi/go-yaml/token"
 )
 

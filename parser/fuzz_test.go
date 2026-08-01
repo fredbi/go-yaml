@@ -7,8 +7,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/internal/testdata/fuzzseeds"
 	"github.com/go-openapi/go-yaml/parser"
-	"github.com/go-openapi/go-yaml/testdata/fuzzseeds"
 )
 
 // parseModes covers the two settings a caller can choose between. Comments

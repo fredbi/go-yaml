@@ -7,7 +7,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	yamltestsuite "github.com/go-openapi/go-yaml/testdata/yaml-test-suite"
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/testdata/yaml-test-suite"
 )
 
 // positionDefects counts the two ways a token position can be malformed.

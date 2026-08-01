@@ -16,7 +16,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml"
-	yamltestsuite "github.com/go-openapi/go-yaml/testdata/yaml-test-suite"
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/testdata/yaml-test-suite"
 )
 
 // Why a case of the YAML Test Suite does not decode to its expected JSON.
