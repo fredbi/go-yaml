@@ -9,9 +9,10 @@
 package fuzzseeds
 
 import (
+	"errors"
 	"fmt"
 
-	yamltestsuite "github.com/go-openapi/go-yaml/internal/testdata/yaml-test-suite"
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
 )
 
 // All returns every seed document: the whole YAML Test Suite, valid and invalid
@@ -22,7 +23,7 @@ func All() ([]string, error) {
 		return nil, fmt.Errorf("loading the YAML Test Suite: %w", err)
 	}
 	if len(tests) == 0 {
-		return nil, fmt.Errorf("the vendored YAML Test Suite is empty")
+		return nil, errors.New("the vendored YAML Test Suite is empty")
 	}
 
 	seeds := make([]string, 0, len(tests)+len(reducedReports))
@@ -54,7 +55,7 @@ var reducedReports = []string{
 	// exercised part of it.
 	"a: 'b",     // unterminated single quote
 	`a: "b`,     // unterminated double quote
-	`a: "\q"`,   // unrecognised escape
+	`a: "\q"`,   // unrecognized escape
 	`"\uZZZZ"`,  // malformed unicode escape
 	"a: |z\n b", // invalid block scalar indicator
 	"a: !!<>",   // malformed tag

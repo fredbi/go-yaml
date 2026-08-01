@@ -21,19 +21,19 @@ type TestSuite struct {
 	Error   bool
 }
 
-func curDir() string {
+// fixturesDir is the vendored copy of the YAML Test Suite, held in this
+// package's testdata directory so that the fixtures sit beside the loader that
+// reads them.
+func fixturesDir() string {
 	_, file, _, _ := runtime.Caller(0) //nolint:dogsled
-	return filepath.Dir(file)
+
+	return filepath.Join(filepath.Dir(file), "testdata")
 }
 
 func TestSuites() ([]*TestSuite, error) {
-	dir := curDir()
+	dir := fixturesDir()
 	testMap := make(map[string]*TestSuite)
 	if err := filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
-		if strings.HasSuffix(path, ".go") {
-			// this file.
-			return nil
-		}
 		if info.IsDir() {
 			return nil
 		}

@@ -378,15 +378,11 @@ than that lives under `internal/`, in modules of its own listed in `go.work`:
 |---|---|
 | `internal/analysis` | the reproducible measurements behind `ANALYSIS-go-openapi.md` |
 | `internal/benchmarks` | comparisons against other YAML libraries |
-| `internal/testdata` | fixtures, the vendored YAML Test Suite, and tests needing third-party libraries |
+| `internal/testintegration` | tests needing third-party libraries |
 
 ```sh
 go test ./...          # the library
 go test work ./...     # the library and every module in the workspace
-
-# internal/testdata carries a go_test.mod rather than a go.mod, so that its
-# dependencies never reach the published go.mod. -modfile needs the workspace off:
-cd internal/testdata && GOWORK=off go test -modfile=go_test.mod ./...
 ```
 
 ## Credits

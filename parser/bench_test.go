@@ -5,7 +5,7 @@ import (
 
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml/internal/testdata/corpus"
+	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
 )

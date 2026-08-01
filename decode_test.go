@@ -1590,7 +1590,7 @@ func TestDecoder_TypeConversionError(t *testing.T) {
 
 func TestDecoder_AnchorReferenceDirs(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
-	dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("internal/testdata"))
+	dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("testdata"))
 	var v struct {
 		A struct {
 			B int
@@ -1612,7 +1612,7 @@ func TestDecoder_AnchorReferenceDirsRecursive(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
 	dec := yaml.NewDecoder(
 		buf,
-		yaml.ReferenceDirs("internal/testdata"),
+		yaml.ReferenceDirs("testdata"),
 	)
 	var v struct {
 		A struct {
@@ -1633,7 +1633,7 @@ func TestDecoder_AnchorReferenceDirsRecursive(t *testing.T) {
 
 func TestDecoder_AnchorFiles(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
-	dec := yaml.NewDecoder(buf, yaml.ReferenceFiles("internal/testdata/anchor.yml"))
+	dec := yaml.NewDecoder(buf, yaml.ReferenceFiles("testdata/anchor.yml"))
 	var v struct {
 		A struct {
 			B int

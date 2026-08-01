@@ -1,6 +1,10 @@
-module github.com/go-openapi/go-yaml
+module github.com/go-openapi/go-yaml/internal/testintegration
 
 go 1.25.0
+
+replace github.com/go-openapi/go-yaml => ../..
+
+require github.com/go-openapi/go-yaml v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/go-playground/validator/v10 v10.22.1
