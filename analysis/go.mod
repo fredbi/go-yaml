@@ -2,13 +2,13 @@
 //
 // It is a separate module on purpose: it depends on go.yaml.in/yaml/v3 for comparison, and
 // the root module has zero external dependencies -- a property worth keeping.
-module github.com/goccy/go-yaml/analysis
+module github.com/go-openapi/go-yaml/analysis
 
 go 1.25.0
 
-replace github.com/goccy/go-yaml => ../
+replace github.com/go-openapi/go-yaml => ../
 
 require (
-	github.com/goccy/go-yaml v0.0.0-00010101000000-000000000000
+	github.com/go-openapi/go-yaml v0.0.0-00010101000000-000000000000
 	go.yaml.in/yaml/v3 v3.0.5
 )

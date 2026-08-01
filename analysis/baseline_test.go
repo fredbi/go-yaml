@@ -4,9 +4,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	v3 "go.yaml.in/yaml/v3"
+
+	"github.com/go-openapi/go-yaml/lexer"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestMemoryFootprint reports LIVE heap retained by each representation, which is what

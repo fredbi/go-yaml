@@ -1,4 +1,4 @@
-module github.com/goccy/go-yaml
+module github.com/go-openapi/go-yaml
 
 go 1.21.0
 
