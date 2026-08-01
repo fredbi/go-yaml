@@ -1,90 +1,88 @@
-# YAML support for the Go language
+# go-yaml
 
-[![PkgGoDev](https://pkg.go.dev/badge/github.com/goccy/go-yaml)](https://pkg.go.dev/github.com/goccy/go-yaml)
-![Go](https://github.com/goccy/go-yaml/workflows/Go/badge.svg)
-[![codecov](https://codecov.io/gh/goccy/go-yaml/branch/master/graph/badge.svg)](https://codecov.io/gh/goccy/go-yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/goccy/go-yaml)](https://goreportcard.com/report/github.com/goccy/go-yaml)
+<!-- Badges: status -->
+[![Tests](https://github.com/go-openapi/go-yaml/actions/workflows/go-test.yml/badge.svg)](https://github.com/go-openapi/go-yaml/actions/workflows/go-test.yml)
+[![CI vulnerability scan](https://github.com/go-openapi/go-yaml/actions/workflows/scanner.yml/badge.svg)](https://github.com/go-openapi/go-yaml/actions/workflows/scanner.yml)
+[![CodeQL](https://github.com/go-openapi/go-yaml/actions/workflows/codeql.yml/badge.svg)](https://github.com/go-openapi/go-yaml/actions/workflows/codeql.yml)
+<!-- Badges: code quality -->
+[![Go Report Card](https://goreportcard.com/badge/github.com/go-openapi/go-yaml)](https://goreportcard.com/report/github.com/go-openapi/go-yaml)
+<!-- Badges: documentation & license -->
+[![GoDoc](https://pkg.go.dev/badge/github.com/go-openapi/go-yaml)](https://pkg.go.dev/github.com/go-openapi/go-yaml)
+[![License](http://img.shields.io/badge/license-MIT-orange.svg)](./LICENSE)
+[![go version](https://img.shields.io/github/go-mod/go-version/go-openapi/go-yaml)](https://github.com/go-openapi/go-yaml)
 
-<img width="300px" src="https://user-images.githubusercontent.com/209884/67159116-64d94b80-f37b-11e9-9b28-f8379636a43c.png"></img>
+**A YAML library for Go, forked from the excellent [`goccy/go-yaml`](https://github.com/goccy/go-yaml).**
 
-This a fork of the great <github.com/goccy/go-yaml> library.
+> [!WARNING]
+> Early days. The module path has changed, the API will change, and there is no release yet.
+> If you want a stable YAML library today, use [`goccy/go-yaml`](https://github.com/goccy/go-yaml) upstream —
+> it is well maintained and this fork exists for reasons specific to go-openapi, not because anything is wrong
+> with it.
 
-> **Why forking?**
+## Why fork?
 
-> **Is it a hard fork?**
+`go-openapi` needs a YAML library that a *tooling* consumer can build on, and it needs three things that no Go
+YAML library currently offers together:
 
-## This library has **NO** relation to the go-yaml/yaml library
+- **Low-level access** — a token and AST surface with accurate positions, not a `Marshal`/`Unmarshal` facade.
+  We drive editor and TUI tooling (syntax colouring, diagnostics, JSON-pointer navigation) over OpenAPI
+  documents, so we need to know *where* every construct is, not just what it means.
+- **Streaming, with a bounded memory footprint.** OpenAPI documents get large. Today the whole input is
+  materialised as `[]rune`, every token is retained, and nothing can be emitted before the entire document has
+  been parsed — an AST costs roughly 32× the source.
+- **Conformance** good enough to project YAML onto JSON semantics faithfully, measured against the
+  [YAML Test Suite](https://github.com/yaml/yaml-test-suite) rather than asserted.
 
-> [!IMPORTANT]
-> This library is developed from scratch to replace [`go-yaml/yaml`](https://github.com/go-yaml/yaml).
-> If you're looking for a better YAML library, this one should be helpful.
+`goccy/go-yaml` is the only Go YAML library whose architecture *exposes the machinery* to build that on. That is
+why we started from it rather than from anything else. What it does not yet have is the performance and the
+streaming — and getting there means changes to the scanner and the token representation that are too invasive to
+land as drive-by pull requests against a library with a large installed base.
 
-# Why a new library?
+See [`ANALYSIS-go-openapi.md`](./ANALYSIS-go-openapi.md) for the measurements behind all of the above, and
+[`PROPOSALS-go-openapi.md`](./PROPOSALS-go-openapi.md) for the parts we think are worth upstreaming.
 
-As of this writing, there already exists a de facto standard library for YAML processing for Go: [https://github.com/go-yaml/yaml](https://github.com/go-yaml/yaml). However, we believe that a new YAML library is necessary for the following reasons:
+## Is it a hard fork?
 
-- Not actively maintained
-- `go-yaml/yaml` has ported the libyaml written in C to Go, so the source code is not written in Go style
-- There is a lot of content that cannot be parsed
-- YAML is often used for configuration, and it is common to include validation along with it. However, the errors in `go-yaml/yaml` are not intuitive, and it is difficult to provide meaningful validation errors
-- When creating tools that use YAML, there are cases where reversible transformation of YAML is required. However, to perform reversible transformations of content that includes Comments or Anchors/Aliases, manipulating the AST is the only option
-- Non-intuitive [Marshaler](https://pkg.go.dev/gopkg.in/yaml.v3#Marshaler) / [Unmarshaler](https://pkg.go.dev/gopkg.in/yaml.v3#Unmarshaler)
+**No — a soft fork, and we intend to contribute back.**
 
-By the way, libraries such as [ghodss/yaml](https://github.com/ghodss/yaml) and [sigs.k8s.io/yaml](https://github.com/kubernetes-sigs/yaml) also depend on go-yaml/yaml, so if you are using these libraries, the same issues apply: they cannot parse things that go-yaml/yaml cannot parse, and they inherit many of the problems that go-yaml/yaml has.
+- **Fixes that cost upstream nothing, we offer upstream.** Bug fixes, conformance corrections and API-neutral
+  performance work are kept as isolated commits so they can be sent as pull requests. The first of those — a fix
+  for super-linear parsing of wide mappings, worth 24× on a 1.4 MB document with no behaviour change — is
+  described in `PROPOSALS-go-openapi.md` §0.
+- **Architecture is where we diverge.** A byte- and reader-based scanner, zero-copy tokens, and byte-valued
+  source offsets are breaking changes by nature. Those we carry here.
+- **Licensing is unchanged.** This repository stays under `goccy/go-yaml`'s MIT license (see [LICENSE](./LICENSE))
+  and claims no separate copyright. Third-party components are recorded in [NOTICE](./NOTICE).
 
-# Features
+If upstream would rather take the architectural work too, we would be glad to be a testing ground for it rather
+than a permanent fork.
 
-- No dependencies
-- A better parser than `go-yaml/yaml`. 
-  - [Support recursive processing](https://github.com/apple/device-management/blob/release/docs/schema.yaml)
-  - Higher coverage in the [YAML Test Suite](https://github.com/yaml/yaml-test-suite?tab=readme-ov-file)
-    - YAML Test Suite consists of 402 cases in total, of which `gopkg.in/yaml.v3` passes `295`. In addition to passing all those test cases, `goccy/go-yaml` successfully passes nearly 60 additional test cases ( 2024/12/15 )
-    - The test code is [here](https://github.com/goccy/go-yaml/blob/master/yaml_test_suite_test.go#L77)
-- Ease and sustainability of maintenance
-  - The main maintainer is [@goccy](https://github.com/goccy), but we are also building a system to develop as a team with trusted developers
-  - Since it is written from scratch, the code is easy to read for Gophers
-- An API structure that allows the use of not only `Encoder`/`Decoder` but also `Tokenizer` and `Parser` functionalities.
-  - [lexer.Tokenize](https://pkg.go.dev/github.com/goccy/go-yaml@v1.15.4/lexer#Tokenize)
-  - [parser.Parse](https://pkg.go.dev/github.com/goccy/go-yaml@v1.15.4/parser#Parse)
-- Filtering, replacing, and merging YAML content using YAML Path
-- Reversible transformation without using the AST for YAML that includes Anchors, Aliases, and Comments
-- Customize the Marshal/Unmarshal behavior for primitive types and third-party library types ([RegisterCustomMarshaler](https://pkg.go.dev/github.com/goccy/go-yaml#RegisterCustomMarshaler), [RegisterCustomUnmarshaler](https://pkg.go.dev/github.com/goccy/go-yaml#RegisterCustomUnmarshaler))
-- Respects `encoding/json` behavior
-  - Accept the `json` tag. Note that not all options from the `json` tag will have significance when parsing YAML documents. If both tags exist, `yaml` tag will take precedence.
-  - [json.Marshaler](https://pkg.go.dev/encoding/json#Marshaler) style [marshaler](https://pkg.go.dev/github.com/goccy/go-yaml#BytesMarshaler)
-  - [json.Unmarshaler](https://pkg.go.dev/encoding/json#Unmarshaler) style [unmarshaler](https://pkg.go.dev/github.com/goccy/go-yaml#BytesUnmarshaler)
-  - Options for using `MarshalJSON` and `UnmarshalJSON` ([UseJSONMarshaler](https://pkg.go.dev/github.com/goccy/go-yaml#UseJSONMarshaler), [UseJSONUnmarshaler](https://pkg.go.dev/github.com/goccy/go-yaml#UseJSONUnmarshaler))
-- Pretty format for error notifications
-- Smart validation processing combined with [go-playground/validator](https://github.com/go-playground/validator)
-  - [example test code is here](https://github.com/goccy/go-yaml/blob/45889c98b0a0967240eb595a1bd6896e2f575106/testdata/validate_test.go#L12)
-- Allow referencing elements declared in another file via anchors
+## Relationship to `go-yaml/yaml`
 
-# Users
+None — and that is inherited from upstream. This library was written from scratch by
+[@goccy](https://github.com/goccy), not ported from libyaml, which is precisely what makes its internals
+approachable enough to fork. If you are coming from `gopkg.in/yaml.v3` or `go.yaml.in/yaml/v3`, the upstream
+README's rationale still applies:
 
-The repositories that use goccy/go-yaml are listed here.
+- the source is written in Go style rather than transliterated from C
+- higher coverage of the YAML Test Suite
+- errors carry source positions, which makes validation diagnostics possible
+- comments and anchors survive a round trip, so reversible transformation is achievable
+- an API that exposes `Tokenizer` and `Parser`, not only `Encoder`/`Decoder`
 
-- https://github.com/goccy/go-yaml/wiki/Users
-
-The source data is [here](https://github.com/goccy/go-yaml/network/dependents). 
-It is already being used in many repositories. Now it's your turn 😄
-
-# Playground
-
-The Playground visualizes how go-yaml processes YAML text. Use it to assist with your debugging or issue reporting.
-
-https://goccy.github.io/go-yaml
-
-# Installation
+## Installation
 
 ```sh
-go get github.com/goccy/go-yaml
+go get github.com/go-openapi/go-yaml
 ```
 
-# Synopsis
+Requires Go 1.25 or later. We support the two most recent stable Go minor versions.
 
-## 1. Simple Encode/Decode
+## Synopsis
 
-Has an interface like `go-yaml/yaml` using `reflect`
+### 1. Simple Encode/Decode
+
+An interface like `go-yaml/yaml`, using `reflect`:
 
 ```go
 var v struct {
@@ -116,7 +114,7 @@ if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 }
 ```
 
-To control marshal/unmarshal behavior, you can use the `yaml` tag.
+To control marshal/unmarshal behavior, you can use the `yaml` tag:
 
 ```go
 	yml := `---
@@ -132,43 +130,23 @@ if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 }
 ```
 
-For convenience, we also accept the `json` tag. Note that not all options from
-the `json` tag will have significance when parsing YAML documents. If both
-tags exist, `yaml` tag will take precedence.
+For convenience, the `json` tag is also accepted. Note that not all options from the `json` tag have significance
+when parsing YAML documents. If both tags exist, the `yaml` tag takes precedence.
 
-```go
-	yml := `---
-foo: 1
-bar: c
-`
-var v struct {
-	A int    `json:"foo"`
-	B string `json:"bar"`
-}
-if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
-	//...
-}
-```
+For custom marshal/unmarshaling, implement either the `Bytes` or the `Interface` variant of
+marshaler/unmarshaler. `BytesMarshaler`/`BytesUnmarshaler` behaves like
+[`encoding/json`](https://pkg.go.dev/encoding/json); `InterfaceMarshaler`/`InterfaceUnmarshaler` behaves like
+[`gopkg.in/yaml.v2`](https://pkg.go.dev/gopkg.in/yaml.v2).
 
-For custom marshal/unmarshaling, implement either `Bytes` or `Interface` variant of marshaler/unmarshaler. The difference is that while `BytesMarshaler`/`BytesUnmarshaler` behaves like [`encoding/json`](https://pkg.go.dev/encoding/json) and `InterfaceMarshaler`/`InterfaceUnmarshaler` behaves like [`gopkg.in/yaml.v2`](https://pkg.go.dev/gopkg.in/yaml.v2).
+Semantically both are the same, but they differ in performance. Because indentation matters in YAML, a valid YAML
+fragment returned by a marshaler cannot simply be spliced into the parent container's serialized form — so when
+we receive `[]byte` from a `BytesMarshaler`, we must decode it once to work out how to place it in context. With
+an `InterfaceMarshaler`, that decode is skipped. If you repeatedly marshal complex objects, the latter is always
+better; for a config file read once, the former is easier to write.
 
-Semantically both are the same, but they differ in performance. Because indentation matters in YAML, you cannot simply accept a valid YAML fragment from a Marshaler, and expect it to work when it is attached to the parent container's serialized form. Therefore when we receive use the `BytesMarshaler`, which returns `[]byte`, we must decode it once to figure out how to make it work in the given context. If you use the `InterfaceMarshaler`, we can skip the decoding.
+### 2. Reference elements declared in another file
 
-If you are repeatedly marshaling complex objects, the latter is always better
-performance wise. But if you are, for example, just providing a choice between
-a config file format that is read only once, the former is probably easier to
-code.
-
-## 2. Reference elements declared in another file
-
-`testdata` directory contains `anchor.yml` file:
-
-```shell
-├── testdata
-   └── anchor.yml
-```
-
-And `anchor.yml` is defined as follows:
+The `testdata` directory contains an `anchor.yml` file:
 
 ```yaml
 a: &a
@@ -176,9 +154,9 @@ a: &a
   c: hello
 ```
 
-Then, if `yaml.ReferenceDirs("testdata")` option is passed to `yaml.Decoder`, 
- `Decoder` tries to find the anchor definition from YAML files the under `testdata` directory.
- 
+If the `yaml.ReferenceDirs("testdata")` option is passed to `yaml.Decoder`, the decoder looks for anchor
+definitions in the YAML files under that directory:
+
 ```go
 buf := bytes.NewBufferString("a: *a\n")
 dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("testdata"))
@@ -194,13 +172,13 @@ if err := dec.Decode(&v); err != nil {
 fmt.Printf("%+v\n", v) // {A:{B:1 C:hello}}
 ```
 
-## 3. Encode with `Anchor` and `Alias`
+### 3. Encode with `Anchor` and `Alias`
 
-### 3.1. Explicitly declared `Anchor` name and `Alias` name
+#### 3.1. Explicitly declared anchor and alias names
 
-If you want to use `anchor`, you can define it as a struct tag.
-If the value specified for an anchor is a pointer type and the same address as the pointer is found, the value is automatically set to alias.
-If an explicit alias name is specified, an error is raised if its value is different from the value specified in the anchor.
+Declare them as a struct tag. If the value specified for an anchor is a pointer and the same address is found
+again, the value is automatically emitted as an alias. If an explicit alias name is specified, an error is raised
+when its value differs from the value specified in the anchor.
 
 ```go
 type T struct {
@@ -226,11 +204,9 @@ d: *x
 */
 ```
 
-### 3.2. Implicitly declared `Anchor` and `Alias` names
+#### 3.2. Implicitly declared anchor and alias names
 
-If you do not explicitly declare the anchor name, the default behavior is to
-use the equivalent of `strings.ToLower($FieldName)` as the name of the anchor.
-If the value specified for an anchor is a pointer type and the same address as the pointer is found, the value is automatically set to alias.
+Without an explicit anchor name, the default is `strings.ToLower($FieldName)`.
 
 ```go
 type T struct {
@@ -245,13 +221,13 @@ var v struct {
 }
 v.A = &T{I: 1, S: "hello"}
 v.B = &T{I: 2, S: "world"}
-v.C = v.A // C has same pointer address to A
-v.D = v.B // D has same pointer address to B
+v.C = v.A // C has the same pointer address as A
+v.D = v.B // D has the same pointer address as B
 bytes, err := yaml.Marshal(v)
 if err != nil {
 	//...
 }
-fmt.Println(string(bytes)) 
+fmt.Println(string(bytes))
 /*
 a: &a
   i: 1
@@ -264,9 +240,9 @@ d: *b
 */
 ```
 
-### 3.3 MergeKey and Alias
+#### 3.3 Merge key and alias
 
-Merge key and alias ( `<<: *alias` ) can be used by embedding a structure with the `inline,alias` tag.
+A merge key with an alias (`<<: *alias`) can be used by embedding a structure with the `inline,alias` tag.
 
 ```go
 type Person struct {
@@ -311,23 +287,12 @@ people:
 */
 ```
 
-## 4. Pretty Formatted Errors
+### 4. Pretty formatted errors
 
-Error values produced during parsing have two extra features over regular
-error values.
+Errors produced during parsing carry the location of the problem in the source document, and can optionally be
+colorized. Use `yaml.FormatError` to control both, which accepts two boolean values.
 
-First, by default, they contain extra information on the location of the error
-from the source YAML document, to make it easier to find the error location.
-
-Second, the error messages can optionally be colorized.
-
-If you would like to control exactly how the output looks like, consider
-using  `yaml.FormatError`, which accepts two boolean values to
-control turning these features on or off.
-
-<img src="https://user-images.githubusercontent.com/209884/67358124-587f0980-f59a-11e9-96fc-7205aab77695.png"></img>
-
-## 5. Use YAMLPath
+### 5. Use YAMLPath
 
 ```go
 yml := `
@@ -353,7 +318,7 @@ fmt.Println(authors)
 // [john ken]
 ```
 
-### 5.1 Print customized error with YAML source code
+#### 5.1 Print a customized error with the YAML source
 
 ```go
 package main
@@ -361,7 +326,7 @@ package main
 import (
   "fmt"
 
-  "github.com/goccy/go-yaml"
+  "github.com/go-openapi/go-yaml"
 )
 
 func main() {
@@ -391,36 +356,39 @@ b: "hello"
 }
 ```
 
-output result is the following:
+## Playground
 
-<img src="https://user-images.githubusercontent.com/209884/84148813-7aca8680-aa9a-11ea-8fc9-37dece2ebdac.png"></img>
+Upstream hosts a playground that visualizes how the library processes YAML text, which is useful for debugging
+and for filing issues: https://goccy.github.io/go-yaml
 
+Note that it runs *upstream's* code, so it will not reflect changes made in this fork.
 
-# Tools
+## For developers
 
-## ycat
+See [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
 
-print yaml file with color
+The library itself has **no runtime dependencies**, and that is a property worth keeping: `go-openapi/core`
+depends on this module, so anything we add here propagates.
 
-<img width="713" alt="ycat" src="https://user-images.githubusercontent.com/209884/66986084-19b00600-f0f9-11e9-9f0e-1f91eb072fe0.png">
-
-### Installation
+Tests use [`go-openapi/testify/v2`](https://github.com/go-openapi/testify/v2), which is itself dependency-free —
+so the only entry in `go.mod` is a test dependency that never reaches your binary. Test code needing heavier
+third-party libraries lives under `testdata/`, which has its own `go_test.mod`:
 
 ```sh
-git clone https://github.com/goccy/go-yaml.git
-cd go-yaml/cmd/ycat && go install .
+go test ./...                                # the library
+cd testdata && go test -modfile=go_test.mod ./...   # tests with third-party dependencies
 ```
 
+Benchmarks and measurement code live in their own nested modules (`benchmarks/`, `analysis/`) for the same
+reason. `analysis/` holds the reproducible measurements behind `ANALYSIS-go-openapi.md`.
 
-# For Developers
+## Credits
 
-> [!NOTE]
-> In this project, we manage such test code under the `testdata` directory to avoid adding dependencies  on libraries that are only needed for testing to the top `go.mod` file. Therefore, if you want to add test cases that use 3rd party libraries, please add the test code to the `testdata` directory.
+This library was created by [Masaaki Goshima (@goccy)](https://github.com/goccy) and is developed upstream at
+[github.com/goccy/go-yaml](https://github.com/goccy/go-yaml). If this fork is useful to you, the credit for
+almost all of it belongs there — and upstream is
+[looking for sponsors](https://github.com/sponsors/goccy).
 
-# Looking for Sponsors
+## License
 
-I'm looking for sponsors this library. This library is being developed as a personal project in my spare time. If you want a quick response or problem resolution when using this library in your project, please register as a [sponsor](https://github.com/sponsors/goccy). I will cooperate as much as possible. Of course, this library is developed as an MIT license, so you can use it freely for free.
-
-# License
-
-MIT
+MIT — see [LICENSE](./LICENSE). Third-party components are recorded in [NOTICE](./NOTICE).
