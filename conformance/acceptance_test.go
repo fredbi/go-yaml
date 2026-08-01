@@ -1,0 +1,212 @@
+package conformance_test
+
+import (
+	"sort"
+	"testing"
+
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
+
+	"github.com/go-openapi/go-yaml/parser"
+	yamltestsuite "github.com/go-openapi/go-yaml/testdata/yaml-test-suite"
+)
+
+// verdict is what happened to a case, compared with what the suite says should
+// happen.
+type verdict int
+
+const (
+	// accepted: the suite says the document is valid and the parser took it.
+	accepted verdict = iota
+	// rejected: the suite says the document is invalid and the parser refused it.
+	rejected
+	// wronglyAccepted: the parser took a document YAML 1.2 forbids.
+	wronglyAccepted
+	// wronglyRejected: the parser refused a document YAML 1.2 allows.
+	wronglyRejected
+)
+
+func (v verdict) String() string {
+	switch v {
+	case accepted:
+		return "accepted"
+	case rejected:
+		return "rejected"
+	case wronglyAccepted:
+		return "wrongly accepted"
+	case wronglyRejected:
+		return "wrongly rejected"
+	default:
+		return "unknown"
+	}
+}
+
+func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRejected }
+
+// The reasons a case diverges. Cases sharing a reason share a root cause, and
+// are expected to be fixed together.
+const (
+	// Wrongly rejected.
+	reasonComplexKey = "a collection or an explicit '?' key is not accepted as a mapping key"
+	reasonEmptyKey   = "an empty key is not accepted"
+	reasonFlowBreak  = "inside a flow mapping, a line break between a key and its ':' is legal but rejected"
+	reasonFlowNote   = "a comment inside a flow collection ends the collection"
+	reasonDirective  = "an unknown or reserved directive is rejected rather than ignored"
+	reasonBlockEnd   = "content after a block scalar is misattributed"
+	reasonTabLine    = "a line holding only a tab is read as indentation"
+
+	// Wrongly accepted.
+	reasonCommentSpace = "a '#' starting a comment is accepted without the whitespace YAML requires before it"
+	reasonFlowDash     = "a plain '-' is accepted as a scalar in flow context"
+	reasonFlowIndent   = "indentation and tabs inside a flow collection are not checked"
+	reasonTagComma     = "a comma inside a tag is accepted"
+	reasonTagScope     = "a tag shorthand stays defined past the document that defined it"
+)
+
+// acceptanceLedger records every case where the parser disagrees with the YAML
+// Test Suite about whether a document is valid.
+//
+// The wrongly-rejected entries are dominated by one cause: mapping keys that
+// are not plain scalars. Explicit '?' keys, collections used as keys and empty
+// keys account for well over half the list, and they are a single body of work
+// rather than twenty separate defects.
+//
+// The wrongly-accepted entries are the opposite: small, independent
+// acceptance checks that were never written. Each is cheap to fix on its own,
+// and each *tightens* what the parser takes -- which makes them breaking
+// changes for anyone relying on the laxity, so they want a version boundary.
+var acceptanceLedger = map[string]struct {
+	verdict verdict
+	reason  string
+}{
+	// Documents YAML 1.2 allows that the parser refuses.
+	"aliases-in-flow-objects":                          {wronglyRejected, reasonComplexKey},
+	"anchors-on-empty-scalars":                         {wronglyRejected, reasonComplexKey},
+	"block-mapping-with-missing-keys":                  {wronglyRejected, reasonEmptyKey},
+	"comment-in-flow-sequence-before-comma":            {wronglyRejected, reasonFlowNote},
+	"empty-implicit-key-in-single-pair-flow-sequences": {wronglyRejected, reasonEmptyKey},
+	"empty-keys-in-block-and-flow-mapping":             {wronglyRejected, reasonEmptyKey},
+	"empty-lines-at-end-of-document":                   {wronglyRejected, reasonEmptyKey},
+	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
+	"explicit-key-and-value-seperated-by-comment":           {wronglyRejected, reasonComplexKey},
+	"flow-collections-over-many-lines/01":                   {wronglyRejected, reasonFlowBreak},
+	"flow-mapping-colon-on-line-after-key/02":               {wronglyRejected, reasonFlowBreak},
+	"flow-sequence-in-flow-mapping":                         {wronglyRejected, reasonComplexKey},
+	"implicit-flow-mapping-key-on-one-line":                 {wronglyRejected, reasonComplexKey},
+	"mapping-key-and-flow-sequence-item-anchors":            {wronglyRejected, reasonComplexKey},
+	"nested-implicit-complex-keys":                          {wronglyRejected, reasonComplexKey},
+	"question-mark-edge-cases/00":                           {wronglyRejected, reasonComplexKey},
+	"question-mark-edge-cases/01":                           {wronglyRejected, reasonComplexKey},
+	"single-character-streams/01":                           {wronglyRejected, reasonEmptyKey},
+	"single-pair-implicit-entries":                          {wronglyRejected, reasonFlowNote},
+	"spec-example-2-11-mapping-between-sequences":           {wronglyRejected, reasonComplexKey},
+	"spec-example-6-12-separation-spaces":                   {wronglyRejected, reasonComplexKey},
+	"spec-example-6-13-reserved-directives":                 {wronglyRejected, reasonDirective},
+	"spec-example-6-13-reserved-directives-1-3":             {wronglyRejected, reasonDirective},
+	"spec-example-6-14-yaml-directive":                      {wronglyRejected, reasonDirective},
+	"spec-example-7-3-completely-empty-flow-nodes":          {wronglyRejected, reasonEmptyKey},
+	"spec-example-8-10-folded-lines-8-13-final-empty-lines": {wronglyRejected, reasonBlockEnd},
+	"spec-example-8-18-implicit-block-mapping-entries":      {wronglyRejected, reasonComplexKey},
+	"spec-example-8-19-compact-block-mappings":              {wronglyRejected, reasonComplexKey},
+	"spec-example-8-8-literal-content":                      {wronglyRejected, reasonBlockEnd},
+	"spec-example-8-8-literal-content-1-3":                  {wronglyRejected, reasonBlockEnd},
+	"spec-example-9-3-bare-documents":                       {wronglyRejected, reasonBlockEnd},
+	"syntax-character-edge-cases/00":                        {wronglyRejected, reasonComplexKey},
+	"tabs-that-look-like-indentation/04":                    {wronglyRejected, reasonTabLine},
+	"tags-on-empty-scalars":                                 {wronglyRejected, reasonComplexKey},
+	"various-combinations-of-explicit-block-mappings":       {wronglyRejected, reasonComplexKey},
+	"various-trailing-comments":                             {wronglyRejected, reasonComplexKey},
+	"various-trailing-comments-1-3":                         {wronglyRejected, reasonComplexKey},
+	"zero-indented-sequences-in-explicit-mapping-keys":      {wronglyRejected, reasonComplexKey},
+
+	// Documents YAML 1.2 forbids that the parser takes.
+	"comment-without-whitespace-after-doublequoted-scalar":          {wronglyAccepted, reasonCommentSpace},
+	"dash-in-flow-sequence":                                         {wronglyAccepted, reasonFlowDash},
+	"invalid-comma-in-tag":                                          {wronglyAccepted, reasonTagComma},
+	"invalid-comment-after-comma":                                   {wronglyAccepted, reasonCommentSpace},
+	"invalid-comment-after-end-of-flow-sequence":                    {wronglyAccepted, reasonCommentSpace},
+	"plain-dashes-in-flow-sequence":                                 {wronglyAccepted, reasonFlowDash},
+	"tabs-in-various-contexts/003":                                  {wronglyAccepted, reasonFlowIndent},
+	"tag-shorthand-used-in-documents-but-only-defined-in-the-first": {wronglyAccepted, reasonTagScope},
+	"wrong-indented-flow-sequence":                                  {wronglyAccepted, reasonFlowIndent},
+	"wrong-indented-multiline-quoted-scalar":                        {wronglyAccepted, reasonFlowIndent},
+}
+
+// TestSuiteAcceptance parses every case of the YAML Test Suite and compares the
+// parser's verdict with the suite's.
+func TestSuiteAcceptance(t *testing.T) {
+	tests, err := yamltestsuite.TestSuites()
+	require.NoError(t, err)
+	require.NotEmpty(t, tests)
+
+	counts := make(map[verdict]int, 4)
+	diverged := make(map[string]verdict)
+
+	for _, test := range tests {
+		var got verdict
+
+		t.Run(test.Name, func(t *testing.T) {
+			_, err := parser.ParseBytes(test.InYAML, parser.ParseComments)
+
+			switch {
+			case test.Error && err == nil:
+				got = wronglyAccepted
+			case test.Error:
+				got = rejected
+			case err == nil:
+				got = accepted
+			default:
+				got = wronglyRejected
+			}
+
+			counts[got]++
+			if !got.diverges() {
+				assert.NotContainsf(t, acceptanceLedger, test.Name,
+					"%s: now %s -- if that is a fix, delete the ledger entry", test.Name, got)
+
+				return
+			}
+
+			diverged[test.Name] = got
+			known, listed := acceptanceLedger[test.Name]
+			if !assert.Truef(t, listed, "%s: %s, and not in the ledger: %v", test.Name, got, err) {
+				return
+			}
+			assert.Equalf(t, known.verdict, got, "%s: diverges differently than recorded", test.Name)
+		})
+	}
+
+	reportAcceptance(t, len(tests), counts, diverged)
+}
+
+// reportAcceptance logs the headline numbers, so that a run says where
+// conformance stands rather than only whether it moved.
+func reportAcceptance(t *testing.T, total int, counts map[verdict]int, diverged map[string]verdict) {
+	t.Helper()
+
+	agreed := counts[accepted] + counts[rejected]
+	t.Logf("YAML Test Suite: %d cases, %d agree (%d accepted, %d rejected), %d diverge (%.1f%% conformant)",
+		total, agreed, counts[accepted], counts[rejected], len(diverged),
+		100*float64(agreed)/float64(total))
+
+	byReason := make(map[string][]string)
+	for name := range diverged {
+		byReason[acceptanceLedger[name].reason] = append(byReason[acceptanceLedger[name].reason], name)
+	}
+
+	reasons := make([]string, 0, len(byReason))
+	for reason := range byReason {
+		reasons = append(reasons, reason)
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		if len(byReason[reasons[i]]) != len(byReason[reasons[j]]) {
+			return len(byReason[reasons[i]]) > len(byReason[reasons[j]])
+		}
+
+		return reasons[i] < reasons[j]
+	})
+
+	for _, reason := range reasons {
+		t.Logf("  %2d cases: %s", len(byReason[reason]), reason)
+	}
+}
