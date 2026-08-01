@@ -7,6 +7,12 @@
 
 <img width="300px" src="https://user-images.githubusercontent.com/209884/67159116-64d94b80-f37b-11e9-9b28-f8379636a43c.png"></img>
 
+This a fork of the great <github.com/goccy/go-yaml> library.
+
+> **Why forking?**
+
+> **Is it a hard fork?**
+
 ## This library has **NO** relation to the go-yaml/yaml library
 
 > [!IMPORTANT]
