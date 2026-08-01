@@ -95,11 +95,13 @@ func TestWideDocumentCost(t *testing.T) {
 	}
 }
 
-// TestParseScalesLinearly is the regression guard to ENABLE once the quadratic parseMap is
-// fixed. It fails while the defect is present, so it is skipped rather than left red.
+// TestParseScalesLinearly is the timing counterpart of the guard in parser/scaling_test.go,
+// which measures allocation instead and so is the one CI relies on. This one catches a
+// slowdown that does not show up as allocation, at the cost of being a wall-clock threshold.
+//
+// Before parseMap parsed sibling entries in a loop, a 4x larger document took ~10x longer and
+// this failed outright.
 func TestParseScalesLinearly(t *testing.T) {
-	t.Skip("enable once parseMap is iterative -- see ANALYSIS-go-openapi.md §3")
-
 	const small, large = 4000, 16000 // a 4x increase in size
 
 	s := timeIt(t, func() { mustParse(t, flatMap(small)) })
