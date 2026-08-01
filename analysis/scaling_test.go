@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	v3 "go.yaml.in/yaml/v3"
+
+	"github.com/go-openapi/go-yaml/lexer"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestFlatMapScaling is the headline measurement: how parse time grows with the number of

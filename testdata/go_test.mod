@@ -1,6 +1,6 @@
-module github.com/goccy/go-yaml
+module github.com/go-openapi/go-yaml
 
-go 1.21.0
+go 1.25.0
 
 require (
 	github.com/go-playground/validator/v10 v10.22.1

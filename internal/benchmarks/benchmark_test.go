@@ -3,9 +3,10 @@ package benchmarks
 import (
 	"testing"
 
-	"github.com/go-openapi/go-yaml"
 	goyaml3 "go.yaml.in/yaml/v3"
 	goyaml2 "gopkg.in/yaml.v2"
+
+	"github.com/go-openapi/go-yaml"
 )
 
 func Benchmark(b *testing.B) {
