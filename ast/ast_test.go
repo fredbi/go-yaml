@@ -3,34 +3,30 @@ package ast
 import (
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
+
 	"github.com/go-openapi/go-yaml/token"
 )
 
 func TestEscapeSingleQuote(t *testing.T) {
-	expected := `'Victor''s victory'`
-	got := escapeSingleQuote("Victor's victory")
-	if got != expected {
-		t.Fatalf("expected:%s\ngot:%s", expected, got)
-	}
+	assert.Equal(t, `'Victor''s victory'`, escapeSingleQuote("Victor's victory"))
 }
 
 func TestReadNode(t *testing.T) {
 	t.Run("utf-8", func(t *testing.T) {
-		value := "éɛทᛞ⠻チ▓🦄"
+		const value = "éɛทᛞ⠻チ▓🦄"
 		node := &StringNode{
 			BaseNode: &BaseNode{},
 			Token:    &token.Token{},
 			Value:    value,
 		}
-		expectedSize := len(value)
-		gotBuffer := make([]byte, expectedSize)
-		expectedBuffer := []byte(value)
-		gotSize, _ := readNode(gotBuffer, node)
-		if gotSize != expectedSize {
-			t.Fatalf("expected size:%d\ngot:%d", expectedSize, gotSize)
-		}
-		if string(gotBuffer) != string(expectedBuffer) {
-			t.Fatalf("expected buffer:%s\ngot:%s", expectedBuffer, gotBuffer)
-		}
+
+		buffer := make([]byte, len(value))
+		size, err := readNode(buffer, node)
+		require.NoError(t, err)
+
+		assert.Equal(t, len(value), size)
+		assert.Equal(t, value, string(buffer))
 	})
 }

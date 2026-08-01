@@ -3,6 +3,8 @@ package token_test
 import (
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
+
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -62,18 +64,12 @@ func TestToken(t *testing.T) {
 	}
 	tokens.Dump()
 	tokens.Add(token.New("hoge", "hoge", pos))
-	if tokens[len(tokens)-1].PreviousType() != token.TagType {
-		t.Fatal("invalid previous token type")
-	}
-	if tokens[0].PreviousType() != token.UnknownType {
-		t.Fatal("invalid previous token type")
-	}
-	if tokens[len(tokens)-2].NextType() != token.StringType {
-		t.Fatal("invalid next token type")
-	}
-	if tokens[len(tokens)-1].NextType() != token.UnknownType {
-		t.Fatal("invalid next token type")
-	}
+
+	last := tokens[len(tokens)-1]
+	assert.Equalf(t, token.TagType, last.PreviousType(), "the token added last follows a tag")
+	assert.Equalf(t, token.UnknownType, last.NextType(), "nothing follows the token added last")
+	assert.Equalf(t, token.UnknownType, tokens[0].PreviousType(), "nothing precedes the first token")
+	assert.Equalf(t, token.StringType, tokens[len(tokens)-2].NextType(), "the token added last is a string")
 }
 
 func TestIsNeedQuoted(t *testing.T) {
@@ -139,20 +135,17 @@ func TestIsNeedQuoted(t *testing.T) {
 		"-",
 		"- --foo",
 	}
-	for i, test := range needQuotedTests {
-		if !token.IsNeedQuoted(test) {
-			t.Errorf("%d: failed to quoted judge for %s", i, test)
-		}
+	for _, test := range needQuotedTests {
+		assert.Truef(t, token.IsNeedQuoted(test), "expected %q to need quoting", test)
 	}
+
 	notNeedQuotedTests := []string{
 		"Hello World",
 		// time.Parse cannot handle: "2001-12-14 21:59:43.10 -5" from the examples.
 		// https://yaml.org/type/timestamp.html
 		"2001-12-14 21:59:43.10 -5",
 	}
-	for i, test := range notNeedQuotedTests {
-		if token.IsNeedQuoted(test) {
-			t.Errorf("%d: failed to quoted judge for %s", i, test)
-		}
+	for _, test := range notNeedQuotedTests {
+		assert.Falsef(t, token.IsNeedQuoted(test), "expected %q not to need quoting", test)
 	}
 }
