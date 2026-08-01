@@ -962,11 +962,23 @@ func (p *parser) parseTag(ctx *context) (*ast.TagNode, error) {
 
 	var tagValue ast.Node
 	if p.secondaryTagDirective != nil {
-		value, err := newStringNode(ctx, ctx.currentToken())
-		if err != nil {
-			return nil, err
+		valueTk := ctx.currentToken()
+		if valueTk == nil {
+			// A secondary tag directive with nothing left to tag. Produce the
+			// same implicit null parseTagValue produces for the primary case,
+			// rather than building a node out of a token that is not there.
+			value, err := newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
+			if err != nil {
+				return nil, err
+			}
+			tagValue = value
+		} else {
+			value, err := newStringNode(ctx, valueTk)
+			if err != nil {
+				return nil, err
+			}
+			tagValue = value
 		}
-		tagValue = value
 		node.Directive = p.secondaryTagDirective
 	} else {
 		value, err := p.parseTagValue(ctx, tagRawTk, ctx.currentToken())
