@@ -302,8 +302,11 @@ func checkLineBreak(t *token.Token) bool {
 		}
 		lineDiff := t.Position.Line - prev.Position.Line - 1
 		if lineDiff > 0 {
-			if prev.Type == token.StringType {
-				// Remove any line breaks included in multiline string
+			switch prev.Type {
+			case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
+				// Remove any line breaks included in multiline string. A quoted
+				// scalar spans lines just as a plain one does, and the lines it
+				// occupies are not a gap the author left.
 				adjustment += strings.Count(strings.TrimRight(strings.TrimSpace(prev.Origin), lbc), lbc)
 			}
 			// Due to the way that comment parsing works its assumed that when a null value does not have new line in origin
@@ -537,15 +540,7 @@ func (f *File) Read(p []byte) (int, error) {
 
 // String all documents to text
 func (f *File) String() string {
-	docs := []string{}
-	for _, doc := range f.Docs {
-		docs = append(docs, doc.String())
-	}
-	if len(docs) > 0 {
-		return strings.Join(docs, "\n") + "\n"
-	} else {
-		return ""
-	}
+	return defaultRenderer.File(f)
 }
 
 // DocumentNode type of Document
@@ -584,17 +579,7 @@ func (d *DocumentNode) AddColumn(col int) {
 
 // String document to text
 func (d *DocumentNode) String() string {
-	doc := []string{}
-	if d.Start != nil {
-		doc = append(doc, d.Start.Value)
-	}
-	if d.Body != nil {
-		doc = append(doc, d.Body.String())
-	}
-	if d.End != nil {
-		doc = append(doc, d.End.Value)
-	}
-	return strings.Join(doc, "\n")
+	return defaultRenderer.String(d)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -646,6 +631,12 @@ func (n *NullNode) String() string {
 }
 
 func (n *NullNode) stringWithoutComment() string {
+	if n.Token.Type == token.ImplicitNullType {
+		// A null nobody wrote has no text. Writing "null" for it would put a
+		// key where the document had none.
+		return ""
+	}
+
 	return "null"
 }
 
@@ -921,16 +912,11 @@ func (n *LiteralNode) GetValue() interface{} {
 
 // String literal to text
 func (n *LiteralNode) String() string {
-	origin := n.Value.GetToken().Origin
-	lit := strings.TrimRight(strings.TrimRight(origin, " "), "\n")
-	if n.Comment != nil {
-		return fmt.Sprintf("%s %s\n%s", n.Start.Value, n.Comment.String(), lit)
-	}
-	return fmt.Sprintf("%s\n%s", n.Start.Value, lit)
+	return defaultRenderer.String(n)
 }
 
 func (n *LiteralNode) stringWithoutComment() string {
-	return n.String()
+	return bareRenderer.String(n)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1250,39 +1236,6 @@ func (n *MappingNode) AddColumn(col int) {
 	}
 }
 
-func (n *MappingNode) flowStyleString(commentMode bool) string {
-	values := []string{}
-	for _, value := range n.Values {
-		values = append(values, strings.TrimLeft(value.String(), " "))
-	}
-	mapText := fmt.Sprintf("{%s}", strings.Join(values, ", "))
-	if commentMode && n.Comment != nil {
-		return addCommentString(mapText, n.Comment)
-	}
-	return mapText
-}
-
-func (n *MappingNode) blockStyleString(commentMode bool) string {
-	values := []string{}
-	for _, value := range n.Values {
-		values = append(values, value.String())
-	}
-	mapText := strings.Join(values, "\n")
-	if commentMode && n.Comment != nil {
-		value := values[0]
-		var spaceNum int
-		for i := 0; i < len(value); i++ {
-			if value[i] != ' ' {
-				break
-			}
-			spaceNum++
-		}
-		comment := n.Comment.StringWithSpace(spaceNum)
-		return fmt.Sprintf("%s\n%s", comment, mapText)
-	}
-	return mapText
-}
-
 // String mapping values to text
 // IsMergeKey returns whether it is a MergeKey node.
 //
@@ -1292,29 +1245,11 @@ func (n *MappingNode) IsMergeKey() bool { return false }
 // stringWithoutComment renders the mapping for use as a key, where comments
 // would be noise -- a key's identity is its content.
 func (n *MappingNode) stringWithoutComment() string {
-	if len(n.Values) == 0 {
-		return "{}"
-	}
-	if n.IsFlowStyle {
-		return n.flowStyleString(false)
-	}
-
-	return n.blockStyleString(false)
+	return bareRenderer.String(n)
 }
 
 func (n *MappingNode) String() string {
-	if len(n.Values) == 0 {
-		if n.Comment != nil {
-			return addCommentString("{}", n.Comment)
-		}
-		return "{}"
-	}
-
-	commentMode := true
-	if n.IsFlowStyle || len(n.Values) == 0 {
-		return n.flowStyleString(commentMode)
-	}
-	return n.blockStyleString(commentMode)
+	return defaultRenderer.String(n)
 }
 
 // MapRange implements MapNode protocol
@@ -1360,11 +1295,11 @@ func (n *MappingKeyNode) AddColumn(col int) {
 
 // String tag to text
 func (n *MappingKeyNode) String() string {
-	return n.stringWithoutComment()
+	return defaultRenderer.String(n)
 }
 
 func (n *MappingKeyNode) stringWithoutComment() string {
-	return fmt.Sprintf("%s %s", n.Start.Value, n.Value.String())
+	return bareRenderer.String(n)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1442,90 +1377,7 @@ func (n *MappingValueNode) SetIsFlowStyle(isFlow bool) {
 
 // String mapping value to text
 func (n *MappingValueNode) String() string {
-	var text string
-	if n.Comment != nil {
-		text = fmt.Sprintf(
-			"%s\n%s",
-			n.Comment.StringWithSpace(n.Key.GetToken().Position.Column-1),
-			n.toString(),
-		)
-	} else {
-		text = n.toString()
-	}
-	if n.FootComment != nil {
-		text += fmt.Sprintf("\n%s", n.FootComment.StringWithSpace(n.Key.GetToken().Position.Column-1))
-	}
-	return text
-}
-
-func (n *MappingValueNode) toString() string {
-	space := strings.Repeat(" ", n.Key.GetToken().Position.Column-1)
-	if checkLineBreak(n.Key.GetToken()) {
-		space = fmt.Sprintf("%s%s", "\n", space)
-	}
-	if _, ok := n.Key.(*MappingKeyNode); ok {
-		return n.explicitKeyString(space)
-	}
-	keyIndentLevel := n.Key.GetToken().Position.IndentLevel
-	valueIndentLevel := n.Value.GetToken().Position.IndentLevel
-	keyComment := n.Key.GetComment()
-	if _, ok := n.Value.(ScalarNode); ok {
-		value := n.Value.String()
-		if value == "" {
-			// implicit null value.
-			return fmt.Sprintf("%s%s:", space, n.Key.String())
-		}
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), value)
-	} else if keyIndentLevel < valueIndentLevel && !n.IsFlowStyle {
-		valueStr := n.Value.String()
-		// For flow-style values indented on the next line, we need to add the proper indentation
-		if m, ok := n.Value.(*MappingNode); ok && m.IsFlowStyle {
-			valueIndent := strings.Repeat(" ", n.Value.GetToken().Position.Column-1)
-			valueStr = valueIndent + valueStr
-		} else if s, ok := n.Value.(*SequenceNode); ok && s.IsFlowStyle {
-			valueIndent := strings.Repeat(" ", n.Value.GetToken().Position.Column-1)
-			valueStr = valueIndent + valueStr
-		}
-		if keyComment != nil {
-			return fmt.Sprintf(
-				"%s%s: %s\n%s",
-				space,
-				n.Key.stringWithoutComment(),
-				keyComment.String(),
-				valueStr,
-			)
-		}
-		return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), valueStr)
-	} else if m, ok := n.Value.(*MappingNode); ok && (m.IsFlowStyle || len(m.Values) == 0) {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
-	} else if s, ok := n.Value.(*SequenceNode); ok && (s.IsFlowStyle || len(s.Values) == 0) {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
-	} else if _, ok := n.Value.(*AnchorNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
-	} else if _, ok := n.Value.(*AliasNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
-	} else if _, ok := n.Value.(*TagNode); ok {
-		return fmt.Sprintf("%s%s: %s", space, n.Key.String(), n.Value.String())
-	}
-
-	if keyComment != nil {
-		return fmt.Sprintf(
-			"%s%s: %s\n%s",
-			space,
-			n.Key.stringWithoutComment(),
-			keyComment.String(),
-			n.Value.String(),
-		)
-	}
-	if m, ok := n.Value.(*MappingNode); ok && m.Comment != nil {
-		return fmt.Sprintf(
-			"%s%s: %s",
-			space,
-			n.Key.String(),
-			strings.TrimLeft(n.Value.String(), " "),
-		)
-	}
-	return fmt.Sprintf("%s%s:\n%s", space, n.Key.String(), n.Value.String())
+	return defaultRenderer.String(n)
 }
 
 // MapRange implements MapNode protocol
@@ -1534,23 +1386,6 @@ func (n *MappingValueNode) MapRange() *MapNodeIter {
 		idx:    startRangeIndex,
 		values: []*MappingValueNode{n},
 	}
-}
-
-// explicitKeyString renders an entry whose key was written with '?'.
-//
-// The ':' has to go on its own line. Written inline as "? a: b", YAML reads the
-// whole of "a: b" as the key -- an explicit key runs to the end of what is
-// indented under it -- so the entry would come back as a nested mapping with no
-// value, which is not what it started as.
-func (n *MappingValueNode) explicitKeyString(space string) string {
-	key := n.Key.String()
-
-	value := n.Value.String()
-	if value == "" {
-		return fmt.Sprintf("%s%s\n%s:", space, key, space)
-	}
-
-	return fmt.Sprintf("%s%s\n%s: %s", space, key, space, value)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1662,68 +1497,6 @@ func (n *SequenceNode) AddColumn(col int) {
 	}
 }
 
-func (n *SequenceNode) flowStyleString() string {
-	values := []string{}
-	for _, value := range n.Values {
-		values = append(values, value.String())
-	}
-	seqText := fmt.Sprintf("[%s]", strings.Join(values, ", "))
-	if n.Comment != nil {
-		return addCommentString(seqText, n.Comment)
-	}
-	return seqText
-}
-
-func (n *SequenceNode) blockStyleString() string {
-	space := strings.Repeat(" ", n.Start.Position.Column-1)
-	values := []string{}
-	if n.Comment != nil {
-		values = append(values, n.Comment.StringWithSpace(n.Start.Position.Column-1))
-	}
-
-	for idx, value := range n.Values {
-		if value == nil {
-			continue
-		}
-		valueStr := value.String()
-		newLinePrefix := ""
-		if strings.HasPrefix(valueStr, "\n") {
-			valueStr = valueStr[1:]
-			newLinePrefix = "\n"
-		}
-		splittedValues := strings.Split(valueStr, "\n")
-		trimmedFirstValue := strings.TrimLeft(splittedValues[0], " ")
-		diffLength := len(splittedValues[0]) - len(trimmedFirstValue)
-		if len(splittedValues) > 1 && value.Type() == StringType || value.Type() == LiteralType {
-			// If multi-line string, the space characters for indent have already been added, so delete them.
-			prefix := space + "  "
-			for i := 1; i < len(splittedValues); i++ {
-				splittedValues[i] = strings.TrimPrefix(splittedValues[i], prefix)
-			}
-		}
-		newValues := []string{trimmedFirstValue}
-		for i := 1; i < len(splittedValues); i++ {
-			if len(splittedValues[i]) <= diffLength {
-				// this line is \n or white space only
-				newValues = append(newValues, "")
-				continue
-			}
-			trimmed := splittedValues[i][diffLength:]
-			newValues = append(newValues, fmt.Sprintf("%s  %s", space, trimmed))
-		}
-		newValue := strings.Join(newValues, "\n")
-		if len(n.ValueHeadComments) == len(n.Values) && n.ValueHeadComments[idx] != nil {
-			values = append(values, fmt.Sprintf("%s%s", newLinePrefix, n.ValueHeadComments[idx].StringWithSpace(n.Start.Position.Column-1)))
-			newLinePrefix = ""
-		}
-		values = append(values, fmt.Sprintf("%s%s- %s", newLinePrefix, space, newValue))
-	}
-	if n.FootComment != nil {
-		values = append(values, n.FootComment.StringWithSpace(n.Start.Position.Column-1))
-	}
-	return strings.Join(values, "\n")
-}
-
 // String sequence to text
 // IsMergeKey returns whether it is a MergeKey node.
 //
@@ -1732,13 +1505,12 @@ func (n *SequenceNode) IsMergeKey() bool { return false }
 
 // stringWithoutComment renders the sequence for use as a key. SequenceNode
 // renders without comments already, so this is String.
-func (n *SequenceNode) stringWithoutComment() string { return n.String() }
+func (n *SequenceNode) stringWithoutComment() string {
+	return bareRenderer.String(n)
+}
 
 func (n *SequenceNode) String() string {
-	if n.IsFlowStyle || len(n.Values) == 0 {
-		return n.flowStyleString()
-	}
-	return n.blockStyleString()
+	return defaultRenderer.String(n)
 }
 
 // ArrayRange implements ArrayNode protocol
@@ -1844,7 +1616,7 @@ type AnchorNode struct {
 }
 
 func (n *AnchorNode) stringWithoutComment() string {
-	return n.Value.String()
+	return bareRenderer.String(n)
 }
 
 func (n *AnchorNode) SetName(name string) error {
@@ -1889,18 +1661,7 @@ func (n *AnchorNode) AddColumn(col int) {
 
 // String anchor to text
 func (n *AnchorNode) String() string {
-	anchor := "&" + n.Name.String()
-	value := n.Value.String()
-	if s, ok := n.Value.(*SequenceNode); ok && !s.IsFlowStyle {
-		return fmt.Sprintf("%s\n%s", anchor, value)
-	} else if m, ok := n.Value.(*MappingNode); ok && !m.IsFlowStyle {
-		return fmt.Sprintf("%s\n%s", anchor, value)
-	}
-	if value == "" {
-		// implicit null value.
-		return anchor
-	}
-	return fmt.Sprintf("%s %s", anchor, value)
+	return defaultRenderer.String(n)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -2048,7 +1809,7 @@ func (n *TagNode) GetValue() any {
 }
 
 func (n *TagNode) stringWithoutComment() string {
-	return n.Value.String()
+	return bareRenderer.String(n)
 }
 
 // Read implements (io.Reader).Read
@@ -2074,14 +1835,7 @@ func (n *TagNode) AddColumn(col int) {
 
 // String tag to text
 func (n *TagNode) String() string {
-	value := n.Value.String()
-	if s, ok := n.Value.(*SequenceNode); ok && !s.IsFlowStyle {
-		return fmt.Sprintf("%s\n%s", n.Start.Value, value)
-	} else if m, ok := n.Value.(*MappingNode); ok && !m.IsFlowStyle {
-		return fmt.Sprintf("%s\n%s", n.Start.Value, value)
-	}
-
-	return fmt.Sprintf("%s %s", n.Start.Value, value)
+	return defaultRenderer.String(n)
 }
 
 // MarshalYAML encodes to a YAML text

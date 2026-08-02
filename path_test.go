@@ -592,15 +592,19 @@ a:
    - 4
    - 5
 `,
+			// The merged document comes back in the library's own layout, not in
+			// the three-space indentation the fixtures happen to use: rendering
+			// lays a document out from its structure rather than replaying the
+			// columns the source was read at.
 			expected: `
 a:
   b:
-   - 1
-   - 2
-   - 3
-   - map:
-      - 4
-      - 5
+  - 1
+  - 2
+  - 3
+  - map:
+    - 4
+    - 5
 `,
 		},
 	}
@@ -756,15 +760,15 @@ building:
 			src: `ken`,
 			expected: `
 books:
-  - name: book_a
-    author: ken
-  - name: book_b
-    author: ken
+- name: book_a
+  author: ken
+- name: book_b
+  author: ken
 pictures:
-  - name: picture_a
-    author: none
-  - name: picture_b
-    author: none
+- name: picture_a
+  author: none
+- name: picture_b
+  author: none
 building:
   author: none
 `,
@@ -788,15 +792,15 @@ building:
 			src: `ken`,
 			expected: `
 books:
-  - name: book_a
-    author: ken
-  - name: book_b
-    author: ken
+- name: book_a
+  author: ken
+- name: book_b
+  author: ken
 pictures:
-  - name: picture_a
-    author: ken
-  - name: picture_b
-    author: ken
+- name: picture_a
+  author: ken
+- name: picture_b
+  author: ken
 building:
   author: ken
 `,

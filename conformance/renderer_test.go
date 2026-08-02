@@ -14,14 +14,15 @@ import (
 // rendererFloor is the number of suite documents that must survive a round trip
 // through ast.Renderer.
 //
-// A floor rather than a ledger, deliberately: the renderer is not wired into
-// String yet, so a second per-case ledger would have to be maintained beside
-// the one in roundtrip_test.go for as long as both renderers exist. Raise it as
+// A floor rather than a ledger: the per-case ledger lives in roundtrip_test.go,
+// which measures the same thing through String. This one measures the renderer
+// directly, so that a caller driving it themselves -- with their own indent, or
+// with comments off -- is covered by more than the default path. Raise it as
 // the renderer improves; it is not allowed to fall.
-const rendererFloor = 278
+const rendererFloor = 291
 
 // TestRendererRoundTrip measures ast.Renderer the way roundtrip_test.go
-// measures the current rendering, so the two numbers mean the same thing.
+// measures rendering through String, so the two numbers mean the same thing.
 func TestRendererRoundTrip(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
 	require.NoError(t, err)
@@ -109,4 +110,88 @@ func TestRendererSequenceIndentation(t *testing.T) {
 
 	assert.Equal(t, "tags:\n- a\n- b\n", ast.NewRenderer().File(file))
 	assert.Equal(t, "tags:\n  - a\n  - b\n", ast.NewRenderer(ast.WithIndentSequence(true)).File(file))
+}
+
+// TestRendererBlockScalarIndentation covers the one scalar that spans lines.
+//
+// Its content is indented from the start of the line its header shares, not
+// from where the header sits, so nesting it deeper does not compound: the
+// second case is the first one level in, and its content moves by exactly that
+// one level.
+func TestRendererBlockScalarIndentation(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"under a key":          {"a: |\n  x\n  y\n", "a: |\n  x\n  y\n"},
+		"one level deeper":     {"a:\n  b: |\n    x\n    y\n", "a:\n  b: |\n    x\n    y\n"},
+		"as a sequence entry":  {"- |\n  x\n  y\n", "- |\n  x\n  y\n"},
+		"beside a sibling key": {"- a: |\n    x\n  b: 1\n", "- a: |\n    x\n  b: 1\n"},
+		"with a stated width":  {"a: |2\n   x\n", "a: |2\n   x\n"},
+		"with a chomping mark": {"a: |-\n  x\n", "a: |-\n  x\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), 0)
+			require.NoError(t, err)
+
+			assert.Equal(t, test.want, ast.NewRenderer().File(file))
+		})
+	}
+}
+
+// TestRendererKeepsAuthoredBlankLines pins what rendering carries over from the
+// source besides the values themselves.
+//
+// A blank line between entries is the author's grouping, and unlike a column it
+// does not compound: it says "there was a gap here", which stays true however
+// many times the document is read and written.
+func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
+	tests := map[string]string{
+		"between mapping entries": "a: 1\n\nb: 2\n",
+		"between nested entries":  "a:\n  b: 1\n\n  c: 2\n",
+		"above a head comment":    "a:\n- b: 1\n\n# c\n- c: 2\n",
+	}
+
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			require.NoError(t, err)
+
+			assert.Equal(t, source, ast.NewRenderer().File(file))
+		})
+	}
+
+	// And only where the author left one. A scalar written across two lines
+	// occupies them; the second is not a gap, and reading it as one put a stray
+	// blank line after every such entry.
+	t.Run("not for a value spanning lines", func(t *testing.T) {
+		file, err := parser.ParseBytes([]byte("a: 'x\n  y'\nb: 2\n"), parser.ParseComments)
+		require.NoError(t, err)
+
+		assert.NotContains(t, ast.NewRenderer().File(file), "\n\n")
+	})
+}
+
+// TestRendererPlacesKeyComments covers where a comment written on a key's line
+// ends up. Before the ':' it would be read back as part of the key, so it goes
+// after it -- and a collection that would have shared the line moves down to
+// make room.
+func TestRendererPlacesKeyComments(t *testing.T) {
+	tests := map[string]string{
+		"on a key with a block value":  "a: # c\n  b: 1\n",
+		"on a key with a flow value":   "a: # c\n  {b: 1}\n",
+		"on a key with a scalar value": "a: 1 # c\n",
+		"on a key with a sequence":     "a: # c\n- b\n",
+	}
+
+	for name, source := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			require.NoError(t, err)
+
+			assert.Equal(t, source, ast.NewRenderer().File(file))
+		})
+	}
 }
