@@ -1689,7 +1689,9 @@ type AliasNode struct {
 }
 
 func (n *AliasNode) stringWithoutComment() string {
-	return n.Value.String()
+	// An alias carries no comment of its own, and it is the '*' that makes it
+	// one: dropping it here would write the name as a plain scalar.
+	return n.String()
 }
 
 func (n *AliasNode) SetName(name string) error {

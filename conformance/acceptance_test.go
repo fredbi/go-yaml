@@ -54,10 +54,12 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 // Every remaining one is a document YAML allows that the parser refuses. The
 // parser no longer takes anything the spec forbids.
 const (
-	reasonComplexKey   = "a collection or an explicit '?' key is not accepted as a mapping key"
-	reasonFlowAdjacent = "a quoted key with no space before its ':' is not read as a pair in flow context"
-	reasonBlockEnd     = "content after a block scalar is misattributed"
-	reasonTabLine      = "a line holding only a tab is read as indentation"
+	reasonAnchoredFlowKey = "an anchor written before a flow collection used as a mapping key is taken as the mapping's"
+	reasonNestedFlowKey   = "a flow collection used as a mapping key is not read when it holds another collection used as a key"
+	reasonExplicitBlock   = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
+	reasonFlowAdjacent    = "a quoted key with no space before its ':' is not read as a pair in flow context"
+	reasonBlockEnd        = "content after a block scalar is misattributed"
+	reasonTabLine         = "a line holding only a tab is read as indentation"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
@@ -69,21 +71,19 @@ const (
 // passed through here unremarked, and been handed on as if it were sound. They
 // are gone.
 //
-// What remains is dominated by one cause: mapping keys that are not plain
-// scalars. Explicit '?' keys, collections used as keys and empty keys account
-// for a third of the list, and they are a single body of work rather than six
-// separate defects.
+// What remains is still about mapping keys that are not plain scalars, but no
+// longer as one body of work: each entry below was reduced to the smallest
+// document that reproduces it, and they come apart into four separate defects
+// with nothing in common but the shape of the thing they refuse.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"aliases-in-flow-objects":                         {wronglyRejected, reasonComplexKey},
-	"anchors-on-empty-scalars":                        {wronglyRejected, reasonComplexKey},
-	"mapping-key-and-flow-sequence-item-anchors":      {wronglyRejected, reasonComplexKey},
-	"nested-implicit-complex-keys":                    {wronglyRejected, reasonComplexKey},
+	"aliases-in-flow-objects":                         {wronglyRejected, reasonAnchoredFlowKey},
+	"mapping-key-and-flow-sequence-item-anchors":      {wronglyRejected, reasonAnchoredFlowKey},
+	"nested-implicit-complex-keys":                    {wronglyRejected, reasonNestedFlowKey},
 	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowAdjacent},
 	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
 	"tabs-that-look-like-indentation/04":              {wronglyRejected, reasonTabLine},
-	"tags-on-empty-scalars":                           {wronglyRejected, reasonComplexKey},
-	"various-combinations-of-explicit-block-mappings": {wronglyRejected, reasonComplexKey},
+	"various-combinations-of-explicit-block-mappings": {wronglyRejected, reasonExplicitBlock},
 
 	// Documents YAML 1.2 forbids that the parser takes.
 }

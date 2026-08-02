@@ -246,7 +246,47 @@ func (r *Renderer) mappingValue(n *MappingValueNode) string {
 		trailing = " " + comment
 	}
 
-	return head + key + ":" + inline + value + trailing + r.footComment(n.FootComment)
+	return head + key + r.colonAfter(n.Key) + inline + value + trailing + r.footComment(n.FootComment)
+}
+
+// colonAfter returns the ':' that closes a key, with the separating space the
+// key needs in front of it.
+//
+// An anchor name, an alias name and a tag shorthand may all contain ':', so a
+// key that ends on one absorbs the ':' written straight after it: "&a: v"
+// anchors "a:" over the scalar v, where "&a : v" anchors the empty key of a
+// mapping. The space is what tells them apart.
+func (r *Renderer) colonAfter(key Node) string {
+	if r.absorbsColon(key) {
+		return " :"
+	}
+	return ":"
+}
+
+func (r *Renderer) absorbsColon(n Node) bool {
+	switch nn := n.(type) {
+	case *AliasNode:
+		// An alias is its name and nothing else.
+		return true
+	case *AnchorNode:
+		return r.endsOnProperty(nn.Value)
+	case *TagNode:
+		return r.endsOnProperty(nn.Value)
+	}
+	return false
+}
+
+// endsOnProperty reports whether a property's node leaves the property itself
+// last on the line -- because the node is the empty scalar, or because it is
+// another property in the same position.
+func (r *Renderer) endsOnProperty(n Node) bool {
+	if n == nil {
+		return true
+	}
+	if r.absorbsColon(n) {
+		return true
+	}
+	return r.bare().String(n) == ""
 }
 
 // hoistBlockComment takes a block collection's own leading comment off the

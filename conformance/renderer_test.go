@@ -24,7 +24,7 @@ import (
 // directly, so that a caller driving it themselves -- with their own indent, or
 // with comments off -- is covered by more than the default path. Lower it as
 // the renderer improves; it is not allowed to rise.
-const rendererCeiling = 7
+const rendererCeiling = 4
 
 // TestRendererRoundTrip measures ast.Renderer the way roundtrip_test.go
 // measures rendering through String, so the two numbers mean the same thing.
