@@ -503,16 +503,35 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 
 func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
+	var flowDepth int
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
-		case token.MappingValueType:
-			if i == 0 {
-				return nil, errors.ErrSyntax("unexpected key name", tk.RawToken())
+		case token.MappingStartType, token.SequenceStartType:
+			flowDepth++
+			ret = append(ret, tk)
+		case token.MappingEndType, token.SequenceEndType:
+			if flowDepth > 0 {
+				flowDepth--
 			}
-			mapKeyTk := tokens[i-1]
+			ret = append(ret, tk)
+		case token.MappingValueType:
+			if hasNoKey(tokens, i, flowDepth > 0) {
+				// The key is absent: ": value", "- :", "{ : }", "{a: 1, : 2}".
+				// YAML 1.2 allows it, and an absent key is the null node -- so
+				// there is nothing to reject here, only a node to supply.
+				ret = append(ret, &Token{
+					Group: &TokenGroup{
+						Type:   TokenGroupMapKey,
+						Tokens: []*Token{implicitNullKeyToken(tk), tk},
+					},
+				})
+
+				continue
+			}
+			mapKeyTk := tokens[keyCandidateIndex(tokens, i)]
 			if isNotMapKeyType(mapKeyTk) {
-				return nil, errors.ErrSyntax("found an invalid key for this map", tokens[i].RawToken())
+				return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
 			}
 			newTk := &Token{Token: mapKeyTk.Token, Group: mapKeyTk.Group}
 			mapKeyTk.Token = nil
@@ -721,6 +740,95 @@ func isScalarType(tk *Token) bool {
 		typ == token.StringType ||
 		typ == token.SingleQuoteType ||
 		typ == token.DoubleQuoteType
+}
+
+// hasNoKey reports whether the ':' at tokens[i] has no key in front of it.
+//
+// Three ways that happens. There is nothing before it at all; what is before it
+// is punctuation that cannot be a key; or -- in block context only -- the
+// candidate sits on an earlier line, and an implicit key must share its line
+// with its ':'. A flow collection is not line-sensitive, so the last rule does
+// not apply inside one, and an explicit "?" key is exempt everywhere: naming
+// the key separately is precisely what "?" is for.
+func hasNoKey(tokens []*Token, i int, inFlow bool) bool {
+	j := keyCandidateIndex(tokens, i)
+	if j < 0 {
+		return true
+	}
+
+	candidate := tokens[j]
+	if precedesAbsentKey(candidate) {
+		return true
+	}
+	if inFlow || candidate.Group != nil {
+		return false
+	}
+
+	return keyEndLine(candidate) != tokens[i].Line()
+}
+
+// keyEndLine reports the line on which a key token ends.
+//
+// A plain scalar may span several lines and its position records where it
+// starts, so the line that matters for the implicit-key rule has to be
+// computed. Whitespace on either side of the origin belongs to the neighboring
+// tokens rather than to this one -- a trailing newline in particular would
+// otherwise push the end line one past where the token really finishes.
+func keyEndLine(tk *Token) int {
+	raw := tk.RawToken()
+	if raw == nil {
+		return tk.Line()
+	}
+
+	return tk.Line() + strings.Count(strings.Trim(raw.Origin, " \r\n"), "\n")
+}
+
+// precedesAbsentKey reports whether tk is punctuation that cannot itself be a
+// key and does not close a collection, so that a ':' right after it has no key
+// at all.
+//
+// The exclusion of '}' and ']' is the point of this being separate from
+// isNotMapKeyType: a ':' after them has a key -- the collection that just
+// closed -- which is a different feature, and still unsupported. Treating those
+// as absent keys would turn a clear "found an invalid key for this map" into a
+// null key and a misleading error further on.
+func precedesAbsentKey(tk *Token) bool {
+	switch tk.Type() {
+	case token.CollectEntryType,
+		token.MappingStartType,
+		token.SequenceStartType,
+		token.SequenceEntryType,
+		token.MappingValueType,
+		token.DirectiveType,
+		token.DocumentHeaderType,
+		token.DocumentEndType:
+		return true
+	default:
+		return false
+	}
+}
+
+// keyCandidateIndex finds what would be the key of the ':' at tokens[i],
+// skipping comments -- a comment is never a key, and one may sit between an
+// explicit "?" key and its ':'. It reports -1 when there is nothing before it.
+func keyCandidateIndex(tokens []*Token, i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if tokens[j].Type() != token.CommentType {
+			return j
+		}
+	}
+
+	return -1
+}
+
+// implicitNullKeyToken builds the null node standing in for an absent mapping
+// key, positioned where the key would have been -- immediately before its ':'.
+func implicitNullKeyToken(colon *Token) *Token {
+	pos := *(colon.RawToken().Position)
+	tk := token.New("null", "null", &pos)
+	tk.Type = token.ImplicitNullType
+
+	return &Token{Token: tk}
 }
 
 func isNotMapKeyType(tk *Token) bool {
