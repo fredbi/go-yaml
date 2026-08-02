@@ -12,6 +12,10 @@ type context struct {
 	tokenRef *tokenRef
 	path     string
 	isFlow   bool
+	// inFlowSequence distinguishes "[a: b]" from "{a: b}". A pair written
+	// inside a flow sequence is an implicit key, which a flow mapping's key is
+	// not, and the two are held to different rules.
+	inFlowSequence bool
 }
 
 type tokenRef struct {
@@ -97,6 +101,14 @@ func (c *context) withIndex(idx uint) *context {
 func (c *context) withFlow(isFlow bool) *context {
 	ctx := *c
 	ctx.isFlow = isFlow
+	ctx.inFlowSequence = false
+	return &ctx
+}
+
+func (c *context) withFlowSequence() *context {
+	ctx := *c
+	ctx.isFlow = true
+	ctx.inFlowSequence = true
 	return &ctx
 }
 

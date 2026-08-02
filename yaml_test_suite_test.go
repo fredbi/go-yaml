@@ -53,8 +53,6 @@ var decodeLedger = map[string]string{
 	"empty-implicit-key-in-single-pair-flow-sequences": reasonNotDecoded,
 	"empty-keys-in-block-and-flow-mapping":             reasonNotDecoded,
 	"empty-lines-at-end-of-document":                   reasonNotDecoded,
-	"flow-collections-over-many-lines/01":              reasonNotDecoded,
-	"flow-mapping-colon-on-line-after-key/02":          reasonNotDecoded,
 	"flow-sequence-in-flow-mapping":                    reasonNotDecoded,
 	"implicit-flow-mapping-key-on-one-line":            reasonNotDecoded,
 	"mapping-key-and-flow-sequence-item-anchors":       reasonNotDecoded,
