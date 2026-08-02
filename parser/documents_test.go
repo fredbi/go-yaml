@@ -74,3 +74,50 @@ func TestParseDocumentsAfterASuffix(t *testing.T) {
 		})
 	}
 }
+
+// TestParseExplicitKeyComments covers a comment written on the "?" line.
+//
+// It belongs to the key. The group that holds an explicit key ends on the key
+// itself rather than on a ':', and the comment was carried over to the value as
+// though it had been written after one -- so it came back on both lines, and
+// the document gained a comment every time it was read and written.
+func TestParseExplicitKeyComments(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"on a key with no value": {
+			source: "? a # note\n",
+			want:   "? a # note\n:\n",
+		},
+		"on a key with a value": {
+			source: "? a # note\n: b\n",
+			want:   "? a # note\n: b\n",
+		},
+		"on the value instead": {
+			source: "? a\n: b # note\n",
+			want:   "? a\n: b # note\n",
+		},
+		"on both": {
+			source: "? a # key\n: b # value\n",
+			want:   "? a # key\n: b # value\n",
+		},
+		"on a block scalar key": {
+			source: "? |\n  a\n: b # note\n",
+			want:   "? |\n  a\n: b # note\n",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			// And it settles: a second cycle adds nothing.
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}

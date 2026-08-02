@@ -22,9 +22,9 @@ import (
 // A count rather than a ledger: the per-case ledger lives in roundtrip_test.go,
 // which measures the same thing through String. This one measures the renderer
 // directly, so that a caller driving it themselves -- with their own indent, or
-// with comments off -- is covered by more than the default path. Lower it as
-// the renderer improves; it is not allowed to rise.
-const rendererCeiling = 1
+// with comments off -- is covered by more than the default path. It is at zero,
+// and is not allowed to rise.
+const rendererCeiling = 0
 
 // TestRendererRoundTrip measures ast.Renderer the way roundtrip_test.go
 // measures rendering through String, so the two numbers mean the same thing.

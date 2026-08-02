@@ -20,6 +20,14 @@ func newMappingValueNode(ctx *context, colonTk, entryTk *Token, key ast.MapKeyNo
 	node.CollectEntry = entryTk.RawToken()
 	// entryTk is the ',' that comes *before* this entry, so a comment hanging on
 	// it was written about the entry before this one and is attached there.
+	if _, explicit := key.(*ast.MappingKeyNode); explicit {
+		// An explicit key's group ends on the key itself rather than on a ':',
+		// so colonTk is the key and a comment on it is the key's own -- already
+		// attached there. Carrying it over would write it twice, once on the
+		// "?" line and once on the ':' line, and the document would gain a
+		// comment on every cycle.
+		return node, nil
+	}
 	if key.GetToken().Position.Line == value.GetToken().Position.Line {
 		// originally key was commented, but now that null value has been added, value must be commented.
 		if err := setLineComment(ctx, value, colonTk); err != nil {

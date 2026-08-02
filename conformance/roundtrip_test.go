@@ -36,13 +36,6 @@ func (o outcome) String() string {
 	}
 }
 
-// The reasons a document fails to survive a round trip.
-const (
-	// The comment reaches both the key and the value, and rendering writes it
-	// in both places, so the document gains a comment on every cycle.
-	reasonExplicitKeyComment = "a comment on an explicit key is written both on the key line and on the ':' line"
-)
-
 // roundTripLedger records every accepted document that does not survive
 // parse -> render -> parse -> render unchanged.
 //
@@ -51,20 +44,20 @@ const (
 // comments and anchors intact -- is one of the reasons this library exists, and
 // these are the documents where it does not hold.
 //
-// The list used to be five times this length, and two thirds of it had one
-// cause: rendering placed a child at the column its token was read at, so every
-// cycle added a little more indentation and no document ever settled. Laying
-// documents out by depth removed that cause and everything that followed from
-// it. One document is left, and it drifts by gaining a comment rather than by
-// losing anything: every document the parser accepts still renders back to the
-// value it was read from.
+// It is empty: every document the YAML Test Suite offers and the parser accepts
+// survives the cycle unchanged, comments and anchors included. The list used to
+// be forty long, and two thirds of it had one cause -- rendering placed a child
+// at the column its token was read at, so every cycle added a little more
+// indentation and no document ever settled. Laying documents out by depth
+// removed that cause and everything that followed from it.
+//
+// The ratchet runs both ways: a document that stops surviving fails because it
+// is missing from here, and one that starts surviving fails because it is still
+// listed. An empty ledger is re-earned on every run.
 var roundTripLedger = map[string]struct {
 	outcome outcome
 	reason  string
-}{
-	// The rendered document parses, but does not render the same way twice.
-	"spec-example-8-17-explicit-block-mapping-entries": {drifting, reasonExplicitKeyComment},
-}
+}{}
 
 // TestSuiteRoundTrip renders every document the parser accepts, reads it back,
 // and renders it again. A library that offers reversible transformation should
