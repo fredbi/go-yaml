@@ -1145,8 +1145,14 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if s.isDirective || s.isAnchor || s.isAlias {
 		return false, nil
 	}
-	if s.startedFlowMapNum <= 0 && nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() {
-		return false, nil
+	if nc != ' ' && nc != '\t' && !s.isNewLineChar(nc) && !ctx.isNextEOS() {
+		// Nothing separates this ':' from what follows it, so it only delimits
+		// a pair where the spec allows the value to be adjacent: after a
+		// JSON-like key, or where the value is absent and the next character
+		// is what ends the entry.
+		if !s.isFlowMode() || (!isFlowIndicator(nc) && !followsJSONLikeKey(ctx)) {
+			return false, nil
+		}
 	}
 	if s.startedFlowMapNum > 0 && nc == '/' {
 		// like http://
@@ -1181,6 +1187,49 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true, nil
+}
+
+// followsJSONLikeKey reports whether the key just read is one the spec calls
+// JSON-like: a quoted scalar, or a flow collection.
+//
+// Only after one of those may the ':' be adjacent, written with no space in
+// front of its value. Everywhere else the space is what separates the ':' from
+// the key, which is why [ a:b ] holds the one plain scalar "a:b" while
+// [ "a":b ] and [ {a: 1}:b ] each hold a pair.
+func followsJSONLikeKey(ctx *Context) bool {
+	if ctx.existsBuffer() {
+		return false
+	}
+
+	tk := lastContentToken(ctx.tokens)
+	if tk == nil {
+		return false
+	}
+	if tk.Indicator == token.QuotedScalarIndicator {
+		return true
+	}
+
+	return tk.Type == token.SequenceEndType || tk.Type == token.MappingEndType
+}
+
+// isFlowIndicator reports whether c is one of the characters that end an entry
+// of a flow collection. A plain scalar cannot hold one, so a ':' in front of
+// one closes the key rather than belonging to it: "{a:}" is the pair a/null.
+func isFlowIndicator(c rune) bool {
+	return c == ',' || c == '}' || c == ']'
+}
+
+// lastContentToken returns the last token that is part of the document rather
+// than a note about it. A comment may stand between a key and its ':', on its
+// own line, without making the two any less adjacent.
+func lastContentToken(tokens token.Tokens) *token.Token {
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if tokens[i].Type != token.CommentType {
+			return tokens[i]
+		}
+	}
+
+	return nil
 }
 
 // keyStartColumn reports the column a map key made only of already-cut tokens

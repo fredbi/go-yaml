@@ -526,19 +526,28 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 
 func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
-	var flowDepth int
+
+	// One entry per flow collection still open, innermost last, recording
+	// whether it is a sequence. A pair written directly inside a sequence is an
+	// implicit key and has to fit on one line with its ':'; inside a mapping the
+	// same pair may span lines.
+	var flow []bool
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
-		case token.MappingStartType, token.SequenceStartType:
-			flowDepth++
+		case token.MappingStartType:
+			flow = append(flow, false)
+			ret = append(ret, tk)
+		case token.SequenceStartType:
+			flow = append(flow, true)
 			ret = append(ret, tk)
 		case token.MappingEndType, token.SequenceEndType:
-			if flowDepth > 0 {
-				flowDepth--
+			if len(flow) > 0 {
+				flow = flow[:len(flow)-1]
 			}
 			ret = append(ret, tk)
 		case token.MappingValueType:
+			flowDepth := len(flow)
 			if hasNoKey(tokens, i, flowDepth > 0) {
 				// The key is absent: ": value", "- :", "{ : }", "{a: 1, : 2}".
 				// YAML 1.2 allows it, and an absent key is the null node -- so
@@ -564,9 +573,13 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 				start = withKeyProperties(ret, start)
 				if ret[start].Line() != mapKeyTk.Line() {
 					// An implicit key has to be a single-line node, so a
-					// collection spanning lines cannot be one. The line break
-					// between a key and its ':' is a separate question, and is
-					// allowed in flow context.
+					// collection spanning lines cannot be one.
+					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
+				}
+				if flowDepth > 0 && flow[flowDepth-1] && mapKeyTk.Line() != tk.Line() {
+					// Directly inside a sequence the ':' is part of that one
+					// line too. Inside a mapping it is separation like any
+					// other, and may follow on the next line.
 					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
 				}
 				keyTokens := append(append([]*Token{}, ret[start:]...), tk)
