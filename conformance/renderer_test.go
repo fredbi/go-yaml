@@ -11,15 +11,20 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// rendererFloor is the number of suite documents that must survive a round trip
+// rendererCeiling is how many suite documents may fail to survive a round trip
 // through ast.Renderer.
 //
-// A floor rather than a ledger: the per-case ledger lives in roundtrip_test.go,
+// A ceiling on failures rather than a floor on successes: the two differ
+// whenever acceptance changes, and tightening the parser legitimately shrinks
+// the set of documents this measures at all. Counting what is broken keeps the
+// number about rendering.
+//
+// A count rather than a ledger: the per-case ledger lives in roundtrip_test.go,
 // which measures the same thing through String. This one measures the renderer
 // directly, so that a caller driving it themselves -- with their own indent, or
-// with comments off -- is covered by more than the default path. Raise it as
-// the renderer improves; it is not allowed to fall.
-const rendererFloor = 291
+// with comments off -- is covered by more than the default path. Lower it as
+// the renderer improves; it is not allowed to rise.
+const rendererCeiling = 7
 
 // TestRendererRoundTrip measures ast.Renderer the way roundtrip_test.go
 // measures rendering through String, so the two numbers mean the same thing.
@@ -53,8 +58,9 @@ func TestRendererRoundTrip(t *testing.T) {
 	t.Logf("ast.Renderer: %d accepted, %d survive (%.1f%%), %d do not parse when read back, %d drift",
 		accepted, stable, 100*float64(stable)/float64(accepted), unreadable, drifting)
 
-	assert.GreaterOrEqualf(t, stable, rendererFloor,
-		"the renderer lost ground: %d documents survive, floor is %d", stable, rendererFloor)
+	assert.LessOrEqualf(t, unreadable+drifting, rendererCeiling,
+		"the renderer lost ground: %d documents do not survive, ceiling is %d",
+		unreadable+drifting, rendererCeiling)
 }
 
 // TestRendererReachesAFixedPoint pins the property the redesign exists for.

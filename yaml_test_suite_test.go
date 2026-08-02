@@ -30,7 +30,6 @@ const (
 	// are the parser's complex-key and empty-key gaps seen from one layer up.
 	reasonNotDecoded = "valid document the decoder will not read"
 	// The document is invalid, and the decoder reads it anyway.
-	reasonNotRejected = "invalid document the decoder accepts"
 	// The document decodes, to the wrong value.
 	reasonWrongValue = "decodes to a value other than the expected JSON"
 	// The fixture carries no expected JSON, so there is nothing to compare
@@ -77,17 +76,6 @@ var decodeLedger = map[string]string{
 	"various-trailing-comments":                        reasonNotDecoded,
 	"various-trailing-comments-1-3":                    reasonNotDecoded,
 	"zero-indented-sequences-in-explicit-mapping-keys": reasonNotDecoded,
-
-	"comment-without-whitespace-after-doublequoted-scalar":          reasonNotRejected,
-	"dash-in-flow-sequence":                                         reasonNotRejected,
-	"invalid-comma-in-tag":                                          reasonNotRejected,
-	"invalid-comment-after-comma":                                   reasonNotRejected,
-	"invalid-comment-after-end-of-flow-sequence":                    reasonNotRejected,
-	"plain-dashes-in-flow-sequence":                                 reasonNotRejected,
-	"tabs-in-various-contexts/003":                                  reasonNotRejected,
-	"tag-shorthand-used-in-documents-but-only-defined-in-the-first": reasonNotRejected,
-	"wrong-indented-flow-sequence":                                  reasonNotRejected,
-	"wrong-indented-multiline-quoted-scalar":                        reasonNotRejected,
 
 	"construct-binary":            reasonWrongValue,
 	"spec-example-9-6-stream":     reasonWrongValue,

@@ -81,14 +81,14 @@ var roundTripLedger = map[string]struct {
 	reason  string
 }{
 	// The rendered document no longer parses.
-	"empty-keys-in-block-and-flow-mapping": {unreadable, reasonFlowComment},
-	"spec-example-6-1-indentation-spaces":  {unreadable, reasonFlowComment},
-	"spec-example-7-2-empty-content":       {unreadable, reasonEmptyTagInFlow},
+	"empty-keys-in-block-and-flow-mapping":         {unreadable, reasonFlowComment},
+	"spec-example-6-1-indentation-spaces":          {unreadable, reasonFlowComment},
+	"spec-example-7-2-empty-content":               {unreadable, reasonEmptyTagInFlow},
+	"various-empty-or-newline-only-quoted-strings": {unreadable, reasonFoldedNewline},
 
 	// The rendered document parses, but does not render the same way twice.
 	"spec-example-7-9-single-quoted-lines":             {drifting, reasonFoldedNewline},
 	"spec-example-7-9-single-quoted-lines-1-3":         {drifting, reasonFoldedNewline},
-	"various-empty-or-newline-only-quoted-strings":     {drifting, reasonFoldedNewline},
 	"spec-example-8-17-explicit-block-mapping-entries": {drifting, reasonExplicitKeyComment},
 }
 
