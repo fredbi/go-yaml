@@ -48,12 +48,15 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 const (
 	// Wrongly rejected.
 	reasonComplexKey = "a collection or an explicit '?' key is not accepted as a mapping key"
-	reasonEmptyKey   = "an empty key is not accepted"
 	reasonFlowBreak  = "inside a flow mapping, a line break between a key and its ':' is legal but rejected"
 	reasonFlowNote   = "a comment inside a flow collection ends the collection"
 	reasonDirective  = "an unknown or reserved directive is rejected rather than ignored"
 	reasonBlockEnd   = "content after a block scalar is misattributed"
 	reasonTabLine    = "a line holding only a tab is read as indentation"
+
+	// Two absent keys in one mapping are two null keys, and duplicate keys are
+	// rejected. Whether that is right is a policy question, still open.
+	reasonDuplicateKey = "two absent keys in one mapping are duplicate keys, which we reject"
 
 	// Wrongly accepted.
 	reasonCommentSpace = "a '#' starting a comment is accepted without the whitespace YAML requires before it"
@@ -75,20 +78,13 @@ const (
 // acceptance checks that were never written. Each is cheap to fix on its own,
 // and each *tightens* what the parser takes -- which makes them breaking
 // changes for anyone relying on the laxity, so they want a version boundary.
-var acceptanceLedger = map[string]struct {
-	verdict verdict
-	reason  string
-}{
+var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"aliases-in-flow-objects":                          {wronglyRejected, reasonComplexKey},
-	"anchors-on-empty-scalars":                         {wronglyRejected, reasonComplexKey},
-	"block-mapping-with-missing-keys":                  {wronglyRejected, reasonEmptyKey},
-	"comment-in-flow-sequence-before-comma":            {wronglyRejected, reasonFlowNote},
-	"empty-implicit-key-in-single-pair-flow-sequences": {wronglyRejected, reasonEmptyKey},
-	"empty-keys-in-block-and-flow-mapping":             {wronglyRejected, reasonEmptyKey},
-	"empty-lines-at-end-of-document":                   {wronglyRejected, reasonEmptyKey},
+	"aliases-in-flow-objects":               {wronglyRejected, reasonComplexKey},
+	"anchors-on-empty-scalars":              {wronglyRejected, reasonComplexKey},
+	"block-mapping-with-missing-keys":       {wronglyRejected, reasonDuplicateKey},
+	"comment-in-flow-sequence-before-comma": {wronglyRejected, reasonFlowNote},
 	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
-	"explicit-key-and-value-seperated-by-comment":           {wronglyRejected, reasonComplexKey},
 	"flow-collections-over-many-lines/01":                   {wronglyRejected, reasonFlowBreak},
 	"flow-mapping-colon-on-line-after-key/02":               {wronglyRejected, reasonFlowBreak},
 	"flow-sequence-in-flow-mapping":                         {wronglyRejected, reasonComplexKey},
@@ -97,21 +93,17 @@ var acceptanceLedger = map[string]struct {
 	"nested-implicit-complex-keys":                          {wronglyRejected, reasonComplexKey},
 	"question-mark-edge-cases/00":                           {wronglyRejected, reasonComplexKey},
 	"question-mark-edge-cases/01":                           {wronglyRejected, reasonComplexKey},
-	"single-character-streams/01":                           {wronglyRejected, reasonEmptyKey},
 	"single-pair-implicit-entries":                          {wronglyRejected, reasonFlowNote},
 	"spec-example-2-11-mapping-between-sequences":           {wronglyRejected, reasonComplexKey},
 	"spec-example-6-12-separation-spaces":                   {wronglyRejected, reasonComplexKey},
 	"spec-example-6-13-reserved-directives":                 {wronglyRejected, reasonDirective},
 	"spec-example-6-13-reserved-directives-1-3":             {wronglyRejected, reasonDirective},
 	"spec-example-6-14-yaml-directive":                      {wronglyRejected, reasonDirective},
-	"spec-example-7-3-completely-empty-flow-nodes":          {wronglyRejected, reasonEmptyKey},
 	"spec-example-8-10-folded-lines-8-13-final-empty-lines": {wronglyRejected, reasonBlockEnd},
-	"spec-example-8-18-implicit-block-mapping-entries":      {wronglyRejected, reasonComplexKey},
 	"spec-example-8-19-compact-block-mappings":              {wronglyRejected, reasonComplexKey},
 	"spec-example-8-8-literal-content":                      {wronglyRejected, reasonBlockEnd},
 	"spec-example-8-8-literal-content-1-3":                  {wronglyRejected, reasonBlockEnd},
 	"spec-example-9-3-bare-documents":                       {wronglyRejected, reasonBlockEnd},
-	"syntax-character-edge-cases/00":                        {wronglyRejected, reasonComplexKey},
 	"tabs-that-look-like-indentation/04":                    {wronglyRejected, reasonTabLine},
 	"tags-on-empty-scalars":                                 {wronglyRejected, reasonComplexKey},
 	"various-combinations-of-explicit-block-mappings":       {wronglyRejected, reasonComplexKey},
@@ -130,6 +122,12 @@ var acceptanceLedger = map[string]struct {
 	"tag-shorthand-used-in-documents-but-only-defined-in-the-first": {wronglyAccepted, reasonTagScope},
 	"wrong-indented-flow-sequence":                                  {wronglyAccepted, reasonFlowIndent},
 	"wrong-indented-multiline-quoted-scalar":                        {wronglyAccepted, reasonFlowIndent},
+}
+
+// ledgerEntry records how a case diverges and why.
+type ledgerEntry struct {
+	verdict verdict
+	reason  string
 }
 
 // TestSuiteAcceptance parses every case of the YAML Test Suite and compares the

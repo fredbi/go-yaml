@@ -91,6 +91,10 @@ var roundTripLedger = map[string]struct {
 	"zero-indented-block-scalar-with-line-that-looks-like-a-comment": {unreadable, reasonBlockScalarIndent},
 
 	// The rendered document parses, but does not render the same way twice.
+	// The first two arrived with empty-key support: they were rejected before,
+	// so they had never reached this measurement.
+	"empty-implicit-key-in-single-pair-flow-sequences": {drifting, reasonAbsoluteColumns},
+	"empty-keys-in-block-and-flow-mapping":             {drifting, reasonAbsoluteColumns},
 	"document-end-marker":                              {drifting, reasonMarkerDropped},
 	"spec-example-2-24-global-tags":                    {drifting, reasonAbsoluteColumns},
 	"spec-example-7-11-plain-implicit-keys":            {drifting, reasonAbsoluteColumns},
