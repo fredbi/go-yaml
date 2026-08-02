@@ -87,13 +87,9 @@ var acceptanceLedger = map[string]ledgerEntry{
 	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
 	"flow-collections-over-many-lines/01":                   {wronglyRejected, reasonFlowBreak},
 	"flow-mapping-colon-on-line-after-key/02":               {wronglyRejected, reasonFlowBreak},
-	"flow-sequence-in-flow-mapping":                         {wronglyRejected, reasonComplexKey},
-	"implicit-flow-mapping-key-on-one-line":                 {wronglyRejected, reasonComplexKey},
 	"mapping-key-and-flow-sequence-item-anchors":            {wronglyRejected, reasonComplexKey},
 	"nested-implicit-complex-keys":                          {wronglyRejected, reasonComplexKey},
-	"question-mark-edge-cases/01":                           {wronglyRejected, reasonComplexKey},
 	"single-pair-implicit-entries":                          {wronglyRejected, reasonFlowNote},
-	"spec-example-6-12-separation-spaces":                   {wronglyRejected, reasonComplexKey},
 	"spec-example-6-13-reserved-directives":                 {wronglyRejected, reasonDirective},
 	"spec-example-6-13-reserved-directives-1-3":             {wronglyRejected, reasonDirective},
 	"spec-example-6-14-yaml-directive":                      {wronglyRejected, reasonDirective},

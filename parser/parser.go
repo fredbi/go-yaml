@@ -594,6 +594,19 @@ func (p *parser) parseMapKeyValue(ctx *context, g *TokenGroup, entryTk *Token) (
 	return newMappingValueNode(c, keyGroup.Last(), entryTk, key, value)
 }
 
+// parseMapKeyValueNode parses the key part of a map-key group.
+//
+// A key is usually a single scalar token, and that path is kept: it is every
+// ordinary document. A key spanning more tokens is a flow collection used as a
+// key, which has to be parsed as a node like any other.
+func (p *parser) parseMapKeyValueNode(ctx *context, g *TokenGroup) (ast.Node, error) {
+	if len(g.Tokens) <= 2 {
+		return p.parseScalarValue(ctx, g.First())
+	}
+
+	return p.parseToken(ctx, g.First())
+}
+
 func (p *parser) parseMapKey(ctx *context, g *TokenGroup) (ast.MapKeyNode, error) {
 	if g.Type != TokenGroupMapKey {
 		return nil, errors.ErrSyntax("unexpected map key", g.RawToken())
@@ -640,7 +653,7 @@ func (p *parser) parseMapKey(ctx *context, g *TokenGroup) (ast.MapKeyNode, error
 		return nil, errors.ErrSyntax("expected map key-value delimiter ':'", g.Last().RawToken())
 	}
 
-	scalar, err := p.parseScalarValue(ctx, g.First())
+	scalar, err := p.parseMapKeyValueNode(ctx, g)
 	if err != nil {
 		return nil, err
 	}
