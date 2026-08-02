@@ -24,6 +24,9 @@ const (
 	wronglyAccepted
 	// wronglyRejected: the parser refused a document YAML 1.2 allows.
 	wronglyRejected
+	// unstated: the fixture says nothing about what should happen, so there is
+	// nothing to agree or disagree with.
+	unstated
 )
 
 func (v verdict) String() string {
@@ -36,6 +39,8 @@ func (v verdict) String() string {
 		return "wrongly accepted"
 	case wronglyRejected:
 		return "wrongly rejected"
+	case unstated:
+		return "no expectation stated"
 	default:
 		return "unknown"
 	}
@@ -53,10 +58,6 @@ const (
 	reasonDirective  = "an unknown or reserved directive is rejected rather than ignored"
 	reasonBlockEnd   = "content after a block scalar is misattributed"
 	reasonTabLine    = "a line holding only a tab is read as indentation"
-
-	// Two absent keys in one mapping are two null keys, and duplicate keys are
-	// rejected. Whether that is right is a policy question, still open.
-	reasonDuplicateKey = "two absent keys in one mapping are duplicate keys, which we reject"
 
 	// Wrongly accepted.
 	reasonCommentSpace = "a '#' starting a comment is accepted without the whitespace YAML requires before it"
@@ -82,7 +83,6 @@ var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
 	"aliases-in-flow-objects":               {wronglyRejected, reasonComplexKey},
 	"anchors-on-empty-scalars":              {wronglyRejected, reasonComplexKey},
-	"block-mapping-with-missing-keys":       {wronglyRejected, reasonDuplicateKey},
 	"comment-in-flow-sequence-before-comma": {wronglyRejected, reasonFlowNote},
 	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
 	"flow-collections-over-many-lines/01":                   {wronglyRejected, reasonFlowBreak},
@@ -146,6 +146,13 @@ func TestSuiteAcceptance(t *testing.T) {
 		t.Run(test.Name, func(t *testing.T) {
 			_, err := parser.ParseBytes(test.InYAML, parser.ParseComments)
 
+			if !test.HasExpectation() {
+				// Parsed anyway, so a panic here still fails the run.
+				counts[unstated]++
+
+				return
+			}
+
 			switch {
 			case test.Error && err == nil:
 				got = wronglyAccepted
@@ -183,9 +190,11 @@ func reportAcceptance(t *testing.T, total int, counts map[verdict]int, diverged 
 	t.Helper()
 
 	agreed := counts[accepted] + counts[rejected]
-	t.Logf("YAML Test Suite: %d cases, %d agree (%d accepted, %d rejected), %d diverge (%.1f%% conformant)",
-		total, agreed, counts[accepted], counts[rejected], len(diverged),
-		100*float64(agreed)/float64(total))
+	scored := total - counts[unstated]
+	t.Logf("YAML Test Suite: %d cases, %d scored (%d state no expectation and are excluded)",
+		total, scored, counts[unstated])
+	t.Logf("  %d agree (%d accepted, %d rejected), %d diverge -- %.1f%% conformant",
+		agreed, counts[accepted], counts[rejected], len(diverged), 100*float64(agreed)/float64(scored))
 
 	byReason := make(map[string][]string)
 	for name := range diverged {

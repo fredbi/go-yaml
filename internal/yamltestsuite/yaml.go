@@ -19,11 +19,27 @@ type TestSuite struct {
 	InJSON  []any
 	OutYAML []byte
 	Error   bool
+
+	// hasJSON records that an in.json file was present, which is not the same
+	// as InJSON being non-empty: an empty in.json is a real expectation -- the
+	// stream yields nothing -- and empty-stream relies on exactly that.
+	hasJSON bool
 }
 
 // fixturesDir is the vendored copy of the YAML Test Suite, held in this
 // package's testdata directory so that the fixtures sit beside the loader that
 // reads them.
+// HasExpectation reports whether the fixture says anything about what should
+// happen to its document.
+//
+// Nine of the vendored cases carry only in.yaml -- no in.json, no out.yaml, no
+// error marker -- and every one of them is an empty-key or explicit-key case.
+// Reading "no error marker" as "must be accepted" would invent an expectation
+// the fixture does not state, and score us against it either way.
+func (t *TestSuite) HasExpectation() bool {
+	return t.Error || t.hasJSON || t.OutYAML != nil
+}
+
 func fixturesDir() string {
 	_, file, _, _ := runtime.Caller(0) //nolint:dogsled
 
@@ -67,6 +83,7 @@ func TestSuites() ([]*TestSuite, error) {
 				inJSON = append(inJSON, v)
 			}
 			testMap[name].InJSON = inJSON
+			testMap[name].hasJSON = true
 		case "out.yaml":
 			testMap[name].OutYAML = f
 		case "error":
