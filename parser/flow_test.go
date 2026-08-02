@@ -75,6 +75,16 @@ func TestParseFlowComments(t *testing.T) {
 			source: "[ a, b\n# comment\n]\n",
 			want:   "[\n  a,\n  b\n  # comment\n]\n",
 		},
+		// On the ',' line the comment was written about the entry the ',' comes
+		// after, and stays with it.
+		"on the comma's line in a sequence": {
+			source: "[ a, # comment\n  b ]\n",
+			want:   "[\n  a, # comment\n  b\n]\n",
+		},
+		"on the comma's line in a mapping": {
+			source: "{ a: 1, # comment\n  b: 2 }\n",
+			want:   "{\n  a: 1, # comment\n  b: 2\n}\n",
+		},
 		// Nothing to carry, so nothing changes: the collection stays on the one
 		// line it is meant to occupy.
 		"none at all": {
@@ -98,45 +108,6 @@ func TestParseFlowComments(t *testing.T) {
 			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
-		})
-	}
-}
-
-// TestParseFlowCommentsOnTheCommaLine pins what still goes wrong with a comment
-// written on the same line as the ',' that follows an entry.
-//
-// Such a comment is carried on the ',' token rather than reaching the loop that
-// reads the collection, so it never becomes an entry's own. In a sequence it
-// ends up on a node nothing renders and is lost; in a mapping it lands on the
-// entry after the comma, which is not the entry it was written about.
-//
-// Both are wrong. This test states what happens today so that fixing it is
-// noticed rather than silently changing the output.
-func TestParseFlowCommentsOnTheCommaLine(t *testing.T) {
-	tests := map[string]struct {
-		source string
-		want   string
-		note   string
-	}{
-		"in a sequence": {
-			source: "[ a, # comment\n  b ]\n",
-			want:   "[a, b]\n",
-			note:   "the comment is dropped",
-		},
-		"in a mapping": {
-			source: "{ a: 1, # comment\n  b: 2 }\n",
-			want:   "{\n  a: 1,\n  b: 2 # comment\n}\n",
-			note:   "the comment moves to the entry after the comma, not the one it was written on",
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
-			require.NoError(t, err)
-
-			assert.Equalf(t, test.want, file.String(),
-				"%s -- if this changed, the defect may be fixed: move the case to TestParseFlowComments", test.note)
 		})
 	}
 }
