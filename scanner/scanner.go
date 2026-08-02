@@ -50,8 +50,12 @@ type Scanner struct {
 	isDirective            bool
 	startedFlowSequenceNum int
 	startedFlowMapNum      int
-	indentState            IndentState
-	savedPos               *token.Position
+	// flowIndent is the indentation the line that opened the outermost flow
+	// collection carried. Every further line of that collection has to be
+	// indented past it.
+	flowIndent  int
+	indentState IndentState
+	savedPos    *token.Position
 }
 
 func (s *Scanner) pos() *token.Position {
@@ -213,6 +217,7 @@ func (s *Scanner) breakMultiLine(ctx *Context) {
 
 func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 	ctx.addOriginBuf('\'')
+	baseIndent := s.contentIndent()
 	srcpos := s.pos()
 	startIndex := ctx.idx + 1
 	src := ctx.src
@@ -251,6 +256,9 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			s.progressLine(ctx)
 			if idx+1 < size {
 				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+1:]); err != nil {
+					return nil, err
+				}
+				if err := s.checkContinuationIndent(ctx, src[idx+1:], baseIndent); err != nil {
 					return nil, err
 				}
 			}
@@ -311,6 +319,7 @@ func hexRunesToInt(b []rune) int {
 
 func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 	ctx.addOriginBuf('"')
+	baseIndent := s.contentIndent()
 	srcpos := s.pos()
 	startIndex := ctx.idx + 1
 	src := ctx.src
@@ -349,6 +358,9 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			s.progressLine(ctx)
 			if idx+1 < size {
 				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+1:]); err != nil {
+					return nil, err
+				}
+				if err := s.checkContinuationIndent(ctx, src[idx+1:], baseIndent); err != nil {
 					return nil, err
 				}
 			}
@@ -694,9 +706,21 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	ctx.addOriginBuf('!')
 	s.progress(ctx, 1) // skip '!' character
 
+	// A verbatim tag, "!<...>", holds a URI and takes it as written: the
+	// characters a shorthand may not contain are ordinary inside the brackets.
+	verbatim := ctx.currentChar() == '<'
+
 	var progress int
 	for idx, c := range ctx.src[ctx.idx:] {
 		progress = idx + 1
+		if verbatim {
+			ctx.addOriginBuf(c)
+			if c == '>' {
+				verbatim = false
+			}
+
+			continue
+		}
 		switch c {
 		case ' ':
 			ctx.addOriginBuf(c)
@@ -712,9 +736,15 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				s.progressColumn(ctx, len([]rune(value))-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
-			} else {
-				ctx.addOriginBuf(c)
 			}
+			// Outside a flow collection nothing ends the tag here, and a ',' is
+			// not a character a tag may contain: it has to be percent-encoded.
+			ctx.addOriginBuf(c)
+			s.progressColumn(ctx, progress)
+
+			return false, ErrInvalidToken(
+				token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos()),
+			)
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
@@ -737,7 +767,11 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 }
 
 func (s *Scanner) scanComment(ctx *Context) bool {
-	if ctx.existsBuffer() {
+	// A comment starts a line or follows a space. The check used to run only
+	// while a plain scalar was being buffered, so a '#' pressed up against
+	// anything that had already been emitted -- a closing quote, a comma, a
+	// bracket -- started a comment where YAML has none.
+	if ctx.idx > 0 {
 		c := ctx.previousChar()
 		if c != ' ' && c != '\t' && !s.isNewLineChar(c) {
 			return false
@@ -896,6 +930,135 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	s.progressLine(ctx)
 }
 
+// scanFlowDash reports a '-' that is neither a sequence entry nor the start of
+// a scalar.
+//
+// A plain scalar may begin with '-' only when what follows can continue it. In
+// a flow collection the characters that structure the collection cannot, so
+// "[-]" and "[-, -]" hold no scalar at all -- they used to be read as the
+// one-character string "-".
+func (s *Scanner) scanFlowDash(ctx *Context) error {
+	if ctx.existsBuffer() || !s.isFlowMode() {
+		return nil
+	}
+
+	switch ctx.nextChar() {
+	case ',', '[', ']', '{', '}':
+	default:
+		return nil
+	}
+
+	ctx.addBuf('-')
+	ctx.addOriginBuf('-')
+	err := ErrInvalidToken(
+		token.Invalid(
+			"'-' is not a scalar, and a flow collection has no sequence entries",
+			string(ctx.obuf), s.pos(),
+		),
+	)
+	s.progressColumn(ctx, 1)
+	ctx.clear()
+
+	return err
+}
+
+// enterFlow records what a flow collection's continuation lines must clear.
+//
+// Only the outermost one matters: a collection nested inside another is already
+// past the indentation its parent required.
+func (s *Scanner) enterFlow() {
+	if s.isFlowMode() {
+		return
+	}
+	s.flowIndent = s.contentIndent()
+}
+
+// checkFlowIndent rejects the line about to start when it is not indented past
+// the line its flow collection opened on.
+//
+// This is what makes "flow: [a,\nb]" invalid: "b" sits in the same column as
+// the key that owns the collection, so nothing marks it as belonging to it.
+// Indentation is spaces, so a line led by a tab clears nothing.
+//
+// It runs from scanNewLine, which a quoted or literal scalar spanning lines
+// never reaches -- their own line breaks are theirs, not the collection's.
+func (s *Scanner) checkFlowIndent(ctx *Context) error {
+	if !s.isFlowMode() {
+		return nil
+	}
+
+	indent, blank := lineIndent(ctx.src[ctx.idx+1:])
+	if blank || indent > s.flowIndent {
+		return nil
+	}
+
+	s.progressLine(ctx)
+
+	return ErrInvalidToken(
+		token.Invalid(
+			"a flow collection continues on a line that is not indented past the one it started on",
+			string(ctx.obuf), s.pos(),
+		),
+	)
+}
+
+// contentIndent is the indentation a further line of the construct now being
+// scanned has to clear.
+func (s *Scanner) contentIndent() int {
+	if s.isFlowMode() {
+		return s.flowIndent
+	}
+
+	// The indentation of the block node this belongs to, which is the key or
+	// the '-' that introduced it -- not the line the construct happens to start
+	// on, which may already be indented under that key.
+	//
+	// Zero means nothing introduced it: the construct is the document's own
+	// root, and its further lines have nothing to be indented past.
+	return s.lastDelimColumn - 1
+}
+
+// checkContinuationIndent rejects a further line of a quoted scalar that is not
+// indented past the line the scalar started on.
+//
+// A scalar spanning lines is one value, and what marks its later lines as part
+// of it is that they are indented under it. Without that, "quoted: \"a\nb\"" reads
+// as a scalar and then a second, unrelated line.
+func (s *Scanner) checkContinuationIndent(ctx *Context, rest []rune, base int) error {
+	indent, blank := lineIndent(rest)
+	if blank || indent > base {
+		return nil
+	}
+
+	return ErrInvalidToken(
+		token.Invalid(
+			"a scalar continues on a line that is not indented past the one it started on",
+			string(ctx.obuf), s.pos(),
+		),
+	)
+}
+
+// lineIndent returns how many spaces begin the line, and whether the line holds
+// nothing else. A blank line is part of no indentation.
+func lineIndent(src []rune) (int, bool) {
+	indent := 0
+	for _, c := range src {
+		switch c {
+		case ' ':
+			indent++
+		case '\t':
+			// A tab is whitespace but not indentation: it neither adds to
+			// the count nor ends the line.
+		case '\n', '\r':
+			return indent, true
+		default:
+			return indent, false
+		}
+	}
+
+	return indent, true
+}
+
 func (s *Scanner) isFlowMode() bool {
 	if s.startedFlowSequenceNum > 0 {
 		return true
@@ -914,6 +1077,7 @@ func (s *Scanner) scanFlowMapStart(ctx *Context) bool {
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('{')
 	ctx.addToken(token.MappingStart(string(ctx.obuf), s.pos()))
+	s.enterFlow()
 	s.startedFlowMapNum++
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -942,6 +1106,7 @@ func (s *Scanner) scanFlowArrayStart(ctx *Context) bool {
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('[')
 	ctx.addToken(token.SequenceStart(string(ctx.obuf), s.pos()))
+	s.enterFlow()
 	s.startedFlowSequenceNum++
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -1283,6 +1448,31 @@ func (s *Scanner) scanAlias(ctx *Context) bool {
 	return true
 }
 
+// scanCommentIndicator reports the '#' that scanComment declined.
+//
+// Inside a plain scalar a '#' is an ordinary character, so one that follows
+// something already buffered is left alone. Starting a token it is neither a
+// comment -- nothing separates it from what came before -- nor the first
+// character of a plain scalar, which YAML does not allow it to be.
+func (s *Scanner) scanCommentIndicator(ctx *Context) error {
+	if ctx.existsBuffer() {
+		return nil
+	}
+
+	ctx.addBuf('#')
+	ctx.addOriginBuf('#')
+	err := ErrInvalidToken(
+		token.Invalid(
+			"a comment must be preceded by a space, and a scalar cannot begin with '#'",
+			string(ctx.obuf), s.pos(),
+		),
+	)
+	s.progressColumn(ctx, 1)
+	ctx.clear()
+
+	return err
+}
+
 func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
 	if ctx.existsBuffer() {
 		return nil
@@ -1389,6 +1579,11 @@ func (s *Scanner) scan(ctx *Context) error {
 			if err != nil {
 				return err
 			}
+			if !scanned {
+				if err := s.scanFlowDash(ctx); err != nil {
+					return err
+				}
+			}
 			if scanned {
 				continue
 			}
@@ -1448,6 +1643,9 @@ func (s *Scanner) scan(ctx *Context) error {
 			if s.scanComment(ctx) {
 				continue
 			}
+			if err := s.scanCommentIndicator(ctx); err != nil {
+				return err
+			}
 		case '\'', '"':
 			scanned, err := s.scanQuote(ctx, c)
 			if err != nil {
@@ -1457,6 +1655,9 @@ func (s *Scanner) scan(ctx *Context) error {
 				continue
 			}
 		case '\r', '\n':
+			if err := s.checkFlowIndent(ctx); err != nil {
+				return err
+			}
 			s.scanNewLine(ctx, c)
 			continue
 		case ' ':

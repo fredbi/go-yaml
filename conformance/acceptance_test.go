@@ -50,35 +50,31 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 
 // The reasons a case diverges. Cases sharing a reason share a root cause, and
 // are expected to be fixed together.
+//
+// Every remaining one is a document YAML allows that the parser refuses. The
+// parser no longer takes anything the spec forbids.
 const (
-	// Wrongly rejected.
 	reasonComplexKey = "a collection or an explicit '?' key is not accepted as a mapping key"
 	reasonFlowBreak  = "inside a flow mapping, a line break between a key and its ':' is legal but rejected"
 	reasonFlowNote   = "a comment inside a flow collection ends the collection"
 	reasonDirective  = "an unknown or reserved directive is rejected rather than ignored"
 	reasonBlockEnd   = "content after a block scalar is misattributed"
 	reasonTabLine    = "a line holding only a tab is read as indentation"
-
-	// Wrongly accepted.
-	reasonCommentSpace = "a '#' starting a comment is accepted without the whitespace YAML requires before it"
-	reasonFlowDash     = "a plain '-' is accepted as a scalar in flow context"
-	reasonFlowIndent   = "indentation and tabs inside a flow collection are not checked"
-	reasonTagComma     = "a comma inside a tag is accepted"
-	reasonTagScope     = "a tag shorthand stays defined past the document that defined it"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
 // Test Suite about whether a document is valid.
 //
-// The wrongly-rejected entries are dominated by one cause: mapping keys that
-// are not plain scalars. Explicit '?' keys, collections used as keys and empty
-// keys account for well over half the list, and they are a single body of work
-// rather than twenty separate defects.
+// Everything left is a document the parser refuses and should not. It used to
+// hold ten of the opposite -- documents YAML forbids that the parser took --
+// and those mattered more: a document another implementation rejects would have
+// passed through here unremarked, and been handed on as if it were sound. They
+// are gone.
 //
-// The wrongly-accepted entries are the opposite: small, independent
-// acceptance checks that were never written. Each is cheap to fix on its own,
-// and each *tightens* what the parser takes -- which makes them breaking
-// changes for anyone relying on the laxity, so they want a version boundary.
+// What remains is dominated by one cause: mapping keys that are not plain
+// scalars. Explicit '?' keys, collections used as keys and empty keys account
+// for a third of the list, and they are a single body of work rather than six
+// separate defects.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
 	"aliases-in-flow-objects":               {wronglyRejected, reasonComplexKey},
@@ -102,16 +98,6 @@ var acceptanceLedger = map[string]ledgerEntry{
 	"various-combinations-of-explicit-block-mappings":       {wronglyRejected, reasonComplexKey},
 
 	// Documents YAML 1.2 forbids that the parser takes.
-	"comment-without-whitespace-after-doublequoted-scalar":          {wronglyAccepted, reasonCommentSpace},
-	"dash-in-flow-sequence":                                         {wronglyAccepted, reasonFlowDash},
-	"invalid-comma-in-tag":                                          {wronglyAccepted, reasonTagComma},
-	"invalid-comment-after-comma":                                   {wronglyAccepted, reasonCommentSpace},
-	"invalid-comment-after-end-of-flow-sequence":                    {wronglyAccepted, reasonCommentSpace},
-	"plain-dashes-in-flow-sequence":                                 {wronglyAccepted, reasonFlowDash},
-	"tabs-in-various-contexts/003":                                  {wronglyAccepted, reasonFlowIndent},
-	"tag-shorthand-used-in-documents-but-only-defined-in-the-first": {wronglyAccepted, reasonTagScope},
-	"wrong-indented-flow-sequence":                                  {wronglyAccepted, reasonFlowIndent},
-	"wrong-indented-multiline-quoted-scalar":                        {wronglyAccepted, reasonFlowIndent},
 }
 
 // ledgerEntry records how a case diverges and why.

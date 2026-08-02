@@ -79,6 +79,7 @@ type parser struct {
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
 	secondaryTagDirective *ast.DirectiveNode
+	tagHandles            map[string]struct{}
 }
 
 func newParser(tokens token.Tokens, mode Mode, opts []Option) (*parser, error) {
@@ -156,6 +157,15 @@ func (p *parser) parseDocument(ctx *context, docGroup *TokenGroup) (*ast.Documen
 	}))
 	if err != nil {
 		return nil, err
+	}
+
+	// A TAG directive defines a handle for the one document that follows it,
+	// and this was that document: what it declared goes out of scope here.
+	// Carrying the definitions on let a later document use a handle it never
+	// declared. A document holding only the directives themselves does not end
+	// their scope -- it is what opens it.
+	if _, directives := body.(*ast.DirectiveNode); !directives {
+		p.clearTagDirectives()
 	}
 	node := ast.Document(start, body)
 	node.End = end
@@ -985,6 +995,12 @@ func (p *parser) parseScalarTag(ctx *context) (*ast.TagNode, error) {
 func (p *parser) parseTag(ctx *context) (*ast.TagNode, error) {
 	tagTk := ctx.currentToken()
 	tagRawTk := tagTk.RawToken()
+	if handle, named := namedTagHandle(tagRawTk.Value); named {
+		if _, declared := p.tagHandles[handle]; !declared {
+			return nil, errors.ErrSyntax(
+				fmt.Sprintf("tag handle %s is not defined by a TAG directive", handle), tagRawTk)
+		}
+	}
 	node, err := newTagNode(ctx, tagTk)
 	if err != nil {
 		return nil, err
@@ -1025,6 +1041,29 @@ func (p *parser) parseTag(ctx *context) (*ast.TagNode, error) {
 	}
 	node.Value = tagValue
 	return node, nil
+}
+
+func (p *parser) clearTagDirectives() {
+	p.tagHandles = nil
+	p.secondaryTagDirective = nil
+}
+
+// namedTagHandle returns the handle a tag shorthand uses, and whether that
+// handle is one a TAG directive has to define.
+//
+// The primary "!" and secondary "!!" handles are always available, and a
+// verbatim "!<...>" tag uses none: only "!name!" has to be declared.
+func namedTagHandle(value string) (string, bool) {
+	if !strings.HasPrefix(value, "!") || strings.HasPrefix(value, "!<") {
+		return "", false
+	}
+
+	name, _, found := strings.Cut(value[1:], "!")
+	if !found || name == "" {
+		return "", false
+	}
+
+	return "!" + name + "!", true
 }
 
 func (p *parser) parseTagValue(ctx *context, tagRawTk *token.Token, tk *Token) (ast.Node, error) {
@@ -1295,6 +1334,10 @@ func (p *parser) parseDirective(ctx *context, g *TokenGroup) (*ast.DirectiveNode
 		if tagKey.Value == "!!" {
 			p.secondaryTagDirective = directive
 		}
+		if p.tagHandles == nil {
+			p.tagHandles = make(map[string]struct{})
+		}
+		p.tagHandles[tagKey.Value] = struct{}{}
 		tagValue, err := newStringNode(ctx, g.Tokens[2])
 		if err != nil {
 			return nil, err

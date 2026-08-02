@@ -2892,12 +2892,14 @@ func TestMultiLineToken_ValueLineColumnPosition(t *testing.T) {
 	}{
 		{
 			name: "double quote",
+			// The continuation lines are indented under their key, as a scalar
+			// spanning lines has to be: without that they are not part of it.
 			src: `one: "1 2 3 4 5"
 two: "1 2
-3 4
-5"
+ 3 4
+ 5"
 three: "1 2 3 4
-5"`,
+ 5"`,
 			expect: []testToken{
 				{
 					line:   1,
@@ -2948,8 +2950,10 @@ three: "1 2 3 4
 		},
 		{
 			name: "single quote in an array",
+			// As above: a scalar carrying on to the next line is indented under
+			// the key whose value it is.
 			src: `arr: ['1', 'and
-two']
+ two']
 last: 'hello'`,
 			expect: []testToken{
 				{
@@ -2984,7 +2988,7 @@ last: 'hello'`,
 				},
 				{
 					line:   2,
-					column: 5,
+					column: 6,
 					value:  "]",
 				},
 				{
@@ -3011,7 +3015,7 @@ last: 'hello'`,
 
 
 
-bar"
+ bar"
 foo2: 'bar2'`,
 			expect: []testToken{
 				{
