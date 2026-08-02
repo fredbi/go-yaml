@@ -121,9 +121,12 @@ var Ledger = []Divergence{
 			"document, so rendering takes two passes to settle, and where the " +
 			"head is already taken the comment is dropped altogether. An entry " +
 			"with a scalar on its line keeps its comment, and so does a mapping " +
-			"entry. The shape is wider than the loss: every document of it fails " +
-			"to settle, while roughly four in ten actually drop a comment, so the " +
-			"condition for dropping one rather than moving it is not yet pinned down",
+			"entry. The shape is wider than either symptom: about half the " +
+			"documents drawn from it fail to settle and slightly fewer drop a " +
+			"comment, so the condition that separates moving one from dropping " +
+			"it -- and either from leaving it alone -- is not yet pinned down. " +
+			"Tightening this entry is the next thing worth doing to it: until " +
+			"then it excuses roughly as many sound documents as unsound ones",
 		Match: func(v Value, st Style) bool {
 			if st.Flow || st.Comments == NoComments {
 				return false
@@ -148,26 +151,6 @@ var Ledger = []Divergence{
 				// Keep chomping is what the emitter picks for more than one
 				// trailing newline.
 				return canLiteral(s) && len(s)-len(strings.TrimRight(s, "\n")) >= 2
-			})
-		},
-	},
-	{
-		Name: "single-quoted-key-loses-its-escaping",
-		// The rendered document does not parse, which fails both questions at
-		// once: there is no value to compare and nothing to render again.
-		Property: Render | Settle,
-		Reason: "rendering a mapping key that was read from a single-quoted " +
-			"scalar writes the quote it contains unescaped, so 'a''b' becomes " +
-			"'a'b' and the rendered document no longer parses; the same string " +
-			"in a value position survives",
-		Match: func(v Value, st Style) bool {
-			if st.Quoting != QuoteSingle {
-				return false
-			}
-
-			return anyKey(v, func(k string) bool {
-				// Only keys the emitter actually single quotes are affected.
-				return canSingle(k) && strings.Contains(k, "'")
 			})
 		},
 	},
@@ -251,30 +234,6 @@ func leavesItsLineEmpty(v Value, st Style) bool {
 	case Str:
 		// A literal block scalar puts its content below, not on the line.
 		return st.Literal && canLiteral(n.V)
-	default:
-		return false
-	}
-}
-
-// anyKey reports whether any mapping key anywhere in the value satisfies pred.
-func anyKey(v Value, pred func(string) bool) bool {
-	switch n := v.(type) {
-	case Seq:
-		for _, item := range n.Items {
-			if anyKey(item, pred) {
-				return true
-			}
-		}
-
-		return false
-	case Map:
-		for _, p := range n.Pairs {
-			if pred(p.Key) || anyKey(p.Val, pred) {
-				return true
-			}
-		}
-
-		return false
 	default:
 		return false
 	}

@@ -174,6 +174,8 @@ func TestRenderKeepsEveryComment(t *testing.T) {
 // differently every time it is used, which is what makes a library unusable for
 // the round-tripping it advertises.
 func TestRenderReachesAFixedPoint(t *testing.T) {
+	tally := newTally()
+
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -183,15 +185,19 @@ func TestRenderReachesAFixedPoint(t *testing.T) {
 			return
 		}
 
-		if !renderDoesNotSettle([]byte(src)) {
+		unsettled := renderDoesNotSettle([]byte(src))
+
+		if known := yamlgen.Known(yamlgen.Settle, value, style); known != nil {
+			tally.record(known.Name, unsettled)
+
 			return
 		}
 
-		if yamlgen.Known(yamlgen.Settle, value, style) != nil {
-			return
+		if unsettled {
+			rt.Fatalf("style %s: rendering does not settle.\n%s",
+				style, reduced("RenderDoesNotSettle", src, renderDoesNotSettle))
 		}
-
-		rt.Fatalf("style %s: rendering does not settle.\n%s",
-			style, reduced("RenderDoesNotSettle", src, renderDoesNotSettle))
 	})
+
+	tally.report(t, yamlgen.Settle)
 }

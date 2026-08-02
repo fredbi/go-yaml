@@ -110,29 +110,6 @@ func TestDefectCommentOnASequenceEntryMovesOrIsLost(t *testing.T) {
 	})
 }
 
-// TestDefectSingleQuotedKeyLosesItsEscaping: rendering a mapping key read from
-// a single-quoted scalar writes its quote unescaped, and the result does not
-// parse.
-//
-// The same string in a value position survives, which places the defect in how
-// keys are written rather than in single-quoted scalars.
-func TestDefectSingleQuotedKeyLosesItsEscaping(t *testing.T) {
-	file, err := parser.ParseBytes([]byte("'a''b': false\n"), parser.ParseComments)
-	require.NoError(t, err)
-
-	rendered := file.String()
-	assert.Equal(t, "'a'b': false\n", rendered,
-		"the escaped quote is written bare -- if this now round trips, the defect is fixed")
-
-	_, err = parser.ParseBytes([]byte(rendered), parser.ParseComments)
-	assert.Error(t, err, "and the rendered document no longer parses")
-
-	// The same string as a value is written back correctly.
-	value, err := parser.ParseBytes([]byte("k: 'a''b'\n"), parser.ParseComments)
-	require.NoError(t, err)
-	assert.Equal(t, "k: 'a''b'\n", value.String())
-}
-
 // render parses a document and writes it back out.
 func render(t *testing.T, src string) string {
 	t.Helper()

@@ -25,7 +25,15 @@ import (
 //
 // Run them with:
 //
-//	go test -run TestInvariant -yamlgen.invariants ./internal/testintegration/yamlgen/
+//	go test -run TestInvariant ./internal/testintegration/yamlgen/ -args -yamlgen.invariants -rapid.checks=10000
+//
+// The flags go after -args because go test validates the ones it does not
+// recognize against the package in the current directory, which is not this
+// one. From this directory `go test -yamlgen.invariants .` works as written.
+//
+// Ten thousand checks rather than the default hundred: the rarer shapes are
+// drawn a few times in a hundred thousand, so a short run reports success it
+// has not earned.
 //
 // Every failure arrives reduced to the smallest document that still shows it,
 // with a test case to paste. When the last one passes, the ledger next door is
@@ -144,11 +152,6 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		{
 			invariant: "rendering preserves the value",
 			src:       "k: |+\n  trail\n\n",
-			fails:     renderChangesValue,
-		},
-		{
-			invariant: "rendering preserves the value",
-			src:       "'''':\n",
 			fails:     renderChangesValue,
 		},
 		{

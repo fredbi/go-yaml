@@ -60,7 +60,7 @@ func TestReduce(t *testing.T) {
 // TestReduceKeepsThePredicateTrue is the property that matters for a reducer:
 // whatever it returns must still be a case of the thing being reduced.
 func TestReduceKeepsThePredicateTrue(t *testing.T) {
-	src := "a: 1\nb: 2\n'x''y': 3\nc: 4\n"
+	src := "a: 1\nk: |+\n  trail\n\n"
 	require.True(t, renderChangesValue([]byte(src)), "the fixture must show the defect to begin with")
 
 	small := yamlgen.Reduce([]byte(src), renderChangesValue)
@@ -76,7 +76,7 @@ func TestReduceKeepsThePredicateTrue(t *testing.T) {
 // already gone wrong -- which is precisely when nobody wants to discover that
 // the reporting itself is broken.
 func TestReducedReportIsUseful(t *testing.T) {
-	report := reduced("Defect", "a: 1\nb: 2\n'x''y': 3\nc: 4\n", renderChangesValue)
+	report := reduced("Defect", "a: 1\nk: |+\n  trail\n\n", renderChangesValue)
 
 	assert.Contains(t, report, "as generated")
 	assert.Contains(t, report, "reduced to")
