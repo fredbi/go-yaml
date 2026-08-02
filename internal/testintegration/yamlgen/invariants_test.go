@@ -142,14 +142,6 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		fails     func([]byte) bool
 	}{
 		{
-			invariant: "reading any presentation gives the value",
-			src:       "|-\n  trailing \n",
-			fails: func(b []byte) bool {
-				var got any
-				return yaml.Unmarshal(b, &got) != nil || got != "trailing "
-			},
-		},
-		{
 			invariant: "rendering preserves the value",
 			src:       "k: |+\n  trail\n\n",
 			fails:     renderChangesValue,

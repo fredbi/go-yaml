@@ -82,34 +82,6 @@ func (p Property) String() string {
 // longer diverges, rather than sitting here forever.
 var Ledger = []Divergence{
 	{
-		Name: "strip-chomping-eats-trailing-spaces",
-		// The value is already wrong when the document is read, so writing it
-		// back out cannot make it right again.
-		Property: Decode | Render,
-		Reason: "a literal block scalar with strip chomping (|-) drops trailing " +
-			"spaces on its last line; chomping is defined over line breaks, so " +
-			"the spaces should survive",
-		Match: func(v Value, st Style) bool {
-			// Only block style reaches a block scalar at all, and only a value
-			// is written as one -- a mapping key never is. Matching more
-			// broadly than the defect would tolerate documents that are fine,
-			// and hide the next defect among them.
-			if st.Flow || !st.Literal {
-				return false
-			}
-
-			return anyValueString(v, func(s string) bool {
-				// Strip chomping is what the emitter picks when there is no
-				// trailing newline to clip or keep.
-				if !canLiteral(s) || strings.HasSuffix(s, "\n") {
-					return false
-				}
-
-				return endsWithSpace(s)
-			})
-		},
-	},
-	{
 		Name: "comment-on-a-nested-sequence-entry-moves-or-is-lost",
 		// One root cause with two symptoms, which is why it is one entry: the
 		// comment is sometimes relocated and sometimes dropped, and both are
@@ -237,10 +209,6 @@ func leavesItsLineEmpty(v Value, st Style) bool {
 	default:
 		return false
 	}
-}
-
-func endsWithSpace(s string) bool {
-	return strings.HasSuffix(s, " ") || strings.HasSuffix(s, "\t")
 }
 
 // anyValueString reports whether any string in a value position satisfies pred.
