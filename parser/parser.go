@@ -966,6 +966,19 @@ func endsValue(tk *Token) bool {
 	}
 }
 
+// startsEntry reports whether a token opens the next entry of the mapping
+// around it, rather than continuing what came before.
+func startsEntry(tk *Token) bool {
+	switch tk.GroupType() {
+	case TokenGroupMapKey, TokenGroupMapKeyValue:
+		return true
+	}
+
+	// A '-' cannot be a scalar's value, so it opens the next entry of the
+	// sequence around it rather than continuing this one.
+	return tk.Type() == token.SequenceEntryType
+}
+
 // parseAnchorValue reads what an anchor names.
 //
 // An anchor with nothing after it names the empty node: "a: &x" is a valid
@@ -1163,7 +1176,11 @@ func (p *parser) parseTagValue(ctx *context, tagRawTk *token.Token, tk *Token) (
 	case token.IntegerTag, token.FloatTag, token.StringTag, token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
 		if tk.GroupType() == TokenGroupLiteral || tk.GroupType() == TokenGroupFolded {
 			return p.parseLiteral(ctx.withGroup(tk.Group))
-		} else if tk.Type() == token.CollectEntryType || tk.Type() == token.MappingValueType {
+		}
+		if endsValue(tk) || startsEntry(tk) {
+			// Nothing here is the tag's value: either punctuation closes what
+			// the tag was written in, or the next entry of the enclosing
+			// mapping has begun. The tag is on the empty node.
 			return newTagDefaultScalarValueNode(ctx, tagRawTk)
 		}
 		scalar, err := p.parseScalarValue(ctx, tk)
