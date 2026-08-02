@@ -806,20 +806,31 @@ func escapeSingleQuote(s string) string {
 	return sb.String()
 }
 
+// quotedString writes a quoted scalar so that reading it back gives the same
+// value.
+//
+// A single-quoted scalar has no escapes: what it holds is what it says, and a
+// line break written inside one is folded away -- one break becomes a space,
+// and n+1 breaks become n breaks, with the whitespace around them dropped. Most
+// values holding a break therefore have no single-quoted spelling at all, so
+// they are written double-quoted, where a break is an escape and survives.
+func quotedString(n *StringNode) string {
+	if n.Token.Type == token.DoubleQuoteType || strings.ContainsAny(n.Value, "\n\r") {
+		return strconv.Quote(n.Value)
+	}
+
+	return escapeSingleQuote(n.Value)
+}
+
 // String string value to text with quote or literal header if required
 func (n *StringNode) String() string {
 	switch n.Token.Type {
-	case token.SingleQuoteType:
-		quoted := escapeSingleQuote(n.Value)
+	case token.SingleQuoteType, token.DoubleQuoteType:
+		quoted := quotedString(n)
 		if n.Comment != nil {
 			return addCommentString(quoted, n.Comment)
 		}
-		return quoted
-	case token.DoubleQuoteType:
-		quoted := strconv.Quote(n.Value)
-		if n.Comment != nil {
-			return addCommentString(quoted, n.Comment)
-		}
+
 		return quoted
 	}
 
@@ -847,12 +858,8 @@ func (n *StringNode) String() string {
 
 func (n *StringNode) stringWithoutComment() string {
 	switch n.Token.Type {
-	case token.SingleQuoteType:
-		quoted := fmt.Sprintf(`'%s'`, n.Value)
-		return quoted
-	case token.DoubleQuoteType:
-		quoted := strconv.Quote(n.Value)
-		return quoted
+	case token.SingleQuoteType, token.DoubleQuoteType:
+		return quotedString(n)
 	}
 
 	lbc := token.DetectLineBreakCharacter(n.Value)
