@@ -151,6 +151,16 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 			src:       "'''':\n",
 			fails:     renderChangesValue,
 		},
+		{
+			invariant: "rendering settles after one cycle",
+			src:       "-\n# c\n - x\n",
+			fails:     renderDoesNotSettle,
+		},
+		{
+			invariant: "rendering keeps every comment",
+			src:       "# c1\n-  # c2\n",
+			fails:     commentsAreLost,
+		},
 	}
 
 	var open int

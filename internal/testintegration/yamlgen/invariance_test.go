@@ -145,6 +145,8 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 		},
 	}
 
+	tests = append(tests, commentCases()...)
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, yamlgen.Emit(tc.value, tc.style))
@@ -153,5 +155,71 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 			require.NoError(t, yaml.Unmarshal([]byte(tc.want), &got))
 			assert.Equal(t, tc.value.Decoded(), got)
 		})
+	}
+}
+
+// commentCases pins where comments are written. Comments carry no meaning, so
+// nothing else in the suite would notice if they landed somewhere legal but
+// unintended -- or somewhere illegal, which would then be blamed on the parser.
+func commentCases() []struct {
+	name  string
+	value yamlgen.Value
+	style yamlgen.Style
+	want  string
+} {
+	base := yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, NullSpelling: "null"}
+	head := base
+	head.Comments = yamlgen.HeadComments
+	line := base
+	line.Comments = yamlgen.LineComments
+	both := base
+	both.Comments = yamlgen.AllComments
+
+	pair := func(k string, v yamlgen.Value) yamlgen.Value {
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: k, Val: v}}}
+	}
+
+	return []struct {
+		name  string
+		value yamlgen.Value
+		style yamlgen.Style
+		want  string
+	}{
+		{
+			name:  "a head comment sits above its entry",
+			value: pair("a", yamlgen.Int{V: 1}),
+			style: head,
+			want:  "# c1\na: 1\n",
+		},
+		{
+			name:  "a line comment sits after the value",
+			value: pair("a", yamlgen.Int{V: 1}),
+			style: line,
+			want:  "a: 1 # c1\n",
+		},
+		{
+			name:  "both, numbered in the order they are written",
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Int{V: 1}}, {Key: "b", Val: yamlgen.Int{V: 2}}}},
+			style: both,
+			want:  "# c1\na: 1 # c2\n# c3\nb: 2 # c4\n",
+		},
+		{
+			name:  "a comment introduces a nested block",
+			value: pair("a", pair("b", yamlgen.Int{V: 2})),
+			style: line,
+			want:  "a: # c1\n  b: 2 # c2\n",
+		},
+		{
+			name:  "head comments indent with their entry",
+			value: pair("a", pair("b", yamlgen.Int{V: 2})),
+			style: head,
+			want:  "# c1\na:\n  # c2\n  b: 2\n",
+		},
+		{
+			name:  "sequence entries take comments too",
+			value: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}},
+			style: both,
+			want:  "# c1\n- 1 # c2\n",
+		},
 	}
 }

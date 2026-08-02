@@ -73,6 +73,43 @@ func TestDefectKeepChompingLosesTheNewlinesItKeeps(t *testing.T) {
 	assert.Equal(t, map[string]any{"k": "trail\n"}, after, "and the value changed")
 }
 
+// TestDefectCommentOnASequenceEntryMovesOrIsLost: a comment on a sequence entry
+// with nothing else on its line is not kept where it was.
+//
+// Two symptoms, one cause. The comment has nothing on its own line to attach to,
+// so the renderer moves it -- and where it cannot, drops it. A mapping entry in
+// the same position keeps its comment, which places the defect in how sequence
+// entries carry comments rather than in comments generally.
+func TestDefectCommentOnASequenceEntryMovesOrIsLost(t *testing.T) {
+	t.Run("it moves twice, so rendering takes two passes to settle", func(t *testing.T) {
+		// The comment starts on its own line between the entry and the nested
+		// sequence it introduces.
+		once := render(t, "-\n# c\n - x\n")
+		assert.Equal(t, "- # c\n  - x\n", once, "first it moves onto the entry's line")
+
+		twice := render(t, once)
+		assert.Equal(t, "# c\n- - x\n", twice, "then out to the head of the document")
+
+		assert.Equal(t, twice, render(t, twice), "only then does it settle")
+	})
+
+	t.Run("it is lost when the head is already taken", func(t *testing.T) {
+		file, err := parser.ParseBytes([]byte("# c1\n-  # c2\n"), parser.ParseComments)
+		require.NoError(t, err)
+
+		rendered := file.String()
+		assert.NotContains(t, rendered, "# c2",
+			"the line comment is dropped -- if it survives now, the defect is fixed")
+		assert.Contains(t, rendered, "# c1", "the head comment survives")
+	})
+
+	t.Run("a mapping entry keeps its comment", func(t *testing.T) {
+		file, err := parser.ParseBytes([]byte("k: # c\n  j: 1\n"), parser.ParseComments)
+		require.NoError(t, err)
+		assert.Equal(t, "k: # c\n  j: 1\n", file.String())
+	})
+}
+
 // TestDefectSingleQuotedKeyLosesItsEscaping: rendering a mapping key read from
 // a single-quoted scalar writes its quote unescaped, and the result does not
 // parse.
@@ -94,4 +131,14 @@ func TestDefectSingleQuotedKeyLosesItsEscaping(t *testing.T) {
 	value, err := parser.ParseBytes([]byte("k: 'a''b'\n"), parser.ParseComments)
 	require.NoError(t, err)
 	assert.Equal(t, "k: 'a''b'\n", value.String())
+}
+
+// render parses a document and writes it back out.
+func render(t *testing.T, src string) string {
+	t.Helper()
+
+	file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+	require.NoError(t, err)
+
+	return file.String()
 }

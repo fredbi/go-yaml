@@ -28,6 +28,36 @@ func (q Quoting) String() string {
 	}
 }
 
+// Commenting is where comments are put, if anywhere.
+type Commenting int
+
+const (
+	// NoComments writes none.
+	NoComments Commenting = iota
+	// HeadComments writes a comment line above each block entry.
+	HeadComments
+	// LineComments writes a comment after each scalar, on its line.
+	LineComments
+	// AllComments writes both.
+	AllComments
+)
+
+func (c Commenting) String() string {
+	switch c {
+	case HeadComments:
+		return " head-comments"
+	case LineComments:
+		return " line-comments"
+	case AllComments:
+		return " comments"
+	default:
+		return ""
+	}
+}
+
+func (c Commenting) head() bool { return c == HeadComments || c == AllComments }
+func (c Commenting) line() bool { return c == LineComments || c == AllComments }
+
 // Style is one way of writing a document down.
 //
 // These are the axes along which two documents can look completely different
@@ -50,6 +80,11 @@ type Style struct {
 	NullSpelling string
 	// BoolCase is how true and false are capitalized.
 	BoolCase int
+	// Comments is where comments are written. They carry no meaning, which is
+	// exactly what makes them worth generating: a document must read as the
+	// same value with them and without, and a library that offers to preserve
+	// them must still have them after a round trip.
+	Comments Commenting
 }
 
 // BoolSpelling returns how this style writes a boolean.
@@ -84,7 +119,7 @@ func (s Style) String() string {
 	}
 
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
-		lit + markers + " null=" + quoteEmpty(s.NullSpelling)
+		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling)
 }
 
 // Styles generates a presentation.
@@ -98,6 +133,7 @@ func Styles() *rapid.Generator[Style] {
 			Markers:      rapid.Bool().Draw(t, "markers"),
 			NullSpelling: rapid.SampledFrom([]string{"null", "~", "", "Null", "NULL"}).Draw(t, "null"),
 			BoolCase:     rapid.IntRange(0, 2).Draw(t, "boolcase"),
+			Comments:     Commenting(rapid.IntRange(0, 3).Draw(t, "comments")),
 		}
 	})
 }

@@ -101,6 +101,72 @@ func TestRenderPreservesValue(t *testing.T) {
 	tally.report(t, yamlgen.Render)
 }
 
+// commentsAreLost reports whether rendering a document drops any of its
+// comments. Self-contained, so it doubles as a reduction predicate.
+func commentsAreLost(src []byte) bool {
+	file, err := parser.ParseBytes(src, parser.ParseComments)
+	if err != nil {
+		return false
+	}
+
+	before := yamlgen.CommentsIn(string(src))
+	after := yamlgen.CommentsIn(file.String())
+
+	missing := make(map[string]int, len(before))
+	for _, c := range before {
+		missing[c]++
+	}
+	for _, c := range after {
+		missing[c]--
+	}
+
+	for _, n := range missing {
+		if n > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestRenderKeepsEveryComment: a library that offers to preserve comments has
+// to still have them afterwards.
+//
+// Nothing else in this package would notice a lost comment. Comments carry no
+// meaning, so the value is unchanged and rendering still settles; the document
+// is just poorer than the one that went in.
+func TestRenderKeepsEveryComment(t *testing.T) {
+	tally := newTally()
+
+	rapid.Check(t, func(rt *rapid.T) {
+		value := yamlgen.Values().Draw(rt, "value")
+		style := yamlgen.Styles().Draw(rt, "style")
+		if style.Comments == yamlgen.NoComments {
+			return
+		}
+
+		src := yamlgen.Emit(value, style)
+		if _, err := parser.ParseBytes([]byte(src), parser.ParseComments); err != nil {
+			return
+		}
+
+		lost := commentsAreLost([]byte(src))
+
+		if known := yamlgen.Known(yamlgen.CommentsKept, value, style); known != nil {
+			tally.record(known.Name, lost)
+
+			return
+		}
+
+		if lost {
+			rt.Fatalf("style %s: rendering dropped a comment.\n%s",
+				style, reduced("RenderDroppedAComment", src, commentsAreLost))
+		}
+	})
+
+	tally.report(t, yamlgen.CommentsKept)
+}
+
 // TestRenderReachesAFixedPoint checks that rendering settles: read a document,
 // write it, read it again, write it again, and the two renderings agree.
 //
@@ -121,7 +187,7 @@ func TestRenderReachesAFixedPoint(t *testing.T) {
 			return
 		}
 
-		if yamlgen.Known(yamlgen.Render, value, style) != nil {
+		if yamlgen.Known(yamlgen.Settle, value, style) != nil {
 			return
 		}
 

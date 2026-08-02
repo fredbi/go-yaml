@@ -78,7 +78,8 @@ func TestReduceKeepsThePredicateTrue(t *testing.T) {
 func TestReducedReportIsUseful(t *testing.T) {
 	report := reduced("Defect", "a: 1\nb: 2\n'x''y': 3\nc: 4\n", renderChangesValue)
 
-	assert.Contains(t, report, "reduced from")
+	assert.Contains(t, report, "as generated")
+	assert.Contains(t, report, "reduced to")
 	assert.Contains(t, report, "renders to:")
 	assert.Contains(t, report, "reads as:")
 	assert.Contains(t, report, "func TestDefect(t *testing.T) {")

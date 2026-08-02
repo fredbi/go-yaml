@@ -3,7 +3,10 @@
 
 package yamlgen
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Divergence is a shape of document where this library disagrees with YAML 1.2.
 //
@@ -38,17 +41,37 @@ const (
 	// Render: parsing the emitted document and writing it out again gives a
 	// document that still means the same thing.
 	Render
+	// Settle: rendering reaches a fixed point after one cycle.
+	//
+	// Separate from Render because the two fail independently. A comment can
+	// move about without any value changing, and an entry that excused both
+	// would be tolerating documents that are fine on one of them.
+	Settle
+	// CommentsKept: rendering keeps every comment the document had.
+	//
+	// Nothing else notices a lost comment. Comments carry no meaning, so the
+	// value is unaffected and rendering still settles -- the document is simply
+	// poorer than the one that went in, which for a library that offers to
+	// preserve them is the whole failure.
+	CommentsKept
 )
 
 func (p Property) String() string {
-	switch p {
-	case Decode:
-		return "decode"
-	case Render:
-		return "render"
-	default:
-		return "decode|render"
+	names := []string{}
+	if p&Decode != 0 {
+		names = append(names, "decode")
 	}
+	if p&Render != 0 {
+		names = append(names, "render")
+	}
+	if p&Settle != 0 {
+		names = append(names, "settle")
+	}
+	if p&CommentsKept != 0 {
+		names = append(names, "comments")
+	}
+
+	return strings.Join(names, "|")
 }
 
 // Ledger records every shape known to diverge.
@@ -87,6 +110,29 @@ var Ledger = []Divergence{
 		},
 	},
 	{
+		Name: "comment-on-a-nested-sequence-entry-moves-or-is-lost",
+		// One root cause with two symptoms, which is why it is one entry: the
+		// comment is sometimes relocated and sometimes dropped, and both are
+		// the renderer failing to keep it attached to the entry it came from.
+		Property: Settle | CommentsKept,
+		Reason: "a comment on a sequence entry that has no scalar on its line -- " +
+			"the value is a collection, or an empty node -- is not kept where it " +
+			"was. It moves onto the entry's line and then out to the head of the " +
+			"document, so rendering takes two passes to settle, and where the " +
+			"head is already taken the comment is dropped altogether. An entry " +
+			"with a scalar on its line keeps its comment, and so does a mapping " +
+			"entry. The shape is wider than the loss: every document of it fails " +
+			"to settle, while roughly four in ten actually drop a comment, so the " +
+			"condition for dropping one rather than moving it is not yet pinned down",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || st.Comments == NoComments {
+				return false
+			}
+
+			return hasSeqEntryWithoutInlineScalar(v, st)
+		},
+	},
+	{
 		Name:     "keep-chomping-loses-the-newlines-it-keeps",
 		Property: Render,
 		Reason: "rendering a literal block scalar with keep chomping (|+) writes " +
@@ -106,8 +152,10 @@ var Ledger = []Divergence{
 		},
 	},
 	{
-		Name:     "single-quoted-key-loses-its-escaping",
-		Property: Render,
+		Name: "single-quoted-key-loses-its-escaping",
+		// The rendered document does not parse, which fails both questions at
+		// once: there is no value to compare and nothing to render again.
+		Property: Render | Settle,
 		Reason: "rendering a mapping key that was read from a single-quoted " +
 			"scalar writes the quote it contains unescaped, so 'a''b' becomes " +
 			"'a'b' and the rendered document no longer parses; the same string " +
@@ -147,6 +195,65 @@ func Entries(p Property) []Divergence {
 	}
 
 	return out
+}
+
+// CommentsIn returns the comment markers a generated document carries, in the
+// order they appear.
+//
+// Emit numbers its comments, so a lost one is identifiable rather than merely
+// countable, and a moved one can be told from a dropped one.
+func CommentsIn(src string) []string {
+	return commentMarker.FindAllString(src, -1)
+}
+
+var commentMarker = regexp.MustCompile(`#\s*c\d+`)
+
+// hasSeqEntryWithoutInlineScalar reports whether any sequence in the value has
+// an entry that leaves its own line empty -- because the value is a collection
+// written below it, or an empty node written as nothing at all.
+//
+// That is the shape whose comment has nothing to attach to. An entry with a
+// scalar on its line is unaffected, and so is a collection nested under a
+// mapping key, which is what keeps this from matching every commented document.
+func hasSeqEntryWithoutInlineScalar(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Seq:
+		for _, item := range n.Items {
+			if leavesItsLineEmpty(item, st) || hasSeqEntryWithoutInlineScalar(item, st) {
+				return true
+			}
+		}
+
+		return false
+	case Map:
+		for _, p := range n.Pairs {
+			if hasSeqEntryWithoutInlineScalar(p.Val, st) {
+				return true
+			}
+		}
+
+		return false
+	default:
+		return false
+	}
+}
+
+func leavesItsLineEmpty(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Seq:
+		return len(n.Items) > 0
+	case Map:
+		return len(n.Pairs) > 0
+	case Null:
+		// The empty spelling of null writes nothing, so the line holds only the
+		// dash. Every other spelling puts a scalar there.
+		return st.NullSpelling == ""
+	case Str:
+		// A literal block scalar puts its content below, not on the line.
+		return st.Literal && canLiteral(n.V)
+	default:
+		return false
+	}
 }
 
 // anyKey reports whether any mapping key anywhere in the value satisfies pred.

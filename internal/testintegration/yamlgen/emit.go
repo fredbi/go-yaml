@@ -34,11 +34,45 @@ func Emit(v Value, st Style) string {
 type emitter struct {
 	buf strings.Builder
 	st  Style
+	// comments numbers the comments as they are written, so that a test can
+	// check the same set came back rather than merely counting them.
+	comments int
+}
+
+// comment returns the next comment body. Comments are numbered rather than
+// random so that a document is reproducible and a lost comment is identifiable.
+func (e *emitter) comment() string {
+	e.comments++
+
+	return fmt.Sprintf("# c%d", e.comments)
+}
+
+// headComment writes a comment on its own line, above whatever comes next.
+func (e *emitter) headComment(indent int) {
+	if !e.st.Comments.head() {
+		return
+	}
+	e.pad(indent)
+	e.buf.WriteString(e.comment())
+	e.buf.WriteString("\n")
+}
+
+// lineComment writes a comment at the end of the line just written.
+//
+// Only after a scalar: after a block scalar header it would be read as part of
+// the header, and inside a flow collection it would run to the closing bracket.
+func (e *emitter) lineComment() {
+	if !e.st.Comments.line() {
+		return
+	}
+	e.buf.WriteString(" ")
+	e.buf.WriteString(e.comment())
 }
 
 func (e *emitter) root(v Value) {
 	if inline, ok := e.inline(v, e.st.Flow); ok {
 		e.buf.WriteString(inline)
+		e.lineComment()
 		e.buf.WriteString("\n")
 
 		return
@@ -82,12 +116,14 @@ func (e *emitter) block(v Value, indent int) {
 	switch n := v.(type) {
 	case Seq:
 		for _, item := range n.Items {
+			e.headComment(indent)
 			e.pad(indent)
 			e.buf.WriteString("-")
 			e.child(item, indent)
 		}
 	case Map:
 		for _, p := range n.Pairs {
+			e.headComment(indent)
 			e.pad(indent)
 			e.buf.WriteString(e.key(p.Key))
 			e.buf.WriteString(":")
@@ -119,11 +155,15 @@ func (e *emitter) child(v Value, indent int) {
 	if inline, ok := e.inline(v, e.st.Flow); ok {
 		e.buf.WriteString(" ")
 		e.buf.WriteString(inline)
+		e.lineComment()
 		e.buf.WriteString("\n")
 
 		return
 	}
 
+	// A comment may sit on the line that introduces a nested block, where the
+	// value itself has not been written yet.
+	e.lineComment()
 	e.buf.WriteString("\n")
 	e.block(v, indent+e.st.Indent)
 }

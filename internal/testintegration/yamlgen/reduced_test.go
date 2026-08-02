@@ -25,7 +25,14 @@ func reduced(name, src string, interesting func([]byte) bool) string {
 
 	var b strings.Builder
 	if small != src {
-		fmt.Fprintf(&b, "\nreduced from %d bytes to %d:\n", len(src), len(small))
+		// The document as generated, as well as the reduction of it. The
+		// reduction is what a fixer wants; the original is what says which
+		// shape the generator was exploring, which is what a ledger entry has
+		// to describe. Reduction can and does produce documents the emitter
+		// would never write.
+		fmt.Fprintf(&b, "\nas generated (%d bytes):\n", len(src))
+		b.WriteString(indent(src))
+		fmt.Fprintf(&b, "\nreduced to %d bytes:\n", len(small))
 	} else {
 		b.WriteString("\ndocument (already minimal):\n")
 	}
