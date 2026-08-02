@@ -455,6 +455,10 @@ func (r *Renderer) sequence(n *SequenceNode) string {
 			}
 			lines = append(lines, blank+r.String(comment))
 			blank = ""
+		} else if blank == "" {
+			// Only a block collection reports a gap of its own. For anything
+			// else the sequence reads it off the entry's first token.
+			blank = blankLineBefore(value)
 		}
 		lines = append(lines, blank+"- "+text)
 	}
