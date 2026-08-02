@@ -1400,22 +1400,6 @@ a:
 			"\n[1:7] '`' is a reserved character\n>  1 | key: [`val]\n             ^\n",
 		},
 		{
-			`{a: b}: v`,
-			`
-[1:7] found an invalid key for this map
->  1 | {a: b}: v
-             ^
-`,
-		},
-		{
-			`[a]: v`,
-			`
-[1:4] found an invalid key for this map
->  1 | [a]: v
-          ^
-`,
-		},
-		{
 			`
 foo:
   bar:

@@ -91,6 +91,7 @@ var roundTripLedger = map[string]struct {
 	"spec-example-6-1-indentation-spaces":                            {unreadable, reasonFlowComment},
 	"spec-example-7-12-plain-lines":                                  {unreadable, reasonBlockScalarIndent},
 	"spec-example-9-5-directives-documents":                          {unreadable, reasonBlockScalarIndent},
+	"spec-example-6-12-separation-spaces":                            {unreadable, reasonAbsoluteColumns},
 	"spec-example-6-2-indentation-indicators":                        {unreadable, reasonExplicitKeyRender},
 	"various-trailing-comments":                                      {unreadable, reasonExplicitKeyRender},
 	"various-trailing-comments-1-3":                                  {unreadable, reasonExplicitKeyRender},
@@ -104,6 +105,8 @@ var roundTripLedger = map[string]struct {
 	"empty-implicit-key-in-single-pair-flow-sequences": {drifting, reasonAbsoluteColumns},
 	"empty-keys-in-block-and-flow-mapping":             {drifting, reasonAbsoluteColumns},
 	"aliases-in-explicit-block-mapping":                {drifting, reasonAbsoluteColumns},
+	"question-mark-edge-cases/01":                      {drifting, reasonAbsoluteColumns},
+
 	"question-mark-edge-cases/00":                      {drifting, reasonAbsoluteColumns},
 	"spec-example-2-11-mapping-between-sequences":      {drifting, reasonAbsoluteColumns},
 	"spec-example-7-16-flow-mapping-entries":           {drifting, reasonAbsoluteColumns},

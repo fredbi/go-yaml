@@ -544,6 +544,28 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 				continue
 			}
 			mapKeyTk := tokens[keyCandidateIndex(tokens, i)]
+			if closesFlowCollection(mapKeyTk) {
+				// The key is the flow collection that just closed, so it has
+				// to be taken whole: "[a, b]: v" keys on the sequence, not on
+				// the ']' that ends it.
+				start := flowCollectionStart(ret)
+				if start < 0 {
+					return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
+				}
+				if ret[start].Line() != mapKeyTk.Line() {
+					// An implicit key has to be a single-line node, so a
+					// collection spanning lines cannot be one. The line break
+					// between a key and its ':' is a separate question, and is
+					// allowed in flow context.
+					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
+				}
+				keyTokens := append(append([]*Token{}, ret[start:]...), tk)
+				ret = append(ret[:start], &Token{
+					Group: &TokenGroup{Type: TokenGroupMapKey, Tokens: keyTokens},
+				})
+
+				continue
+			}
 			if isNotMapKeyType(mapKeyTk) {
 				return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
 			}
@@ -864,6 +886,31 @@ func keyEndLine(tk *Token) int {
 	}
 
 	return tk.Line() + strings.Count(strings.Trim(raw.Origin, " \r\n"), "\n")
+}
+
+// closesFlowCollection reports whether tk ends a flow collection.
+func closesFlowCollection(tk *Token) bool {
+	return tk.Type() == token.MappingEndType || tk.Type() == token.SequenceEndType
+}
+
+// flowCollectionStart finds where the flow collection ending at the last token
+// of ret begins, so the whole of it can be taken as a mapping key. It reports
+// -1 when the brackets do not balance.
+func flowCollectionStart(ret []*Token) int {
+	var depth int
+	for i := len(ret) - 1; i >= 0; i-- {
+		switch ret[i].Type() {
+		case token.MappingEndType, token.SequenceEndType:
+			depth++
+		case token.MappingStartType, token.SequenceStartType:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
 }
 
 // precedesAbsentKey reports whether tk is punctuation that cannot itself be a
