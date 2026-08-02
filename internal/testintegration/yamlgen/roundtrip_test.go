@@ -14,6 +14,51 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
+// renderChangesValue reports whether reading a document, writing it back and
+// reading it again gives a different value.
+//
+// It takes only the document, which is what lets it double as the predicate for
+// reduction: the expected value comes from reading the document itself rather
+// than from the generator, so it stays meaningful on text the generator never
+// produced.
+func renderChangesValue(src []byte) bool {
+	var before any
+	if err := yaml.Unmarshal(src, &before); err != nil {
+		return false
+	}
+
+	file, err := parser.ParseBytes(src, parser.ParseComments)
+	if err != nil {
+		return false
+	}
+
+	var after any
+	if err := yaml.Unmarshal([]byte(file.String()), &after); err != nil {
+		// Rendering produced something unreadable, which is a change of value
+		// by any measure.
+		return true
+	}
+
+	return !assert.ObjectsAreEqual(before, after)
+}
+
+// renderDoesNotSettle reports whether rendering a document twice gives two
+// different documents.
+func renderDoesNotSettle(src []byte) bool {
+	first, err := parser.ParseBytes(src, parser.ParseComments)
+	if err != nil {
+		return false
+	}
+	once := first.String()
+
+	second, err := parser.ParseBytes([]byte(once), parser.ParseComments)
+	if err != nil {
+		return true
+	}
+
+	return second.String() != once
+}
+
 // TestRenderPreservesValue is the property that matters most for a library
 // offering reversible transformation: reading a document and writing it back
 // must not change what it means.
@@ -47,13 +92,9 @@ func TestRenderPreservesValue(t *testing.T) {
 			return
 		}
 
-		if err != nil {
-			rt.Fatalf("style %s: rendering produced a document that does not parse:\nsource:\n%s\nrendered:\n%s\nerror: %v",
-				style, src, rendered, err)
-		}
 		if diverged {
-			rt.Fatalf("style %s: rendering changed the value:\nsource:\n%s\nrendered:\n%s\nexpected: %#v\ngot:      %#v",
-				style, src, rendered, value.Decoded(), got)
+			rt.Fatalf("style %s: rendering changed the value.\n%s",
+				style, reduced("RenderChangedTheValue", src, renderChangesValue))
 		}
 	})
 
@@ -72,24 +113,19 @@ func TestRenderReachesAFixedPoint(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		first, err := parser.ParseBytes([]byte(src), parser.ParseComments)
-		if err != nil {
+		if _, err := parser.ParseBytes([]byte(src), parser.ParseComments); err != nil {
 			return
 		}
-		once := first.String()
 
-		second, err := parser.ParseBytes([]byte(once), parser.ParseComments)
-		if err != nil {
-			if yamlgen.Known(yamlgen.Render, value, style) != nil {
-				return
-			}
-			rt.Fatalf("style %s: the rendered document does not parse:\nsource:\n%s\nrendered:\n%s\nerror: %v",
-				style, src, once, err)
+		if !renderDoesNotSettle([]byte(src)) {
+			return
 		}
 
-		if twice := second.String(); twice != once && yamlgen.Known(yamlgen.Render, value, style) == nil {
-			rt.Fatalf("style %s: rendering does not settle:\nsource:\n%s\nfirst:\n%s\nsecond:\n%s",
-				style, src, once, twice)
+		if yamlgen.Known(yamlgen.Render, value, style) != nil {
+			return
 		}
+
+		rt.Fatalf("style %s: rendering does not settle.\n%s",
+			style, reduced("RenderDoesNotSettle", src, renderDoesNotSettle))
 	})
 }
