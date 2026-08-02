@@ -221,15 +221,9 @@ func (p *parser) parseToken(ctx *context, tk *Token) (ast.Node, error) {
 			return nil, err
 		}
 		ctx.goNext()
-		if ctx.isTokenNotFound() {
-			return nil, errors.ErrSyntax("could not find anchor value", tk.RawToken())
-		}
-		value, err := p.parseToken(ctx, ctx.currentToken())
+		value, err := p.parseAnchorValue(ctx, anchor)
 		if err != nil {
 			return nil, err
-		}
-		if _, ok := value.(*ast.AnchorNode); ok {
-			return nil, errors.ErrSyntax("anchors cannot be used consecutively", value.GetToken())
 		}
 		anchor.Value = value
 		return anchor, nil
@@ -296,15 +290,9 @@ func (p *parser) parseScalarValue(ctx *context, tk *Token) (ast.ScalarNode, erro
 				return nil, err
 			}
 			ctx.goNext()
-			if ctx.isTokenNotFound() {
-				return nil, errors.ErrSyntax("could not find anchor value", tk.RawToken())
-			}
-			value, err := p.parseToken(ctx, ctx.currentToken())
+			value, err := p.parseAnchorValue(ctx, anchor)
 			if err != nil {
 				return nil, err
-			}
-			if _, ok := value.(*ast.AnchorNode); ok {
-				return nil, errors.ErrSyntax("anchors cannot be used consecutively", value.GetToken())
 			}
 			anchor.Value = value
 			return anchor, nil
@@ -958,8 +946,36 @@ func (p *parser) parseAnchor(ctx *context, g *TokenGroup) (*ast.AnchorNode, erro
 		return nil, err
 	}
 	ctx.goNext()
-	if ctx.isTokenNotFound() {
-		return nil, errors.ErrSyntax("could not find anchor value", anchor.GetToken())
+	value, err := p.parseAnchorValue(ctx, anchor)
+	if err != nil {
+		return nil, err
+	}
+	anchor.Value = value
+	return anchor, nil
+}
+
+// endsValue reports whether a token closes what precedes it rather than
+// starting something new: the ':' of a mapping entry, or the ',' and brackets
+// that punctuate a flow collection.
+func endsValue(tk *Token) bool {
+	switch tk.Type() {
+	case token.MappingValueType, token.CollectEntryType, token.MappingEndType, token.SequenceEndType:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseAnchorValue reads what an anchor names.
+//
+// An anchor with nothing after it names the empty node: "a: &x" is a valid
+// document, and *x resolves to null. Refusing it made an anchor the one thing
+// that could not be attached to an absent value.
+func (p *parser) parseAnchorValue(ctx *context, anchor *ast.AnchorNode) (ast.Node, error) {
+	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
+		// Built rather than inserted: there is no token here to stand for the
+		// null, and putting one in the stream would leave it to be read again.
+		return newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: anchor.GetToken()}))
 	}
 
 	value, err := p.parseToken(ctx, ctx.currentToken())
@@ -969,8 +985,8 @@ func (p *parser) parseAnchor(ctx *context, g *TokenGroup) (*ast.AnchorNode, erro
 	if _, ok := value.(*ast.AnchorNode); ok {
 		return nil, errors.ErrSyntax("anchors cannot be used consecutively", value.GetToken())
 	}
-	anchor.Value = value
-	return anchor, nil
+
+	return value, nil
 }
 
 func (p *parser) parseAnchorName(ctx *context) (*ast.AnchorNode, error) {

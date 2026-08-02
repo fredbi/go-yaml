@@ -308,14 +308,19 @@ func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 			if i+1 >= len(tokens) {
 				return nil, errors.ErrSyntax("undefined anchor name", tk.RawToken())
 			}
-			if i+2 >= len(tokens) {
-				return nil, errors.ErrSyntax("undefined anchor value", tk.RawToken())
-			}
 			anchorName := &Token{
 				Group: &TokenGroup{
 					Type:   TokenGroupAnchorName,
 					Tokens: []*Token{tk, tokens[i+1]},
 				},
+			}
+			if i+2 >= len(tokens) {
+				// An anchor with nothing after it names the empty node. The
+				// parser supplies that null; there is nothing to group here.
+				ret = append(ret, anchorName)
+				i++ // the name is part of the group, not a token of its own
+
+				break
 			}
 			valueTk := tokens[i+2]
 			if tk.Line() == valueTk.Line() && valueTk.Type() == token.SequenceEntryType {
@@ -449,7 +454,11 @@ func createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 		switch tk.GroupType() {
 		case TokenGroupAnchorName:
 			if i+1 >= len(tokens) {
-				return nil, errors.ErrSyntax("undefined anchor value", tk.RawToken())
+				// An anchor with nothing after it names the empty node. The
+				// parser supplies that null; there is nothing to group here.
+				ret = append(ret, tk)
+
+				continue
 			}
 			valueTk := tokens[i+1]
 			if tk.Line() == valueTk.Line() && valueTk.GroupType() == TokenGroupScalarTag {
