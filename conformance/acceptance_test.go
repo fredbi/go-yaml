@@ -54,11 +54,10 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 // Every remaining one is a document YAML allows that the parser refuses. The
 // parser no longer takes anything the spec forbids.
 const (
-	reasonComplexKey = "a collection or an explicit '?' key is not accepted as a mapping key"
-	reasonFlowBreak  = "inside a flow mapping, a line break between a key and its ':' is legal but rejected"
-	reasonFlowNote   = "a comment inside a flow collection ends the collection"
-	reasonBlockEnd   = "content after a block scalar is misattributed"
-	reasonTabLine    = "a line holding only a tab is read as indentation"
+	reasonComplexKey   = "a collection or an explicit '?' key is not accepted as a mapping key"
+	reasonFlowAdjacent = "a quoted key with no space before its ':' is not read as a pair in flow context"
+	reasonBlockEnd     = "content after a block scalar is misattributed"
+	reasonTabLine      = "a line holding only a tab is read as indentation"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
@@ -76,15 +75,11 @@ const (
 // separate defects.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"aliases-in-flow-objects":               {wronglyRejected, reasonComplexKey},
-	"anchors-on-empty-scalars":              {wronglyRejected, reasonComplexKey},
-	"comment-in-flow-sequence-before-comma": {wronglyRejected, reasonFlowNote},
-	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
-	"flow-collections-over-many-lines/01":             {wronglyRejected, reasonFlowBreak},
-	"flow-mapping-colon-on-line-after-key/02":         {wronglyRejected, reasonFlowBreak},
+	"aliases-in-flow-objects":                         {wronglyRejected, reasonComplexKey},
+	"anchors-on-empty-scalars":                        {wronglyRejected, reasonComplexKey},
 	"mapping-key-and-flow-sequence-item-anchors":      {wronglyRejected, reasonComplexKey},
 	"nested-implicit-complex-keys":                    {wronglyRejected, reasonComplexKey},
-	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowNote},
+	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowAdjacent},
 	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
 	"tabs-that-look-like-indentation/04":              {wronglyRejected, reasonTabLine},
 	"tags-on-empty-scalars":                           {wronglyRejected, reasonComplexKey},

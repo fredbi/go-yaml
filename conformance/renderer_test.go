@@ -180,6 +180,50 @@ func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 	})
 }
 
+// TestRendererFlowCollectionsWithComments covers the one thing that stops a
+// flow collection being written on a single line.
+//
+// A comment cannot go on that line: everything after it is commented out,
+// including the bracket that closes the collection, which is how "{a: 1, b: 2}"
+// with a note on it used to come back as text that no longer parses. Several
+// lines is the only layout that holds both, and it is still a flow collection.
+func TestRendererFlowCollectionsWithComments(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"comment in a flow sequence": {
+			source: "[a,\n# note\nb]\n",
+			want:   "[\n  a,\n  # note\n  b\n]\n",
+		},
+		"comment in a flow mapping": {
+			source: "{a: 1,\n# note\nb: 2}\n",
+			want:   "{\n  a: 1,\n  # note\n  b: 2\n}\n",
+		},
+		"comment before the closing bracket": {
+			source: "[a, b\n# note\n]\n",
+			want:   "[\n  a,\n  b\n  # note\n]\n",
+		},
+		// Without a comment there is nothing to make room for.
+		"no comment": {
+			source: "[a, b]\n",
+			want:   "[a, b]\n",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+
+			assert.Equal(t, test.want, ast.NewRenderer().File(file))
+
+			// With comments off there is nothing to make room for either.
+			assert.NotContains(t, ast.NewRenderer(ast.WithComments(false)).File(file), "\n  ")
+		})
+	}
+}
+
 // TestRendererPlacesKeyComments covers where a comment written on a key's line
 // ends up. Before the ':' it would be read back as part of the key, so it goes
 // after it -- and a collection that would have shared the line moves down to

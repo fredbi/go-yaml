@@ -172,6 +172,14 @@ func (r *Renderer) mapping(n *MappingNode) string {
 		return r.withComment("{}", n.Comment)
 	}
 	if n.IsFlowStyle {
+		values := make([]Node, 0, len(n.Values))
+		for _, value := range n.Values {
+			values = append(values, value)
+		}
+		if r.flowCarriesComments(values, nil, n.FootComment) {
+			return r.withComment(r.flowBlock("{", "}", values, nil, n.FootComment), n.Comment)
+		}
+
 		entries := make([]string, 0, len(n.Values))
 		for _, value := range n.Values {
 			entries = append(entries, r.inline(value))
@@ -377,6 +385,11 @@ func (r *Renderer) sequence(n *SequenceNode) string {
 		return r.withComment("[]", n.Comment)
 	}
 	if n.IsFlowStyle {
+		if r.flowCarriesComments(n.Values, n.ValueHeadComments, n.FootComment) {
+			return r.withComment(
+				r.flowBlock("[", "]", n.Values, n.ValueHeadComments, n.FootComment), n.Comment)
+		}
+
 		entries := make([]string, 0, len(n.Values))
 		for _, value := range n.Values {
 			entries = append(entries, r.inline(value))
@@ -629,6 +642,91 @@ func splitLeadingBlank(text string) (string, string) {
 	}
 
 	return "", text
+}
+
+// flowCarriesComments reports whether anything in a flow collection has a
+// comment on it, which is what stops it fitting on one line.
+func (r *Renderer) flowCarriesComments(values []Node, heads []*CommentGroupNode, foot *CommentGroupNode) bool {
+	if !r.comments {
+		return false
+	}
+	if foot != nil {
+		return true
+	}
+	for _, head := range heads {
+		if head != nil {
+			return true
+		}
+	}
+	for _, value := range values {
+		if headCommentOf(value) != nil || lineCommentOf(value) != nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// flowBlock writes a flow collection across lines, one entry to a line.
+//
+// A flow collection is normally written on one line, but a comment cannot go
+// there: everything after it is commented out, including the bracket that
+// closes the collection. Several lines is the only layout that holds both, and
+// it is still a flow collection.
+func (r *Renderer) flowBlock(open, closing string, values []Node, heads []*CommentGroupNode, foot *CommentGroupNode) string {
+	lines := make([]string, 0, len(values)+2)
+	lines = append(lines, open)
+
+	bare := r.bare()
+	for i, value := range values {
+		if i < len(heads) && heads[i] != nil {
+			lines = append(lines, r.indented(r.String(heads[i])))
+		}
+		if head := headCommentOf(value); head != nil {
+			lines = append(lines, r.indented(r.String(head)))
+		}
+
+		// The ',' separates the entries, so it goes before the comment: after
+		// it, it would be commented out along with the rest of the line.
+		entry := bare.inline(value)
+		if i < len(values)-1 {
+			entry += ","
+		}
+		if comment := lineCommentOf(value); comment != nil {
+			entry += " " + r.String(comment)
+		}
+		lines = append(lines, r.indented(entry))
+	}
+	if foot != nil {
+		lines = append(lines, r.indented(r.String(foot)))
+	}
+
+	return strings.Join(append(lines, closing), "\n")
+}
+
+// headCommentOf returns the comment written above an entry, or nil.
+func headCommentOf(n Node) *CommentGroupNode {
+	if entry, ok := n.(*MappingValueNode); ok {
+		return entry.Comment
+	}
+
+	return nil
+}
+
+// lineCommentOf returns the comment written at the end of an entry's line, or
+// nil. For a mapping entry that is a comment on its value or on its key.
+func lineCommentOf(n Node) *CommentGroupNode {
+	entry, ok := n.(*MappingValueNode)
+	if !ok {
+		return n.GetComment()
+	}
+	if entry.Value != nil {
+		if comment := entry.Value.GetComment(); comment != nil {
+			return comment
+		}
+	}
+
+	return entry.Key.GetComment()
 }
 
 // inline renders a node for a context that cannot hold a line break.

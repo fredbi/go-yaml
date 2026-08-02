@@ -43,13 +43,6 @@ const (
 	// bare line break, which folds back to a space when read again.
 	reasonFoldedNewline = "a line break inside a quoted scalar is rendered so that reading it back folds it to a space"
 
-	// A flow collection is written on one line. A comment inside it has no
-	// place there: everything after it on the line is commented out, including
-	// the closing bracket. Keeping such a collection on several lines would fix
-	// this; dropping the comment instead would trade invalid output for silent
-	// loss, which is worse.
-	reasonFlowComment = "a comment inside a flow collection is flattened onto one line, which comments out the rest of it"
-
 	// Not a rendering defect: the renderer writes a tag whose value is empty
 	// the way the source did, and the parser will not read it back inside a
 	// flow mapping. It belongs with the acceptance work.
@@ -81,8 +74,6 @@ var roundTripLedger = map[string]struct {
 	reason  string
 }{
 	// The rendered document no longer parses.
-	"empty-keys-in-block-and-flow-mapping":         {unreadable, reasonFlowComment},
-	"spec-example-6-1-indentation-spaces":          {unreadable, reasonFlowComment},
 	"spec-example-7-2-empty-content":               {unreadable, reasonEmptyTagInFlow},
 	"various-empty-or-newline-only-quoted-strings": {unreadable, reasonFoldedNewline},
 

@@ -263,7 +263,7 @@ func (p *parser) parseToken(ctx *context, tk *Token) (ast.Node, error) {
 	case token.MappingStartType:
 		return p.parseFlowMap(ctx.withFlow(true))
 	case token.SequenceStartType:
-		return p.parseFlowSequence(ctx.withFlow(true))
+		return p.parseFlowSequence(ctx.withFlowSequence())
 	case token.SequenceEntryType:
 		return p.parseSequence(ctx)
 	case token.SequenceEndType:
@@ -352,9 +352,17 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 
 	isFirst := true
 	for ctx.next() {
+		// As in a flow sequence: a comment may precede the ',' as well as
+		// follow it.
+		headComment := p.parseHeadComment(ctx)
+		if ctx.isTokenNotFound() {
+			break
+		}
+
 		tk := ctx.currentToken()
 		if tk.Type() == token.MappingEndType {
 			node.End = tk.RawToken()
+			node.FootComment = headComment
 			break
 		}
 
@@ -362,6 +370,9 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 		if tk.Type() == token.CollectEntryType {
 			entryTk = tk
 			ctx.goNext()
+			if next := p.parseHeadComment(ctx); next != nil {
+				headComment = mergeComments(headComment, next)
+			}
 		} else if !isFirst {
 			return nil, errors.ErrSyntax("',' or '}' must be specified", tk.RawToken())
 		}
@@ -374,6 +385,7 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 		}
 
 		mapKeyTk := ctx.currentToken()
+		entered := len(node.Values)
 		switch mapKeyTk.GroupType() {
 		case TokenGroupMapKeyValue:
 			value, err := p.parseMapKeyValue(ctx.withGroup(mapKeyTk.Group), mapKeyTk.Group, entryTk)
@@ -437,6 +449,12 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 			}
 			node.Values = append(node.Values, mapValue)
 			ctx.goNext()
+		}
+		if headComment != nil && len(node.Values) > entered {
+			// The comment introduced this entry, so it belongs above it.
+			if err := node.Values[entered].SetComment(headComment); err != nil {
+				return nil, err
+			}
 		}
 		isFirst = false
 	}
@@ -700,7 +718,13 @@ func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, c
 	}
 	origin := p.removeLeftWhiteSpace(tk.Origin)
 	if ctx.isFlow {
-		if tk.Type == token.StringType {
+		// A pair written inside a flow sequence is an implicit key: it has to
+		// fit on one line, and its ':' has to be on that line with it.
+		//
+		// A flow mapping's key is under neither restriction. It may span lines,
+		// and a line break before the ':' is ordinary separation, so
+		// "{foo\n: bar}" is as legal as "{foo: bar}".
+		if ctx.inFlowSequence && tk.Type == token.StringType {
 			origin = p.removeRightWhiteSpace(origin)
 			if tk.Position.Line+p.newLineCharacterNum(origin) != colonTk.Line() {
 				return errors.ErrSyntax("map key definition includes an implicit line break", tk)
@@ -1100,7 +1124,7 @@ func (p *parser) parseTagValue(ctx *context, tagRawTk *token.Token, tk *Token) (
 		return scalar, nil
 	case token.SequenceTag, token.OrderedMapTag:
 		if tk.Type() == token.SequenceStartType {
-			return p.parseFlowSequence(ctx.withFlow(true))
+			return p.parseFlowSequence(ctx.withFlowSequence())
 		}
 		return p.parseSequence(ctx)
 	}
@@ -1116,9 +1140,18 @@ func (p *parser) parseFlowSequence(ctx *context) (*ast.SequenceNode, error) {
 
 	isFirst := true
 	for ctx.next() {
+		// A comment may sit anywhere separation may, including before the ','
+		// that follows an element. Collect it so it can be carried, and let the
+		// structural token after it decide what happens next.
+		headComment := p.parseHeadComment(ctx)
+		if ctx.isTokenNotFound() {
+			break
+		}
+
 		tk := ctx.currentToken()
 		if tk.Type() == token.SequenceEndType {
 			node.End = tk.RawToken()
+			node.FootComment = headComment
 			break
 		}
 
@@ -1129,6 +1162,9 @@ func (p *parser) parseFlowSequence(ctx *context) (*ast.SequenceNode, error) {
 			}
 			entryTk = tk
 			ctx.goNext()
+			if next := p.parseHeadComment(ctx); next != nil {
+				headComment = mergeComments(headComment, next)
+			}
 		} else if !isFirst {
 			return nil, errors.ErrSyntax("',' or ']' must be specified", tk.RawToken())
 		}
@@ -1150,7 +1186,11 @@ func (p *parser) parseFlowSequence(ctx *context) (*ast.SequenceNode, error) {
 			return nil, err
 		}
 		node.Values = append(node.Values, value)
-		seqEntry := ast.SequenceEntry(entryTk.RawToken(), value, nil)
+		if headComment != nil {
+			node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
+			node.ValueHeadComments[len(node.Values)-1] = headComment
+		}
+		seqEntry := ast.SequenceEntry(entryTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
 			return nil, err
 		}
@@ -1398,6 +1438,37 @@ func (p *parser) parseComment(ctx *context) (ast.Node, error) {
 		return nil, err
 	}
 	return node, nil
+}
+
+// mergeComments joins two comment groups, either of which may be absent.
+func mergeComments(a, b *ast.CommentGroupNode) *ast.CommentGroupNode {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+
+	return ast.CommentGroup(append(commentTokens(a), commentTokens(b)...))
+}
+
+func commentTokens(n *ast.CommentGroupNode) []*token.Token {
+	tks := make([]*token.Token, 0, len(n.Comments))
+	for _, c := range n.Comments {
+		tks = append(tks, c.Token)
+	}
+
+	return tks
+}
+
+// growHeadComments returns the slice sized to hold a comment for every value so
+// far, keeping what is already in it.
+func growHeadComments(comments []*ast.CommentGroupNode, size int) []*ast.CommentGroupNode {
+	for len(comments) < size {
+		comments = append(comments, nil)
+	}
+
+	return comments
 }
 
 func (p *parser) parseHeadComment(ctx *context) *ast.CommentGroupNode {
