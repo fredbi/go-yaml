@@ -48,31 +48,20 @@ func (v verdict) String() string {
 
 func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRejected }
 
-// The reasons a case diverges. Cases sharing a reason share a root cause, and
-// are expected to be fixed together.
-//
-// Every remaining one is a document YAML allows that the parser refuses. The
-// parser no longer takes anything the spec forbids.
-const (
-	reasonBlockEnd = "content after a block scalar is misattributed"
-)
-
 // acceptanceLedger records every case where the parser disagrees with the YAML
 // Test Suite about whether a document is valid.
 //
-// Everything left is a document the parser refuses and should not. It used to
-// hold ten of the opposite -- documents YAML forbids that the parser took --
-// and those mattered more: a document another implementation rejects would have
-// passed through here unremarked, and been handed on as if it were sound. They
-// are gone.
+// It is empty: the parser agrees with the suite on all 393 cases that state an
+// expectation. Every entry is a two-way ratchet -- a new disagreement fails
+// because it is missing from here, and a fixed one fails because it is still
+// listed -- so an empty ledger is a claim that has to be re-earned on every
+// run, not a note about how things once stood.
 //
-// One is left, reduced to the smallest document that reproduces it.
-var acceptanceLedger = map[string]ledgerEntry{
-	// Documents YAML 1.2 allows that the parser refuses.
-	"spec-example-9-3-bare-documents": {wronglyRejected, reasonBlockEnd},
-
-	// Documents YAML 1.2 forbids that the parser takes.
-}
+// An entry records the verdict and a reason, and a reason is worth only what it
+// was measured at: each one written from what a fixture looked like rather than
+// from running it turned out to be wrong. Reduce a case to the smallest
+// document that reproduces it before naming its cause.
+var acceptanceLedger = map[string]ledgerEntry{}
 
 // ledgerEntry records how a case diverges and why.
 type ledgerEntry struct {

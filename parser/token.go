@@ -768,7 +768,11 @@ func createDocumentTokens(tokens []*Token) ([]*Token, error) {
 			if i+1 == len(tokens) {
 				return ret, nil
 			}
-			if isScalarType(tokens[i+1]) {
+			if tokens[i].Line() == tokens[i+1].Line() {
+				// "..." ends the document and takes the rest of its line: only
+				// a comment may follow it there. On the next line a new
+				// document begins, and it may be a bare one -- a scalar, or a
+				// block scalar as in the spec's own bare-documents example.
 				return nil, errors.ErrSyntax("unexpected end content", tokens[i+1].RawToken())
 			}
 

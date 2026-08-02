@@ -1320,33 +1320,6 @@ b: - 2
 `,
 		},
 		{
-			">\n>",
-			`
-[2:1] could not find multi-line content
-   1 | >
->  2 | >
-       ^
-`,
-		},
-		{
-			">\n1",
-			`
-[2:1] could not find multi-line content
-   1 | >
->  2 | 1
-       ^
-`,
-		},
-		{
-			"|\n1",
-			`
-[2:1] could not find multi-line content
-   1 | |
->  2 | 1
-       ^
-`,
-		},
-		{
 			"a: >3\n  1",
 			`
 [2:3] invalid number of indent is specified in the multi-line header

@@ -66,7 +66,6 @@ var decodeLedger = map[string]string{
 	"spec-example-7-3-completely-empty-flow-nodes":     reasonNotDecoded,
 	"spec-example-8-18-implicit-block-mapping-entries": reasonNotDecoded,
 	"spec-example-8-19-compact-block-mappings":         reasonNotDecoded,
-	"spec-example-9-3-bare-documents":                  reasonNotDecoded,
 	"syntax-character-edge-cases/00":                   reasonNotDecoded,
 	"tags-on-empty-scalars":                            reasonNotDecoded,
 	"various-combinations-of-explicit-block-mappings":  reasonNotDecoded,
