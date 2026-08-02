@@ -68,7 +68,6 @@ var decodeLedger = map[string]string{
 	"spec-example-8-19-compact-block-mappings":         reasonNotDecoded,
 	"spec-example-9-3-bare-documents":                  reasonNotDecoded,
 	"syntax-character-edge-cases/00":                   reasonNotDecoded,
-	"tabs-that-look-like-indentation/04":               reasonNotDecoded,
 	"tags-on-empty-scalars":                            reasonNotDecoded,
 	"various-combinations-of-explicit-block-mappings":  reasonNotDecoded,
 	"various-trailing-comments":                        reasonNotDecoded,
