@@ -1892,9 +1892,25 @@ func ExampleMarshal() {
 	// field: "13"
 }
 
+// TestIssue356 covers a block scalar inside a sequence, whose content used to
+// come back mangled.
+//
+// The sequence indentation of the source is not part of what is checked:
+// rendering lays a document out in the library's own layout rather than
+// replaying the columns it was read at. What must survive is the scalar --
+// every line of it, including the blank one, at the relative indentation that
+// makes it one value rather than a nested mapping.
 func TestIssue356(t *testing.T) {
+	const scalar = `
+
+  key:
+    nest1: something
+    nest2:
+      nest2a: b`
+
 	tests := map[string]struct {
-		in string
+		in   string
+		want string
 	}{
 		"content on first line": {
 			in: `args:
@@ -1905,6 +1921,7 @@ func TestIssue356(t *testing.T) {
       nest2:
         nest2a: b
 `,
+			want: "args:\n- |" + scalar + "\n",
 		},
 		"empty first line": {
 			in: `args:
@@ -1915,6 +1932,7 @@ func TestIssue356(t *testing.T) {
       nest2:
         nest2a: b
 `,
+			want: "args:\n- |" + scalar + "\n",
 		},
 	}
 
@@ -1925,8 +1943,17 @@ func TestIssue356(t *testing.T) {
 				t.Fatalf("parse: %v", err)
 			}
 			got := f.String()
-			if test.in != got {
-				t.Fatalf("failed to encode.\nexpected:\n%s\nbut got:\n%s\n", test.in, got)
+			if test.want != got {
+				t.Fatalf("failed to encode.\nexpected:\n%s\nbut got:\n%s\n", test.want, got)
+			}
+
+			// And it settles: reading the result back gives the same text.
+			again, err := parser.ParseBytes([]byte(got), 0)
+			if err != nil {
+				t.Fatalf("reparse: %v", err)
+			}
+			if regot := again.String(); regot != got {
+				t.Fatalf("a second render changed the document:\n%s\nbut got:\n%s\n", got, regot)
 			}
 		})
 	}

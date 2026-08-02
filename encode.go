@@ -15,7 +15,6 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/parser"
-	"github.com/go-openapi/go-yaml/printer"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -101,8 +100,17 @@ func (e *Encoder) EncodeContext(ctx context.Context, v interface{}) error {
 		// write document separator
 		_, _ = e.writer.Write([]byte("---\n"))
 	}
-	var p printer.Printer
-	_, _ = e.writer.Write(p.PrintNode(node))
+	// Lay the document out from the tree rather than from the positions the
+	// nodes carry: this is where the encoder's indentation options take effect.
+	renderer := ast.NewRenderer(
+		ast.WithIndent(e.indentNum),
+		ast.WithIndentSequence(e.indentSequence),
+	)
+	if err := renderer.Render(e.writer, node); err != nil {
+		return err
+	}
+	_, _ = e.writer.Write([]byte("\n"))
+
 	return nil
 }
 
@@ -644,12 +652,6 @@ func (e *Encoder) encodeMapItem(ctx context.Context, item MapItem, column int) (
 	if err != nil {
 		return nil, err
 	}
-	if e.isMapNode(value) {
-		value.AddColumn(e.indentNum)
-	}
-	if e.isTagAndMapNode(value) {
-		value.AddColumn(e.indentNum)
-	}
 	return ast.MappingValue(
 		token.New("", "", e.pos(column)),
 		e.encodeString(k.Interface().(string), column),
@@ -669,16 +671,6 @@ func (e *Encoder) encodeMapSlice(ctx context.Context, value MapSlice, column int
 	return node, nil
 }
 
-func (e *Encoder) isMapNode(node ast.Node) bool {
-	_, ok := node.(ast.MapNode)
-	return ok
-}
-
-func (e *Encoder) isTagAndMapNode(node ast.Node) bool {
-	tn, ok := node.(*ast.TagNode)
-	return ok && e.isMapNode(tn.Value)
-}
-
 func (e *Encoder) encodeMap(ctx context.Context, value reflect.Value, column int) (ast.Node, error) {
 	node := ast.Mapping(token.New("", "", e.pos(column)), e.isFlowStyle)
 	keys := make([]interface{}, len(value.MapKeys()))
@@ -694,12 +686,6 @@ func (e *Encoder) encodeMap(ctx context.Context, value reflect.Value, column int
 		encoded, err := e.encodeValue(ctx, v, column)
 		if err != nil {
 			return nil, err
-		}
-		if e.isMapNode(encoded) {
-			encoded.AddColumn(e.indentNum)
-		}
-		if e.isTagAndMapNode(encoded) {
-			encoded.AddColumn(e.indentNum)
 		}
 		keyText := fmt.Sprint(key)
 		vRef := e.toPointer(v)
@@ -910,9 +896,6 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 		if err != nil {
 			return nil, err
 		}
-		if e.isMapNode(encoded) {
-			encoded.AddColumn(e.indentNum)
-		}
 		var key ast.MapKeyNode = e.encodeString(sf.RenderName, column)
 		switch {
 		case encoded.Type() == ast.AliasType:
@@ -961,8 +944,6 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 					// if declared the same key name, skip encoding this field
 					continue
 				}
-				mapKey.AddColumn(-e.indentNum)
-				mapValue.AddColumn(-e.indentNum)
 				node.Values = append(node.Values, ast.MappingValue(nil, mapKey, mapValue))
 			}
 			continue
@@ -976,7 +957,6 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 		node.Values = append(node.Values, ast.MappingValue(nil, key, encoded))
 	}
 	if hasInlineAnchorField {
-		node.AddColumn(e.indentNum)
 		anchorName := "anchor"
 		anchorNode := ast.Anchor(token.New("&", "&", e.pos(column)))
 		anchorNode.Name = ast.String(token.New(anchorName, anchorName, e.pos(column)))

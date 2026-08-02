@@ -174,13 +174,16 @@ v:
 }
 
 func TestParseEmptyDocument(t *testing.T) {
+	// A document with nothing in it renders as nothing. The line break it used
+	// to produce belonged to no content, and reading it back gave a document
+	// that no longer matched the one written.
 	t.Run("empty document", func(t *testing.T) {
 		f, err := parser.ParseBytes([]byte(""), parser.ParseComments)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := f.String()
-		expected := "\n"
+		expected := ""
 		if got != expected {
 			t.Fatalf("failed to parse comment:\nexpected:\n%q\ngot:\n%q", expected, got)
 		}
@@ -192,7 +195,7 @@ func TestParseEmptyDocument(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := f.String()
-		expected := "\n"
+		expected := ""
 		if got != expected {
 			t.Fatalf("failed to parse comment:\nexpected:\n%q\ngot:\n%q", expected, got)
 		}
@@ -228,13 +231,13 @@ national:
   - Atlanta Braves
 `, `
 american:
-  - Boston Red Sox
-  - Detroit Tigers
-  - New York Yankees
+- Boston Red Sox
+- Detroit Tigers
+- New York Yankees
 national:
-  - New York Mets
-  - Chicago Cubs
-  - Atlanta Braves
+- New York Mets
+- Chicago Cubs
+- Atlanta Braves
 `,
 		},
 		{
@@ -300,8 +303,7 @@ elem1:
 `,
 			`
 elem1:
-  - elem2:
-      {a: b, c: d}
+- elem2: {a: b, c: d}
 `,
 		},
 		{
@@ -312,8 +314,7 @@ elem1:
 `,
 			`
 elem1:
-  - elem2:
-      [a, b, c, d]
+- elem2: [a, b, c, d]
 `,
 		},
 		{
@@ -333,8 +334,8 @@ a: 0 - 1
 `,
 			`
 - a:
-   b: c
-   d: e
+    b: c
+    d: e
 - f:
   g: h
 `,
@@ -366,8 +367,8 @@ a:
  - c
 `, `
 a:
- - b
- - c
+- b
+- c
 `,
 		},
 		{
@@ -421,7 +422,7 @@ d: e # comment
 `,
 			`
 a:
- b: c
+  b: c
 d: e
 `,
 		},
@@ -575,9 +576,9 @@ a:
     piyo`,
 			`
 |
-    hoge
-    fuga
-    piyo
+  hoge
+  fuga
+  piyo
 `,
 		},
 		{
@@ -588,9 +589,9 @@ v: |
  c`,
 			`
 v: |
- a
- b
- c
+  a
+  b
+  c
 `,
 		},
 
@@ -605,10 +606,10 @@ d: eeeeeeeeeeeeeeeee
 `,
 			`
 a: |
-   bbbbbbb
+  bbbbbbb
 
 
-   ccccccc
+  ccccccc
 d: eeeeeeeeeeeeeeeee
 `,
 		},
@@ -750,9 +751,9 @@ a:
 `,
 			`
 a:
-  - |2
-        b
-    c: d
+- |2
+      b
+  c: d
 `,
 		},
 		{
@@ -764,8 +765,8 @@ d: e
 `,
 			`
 a:
- b: &anchor
- c: &anchor2
+  b: &anchor
+  c: &anchor2
 d: e
 `,
 		},
@@ -830,11 +831,11 @@ a:
 `,
 			`
 a:
-  - b: c
-    d: e
+- b: c
+  d: e
 
-  - f: g
-    h: i
+- f: g
+  h: i
 `,
 		},
 		{
@@ -848,11 +849,11 @@ a:
 `,
 			`
 a:
-  - b: c
-    d: e
+- b: c
+  d: e
 
-  - f: g
-    h: i
+- f: g
+  h: i
 `,
 		},
 		{
@@ -910,15 +911,15 @@ a:
 `,
 			`
 a:
-  # comment 1
-  - b: c
-    # comment 2
-    d: e
+# comment 1
+- b: c
+  # comment 2
+  d: e
 
-  # comment 3
-  # comment 4
-  - f: g
-    h: i # comment 5
+# comment 3
+# comment 4
+- f: g
+  h: i # comment 5
 `,
 		},
 		{
@@ -938,17 +939,17 @@ a:
 `,
 			`
 a:
-  # comment 1
-  - b: c
-    # comment 2
-    d: e
+# comment 1
+- b: c
+  # comment 2
+  d: e
 
-  # comment 3
-  # comment 4
-  - f: |
-      g
-      g
-    h: i # comment 5
+# comment 3
+# comment 4
+- f: |
+    g
+    g
+  h: i # comment 5
 `,
 		},
 		{
@@ -969,18 +970,18 @@ a:
 `,
 			`
 a:
-  # comment 1
-  - b: c
-    # comment 2
-    d: e
+# comment 1
+- b: c
+  # comment 2
+  d: e
 
-  # comment 3
-  # comment 4
-  - f: |
-      asd
-      def
+# comment 3
+# comment 4
+- f: |
+    asd
+    def
 
-    h: i # comment 5
+  h: i # comment 5
 `,
 		},
 		{
@@ -1539,8 +1540,8 @@ elem1:
 `,
 			expected: `
 elem1:
-  - elem2: # comment
-      {a: b, c: d}
+- elem2: # comment
+    {a: b, c: d}
 `,
 		},
 		{
@@ -1552,8 +1553,8 @@ elem1:
 `,
 			expected: `
 elem1:
-  - elem2: # comment
-      [a, b, c, d]
+- elem2: # comment
+    [a, b, c, d]
 `,
 		},
 		{
@@ -1748,10 +1749,10 @@ baz:
 	}
 	expected := `
 foo:
-  # comment
-  - bar: 1
+# comment
+- bar: 1
 baz:
-  - xxx`
+- xxx`
 	got := f.Docs[0].String()
 	if got != strings.TrimPrefix(expected, "\n") {
 		t.Fatalf("failed to parse comment:\nexpected:\n%s\ngot:\n%s", strings.TrimPrefix(expected, "\n"), got)

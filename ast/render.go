@@ -3,6 +3,8 @@ package ast
 import (
 	"io"
 	"strings"
+
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // DefaultIndent is the number of spaces one level of nesting adds.
@@ -50,6 +52,13 @@ type Renderer struct {
 	indentSequence bool
 }
 
+// defaultRenderer and bareRenderer back the String methods of the composite
+// node types. They hold no state, so one of each serves the whole package.
+var (
+	defaultRenderer = NewRenderer()
+	bareRenderer    = NewRenderer(WithComments(false))
+)
+
 // NewRenderer returns a Renderer with two-space indentation and comments on.
 func NewRenderer(opts ...RenderOption) *Renderer {
 	r := &Renderer{indent: DefaultIndent, comments: true}
@@ -58,6 +67,19 @@ func NewRenderer(opts ...RenderOption) *Renderer {
 	}
 
 	return r
+}
+
+// bare returns a Renderer that writes no comments, for the places a comment
+// cannot go -- inside a key, where it would be read back as part of the key.
+func (r *Renderer) bare() *Renderer {
+	if !r.comments {
+		return r
+	}
+
+	bare := *r
+	bare.comments = false
+
+	return &bare
 }
 
 // Render writes n to w.
@@ -94,11 +116,17 @@ func (r *Renderer) String(n Node) string {
 		return r.tag(node)
 	case *LiteralNode:
 		return r.literal(node)
+	case *StringNode:
+		return r.stringNode(node)
 	case *CommentGroupNode:
 		return r.commentGroup(node)
 	default:
 		// Scalars, aliases and everything else that occupies one line and
 		// contains no nested node: their own rendering is already relative.
+		if key, ok := n.(MapKeyNode); ok && !r.comments {
+			return key.stringWithoutComment()
+		}
+
 		return n.String()
 	}
 }
@@ -108,28 +136,33 @@ func (r *Renderer) String(n Node) string {
 func (r *Renderer) File(n *File) string {
 	docs := make([]string, 0, len(n.Docs))
 	for _, doc := range n.Docs {
-		docs = append(docs, r.String(doc))
+		// A document with nothing in it contributes nothing, not a blank line.
+		if text := r.String(doc); text != "" {
+			docs = append(docs, text)
+		}
+	}
+	if len(docs) == 0 {
+		return ""
 	}
 
-	return strings.Join(docs, "")
+	// The final line break belongs to the file: a node's rendering never ends
+	// in one, so that it can be placed anywhere.
+	return strings.Join(docs, "\n") + "\n"
 }
 
 func (r *Renderer) document(n *DocumentNode) string {
-	var b strings.Builder
+	parts := make([]string, 0, 3)
 	if n.Start != nil {
-		b.WriteString(n.Start.Value)
-		b.WriteString("\n")
+		parts = append(parts, n.Start.Value)
 	}
 	if n.Body != nil {
-		b.WriteString(r.String(n.Body))
-		b.WriteString("\n")
+		parts = append(parts, r.String(n.Body))
 	}
 	if n.End != nil {
-		b.WriteString(n.End.Value)
-		b.WriteString("\n")
+		parts = append(parts, n.End.Value)
 	}
 
-	return b.String()
+	return strings.Join(parts, "\n")
 }
 
 func (r *Renderer) mapping(n *MappingNode) string {
@@ -160,30 +193,122 @@ func (r *Renderer) mapping(n *MappingNode) string {
 }
 
 func (r *Renderer) mappingValue(n *MappingValueNode) string {
-	key := r.inline(n.Key)
+	key := r.bare().inline(n.Key)
 
+	// A blank line before an entry is the author's, not the layout's: it groups
+	// entries, and no amount of re-rendering should lose it. Unlike a column, it
+	// does not compound when a document is read and written repeatedly.
 	var head string
 	if r.comments && n.Comment != nil {
-		head = r.String(n.Comment) + "\n"
+		// The gap is above the comment, which is what now leads the entry.
+		head = blankLineBefore(n.Comment) + r.String(n.Comment) + "\n"
+	} else {
+		head = blankLineBefore(n.Key)
 	}
 
 	if _, explicit := n.Key.(*MappingKeyNode); explicit {
 		// The ':' goes on its own line. Written inline as "? a: b", YAML reads
 		// the whole of "a: b" as the key.
 		body := r.String(n.Key) + "\n:"
-		if value := r.value(n.Value, ""); value != "" {
+		if value := r.value(n.Value, false); value != "" {
 			body += value
 		}
 
 		return head + body + r.footComment(n.FootComment)
 	}
 
-	return head + key + ":" + r.value(n.Value, key) + r.footComment(n.FootComment)
+	// A comment on the key belongs after the ':', not before it: written where
+	// the key sits, it would be read back as part of the key.
+	comment := r.keyComment(n.Key)
+	value := r.value(n.Value, comment != "")
+	if comment == "" {
+		// A comment written on the key's line, above a block, is recorded on the
+		// block rather than on the key. It goes back where it was written.
+		comment, value = r.hoistBlockComment(n.Key, n.Value, value)
+	}
+
+	var inline, trailing string
+	switch {
+	case comment == "":
+	case strings.HasPrefix(value, "\n"):
+		inline = " " + comment
+	default:
+		trailing = " " + comment
+	}
+
+	return head + key + ":" + inline + value + trailing + r.footComment(n.FootComment)
+}
+
+// hoistBlockComment takes a block collection's own leading comment off the
+// front of its rendered value, so that the caller can put it back on the key's
+// line. It returns the comment and what is left of the value.
+func (r *Renderer) hoistBlockComment(key, n Node, value string) (string, string) {
+	if !r.comments || !strings.HasPrefix(value, "\n") {
+		return "", value
+	}
+
+	var comment *CommentGroupNode
+	switch node := n.(type) {
+	case *MappingNode:
+		if node.IsFlowStyle || len(node.Values) == 0 {
+			return "", value
+		}
+		comment = node.Comment
+	case *SequenceNode:
+		if node.IsFlowStyle || len(node.Values) == 0 {
+			return "", value
+		}
+		comment = node.Comment
+	}
+	if comment == nil || !sameLine(comment, key) {
+		// Written on its own line above the block, it is a comment on the block
+		// and stays there.
+		return "", value
+	}
+
+	// The comment is the block's first line, wherever value() indented it to.
+	_, rest, found := strings.Cut(value[1:], "\n")
+	if !found {
+		return "", value
+	}
+
+	return r.String(comment), "\n" + rest
+}
+
+// sameLine reports whether two nodes were written on the same source line.
+//
+// A node built in code rather than read from a document has no line. Nothing
+// separates it from its neighbors, so it counts as sharing theirs: a comment
+// attached by a caller was attached to that entry, not to a line of its own.
+func sameLine(a, b Node) bool {
+	ta, tb := a.GetToken(), b.GetToken()
+	if ta == nil || tb == nil || ta.Position == nil || tb.Position == nil {
+		return true
+	}
+
+	return ta.Position.Line == tb.Position.Line
+}
+
+// keyComment returns the comment carried by a mapping key, rendered, or "".
+func (r *Renderer) keyComment(key Node) string {
+	if !r.comments {
+		return ""
+	}
+	comment := key.GetComment()
+	if comment == nil {
+		return ""
+	}
+
+	return r.String(comment)
 }
 
 // value renders what follows a "key:", including the space or newline that
 // separates it. It returns "" for an absent value.
-func (r *Renderer) value(n Node, key string) string {
+//
+// keyCommented says the key carries a comment, which claims the rest of the
+// line: a collection that would otherwise sit beside its key goes below it so
+// that the comment stays next to the key it belongs to.
+func (r *Renderer) value(n Node, keyCommented bool) string {
 	if n == nil {
 		return ""
 	}
@@ -193,14 +318,15 @@ func (r *Renderer) value(n Node, key string) string {
 		return ""
 	}
 
-	if r.fitsOnKeyLine(n) {
+	if r.fitsOnKeyLine(n) && (!keyCommented || !isCollection(n)) {
 		return " " + text
 	}
-	if _, isSequence := n.(*SequenceNode); isSequence && !r.indentSequence {
+	if sequence, ok := n.(*SequenceNode); ok && !sequence.IsFlowStyle && !r.indentSequence {
 		// A block sequence under a mapping key sits at the key's own
 		// indentation unless asked otherwise: "key:" then "- item" in column
 		// one of the key's level. Both layouts are legal; this is the one YAML
-		// is usually written in.
+		// is usually written in. A flow sequence is not laid out this way: it
+		// is a value like any other and indents under its key.
 		return "\n" + text
 	}
 
@@ -225,15 +351,23 @@ func (r *Renderer) fitsOnKeyLine(n Node) bool {
 }
 
 func (r *Renderer) mappingKey(n *MappingKeyNode) string {
-	value := r.String(n.Value)
+	value := r.entry(n.Value)
 	if value == "" {
 		return n.Start.Value
 	}
-	if strings.Contains(value, "\n") {
-		return n.Start.Value + " " + r.hangingIndent(value)
-	}
 
 	return n.Start.Value + " " + value
+}
+
+// entry renders a node placed after a marker that occupies the start of its
+// line -- "- " or "? " -- indenting its continuation lines to sit under it.
+func (r *Renderer) entry(n Node) string {
+	blank, text := splitLeadingBlank(r.String(n))
+	if carriesOwnIndent(n) {
+		return blank + text
+	}
+
+	return blank + r.hangingIndent(text)
 }
 
 func (r *Renderer) sequence(n *SequenceNode) string {
@@ -254,10 +388,20 @@ func (r *Renderer) sequence(n *SequenceNode) string {
 		lines = append(lines, r.String(n.Comment))
 	}
 	for i, value := range n.Values {
+		// A blank line inside an entry surfaces as a leading break on the
+		// entry's own text. It belongs above the "- ", not after it.
+		blank, text := splitLeadingBlank(r.entry(value))
 		if r.comments && i < len(n.ValueHeadComments) && n.ValueHeadComments[i] != nil {
-			lines = append(lines, r.String(n.ValueHeadComments[i]))
+			comment := n.ValueHeadComments[i]
+			if blank == "" {
+				// The entry's own token follows the comment, so the gap the
+				// author left shows up above the comment instead.
+				blank = blankLineBefore(comment)
+			}
+			lines = append(lines, blank+r.String(comment))
+			blank = ""
 		}
-		lines = append(lines, "- "+r.hangingIndent(r.String(value)))
+		lines = append(lines, blank+"- "+text)
 	}
 	if r.comments && n.FootComment != nil {
 		lines = append(lines, r.String(n.FootComment))
@@ -296,6 +440,16 @@ func (r *Renderer) prefixed(marker string, value Node) string {
 	return marker + " " + text
 }
 
+// isCollection reports whether n is a mapping or a sequence, in either style.
+func isCollection(n Node) bool {
+	switch n.(type) {
+	case *MappingNode, *SequenceNode:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Renderer) startsBlock(n Node) bool {
 	switch node := n.(type) {
 	case *MappingNode:
@@ -313,14 +467,109 @@ func (r *Renderer) literal(n *LiteralNode) string {
 		header += " " + r.String(n.Comment)
 	}
 
-	// The node holds the scalar's content, without the indentation the document
-	// happened to give it. Re-indenting it is this renderer's job, and doing it
-	// from the value rather than from the source text is what keeps a block
-	// scalar stable across renders.
-	content := strings.TrimRight(n.Value.GetToken().Origin, " \n")
-	content = dedentBlock(content)
+	// Take the content from the source text, which keeps the line breaks and
+	// trailing spaces the value has already lost, but strip the indentation
+	// that introduced it by the width the decoder stripped -- not by the least
+	// indented line. The two differ exactly when the header states a width and
+	// every content line starts with spaces of its own, and those spaces are
+	// part of the value.
+	lbc := lineBreakOf(n.Value.GetToken().Origin)
+	content := strings.TrimRight(n.Value.GetToken().Origin, " \n\r")
+	content = dedentBy(content, introducedIndent(content, n.Value.Value, lbc))
+	if content == "" {
+		// An empty block scalar is its header. Writing the line break that
+		// would introduce content leaves a blank line the parser reads as
+		// content indented differently from what the header announced.
+		return header
+	}
 
-	return header + "\n" + r.indented(content)
+	// A header may state its own indentation, as "|2" does. That width is part
+	// of how the content reads, so it wins over the renderer's own.
+	indent := r.indent
+	if stated := statedIndent(n.Start.Value); stated > 0 {
+		indent = stated
+	}
+
+	return header + lbc + indentLinesWith(content, indent, lbc)
+}
+
+// lineBreakOf returns the line break a scalar's content is written with.
+//
+// A value holding no break at all is written with the ordinary one:
+// token.DetectLineBreakCharacter answers "\r\n" for that case, which is right
+// for deciding what a file uses and wrong for deciding what to write here.
+func lineBreakOf(value string) string {
+	if !strings.ContainsAny(value, "\r\n") {
+		return "\n"
+	}
+
+	return token.DetectLineBreakCharacter(value)
+}
+
+// statedIndent returns the indentation a block scalar header asks for, or 0
+// when it leaves the width to be inferred from the content.
+func statedIndent(header string) int {
+	for _, c := range header {
+		if c >= '1' && c <= '9' {
+			return int(c - '0')
+		}
+	}
+
+	return 0
+}
+
+// stringNode renders a scalar string.
+//
+// A string holding line breaks has no one-line form: it comes out as a block
+// scalar, and that makes it the one scalar whose rendering spans lines and so
+// needs the same relative treatment as a block. The node's own String would lay
+// it out from the column it was recorded at.
+func (r *Renderer) stringNode(n *StringNode) string {
+	header := blockScalarHeader(n)
+	if header == "" {
+		if !r.comments {
+			return n.stringWithoutComment()
+		}
+
+		return n.String()
+	}
+
+	// One trailing break belongs to the block structure rather than to the
+	// content: it is the break that ends the last line. The header says what to
+	// do with the rest -- "|" clips them, "|-" strips them, "|+" keeps them.
+	lbc := lineBreakOf(n.Value)
+	content := strings.TrimSuffix(n.Value, lbc)
+
+	return header + lbc + indentLinesWith(content, r.indent, lbc)
+}
+
+// blockScalarHeader returns the block header a string needs, or "" when the
+// string fits on one line or is quoted -- a quoted scalar keeps its quotes.
+func blockScalarHeader(n *StringNode) string {
+	switch n.Token.Type {
+	case token.SingleQuoteType, token.DoubleQuoteType:
+		return ""
+	default:
+		return token.LiteralBlockHeader(n.Value)
+	}
+}
+
+// carriesOwnIndent reports whether a node already indents its own continuation
+// lines relative to the start of the line it begins on.
+//
+// A block scalar does: its header shares a line with whatever introduces it --
+// "key:" or "- " -- and its content is indented from that line's start, not
+// from where the header happens to sit. Indenting it again would push the
+// content one level too deep for every level of nesting.
+func carriesOwnIndent(n Node) bool {
+	switch node := n.(type) {
+	case *LiteralNode:
+		return true
+	case *StringNode:
+		return blockScalarHeader(node) != ""
+	default:
+		return false
+	}
 }
 
 func (r *Renderer) commentGroup(n *CommentGroupNode) string {
@@ -337,6 +586,27 @@ func (r *Renderer) footComment(c *CommentGroupNode) string {
 	}
 
 	return "\n" + r.String(c)
+}
+
+// blankLineBefore returns the blank line an author left above n, or "".
+func blankLineBefore(n Node) string {
+	if n == nil {
+		return ""
+	}
+	if tk := n.GetToken(); tk != nil && checkLineBreak(tk) {
+		return "\n"
+	}
+
+	return ""
+}
+
+// splitLeadingBlank separates a leading blank line from the text it precedes.
+func splitLeadingBlank(text string) (string, string) {
+	if rest, found := strings.CutPrefix(text, "\n"); found {
+		return "\n", rest
+	}
+
+	return "", text
 }
 
 // inline renders a node for a context that cannot hold a line break.
@@ -369,12 +639,19 @@ func (r *Renderer) hangingIndent(text string) string {
 }
 
 func indentLines(text string, spaces int) string {
+	return indentLinesWith(text, spaces, "\n")
+}
+
+// indentLinesWith indents text whose lines are separated by lbc. A block scalar
+// keeps whatever line break its content was written with, which is not always
+// the "\n" the rest of the document is laid out in.
+func indentLinesWith(text string, spaces int, lbc string) string {
 	if spaces <= 0 || text == "" {
 		return text
 	}
 
 	pad := strings.Repeat(" ", spaces)
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(text, lbc)
 	for i, line := range lines {
 		if line == "" {
 			continue
@@ -382,16 +659,32 @@ func indentLines(text string, spaces int) string {
 		lines[i] = pad + line
 	}
 
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, lbc)
 }
 
-// dedentBlock removes the indentation a block scalar's content carries from the
-// source, leaving the relative shape that is part of its value.
-func dedentBlock(text string) string {
-	lines := strings.Split(text, "\n")
+// introducedIndent returns how much indentation the source text carries that
+// the value does not: the width that introduced the block.
+//
+// It is measured on the first line that has content, by comparing the two.
+// Falling back to the least indented line is right whenever the value cannot
+// answer, and wrong only for the case this exists for.
+func introducedIndent(origin, value, lbc string) int {
+	first, _, _ := strings.Cut(origin, lbc)
+	valueFirst, _, _ := strings.Cut(value, lbc)
 
+	if trimmed := strings.TrimLeft(first, " "); trimmed != "" && strings.HasSuffix(trimmed, strings.TrimLeft(valueFirst, " ")) {
+		if lead := len(first) - len(valueFirst); lead >= 0 {
+			return lead
+		}
+	}
+
+	return commonIndent(origin, lbc)
+}
+
+// commonIndent returns the indentation shared by every line that has content.
+func commonIndent(text, lbc string) int {
 	common := -1
-	for _, line := range lines {
+	for _, line := range strings.Split(text, lbc) {
 		trimmed := strings.TrimLeft(line, " ")
 		if trimmed == "" {
 			continue
@@ -400,13 +693,24 @@ func dedentBlock(text string) string {
 			common = lead
 		}
 	}
-	if common <= 0 {
+	if common < 0 {
+		return 0
+	}
+
+	return common
+}
+
+// dedentBy removes n columns of indentation from every line, leaving the
+// relative shape that is part of a block scalar's value.
+func dedentBy(text string, n int) string {
+	if n <= 0 {
 		return text
 	}
 
+	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		if len(line) >= common {
-			lines[i] = line[common:]
+		if len(line) >= n {
+			lines[i] = line[n:]
 
 			continue
 		}

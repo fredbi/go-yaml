@@ -38,32 +38,26 @@ func (o outcome) String() string {
 
 // The reasons a document fails to survive a round trip.
 const (
-	// The big one. Rendering positions a child by padding out to the column
-	// recorded in its token, rather than by its depth in the tree. Once
-	// rendering has moved anything -- flattened a flow collection onto one
-	// line, re-indented under a tag -- those columns describe text that no
-	// longer exists, and the next parse records the inflated ones. So each
-	// cycle adds a little more and the document never settles.
-	reasonAbsoluteColumns = "children are positioned by recorded column rather than by depth, so indentation compounds"
-
-	// Not a rendering defect: rendering canonicalises "*b : *a" to "*b: *a",
-	// which is correct, and the parser then refuses to read it. The library
-	// cannot parse its own output. Related to goccy/go-yaml#417.
-	reasonAliasKeyRejected = "an alias used as a mapping key parses only with a space before the ':', which rendering removes"
-
 	// The severe one, despite being the smallest group: the value changes.
 	// A blank line encoding a newline inside a quoted scalar is rendered as a
 	// bare line break, which folds back to a space when read again.
 	reasonFoldedNewline = "a line break inside a quoted scalar is rendered so that reading it back folds it to a space"
 
-	reasonBlockScalarIndent = "a block scalar is rendered without the header and indentation needed to read it back"
-	reasonFlowComment       = "flattening a flow collection puts a line comment before the closing bracket"
-	reasonMarkerDropped     = "the document end marker is dropped"
+	// A flow collection is written on one line. A comment inside it has no
+	// place there: everything after it on the line is commented out, including
+	// the closing bracket. Keeping such a collection on several lines would fix
+	// this; dropping the comment instead would trade invalid output for silent
+	// loss, which is worse.
+	reasonFlowComment = "a comment inside a flow collection is flattened onto one line, which comments out the rest of it"
 
-	// Explicit keys have to be written with their ':' on its own line, or the
-	// value reads back as part of the key. Writing them that way is correct and
-	// exposed how little the indentation of what follows is thought through.
-	reasonExplicitKeyRender = "an explicit key's value is re-indented so that reading it back changes the structure"
+	// Not a rendering defect: the renderer writes a tag whose value is empty
+	// the way the source did, and the parser will not read it back inside a
+	// flow mapping. It belongs with the acceptance work.
+	reasonEmptyTagInFlow = "a tag with no value is not accepted inside a flow mapping, though rendering writes it as the source did"
+
+	// The comment reaches both the key and the value, and rendering writes it
+	// in both places, so the document gains a comment on every cycle.
+	reasonExplicitKeyComment = "a comment on an explicit key is written both on the key line and on the ':' line"
 )
 
 // roundTripLedger records every accepted document that does not survive
@@ -74,60 +68,28 @@ const (
 // comments and anchors intact -- is one of the reasons this library exists, and
 // these are the documents where it does not hold.
 //
-// Two things are worth knowing before reading the list. Two thirds of it shares
-// a single cause, recorded as reasonAbsoluteColumns. And two entries are not
-// rendering defects at all -- the parser refuses text the renderer produced
-// correctly -- so they belong with the acceptance work, not here.
+// The list used to be four times this length, and two thirds of it had one
+// cause: rendering placed a child at the column its token was read at, so every
+// cycle added a little more indentation and no document ever settled. Laying
+// documents out by depth removed that cause and everything that followed from
+// it. What is left is four distinct defects, one of which -- the tag with no
+// value inside a flow mapping -- is not a rendering defect at all: the parser
+// refuses text the renderer produced correctly, so it belongs with the
+// acceptance work.
 var roundTripLedger = map[string]struct {
 	outcome outcome
 	reason  string
 }{
 	// The rendered document no longer parses.
-	"aliases-in-implicit-block-mapping":                              {unreadable, reasonAliasKeyRejected},
-	"literal-modifers/02":                                            {unreadable, reasonBlockScalarIndent},
-	"literal-modifers/03":                                            {unreadable, reasonBlockScalarIndent},
-	"multiline-scalar-at-top-level":                                  {unreadable, reasonBlockScalarIndent},
-	"multiline-scalar-at-top-level-1-3":                              {unreadable, reasonBlockScalarIndent},
-	"spec-example-6-1-indentation-spaces":                            {unreadable, reasonFlowComment},
-	"spec-example-7-12-plain-lines":                                  {unreadable, reasonBlockScalarIndent},
-	"spec-example-9-5-directives-documents":                          {unreadable, reasonBlockScalarIndent},
-	"spec-example-6-12-separation-spaces":                            {unreadable, reasonAbsoluteColumns},
-	"spec-example-6-2-indentation-indicators":                        {unreadable, reasonExplicitKeyRender},
-	"various-trailing-comments":                                      {unreadable, reasonExplicitKeyRender},
-	"various-trailing-comments-1-3":                                  {unreadable, reasonExplicitKeyRender},
-	"whitespace-around-colon-in-mappings":                            {unreadable, reasonAliasKeyRejected},
-	"zero-indented-block-scalar":                                     {unreadable, reasonBlockScalarIndent},
-	"zero-indented-block-scalar-with-line-that-looks-like-a-comment": {unreadable, reasonBlockScalarIndent},
+	"empty-keys-in-block-and-flow-mapping": {unreadable, reasonFlowComment},
+	"spec-example-6-1-indentation-spaces":  {unreadable, reasonFlowComment},
+	"spec-example-7-2-empty-content":       {unreadable, reasonEmptyTagInFlow},
 
 	// The rendered document parses, but does not render the same way twice.
-	// The first two arrived with empty-key support: they were rejected before,
-	// so they had never reached this measurement.
-	"empty-implicit-key-in-single-pair-flow-sequences": {drifting, reasonAbsoluteColumns},
-	"empty-keys-in-block-and-flow-mapping":             {drifting, reasonAbsoluteColumns},
-	"aliases-in-explicit-block-mapping":                {drifting, reasonAbsoluteColumns},
-	"question-mark-edge-cases/01":                      {drifting, reasonAbsoluteColumns},
-
-	"question-mark-edge-cases/00":                      {drifting, reasonAbsoluteColumns},
-	"spec-example-2-11-mapping-between-sequences":      {drifting, reasonAbsoluteColumns},
-	"spec-example-7-16-flow-mapping-entries":           {drifting, reasonAbsoluteColumns},
-	"spec-example-7-3-completely-empty-flow-nodes":     {drifting, reasonAbsoluteColumns},
-	"spec-example-8-19-compact-block-mappings":         {drifting, reasonAbsoluteColumns},
-	"document-end-marker":                              {drifting, reasonMarkerDropped},
-	"spec-example-2-24-global-tags":                    {drifting, reasonAbsoluteColumns},
-	"spec-example-7-11-plain-implicit-keys":            {drifting, reasonAbsoluteColumns},
-	"spec-example-7-14-flow-sequence-entries":          {drifting, reasonAbsoluteColumns},
-	"spec-example-7-19-single-pair-flow-mappings":      {drifting, reasonAbsoluteColumns},
-	"spec-example-7-20-single-pair-explicit-entry":     {drifting, reasonAbsoluteColumns},
-	"spec-example-7-4-double-quoted-implicit-keys":     {drifting, reasonAbsoluteColumns},
-	"spec-example-7-8-single-quoted-implicit-keys":     {drifting, reasonAbsoluteColumns},
 	"spec-example-7-9-single-quoted-lines":             {drifting, reasonFoldedNewline},
 	"spec-example-7-9-single-quoted-lines-1-3":         {drifting, reasonFoldedNewline},
-	"spec-example-8-17-explicit-block-mapping-entries": {unreadable, reasonExplicitKeyRender},
-	"spec-example-8-20-block-node-types":               {drifting, reasonAbsoluteColumns},
-	"spec-example-8-22-block-collection-nodes":         {drifting, reasonAbsoluteColumns},
-	"tags-for-block-objects":                           {drifting, reasonAbsoluteColumns},
 	"various-empty-or-newline-only-quoted-strings":     {drifting, reasonFoldedNewline},
-	"various-location-of-anchors-in-flow-sequence":     {drifting, reasonAbsoluteColumns},
+	"spec-example-8-17-explicit-block-mapping-entries": {drifting, reasonExplicitKeyComment},
 }
 
 // TestSuiteRoundTrip renders every document the parser accepts, reads it back,
