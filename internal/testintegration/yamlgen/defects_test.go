@@ -24,31 +24,6 @@ import (
 // arrives together with the deletion of its ledger entry and the correction of
 // the expectation here, and none of the three can be forgotten.
 
-// TestDefectStripChompingEatsTrailingSpaces: `|-` removes trailing spaces from
-// the last line as well as the line break.
-//
-// YAML 1.2 defines chomping over line breaks (b-chomped-last, l-chomped-empty).
-// A trailing space is content: l-nb-literal-text matches nb-char+, and nb-char
-// includes a space. Reading the clipped form of the same document keeps it,
-// which is what shows the two paths disagree rather than the space being
-// unrepresentable.
-func TestDefectStripChompingEatsTrailingSpaces(t *testing.T) {
-	var strip any
-	require.NoError(t, yaml.Unmarshal([]byte("|-\n  trailing \n"), &strip))
-	assert.Equal(t, "trailing", strip, "expected \"trailing \" -- if this now holds, the defect is fixed")
-
-	// The same content, clipped rather than stripped, keeps the space.
-	var clip any
-	require.NoError(t, yaml.Unmarshal([]byte("|\n  trailing \n"), &clip))
-	assert.Equal(t, "trailing \n", clip)
-
-	// A trailing space on a line that is not the last one also survives, so the
-	// defect is in chomping and not in reading block scalars generally.
-	var inner any
-	require.NoError(t, yaml.Unmarshal([]byte("|-\n  a \n  b\n"), &inner))
-	assert.Equal(t, "a \nb", inner)
-}
-
 // TestDefectKeepChompingLosesTheNewlinesItKeeps: rendering writes the `|+`
 // indicator without the blank lines it exists to preserve.
 //

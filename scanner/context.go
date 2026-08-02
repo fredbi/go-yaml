@@ -393,10 +393,6 @@ func (c *Context) bufferedSrc() []rune {
 			}
 		}
 
-		// If the text ends with a space character, remove all of them.
-		if mstate.hasTrimAllEndNewlineOpt() {
-			src = []rune(strings.TrimRight(string(src), " "))
-		}
 		if string(src) == "\n" {
 			// If the content consists only of a newline,
 			// it can be considered as the document ending without any specified value,
