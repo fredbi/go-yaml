@@ -1,0 +1,108 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package grammar_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
+)
+
+// shapes stress different parts of the engine: a flat sequence grows the input
+// without deepening it, a nested sequence deepens it, and a plain scalar is the
+// production with the most alternatives to try.
+var shapes = map[string]func(int) string{
+	"flat sequence": func(n int) string {
+		return "[" + strings.TrimSuffix(strings.Repeat("abc, ", n), ", ") + "]"
+	},
+	"nested sequence": func(n int) string {
+		return strings.Repeat("[", n) + "x" + strings.Repeat("]", n)
+	},
+	"plain scalar": func(n int) string {
+		return strings.TrimSuffix(strings.Repeat("word ", n), " ")
+	},
+	"flow mapping": func(n int) string {
+		pairs := make([]string, 0, n)
+		for i := range n {
+			pairs = append(pairs, "k"+string(rune('a'+i%26))+": v")
+		}
+
+		return "{" + strings.Join(pairs, ", ") + "}"
+	},
+}
+
+// TestScaling is the risk the throughput number does not cover.
+//
+// A PEG backtracks, and the cost of backtracking is not linear in the input. If
+// the oracle degrades sharply with document size then throughput measured on
+// forty-character documents means nothing, because a generator will not confine
+// itself to forty characters.
+func TestScaling(t *testing.T) {
+	for name, build := range shapes {
+		t.Run(name, func(t *testing.T) {
+			for _, memo := range []bool{true, false} {
+				t.Run(label(memo), func(t *testing.T) {
+					measureShape(t, build, memo)
+				})
+			}
+		})
+	}
+}
+
+func label(memo bool) string {
+	if memo {
+		return "memoized"
+	}
+
+	return "plain"
+}
+
+func measureShape(t *testing.T, build func(int) string, memo bool) {
+	t.Helper()
+
+	match := grammar.MatchNoMemo
+	if memo {
+		match = grammar.Match
+	}
+
+	var prev time.Duration
+	var prevSteps int64
+
+	for _, n := range []int{10, 20, 40, 80, 160} {
+		src := []byte(build(n))
+
+		// A run that is already too slow says everything the next one would.
+		if prev > 100*time.Millisecond {
+			t.Logf("n=%3d  %5d bytes  skipped: the previous size already took %s", n, len(src), prev)
+
+			return
+		}
+
+		match("ns-flow-node", src, 0, "flow-out") // warm
+
+		const runs = 5
+		start := time.Now()
+		var res grammar.Result
+		for range runs {
+			res = match("ns-flow-node", src, 0, "flow-out")
+		}
+		elapsed := time.Since(start) / runs
+
+		growth := ""
+		if prevSteps > 0 {
+			growth = "   steps x" + ratio(float64(res.Steps)/float64(prevSteps)) + " for input x2"
+		}
+
+		t.Logf("n=%3d  %5d bytes  %12s  %11d steps  ok=%t%s",
+			n, len(src), elapsed, res.Steps, res.OK, growth)
+
+		prev, prevSteps = elapsed, res.Steps
+	}
+}
+
+func ratio(f float64) string {
+	return strings.TrimSuffix(time.Duration(f*float64(time.Second)).Truncate(100*time.Millisecond).String(), "s")
+}
