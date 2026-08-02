@@ -711,6 +711,12 @@ func (n *indexAllNode) filter(node ast.Node) (ast.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+		if filtered == nil {
+			// The element does not match. It contributes nothing: keeping a hole
+			// for it would put a null in the result where the query found
+			// nothing at all.
+			continue
+		}
 		out.Values = append(out.Values, filtered)
 	}
 	return &out, nil
