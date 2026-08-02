@@ -71,6 +71,58 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 	}
 }
 
+// TestParseAnchorsOnFlowCollectionKeys covers a property written before a flow
+// collection used as a mapping key.
+//
+// It is the key's: "&k [a, b]: v" names the sequence. The key was taken to
+// begin at its '[', which left the anchor outside it and attached to the
+// mapping the entry belongs to -- silently, so the document still parsed and
+// resolved *k to the wrong node, and outright refused as a second anchor when
+// the mapping already carried one.
+func TestParseAnchorsOnFlowCollectionKeys(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"anchor on a flow sequence key": {
+			source: "&key [a, b]: value\n",
+			want:   "&key [a, b]: value\n",
+		},
+		"anchor on a flow mapping key": {
+			source: "&key {a: 1}: value\n",
+			want:   "&key {a: 1}: value\n",
+		},
+		"tag on a flow sequence key": {
+			source: "!!seq [a]: value\n",
+			want:   "!!seq [a]: value\n",
+		},
+		"beneath an anchor of the mapping's own": {
+			source: "&mapping\n&key [ a ]: value\n",
+			want:   "&mapping\n  &key [a]: value\n",
+		},
+		"inside a flow mapping": {
+			source: "{ &a [a, b]: c }\n",
+			want:   "{&a [a, b]: c}\n",
+		},
+		"with an anchored entry as well": {
+			source: "&key [ &item a, b ]: value\n",
+			want:   "&key [&item a, b]: value\n",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}
+
 // TestParseAnchorsStillNeedANameAndOneValue keeps the checks that the empty
 // value had to be threaded past.
 func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {

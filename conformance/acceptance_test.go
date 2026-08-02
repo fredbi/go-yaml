@@ -54,12 +54,11 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 // Every remaining one is a document YAML allows that the parser refuses. The
 // parser no longer takes anything the spec forbids.
 const (
-	reasonAnchoredFlowKey = "an anchor written before a flow collection used as a mapping key is taken as the mapping's"
-	reasonNestedFlowKey   = "a flow collection used as a mapping key is not read when it holds another collection used as a key"
-	reasonExplicitBlock   = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
-	reasonFlowAdjacent    = "a quoted key with no space before its ':' is not read as a pair in flow context"
-	reasonBlockEnd        = "content after a block scalar is misattributed"
-	reasonTabLine         = "a line holding only a tab is read as indentation"
+	reasonNestedFlowKey = "a flow collection used as a mapping key is not read when it holds another collection used as a key"
+	reasonExplicitBlock = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
+	reasonFlowAdjacent  = "a quoted key with no space before its ':' is not read as a pair in flow context"
+	reasonBlockEnd      = "content after a block scalar is misattributed"
+	reasonTabLine       = "a line holding only a tab is read as indentation"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
@@ -71,14 +70,11 @@ const (
 // passed through here unremarked, and been handed on as if it were sound. They
 // are gone.
 //
-// What remains is still about mapping keys that are not plain scalars, but no
-// longer as one body of work: each entry below was reduced to the smallest
-// document that reproduces it, and they come apart into four separate defects
-// with nothing in common but the shape of the thing they refuse.
+// Each entry below was reduced to the smallest document that reproduces it, and
+// no two share a cause: what is left is five separate defects rather than a
+// group, and one entry apiece is what they are worth.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"aliases-in-flow-objects":                         {wronglyRejected, reasonAnchoredFlowKey},
-	"mapping-key-and-flow-sequence-item-anchors":      {wronglyRejected, reasonAnchoredFlowKey},
 	"nested-implicit-complex-keys":                    {wronglyRejected, reasonNestedFlowKey},
 	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowAdjacent},
 	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
