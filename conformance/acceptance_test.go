@@ -91,25 +91,19 @@ var acceptanceLedger = map[string]ledgerEntry{
 	"implicit-flow-mapping-key-on-one-line":                 {wronglyRejected, reasonComplexKey},
 	"mapping-key-and-flow-sequence-item-anchors":            {wronglyRejected, reasonComplexKey},
 	"nested-implicit-complex-keys":                          {wronglyRejected, reasonComplexKey},
-	"question-mark-edge-cases/00":                           {wronglyRejected, reasonComplexKey},
 	"question-mark-edge-cases/01":                           {wronglyRejected, reasonComplexKey},
 	"single-pair-implicit-entries":                          {wronglyRejected, reasonFlowNote},
-	"spec-example-2-11-mapping-between-sequences":           {wronglyRejected, reasonComplexKey},
 	"spec-example-6-12-separation-spaces":                   {wronglyRejected, reasonComplexKey},
 	"spec-example-6-13-reserved-directives":                 {wronglyRejected, reasonDirective},
 	"spec-example-6-13-reserved-directives-1-3":             {wronglyRejected, reasonDirective},
 	"spec-example-6-14-yaml-directive":                      {wronglyRejected, reasonDirective},
 	"spec-example-8-10-folded-lines-8-13-final-empty-lines": {wronglyRejected, reasonBlockEnd},
-	"spec-example-8-19-compact-block-mappings":              {wronglyRejected, reasonComplexKey},
 	"spec-example-8-8-literal-content":                      {wronglyRejected, reasonBlockEnd},
 	"spec-example-8-8-literal-content-1-3":                  {wronglyRejected, reasonBlockEnd},
 	"spec-example-9-3-bare-documents":                       {wronglyRejected, reasonBlockEnd},
 	"tabs-that-look-like-indentation/04":                    {wronglyRejected, reasonTabLine},
 	"tags-on-empty-scalars":                                 {wronglyRejected, reasonComplexKey},
 	"various-combinations-of-explicit-block-mappings":       {wronglyRejected, reasonComplexKey},
-	"various-trailing-comments":                             {wronglyRejected, reasonComplexKey},
-	"various-trailing-comments-1-3":                         {wronglyRejected, reasonComplexKey},
-	"zero-indented-sequences-in-explicit-mapping-keys":      {wronglyRejected, reasonComplexKey},
 
 	// Documents YAML 1.2 forbids that the parser takes.
 	"comment-without-whitespace-after-doublequoted-scalar":          {wronglyAccepted, reasonCommentSpace},
@@ -181,7 +175,28 @@ func TestSuiteAcceptance(t *testing.T) {
 		})
 	}
 
+	assertLedgerIsExercised(t, tests)
 	reportAcceptance(t, len(tests), counts, diverged)
+}
+
+// assertLedgerIsExercised guards a hole in the ratchet: a ledger entry naming a
+// case that states no expectation is never consulted, so it can go stale
+// unnoticed -- which is exactly what happened to the entries for the empty-key
+// fixtures.
+func assertLedgerIsExercised(t *testing.T, tests []*yamltestsuite.TestSuite) {
+	t.Helper()
+
+	scored := make(map[string]struct{}, len(tests))
+	for _, test := range tests {
+		if test.HasExpectation() {
+			scored[test.Name] = struct{}{}
+		}
+	}
+
+	for name := range acceptanceLedger {
+		_, ok := scored[name]
+		assert.Truef(t, ok, "%s: ledger entry for a case that is never scored -- delete it", name)
+	}
 }
 
 // reportAcceptance logs the headline numbers, so that a run says where

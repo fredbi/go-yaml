@@ -1284,6 +1284,24 @@ func (n *MappingNode) blockStyleString(commentMode bool) string {
 }
 
 // String mapping values to text
+// IsMergeKey returns whether it is a MergeKey node.
+//
+// A collection is never one: "<<" is a scalar.
+func (n *MappingNode) IsMergeKey() bool { return false }
+
+// stringWithoutComment renders the mapping for use as a key, where comments
+// would be noise -- a key's identity is its content.
+func (n *MappingNode) stringWithoutComment() string {
+	if len(n.Values) == 0 {
+		return "{}"
+	}
+	if n.IsFlowStyle {
+		return n.flowStyleString(false)
+	}
+
+	return n.blockStyleString(false)
+}
+
 func (n *MappingNode) String() string {
 	if len(n.Values) == 0 {
 		if n.Comment != nil {
@@ -1445,6 +1463,9 @@ func (n *MappingValueNode) toString() string {
 	if checkLineBreak(n.Key.GetToken()) {
 		space = fmt.Sprintf("%s%s", "\n", space)
 	}
+	if _, ok := n.Key.(*MappingKeyNode); ok {
+		return n.explicitKeyString(space)
+	}
 	keyIndentLevel := n.Key.GetToken().Position.IndentLevel
 	valueIndentLevel := n.Value.GetToken().Position.IndentLevel
 	keyComment := n.Key.GetComment()
@@ -1513,6 +1534,23 @@ func (n *MappingValueNode) MapRange() *MapNodeIter {
 		idx:    startRangeIndex,
 		values: []*MappingValueNode{n},
 	}
+}
+
+// explicitKeyString renders an entry whose key was written with '?'.
+//
+// The ':' has to go on its own line. Written inline as "? a: b", YAML reads the
+// whole of "a: b" as the key -- an explicit key runs to the end of what is
+// indented under it -- so the entry would come back as a nested mapping with no
+// value, which is not what it started as.
+func (n *MappingValueNode) explicitKeyString(space string) string {
+	key := n.Key.String()
+
+	value := n.Value.String()
+	if value == "" {
+		return fmt.Sprintf("%s%s\n%s:", space, key, space)
+	}
+
+	return fmt.Sprintf("%s%s\n%s: %s", space, key, space, value)
 }
 
 // MarshalYAML encodes to a YAML text
@@ -1687,6 +1725,15 @@ func (n *SequenceNode) blockStyleString() string {
 }
 
 // String sequence to text
+// IsMergeKey returns whether it is a MergeKey node.
+//
+// A collection is never one: "<<" is a scalar.
+func (n *SequenceNode) IsMergeKey() bool { return false }
+
+// stringWithoutComment renders the sequence for use as a key. SequenceNode
+// renders without comments already, so this is String.
+func (n *SequenceNode) stringWithoutComment() string { return n.String() }
+
 func (n *SequenceNode) String() string {
 	if n.IsFlowStyle || len(n.Values) == 0 {
 		return n.flowStyleString()

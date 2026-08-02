@@ -480,20 +480,34 @@ func createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
 
 func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
+	var flowDepth int
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
+		case token.MappingStartType, token.SequenceStartType:
+			flowDepth++
+			ret = append(ret, tk)
+		case token.MappingEndType, token.SequenceEndType:
+			if flowDepth > 0 {
+				flowDepth--
+			}
+			ret = append(ret, tk)
 		case token.MappingKeyType:
-			if i+1 >= len(tokens) {
+			end := explicitKeyEnd(tokens, i, flowDepth > 0)
+			if end == i+1 {
 				return nil, errors.ErrSyntax("undefined map key", tk.RawToken())
+			}
+			body, err := groupExplicitKeyBody(tokens[i+1 : end])
+			if err != nil {
+				return nil, err
 			}
 			ret = append(ret, &Token{
 				Group: &TokenGroup{
 					Type:   TokenGroupMapKey,
-					Tokens: []*Token{tk, tokens[i+1]},
+					Tokens: append([]*Token{tk}, body...),
 				},
 			})
-			i++
+			i = end - 1
 		default:
 			ret = append(ret, tk)
 		}
@@ -740,6 +754,75 @@ func isScalarType(tk *Token) bool {
 		typ == token.StringType ||
 		typ == token.SingleQuoteType ||
 		typ == token.DoubleQuoteType
+}
+
+// groupExplicitKeyBody applies to an explicit key's body the grouping passes it
+// would otherwise miss.
+//
+// Absorbing the body into the key's own group hides it from the passes that run
+// after this one, and a key is a document in miniature: "? []: x" has a mapping
+// for its key, whose own ':' has to be paired here or it is silently dropped.
+// The passes before this one -- literals, anchors, tags -- have already run over
+// these tokens, so only the mapping ones are needed.
+func groupExplicitKeyBody(body []*Token) ([]*Token, error) {
+	grouped, err := createMapKeyByMappingValue(body)
+	if err != nil {
+		return nil, err
+	}
+
+	return createMapKeyValueTokenGroups(grouped), nil
+}
+
+// explicitKeyEnd returns the index just past the body of the explicit key
+// introduced by the '?' at tokens[i].
+//
+// In block context the body is everything indented deeper than the '?' itself,
+// and nothing else bounds it -- in particular a ':' on the same line does not.
+// "? []: x" has the mapping {[]: x} for its key and no value at all, which is
+// what the test suite records for it, so taking the whole indented run is both
+// simpler and right.
+//
+// A flow collection is not indentation-sensitive, so there the body runs to the
+// punctuation that ends it: its ':', a ',', or the bracket closing the
+// collection it sits in.
+func explicitKeyEnd(tokens []*Token, i int, inFlow bool) int {
+	if inFlow {
+		return explicitFlowKeyEnd(tokens, i)
+	}
+
+	col := tokens[i].Column()
+
+	j := i + 1
+	for ; j < len(tokens); j++ {
+		if tokens[j].Column() <= col {
+			break
+		}
+	}
+
+	return j
+}
+
+func explicitFlowKeyEnd(tokens []*Token, i int) int {
+	var depth int
+
+	j := i + 1
+	for ; j < len(tokens); j++ {
+		switch tokens[j].Type() {
+		case token.MappingStartType, token.SequenceStartType:
+			depth++
+		case token.MappingEndType, token.SequenceEndType:
+			if depth == 0 {
+				return j
+			}
+			depth--
+		case token.MappingValueType, token.CollectEntryType:
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+
+	return j
 }
 
 // hasNoKey reports whether the ':' at tokens[i] has no key in front of it.

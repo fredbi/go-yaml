@@ -59,6 +59,11 @@ const (
 	reasonBlockScalarIndent = "a block scalar is rendered without the header and indentation needed to read it back"
 	reasonFlowComment       = "flattening a flow collection puts a line comment before the closing bracket"
 	reasonMarkerDropped     = "the document end marker is dropped"
+
+	// Explicit keys have to be written with their ':' on its own line, or the
+	// value reads back as part of the key. Writing them that way is correct and
+	// exposed how little the indentation of what follows is thought through.
+	reasonExplicitKeyRender = "an explicit key's value is re-indented so that reading it back changes the structure"
 )
 
 // roundTripLedger records every accepted document that does not survive
@@ -86,6 +91,9 @@ var roundTripLedger = map[string]struct {
 	"spec-example-6-1-indentation-spaces":                            {unreadable, reasonFlowComment},
 	"spec-example-7-12-plain-lines":                                  {unreadable, reasonBlockScalarIndent},
 	"spec-example-9-5-directives-documents":                          {unreadable, reasonBlockScalarIndent},
+	"spec-example-6-2-indentation-indicators":                        {unreadable, reasonExplicitKeyRender},
+	"various-trailing-comments":                                      {unreadable, reasonExplicitKeyRender},
+	"various-trailing-comments-1-3":                                  {unreadable, reasonExplicitKeyRender},
 	"whitespace-around-colon-in-mappings":                            {unreadable, reasonAliasKeyRejected},
 	"zero-indented-block-scalar":                                     {unreadable, reasonBlockScalarIndent},
 	"zero-indented-block-scalar-with-line-that-looks-like-a-comment": {unreadable, reasonBlockScalarIndent},
@@ -95,6 +103,12 @@ var roundTripLedger = map[string]struct {
 	// so they had never reached this measurement.
 	"empty-implicit-key-in-single-pair-flow-sequences": {drifting, reasonAbsoluteColumns},
 	"empty-keys-in-block-and-flow-mapping":             {drifting, reasonAbsoluteColumns},
+	"aliases-in-explicit-block-mapping":                {drifting, reasonAbsoluteColumns},
+	"question-mark-edge-cases/00":                      {drifting, reasonAbsoluteColumns},
+	"spec-example-2-11-mapping-between-sequences":      {drifting, reasonAbsoluteColumns},
+	"spec-example-7-16-flow-mapping-entries":           {drifting, reasonAbsoluteColumns},
+	"spec-example-7-3-completely-empty-flow-nodes":     {drifting, reasonAbsoluteColumns},
+	"spec-example-8-19-compact-block-mappings":         {drifting, reasonAbsoluteColumns},
 	"document-end-marker":                              {drifting, reasonMarkerDropped},
 	"spec-example-2-24-global-tags":                    {drifting, reasonAbsoluteColumns},
 	"spec-example-7-11-plain-implicit-keys":            {drifting, reasonAbsoluteColumns},
@@ -105,7 +119,7 @@ var roundTripLedger = map[string]struct {
 	"spec-example-7-8-single-quoted-implicit-keys":     {drifting, reasonAbsoluteColumns},
 	"spec-example-7-9-single-quoted-lines":             {drifting, reasonFoldedNewline},
 	"spec-example-7-9-single-quoted-lines-1-3":         {drifting, reasonFoldedNewline},
-	"spec-example-8-17-explicit-block-mapping-entries": {drifting, reasonAbsoluteColumns},
+	"spec-example-8-17-explicit-block-mapping-entries": {unreadable, reasonExplicitKeyRender},
 	"spec-example-8-20-block-node-types":               {drifting, reasonAbsoluteColumns},
 	"spec-example-8-22-block-collection-nodes":         {drifting, reasonAbsoluteColumns},
 	"tags-for-block-objects":                           {drifting, reasonAbsoluteColumns},
