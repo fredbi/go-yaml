@@ -98,3 +98,15 @@ func TestRendererIndentWidth(t *testing.T) {
 	assert.Equal(t, "a:\n    b:\n        c: 1\n", ast.NewRenderer(ast.WithIndent(4)).File(file))
 	assert.Equal(t, "a:\n b:\n  c: 1\n", ast.NewRenderer(ast.WithIndent(1)).File(file))
 }
+
+// TestRendererSequenceIndentation pins the layout choice a block sequence under
+// a mapping key gets. Both are legal YAML; not indenting is what this library
+// has always emitted, and yaml.IndentSequence is the option that asks for the
+// other one.
+func TestRendererSequenceIndentation(t *testing.T) {
+	file, err := parser.ParseBytes([]byte("tags:\n- a\n- b\n"), 0)
+	require.NoError(t, err)
+
+	assert.Equal(t, "tags:\n- a\n- b\n", ast.NewRenderer().File(file))
+	assert.Equal(t, "tags:\n  - a\n  - b\n", ast.NewRenderer(ast.WithIndentSequence(true)).File(file))
+}
