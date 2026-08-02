@@ -1182,6 +1182,13 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		// a tag. What the following lines are measured against is where the key
 		// begins, so for "&a :" that is the '&' and not the name after it.
 		s.lastDelimColumn = col
+	} else if last := lastContentToken(ctx.tokens); last == nil || last.Position.Line != s.line {
+		// Nothing precedes this ':' on its line, so the key was written above
+		// it after a '?'. The ':' is then where the entry sits, and the level
+		// its value is measured against. Left at the level of whatever the key
+		// held -- a sequence entry, most often -- the value's own lines read as
+		// no further in than the key, which cut a block scalar short.
+		s.lastDelimColumn = s.column
 	}
 	ctx.addToken(token.MappingValue(s.pos()))
 	s.progressColumn(ctx, 1)
