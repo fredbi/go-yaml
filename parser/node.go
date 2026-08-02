@@ -18,21 +18,15 @@ func newMappingValueNode(ctx *context, colonTk, entryTk *Token, key ast.MapKeyNo
 	node := ast.MappingValue(colonTk.RawToken(), key, value)
 	node.SetPath(ctx.path)
 	node.CollectEntry = entryTk.RawToken()
+	// entryTk is the ',' that comes *before* this entry, so a comment hanging on
+	// it was written about the entry before this one and is attached there.
 	if key.GetToken().Position.Line == value.GetToken().Position.Line {
 		// originally key was commented, but now that null value has been added, value must be commented.
 		if err := setLineComment(ctx, value, colonTk); err != nil {
 			return nil, err
 		}
-		// set line comment by colonTk or entryTk.
-		if err := setLineComment(ctx, value, entryTk); err != nil {
-			return nil, err
-		}
 	} else {
 		if err := setLineComment(ctx, key, colonTk); err != nil {
-			return nil, err
-		}
-		// set line comment by colonTk or entryTk.
-		if err := setLineComment(ctx, key, entryTk); err != nil {
 			return nil, err
 		}
 	}

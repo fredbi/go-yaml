@@ -343,6 +343,33 @@ func (p *parser) parseScalarValue(ctx *context, tk *Token) (ast.ScalarNode, erro
 	return nil, errors.ErrSyntax("unexpected scalar value type", tk.RawToken())
 }
 
+// attachTrailingComment gives a comment written after a ',' to the entry the
+// ',' follows, which is the entry it was written about: in "[ a, # note" the
+// note sits on a's line and is a remark on a.
+//
+// The scanner hangs such a comment on the ',' itself rather than leaving it in
+// the stream, so the loop reading the collection never sees it. Left there it
+// reached a sequence entry node that nothing renders, or -- in a mapping -- the
+// entry after the comma, one place further on than it was written.
+func attachTrailingComment(ctx *context, entryTk *Token, values []ast.Node) error {
+	if entryTk == nil || entryTk.LineComment == nil || len(values) == 0 {
+		return nil
+	}
+
+	target := values[len(values)-1]
+	if entry, ok := target.(*ast.MappingValueNode); ok && entry.Value != nil {
+		// On the entry itself it would read as a comment introducing it.
+		target = entry.Value
+	}
+	if target.GetComment() != nil {
+		return nil
+	}
+	comment := ast.CommentGroup([]*token.Token{entryTk.LineComment})
+	comment.SetPath(ctx.path)
+
+	return target.SetComment(comment)
+}
+
 func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 	node, err := newMappingNode(ctx, ctx.currentToken(), true)
 	if err != nil {
@@ -369,6 +396,13 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 		var entryTk *Token
 		if tk.Type() == token.CollectEntryType {
 			entryTk = tk
+			entered := make([]ast.Node, 0, len(node.Values))
+			for _, value := range node.Values {
+				entered = append(entered, value)
+			}
+			if err := attachTrailingComment(ctx, entryTk, entered); err != nil {
+				return nil, err
+			}
 			ctx.goNext()
 			if next := p.parseHeadComment(ctx); next != nil {
 				headComment = mergeComments(headComment, next)
@@ -1161,6 +1195,9 @@ func (p *parser) parseFlowSequence(ctx *context) (*ast.SequenceNode, error) {
 				return nil, errors.ErrSyntax("expected sequence element, but found ','", tk.RawToken())
 			}
 			entryTk = tk
+			if err := attachTrailingComment(ctx, entryTk, node.Values); err != nil {
+				return nil, err
+			}
 			ctx.goNext()
 			if next := p.parseHeadComment(ctx); next != nil {
 				headComment = mergeComments(headComment, next)
