@@ -746,7 +746,7 @@ func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, c
 		// A flow mapping's key is under neither restriction. It may span lines,
 		// and a line break before the ':' is ordinary separation, so
 		// "{foo\n: bar}" is as legal as "{foo: bar}".
-		if ctx.inFlowSequence && tk.Type == token.StringType {
+		if ctx.inFlowSequence && isScalarKeyToken(tk) {
 			origin = p.removeRightWhiteSpace(origin)
 			if tk.Position.Line+p.newLineCharacterNum(origin) != colonTk.Line() {
 				return errors.ErrSyntax("map key definition includes an implicit line break", tk)
@@ -761,6 +761,17 @@ func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, c
 		return errors.ErrSyntax("unexpected key name", tk)
 	}
 	return nil
+}
+
+// isScalarKeyToken reports whether tk is a scalar written where a key goes,
+// quoted or not.
+func isScalarKeyToken(tk *token.Token) bool {
+	switch tk.Type {
+	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *parser) removeLeftWhiteSpace(src string) string {

@@ -26,6 +26,11 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 			" }\n",
 		"key spanning lines":        "- { multi\n  line: value}\n",
 		"key spanning lines nested": "{ matches\n% : 20 }\n",
+
+		// A mapping's key may still take the next line for its ':', whatever
+		// the key is made of.
+		"quoted key and colon on separate lines":     "{ \"key\"\n  : value }\n",
+		"collection key and colon on separate lines": "{ {a: 1}\n  : value }\n",
 	}
 
 	for name, source := range valid {
@@ -37,14 +42,60 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 
 	invalid := map[string]string{
 		// A single-pair entry in a flow sequence is an implicit key, which has
-		// to fit on one line with its ':'.
-		"implicit key followed by a newline": "[ key\n  : value ]\n",
+		// to fit on one line with its ':'. Quoting the key does not exempt it.
+		"implicit key followed by a newline":          "[ key\n  : value ]\n",
+		"quoted implicit key followed by a newline":   "[ \"key\"\n  : value ]\n",
+		"quoted implicit key with an adjacent value":  "[ \"key\"\n  :value ]\n",
+		"collection key followed by a newline":        "[ {a: 1}\n  : value ]\n",
+		"single-quoted implicit key across two lines": "[ 'key'\n  : value ]\n",
 	}
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
 			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
 			assert.Errorf(t, err, "accepted %q", source)
+		})
+	}
+}
+
+// TestParseAdjacentValuesInFlow covers a ':' written with no space in front of
+// its value.
+//
+// The spec allows it only after a JSON-like key -- a quoted scalar or a flow
+// collection -- which is what makes "{a: 1}" and JSON's own "{"a":1}" both
+// readable by the same parser. After a plain scalar the ':' belongs to the
+// scalar, so [ a:b ] holds one entry and not a pair.
+func TestParseAdjacentValuesInFlow(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"quoted key in a flow sequence":     {"[ \"JSON like\":adjacent ]\n", "[\"JSON like\": adjacent]\n"},
+		"collection key in a flow sequence": {"[ {JSON: like}:adjacent ]\n", "[{JSON: like}: adjacent]\n"},
+		"quoted key in a flow mapping":      {"{\"a\":1}\n", "{\"a\": 1}\n"},
+		"several in one collection":         {"[\"a\":1, [b]:2]\n", "[\"a\": 1, [b]: 2]\n"},
+
+		// Not after a plain scalar: the ':' belongs to the scalar. In a
+		// sequence that leaves one entry; in a mapping it leaves one key with
+		// no value, which is written back with the ':' that says so.
+		"plain key in a flow sequence": {"[ a:b ]\n", "[a:b]\n"},
+		"plain key in a flow mapping":  {"{ a:b }\n", "{a:b:}\n"},
+
+		// A ':' in front of what ends the entry closes the key wherever it is
+		// written: a plain scalar cannot hold one.
+		"absent value before a brace": {"{a:}\n", "{a:}\n"},
+		"absent value before a comma": {"{a:, b: 1}\n", "{a:, b: 1}\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
 		})
 	}
 }
