@@ -561,6 +561,7 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 				if start < 0 {
 					return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
 				}
+				start = withKeyProperties(ret, start)
 				if ret[start].Line() != mapKeyTk.Line() {
 					// An implicit key has to be a single-line node, so a
 					// collection spanning lines cannot be one. The line break
@@ -931,6 +932,25 @@ func flowCollectionStart(ret []*Token) int {
 	}
 
 	return -1
+}
+
+// withKeyProperties widens a key that starts at start to take in the anchors
+// and tags written before it on the same line.
+//
+// They are the key's, not the mapping's: the anchor of "&k [a, b]: v" names the
+// sequence used as the key. Left outside, it was read as naming the mapping the
+// entry belongs to -- silently, and as a second anchor on that mapping when the
+// mapping already had one of its own.
+func withKeyProperties(ret []*Token, start int) int {
+	for start > 0 && ret[start-1].Line() == ret[start].Line() {
+		prev := ret[start-1]
+		if prev.GroupType() != TokenGroupAnchorName && prev.Type() != token.TagType {
+			break
+		}
+		start--
+	}
+
+	return start
 }
 
 // precedesAbsentKey reports whether tk is punctuation that cannot itself be a
