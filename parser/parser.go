@@ -612,11 +612,21 @@ func (p *parser) parseMapKey(ctx *context, g *TokenGroup) (ast.MapKeyNode, error
 			return nil, errors.ErrSyntax("could not find value for mapping key", mapKeyTk.RawToken())
 		}
 
-		scalar, err := p.parseScalarValue(ctx, ctx.currentToken())
+		value, err := p.parseToken(ctx, ctx.currentToken())
 		if err != nil {
 			return nil, err
 		}
+		scalar, ok := value.(ast.MapKeyNode)
+		if !ok {
+			return nil, errors.ErrSyntax("cannot use this node as a map key", value.GetToken())
+		}
 		key.Value = scalar
+		if _, isScalar := value.(ast.ScalarNode); !isScalar {
+			// A collection used as a key has no path: neither YAMLPath nor
+			// JSON Pointer has syntax that reaches one, so it stays out of the
+			// path map rather than being given an invented address.
+			return key, nil
+		}
 		keyText := p.mapKeyText(scalar)
 		keyPath := ctx.withChild(keyText).path
 		key.SetPath(keyPath)
