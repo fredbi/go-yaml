@@ -54,7 +54,6 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 // Every remaining one is a document YAML allows that the parser refuses. The
 // parser no longer takes anything the spec forbids.
 const (
-	reasonNestedFlowKey = "a flow collection used as a mapping key is not read when it holds another collection used as a key"
 	reasonExplicitBlock = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
 	reasonFlowAdjacent  = "a quoted key with no space before its ':' is not read as a pair in flow context"
 	reasonBlockEnd      = "content after a block scalar is misattributed"
@@ -71,11 +70,10 @@ const (
 // are gone.
 //
 // Each entry below was reduced to the smallest document that reproduces it, and
-// no two share a cause: what is left is five separate defects rather than a
+// no two share a cause: what is left is four separate defects rather than a
 // group, and one entry apiece is what they are worth.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"nested-implicit-complex-keys":                    {wronglyRejected, reasonNestedFlowKey},
 	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowAdjacent},
 	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
 	"tabs-that-look-like-indentation/04":              {wronglyRejected, reasonTabLine},

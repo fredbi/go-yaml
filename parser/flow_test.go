@@ -49,6 +49,39 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 	}
 }
 
+// TestParseFlowCollectionsAsKeys covers a flow collection used as a mapping
+// key, nested inside another one used the same way.
+//
+// Once "[b]: d" is grouped as an entry, the group reports the type of the token
+// it opens with -- a '['. The search for where the enclosing key begins counted
+// that as one more open bracket with no ']' to match it, and gave up on the
+// document; a collection used as a key was readable only at the outermost
+// level.
+func TestParseFlowCollectionsAsKeys(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"one level":            {"[ [b]: d ]\n", "[[b]: d]\n"},
+		"two levels":           {"[ [[b]: d]: 23 ]\n", "[[[b]: d]: 23]\n"},
+		"beside other entries": {"[ [a, [ [[b,c]]: d, e]]: 23 ]\n", "[[a, [[[b, c]]: d, e]]: 23]\n"},
+		"in a flow mapping":    {"{ [[b]: d]: 23 }\n", "{[[b]: d]: 23}\n"},
+		"spanning lines":       {"[\n  [[b]: d]: 23\n]\n", "[[[b]: d]: 23]\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}
+
 // TestParseFlowComments covers comments written inside a flow collection.
 //
 // They used to be refused in one position, dropped in another, and in a third

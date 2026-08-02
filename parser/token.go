@@ -920,6 +920,12 @@ func closesFlowCollection(tk *Token) bool {
 func flowCollectionStart(ret []*Token) int {
 	var depth int
 	for i := len(ret) - 1; i >= 0; i-- {
+		if ret[i].GroupType() != TokenGroupNone {
+			// A group is balanced within itself, and reports the type of the
+			// token it opens with. A key already grouped as "[b]: d" would
+			// otherwise read as one more '[' with no ']' to match it.
+			continue
+		}
 		switch ret[i].Type() {
 		case token.MappingEndType, token.SequenceEndType:
 			depth++
