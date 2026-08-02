@@ -111,3 +111,37 @@ func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestParseWhitespaceOnlyLines covers a line that holds nothing but whitespace.
+//
+// It is a blank line however it is spelled. A tab cannot be indentation and is
+// refused where one is expected, which is right -- but on a line of its own
+// there is no indentation to refuse, only a gap between the entries around it.
+func TestParseWhitespaceOnlyLines(t *testing.T) {
+	valid := map[string]string{
+		"a line holding one tab":            "foo: 1\n\t\nbar: 2\n",
+		"a line mixing tabs and spaces":     "foo: 1\n\t \t\nbar: 2\n",
+		"a tab line inside a nested map":    "foo:\n  a: 1\n\t\n  b: 2\n",
+		"a tab line between sequence items": "- a\n\t\n- b\n",
+	}
+
+	for name, source := range valid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.NoErrorf(t, err, "rejected %q", source)
+		})
+	}
+
+	// And a tab that does stand in for indentation is still refused.
+	invalid := map[string]string{
+		"a tab before a mapping entry":  "foo: 1\n\tbar: 2\n",
+		"a tab before a sequence entry": "foo:\n\t- a\n",
+	}
+
+	for name, source := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.Errorf(t, err, "accepted %q", source)
+		})
+	}
+}

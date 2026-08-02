@@ -1580,14 +1580,26 @@ func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
 	return err
 }
 
-func (s *Scanner) scanTab(ctx *Context, c rune) error {
+// scanTab handles a tab that opens a line, where it cannot be indentation.
+// It reports whether it consumed the character.
+func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 	if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 		// tabs character is allowed in flow mode.
-		return nil
+		return false, nil
 	}
 
 	if !s.isFirstCharAtLine {
-		return nil
+		return false, nil
+	}
+
+	if _, blank := lineIndent(ctx.src[ctx.idx:]); blank {
+		// Nothing follows the tab but the end of the line. A line holding only
+		// whitespace is a blank line however it is spelled, and indents
+		// nothing: it separates the entries around it and belongs to neither.
+		ctx.addOriginBuf(c)
+		s.progressOnly(ctx, 1)
+
+		return true, nil
 	}
 
 	ctx.addBuf(c)
@@ -1599,7 +1611,8 @@ func (s *Scanner) scanTab(ctx *Context, c rune) error {
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
-	return err
+
+	return false, err
 }
 
 func (s *Scanner) scan(ctx *Context) error {
@@ -1771,8 +1784,12 @@ func (s *Scanner) scan(ctx *Context) error {
 				s.progressOnly(ctx, 1)
 				continue
 			}
-			if err := s.scanTab(ctx, c); err != nil {
+			scanned, err := s.scanTab(ctx, c)
+			if err != nil {
 				return err
+			}
+			if scanned {
+				continue
 			}
 		}
 		ctx.addBuf(c)

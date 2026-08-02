@@ -56,7 +56,6 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 const (
 	reasonExplicitBlock = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
 	reasonBlockEnd      = "content after a block scalar is misattributed"
-	reasonTabLine       = "a line holding only a tab is read as indentation"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
@@ -69,12 +68,11 @@ const (
 // are gone.
 //
 // Each entry below was reduced to the smallest document that reproduces it, and
-// no two share a cause: what is left is three separate defects rather than a
+// no two share a cause: what is left is two separate defects rather than a
 // group, and one entry apiece is what they are worth.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
 	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
-	"tabs-that-look-like-indentation/04":              {wronglyRejected, reasonTabLine},
 	"various-combinations-of-explicit-block-mappings": {wronglyRejected, reasonExplicitBlock},
 
 	// Documents YAML 1.2 forbids that the parser takes.
