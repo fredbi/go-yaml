@@ -290,12 +290,14 @@ func checkLineBreak(t *token.Token) bool {
 		lbc := "\n"
 		prev := t.Prev
 		var adjustment int
-		// if the previous type is sequence entry use the previous type for that
+		// A sequence entry's '-' says nothing about a gap: the gap the author
+		// left is above the '-', so the comparison steps back past it. The
+		// lines between the '-' and t are then the entry's own layout --
+		// -
+		//   b: c
+		// -- and not part of that gap.
 		if prev.Type == token.SequenceEntryType {
-			// as well as switching to previous type count any new lines in origin to account for:
-			// -
-			//   b: c
-			adjustment = strings.Count(strings.TrimRight(t.Origin, lbc), lbc)
+			adjustment = t.Position.Line - prev.Position.Line
 			if prev.Prev != nil {
 				prev = prev.Prev
 			}

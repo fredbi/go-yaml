@@ -155,9 +155,13 @@ func TestRendererBlockScalarIndentation(t *testing.T) {
 // many times the document is read and written.
 func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 	tests := map[string]string{
-		"between mapping entries": "a: 1\n\nb: 2\n",
-		"between nested entries":  "a:\n  b: 1\n\n  c: 2\n",
-		"above a head comment":    "a:\n- b: 1\n\n# c\n- c: 2\n",
+		"between mapping entries":  "a: 1\n\nb: 2\n",
+		"between nested entries":   "a:\n  b: 1\n\n  c: 2\n",
+		"above a head comment":     "a:\n- b: 1\n\n# c\n- c: 2\n",
+		"between mapping items":    "- a: 1\n\n- b: 2\n",
+		"between scalar items":     "- a\n\n- b\n",
+		"between flow items":       "- [a]\n\n- [b]\n",
+		"between multi-line items": "- a: 1\n  b: 2\n\n- c: 3\n",
 	}
 
 	for name, source := range tests {
@@ -177,6 +181,18 @@ func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.NotContains(t, ast.NewRenderer().File(file), "\n\n")
+	})
+
+	// An entry whose '-' sits on a line of its own occupies both lines. The
+	// second is the entry's layout, not a gap above the entry after it.
+	t.Run("not for an entry written under its dash", func(t *testing.T) {
+		for _, source := range []string{"-\n  a\n-\n  b\n", "-\n  a: 1\n-\n  ? b\n"} {
+			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			require.NoError(t, err)
+
+			assert.NotContainsf(t, ast.NewRenderer().File(file), "\n\n",
+				"invented a blank line rendering %q", source)
+		}
 	})
 }
 
