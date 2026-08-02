@@ -177,6 +177,13 @@ func (p *parser) parseDocumentBody(ctx *context) (ast.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Comments may trail what the document holds -- between a directive and the
+	// '---' below it, most often. They are not a second value.
+	if comment := p.parseFootComment(ctx, 1); comment != nil {
+		if err := setHeadComment(comment, node); err != nil {
+			return nil, err
+		}
+	}
 	if ctx.next() {
 		return nil, errors.ErrSyntax("value is not allowed in this context", ctx.currentToken().RawToken())
 	}
