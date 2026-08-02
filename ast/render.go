@@ -118,6 +118,8 @@ func (r *Renderer) String(n Node) string {
 		return r.literal(node)
 	case *StringNode:
 		return r.stringNode(node)
+	case *DirectiveNode:
+		return r.directive(node)
 	case *CommentGroupNode:
 		return r.commentGroup(node)
 	default:
@@ -570,6 +572,26 @@ func carriesOwnIndent(n Node) bool {
 	default:
 		return false
 	}
+}
+
+// directive renders a directive and the comment lines that followed it.
+//
+// Those sit between the directive and the '---' below, which is where they were
+// written and the only place they can go: a directive is one line, so there is
+// nothing to append them to.
+func (r *Renderer) directive(n *DirectiveNode) string {
+	if !r.comments || n.Comment == nil {
+		return n.String()
+	}
+
+	comment := r.String(n.Comment)
+	if commentTk := n.Comment.GetToken(); commentTk != nil && commentTk.Position != nil &&
+		n.Start != nil && commentTk.Position.Line < n.Start.Position.Line {
+		// Written above the directive rather than below it.
+		return comment + "\n" + n.String()
+	}
+
+	return n.String() + "\n" + comment
 }
 
 func (r *Renderer) commentGroup(n *CommentGroupNode) string {

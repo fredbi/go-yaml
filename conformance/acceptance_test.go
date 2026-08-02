@@ -57,7 +57,6 @@ const (
 	reasonComplexKey = "a collection or an explicit '?' key is not accepted as a mapping key"
 	reasonFlowBreak  = "inside a flow mapping, a line break between a key and its ':' is legal but rejected"
 	reasonFlowNote   = "a comment inside a flow collection ends the collection"
-	reasonDirective  = "an unknown or reserved directive is rejected rather than ignored"
 	reasonBlockEnd   = "content after a block scalar is misattributed"
 	reasonTabLine    = "a line holding only a tab is read as indentation"
 )
@@ -81,21 +80,15 @@ var acceptanceLedger = map[string]ledgerEntry{
 	"anchors-on-empty-scalars":              {wronglyRejected, reasonComplexKey},
 	"comment-in-flow-sequence-before-comma": {wronglyRejected, reasonFlowNote},
 	//nolint:misspell // "seperated" is the spelling of the fixture name in the YAML Test Suite
-	"flow-collections-over-many-lines/01":                   {wronglyRejected, reasonFlowBreak},
-	"flow-mapping-colon-on-line-after-key/02":               {wronglyRejected, reasonFlowBreak},
-	"mapping-key-and-flow-sequence-item-anchors":            {wronglyRejected, reasonComplexKey},
-	"nested-implicit-complex-keys":                          {wronglyRejected, reasonComplexKey},
-	"single-pair-implicit-entries":                          {wronglyRejected, reasonFlowNote},
-	"spec-example-6-13-reserved-directives":                 {wronglyRejected, reasonDirective},
-	"spec-example-6-13-reserved-directives-1-3":             {wronglyRejected, reasonDirective},
-	"spec-example-6-14-yaml-directive":                      {wronglyRejected, reasonDirective},
-	"spec-example-8-10-folded-lines-8-13-final-empty-lines": {wronglyRejected, reasonBlockEnd},
-	"spec-example-8-8-literal-content":                      {wronglyRejected, reasonBlockEnd},
-	"spec-example-8-8-literal-content-1-3":                  {wronglyRejected, reasonBlockEnd},
-	"spec-example-9-3-bare-documents":                       {wronglyRejected, reasonBlockEnd},
-	"tabs-that-look-like-indentation/04":                    {wronglyRejected, reasonTabLine},
-	"tags-on-empty-scalars":                                 {wronglyRejected, reasonComplexKey},
-	"various-combinations-of-explicit-block-mappings":       {wronglyRejected, reasonComplexKey},
+	"flow-collections-over-many-lines/01":             {wronglyRejected, reasonFlowBreak},
+	"flow-mapping-colon-on-line-after-key/02":         {wronglyRejected, reasonFlowBreak},
+	"mapping-key-and-flow-sequence-item-anchors":      {wronglyRejected, reasonComplexKey},
+	"nested-implicit-complex-keys":                    {wronglyRejected, reasonComplexKey},
+	"single-pair-implicit-entries":                    {wronglyRejected, reasonFlowNote},
+	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
+	"tabs-that-look-like-indentation/04":              {wronglyRejected, reasonTabLine},
+	"tags-on-empty-scalars":                           {wronglyRejected, reasonComplexKey},
+	"various-combinations-of-explicit-block-mappings": {wronglyRejected, reasonComplexKey},
 
 	// Documents YAML 1.2 forbids that the parser takes.
 }

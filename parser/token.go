@@ -649,6 +649,16 @@ func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 				valueTks = append(valueTks, tokens[j])
 				i++
 			}
+			// A directive may be followed by comment lines before the '---' that
+			// opens the document. They belong to neither, and are the reason a
+			// perfectly ordinary "%YAML 1.2" with a note above the header was
+			// refused whenever comments were being parsed.
+			var comments []*Token
+			for j := i + 1; j < len(tokens) && tokens[j].Type() == token.CommentType; j++ {
+				comments = append(comments, tokens[j])
+				i++
+			}
+
 			if i+1 >= len(tokens) || tokens[i+1].Type() != token.DocumentHeaderType {
 				return nil, errors.ErrSyntax("unexpected directive value. document not started", tk.RawToken())
 			}
@@ -662,6 +672,7 @@ func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 			} else {
 				ret = append(ret, directiveName)
 			}
+			ret = append(ret, comments...)
 		default:
 			ret = append(ret, tk)
 		}
