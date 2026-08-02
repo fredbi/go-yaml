@@ -1170,17 +1170,57 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if tk != nil {
 		s.lastDelimColumn = tk.Position.Column
 		ctx.addToken(tk)
-	} else if tk := ctx.lastToken(); tk != nil {
-		// If the map key is quote, the buffer does not exist because it has already been cut into tokens.
-		// Therefore, we need to check the last token.
-		if tk.Indicator == token.QuotedScalarIndicator {
-			s.lastDelimColumn = tk.Position.Column
-		}
+	} else if col := keyStartColumn(ctx.tokens); col > 0 {
+		// The buffer is empty because the key has already been cut into tokens:
+		// it is quoted, or it is an empty scalar carrying an anchor, an alias or
+		// a tag. What the following lines are measured against is where the key
+		// begins, so for "&a :" that is the '&' and not the name after it.
+		s.lastDelimColumn = col
 	}
 	ctx.addToken(token.MappingValue(s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true, nil
+}
+
+// keyStartColumn reports the column a map key made only of already-cut tokens
+// begins at, or 0 when the tokens do not form such a key.
+//
+// A quoted scalar is one token and starts where it stands. An anchor, an alias
+// or a tag may carry an empty scalar, and then the key is the run of them: the
+// key of "&a : v" begins at the '&', two tokens before the ':'.
+func keyStartColumn(tokens token.Tokens) int {
+	last := len(tokens) - 1
+	if last < 0 {
+		return 0
+	}
+
+	line := tokens[last].Position.Line
+	column := tokens[last].Position.Column
+	found := tokens[last].Indicator == token.QuotedScalarIndicator || isPropertyToken(tokens[last])
+
+	for i := last - 1; i >= 0 && tokens[i].Position.Line == line; i-- {
+		if !isPropertyToken(tokens[i]) {
+			break
+		}
+		column = tokens[i].Position.Column
+		found = true
+	}
+	if !found {
+		return 0
+	}
+	return column
+}
+
+// isPropertyToken reports whether tk introduces a node property: an anchor, an
+// alias or a tag. Each may stand alone, with the empty scalar as its node.
+func isPropertyToken(tk *token.Token) bool {
+	switch tk.Type {
+	case token.AnchorType, token.AliasType, token.TagType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Scanner) scanDocumentStart(ctx *Context) bool {

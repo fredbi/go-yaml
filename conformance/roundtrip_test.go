@@ -43,11 +43,6 @@ const (
 	// bare line break, which folds back to a space when read again.
 	reasonFoldedNewline = "a line break inside a quoted scalar is rendered so that reading it back folds it to a space"
 
-	// Not a rendering defect: the renderer writes a tag whose value is empty
-	// the way the source did, and the parser will not read it back inside a
-	// flow mapping. It belongs with the acceptance work.
-	reasonEmptyTagInFlow = "a tag with no value is not accepted inside a flow mapping, though rendering writes it as the source did"
-
 	// The comment reaches both the key and the value, and rendering writes it
 	// in both places, so the document gains a comment on every cycle.
 	reasonExplicitKeyComment = "a comment on an explicit key is written both on the key line and on the ':' line"
@@ -65,16 +60,12 @@ const (
 // cause: rendering placed a child at the column its token was read at, so every
 // cycle added a little more indentation and no document ever settled. Laying
 // documents out by depth removed that cause and everything that followed from
-// it. What is left is four distinct defects, one of which -- the tag with no
-// value inside a flow mapping -- is not a rendering defect at all: the parser
-// refuses text the renderer produced correctly, so it belongs with the
-// acceptance work.
+// it. What is left is two distinct defects.
 var roundTripLedger = map[string]struct {
 	outcome outcome
 	reason  string
 }{
 	// The rendered document no longer parses.
-	"spec-example-7-2-empty-content":               {unreadable, reasonEmptyTagInFlow},
 	"various-empty-or-newline-only-quoted-strings": {unreadable, reasonFoldedNewline},
 
 	// The rendered document parses, but does not render the same way twice.

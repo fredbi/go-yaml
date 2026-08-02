@@ -36,9 +36,20 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 			source: "? &e\n: &a\n",
 			want:   "? &e\n: &a\n",
 		},
+		// The space before the ':' is not decoration: ':' is a legal anchor
+		// character, so "&a: a" anchors the name "a:" over the scalar a and is
+		// not a mapping at all.
 		"as a mapping key": {
 			source: "&a : a\n",
-			want:   "&a: a\n",
+			want:   "&a : a\n",
+		},
+		"as a mapping key nested under another": {
+			source: "x:\n  &a : a\n  b: 1\n",
+			want:   "x:\n  &a : a\n  b: 1\n",
+		},
+		"as a mapping key in a sequence entry": {
+			source: "-\n  &a : a\n  b: 1\n",
+			want:   "- &a : a\n  b: 1\n",
 		},
 		"as a sequence entry": {
 			source: "- &a\n- a\n",

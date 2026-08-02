@@ -59,41 +59,72 @@ func TestParseTagsOnEmptyScalars(t *testing.T) {
 	}
 }
 
-// TestParseEmptyKeysWithAnchorsAndTags pins the one position an anchored or
-// tagged empty scalar is still refused in, so that fixing it is noticed.
+// TestParseEmptyKeysCarryingProperties covers a key that is nothing but an
+// anchor, an alias or a tag, in the positions such a key may appear in.
 //
-// The key is accepted at the top level of a document but not inside a nested
-// block mapping with a sibling entry below it. Both anchors and tags fail the
-// same way and at the same place, on a check that compares the key's line and
-// column with the token after it -- the positions of the null node standing in
-// for the empty scalar are what mislead it, so this is about that node rather
-// than about anchors or tags.
-func TestParseEmptyKeysWithAnchorsAndTags(t *testing.T) {
-	accepted := map[string]string{
-		"anchored key at the top level": "&a : a\n",
-		"tagged key at the top level":   "!!null : a\n",
-		"tagged key and tagged value":   "!!str : !!null\n",
+// Nested in a block collection these used to be refused. The key is cut into
+// tokens before the ':' is reached, and the scanner then had no column to
+// measure the following lines against, so the line below the entry was read as
+// a continuation of its value rather than as the next entry.
+func TestParseEmptyKeysCarryingProperties(t *testing.T) {
+	sources := map[string]string{
+		"anchored, at the top level":       "&a : a\n",
+		"tagged, at the top level":         "!!null : a\n",
+		"tagged key and tagged value":      "!!str : !!null\n",
+		"anchored, nested under a key":     "x:\n  &a : a\n  b: 1\n",
+		"tagged, nested under a key":       "x:\n  !!null : a\n  b: 1\n",
+		"anchored, in a sequence entry":    "-\n  &a : a\n  b: 1\n",
+		"tagged, in a sequence entry":      "-\n  !!null : a\n  b: 1\n",
+		"quoted, nested under a key":       "x:\n  \"q\" : a\n  b: 1\n",
+		"aliased, nested under a key":      "k: &r v\nx:\n  *r : a\n  b: 1\n",
+		"anchored, in a flow mapping":      "{&a : 1, b: 2}\n",
+		"anchored, as an explicit key":     "x:\n  ? &a\n  : a\n  b: 1\n",
+		"anchored, with a sibling further": "x:\n  &a : a\n  b: 1\n  c: 2\n",
 	}
 
-	for name, source := range accepted {
+	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
-			assert.NoErrorf(t, err, "rejected %q", source)
+			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			require.NoErrorf(t, err, "rejected %q", source)
+
+			// The entry below the key is a sibling of it, not part of its value.
+			assert.NotContainsf(t, file.String(), "a b",
+				"%q read the next line as a continuation", source)
 		})
 	}
+}
 
-	refused := map[string]string{
-		"anchored key nested under a key":  "x:\n  &a : a\n  b: 1\n",
-		"tagged key nested under a key":    "x:\n  !!null : a\n  b: 1\n",
-		"anchored key in a sequence entry": "-\n  &a : a\n  b: 1\n",
-		"tagged key in a sequence entry":   "-\n  !!null : a\n  b: 1\n",
+// TestRenderPropertyKeysKeepTheirSeparator covers the space between such a key
+// and its ':'.
+//
+// ':' is a legal character in an anchor name, an alias name and a tag, so a key
+// that ends on one absorbs a ':' written straight after it: "&a: v" anchors the
+// name "a:" over the scalar v, where "&a : v" anchors the empty key of a
+// mapping. Dropping the space changes what the document means.
+func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"anchor on the empty key": {source: "&a : v\n", want: "&a : v\n"},
+		"tag on the empty key":    {source: "!!str : v\n", want: "!!str : v\n"},
+		"alias as the key":        {source: "k: &r v\n*r : a\n", want: "k: &r v\n*r : a\n"},
+		"anchor and empty value":  {source: "-\n  &c : &a\n", want: "- &c : &a\n"},
+
+		// A scalar after the property ends the key, and then the ':' is its own.
+		"anchor on a named key": {source: "&a k : v\n", want: "&a k: v\n"},
+		"tag on a named key":    {source: "!!str k : v\n", want: "!!str k: v\n"},
 	}
 
-	for name, source := range refused {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
-			assert.Errorf(t, err,
-				"%q is accepted now -- move it to the accepted set above", source)
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
 		})
 	}
 }
