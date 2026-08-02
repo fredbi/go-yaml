@@ -38,11 +38,6 @@ func (o outcome) String() string {
 
 // The reasons a document fails to survive a round trip.
 const (
-	// The severe one, despite being the smallest group: the value changes.
-	// A blank line encoding a newline inside a quoted scalar is rendered as a
-	// bare line break, which folds back to a space when read again.
-	reasonFoldedNewline = "a line break inside a quoted scalar is rendered so that reading it back folds it to a space"
-
 	// The comment reaches both the key and the value, and rendering writes it
 	// in both places, so the document gains a comment on every cycle.
 	reasonExplicitKeyComment = "a comment on an explicit key is written both on the key line and on the ':' line"
@@ -56,21 +51,18 @@ const (
 // comments and anchors intact -- is one of the reasons this library exists, and
 // these are the documents where it does not hold.
 //
-// The list used to be four times this length, and two thirds of it had one
+// The list used to be five times this length, and two thirds of it had one
 // cause: rendering placed a child at the column its token was read at, so every
 // cycle added a little more indentation and no document ever settled. Laying
 // documents out by depth removed that cause and everything that followed from
-// it. What is left is two distinct defects.
+// it. One document is left, and it drifts by gaining a comment rather than by
+// losing anything: every document the parser accepts still renders back to the
+// value it was read from.
 var roundTripLedger = map[string]struct {
 	outcome outcome
 	reason  string
 }{
-	// The rendered document no longer parses.
-	"various-empty-or-newline-only-quoted-strings": {unreadable, reasonFoldedNewline},
-
 	// The rendered document parses, but does not render the same way twice.
-	"spec-example-7-9-single-quoted-lines":             {drifting, reasonFoldedNewline},
-	"spec-example-7-9-single-quoted-lines-1-3":         {drifting, reasonFoldedNewline},
 	"spec-example-8-17-explicit-block-mapping-entries": {drifting, reasonExplicitKeyComment},
 }
 
