@@ -21,6 +21,13 @@ func WithIndent(spaces int) RenderOption {
 	}
 }
 
+// WithIndentSequence controls whether a block sequence under a mapping key is
+// indented beneath it. It is not, by default, which is the customary YAML
+// layout and what this library has always emitted.
+func WithIndentSequence(on bool) RenderOption {
+	return func(r *Renderer) { r.indentSequence = on }
+}
+
 // WithComments controls whether comments are written. They are, by default.
 func WithComments(on bool) RenderOption {
 	return func(r *Renderer) { r.comments = on }
@@ -38,8 +45,9 @@ func WithComments(on bool) RenderOption {
 // from stale positions produced a document that drifted a little further on
 // every cycle. Rendering here reaches a fixed point after one pass.
 type Renderer struct {
-	indent   int
-	comments bool
+	indent         int
+	comments       bool
+	indentSequence bool
 }
 
 // NewRenderer returns a Renderer with two-space indentation and comments on.
@@ -188,6 +196,13 @@ func (r *Renderer) value(n Node, key string) string {
 	if r.fitsOnKeyLine(n) {
 		return " " + text
 	}
+	if _, isSequence := n.(*SequenceNode); isSequence && !r.indentSequence {
+		// A block sequence under a mapping key sits at the key's own
+		// indentation unless asked otherwise: "key:" then "- item" in column
+		// one of the key's level. Both layouts are legal; this is the one YAML
+		// is usually written in.
+		return "\n" + text
+	}
 
 	return "\n" + r.indented(text)
 }
@@ -271,6 +286,10 @@ func (r *Renderer) prefixed(marker string, value Node) string {
 		return marker
 	}
 	if r.startsBlock(value) {
+		if _, isSequence := value.(*SequenceNode); isSequence && !r.indentSequence {
+			return marker + "\n" + text
+		}
+
 		return marker + "\n" + r.indented(text)
 	}
 
