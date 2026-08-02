@@ -1453,7 +1453,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		}
 	}
 	if s.column == 1 {
-		s.lastDelimColumn = 1
+		// A header at column 1 is the document's own node, which nothing
+		// encloses: its content has no level to be indented past, and may start
+		// at column 1 itself. Zero is the root, as everywhere else here.
+		s.lastDelimColumn = 0
 	}
 
 	commentIndex := strings.Index(string(ctx.obuf), "#")

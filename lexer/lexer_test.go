@@ -2487,7 +2487,7 @@ s: >-3
 					Type:          token.StringType,
 					CharacterType: token.CharacterTypeMiscellaneous,
 					Indicator:     token.NotIndicator,
-					Value:         "\n                text",
+					Value:         "\n                 text",
 					Origin:        "\n                  text\n",
 				},
 			},
@@ -3203,14 +3203,6 @@ a: |invalid`,
 		{
 			name: "invalid double-quoted",
 			src:  `a: "\"key\": \"value:\"`,
-		},
-		{
-			name: "invalid document folded",
-			src:  ">\n>",
-		},
-		{
-			name: "invalid document number",
-			src:  ">\n1",
 		},
 		{
 			name: "invalid document header option number",
