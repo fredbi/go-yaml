@@ -54,8 +54,7 @@ func (v verdict) diverges() bool { return v == wronglyAccepted || v == wronglyRe
 // Every remaining one is a document YAML allows that the parser refuses. The
 // parser no longer takes anything the spec forbids.
 const (
-	reasonExplicitBlock = "a block scalar is not accepted as the value of an explicit key whose key is a block sequence"
-	reasonBlockEnd      = "content after a block scalar is misattributed"
+	reasonBlockEnd = "content after a block scalar is misattributed"
 )
 
 // acceptanceLedger records every case where the parser disagrees with the YAML
@@ -67,13 +66,10 @@ const (
 // passed through here unremarked, and been handed on as if it were sound. They
 // are gone.
 //
-// Each entry below was reduced to the smallest document that reproduces it, and
-// no two share a cause: what is left is two separate defects rather than a
-// group, and one entry apiece is what they are worth.
+// One is left, reduced to the smallest document that reproduces it.
 var acceptanceLedger = map[string]ledgerEntry{
 	// Documents YAML 1.2 allows that the parser refuses.
-	"spec-example-9-3-bare-documents":                 {wronglyRejected, reasonBlockEnd},
-	"various-combinations-of-explicit-block-mappings": {wronglyRejected, reasonExplicitBlock},
+	"spec-example-9-3-bare-documents": {wronglyRejected, reasonBlockEnd},
 
 	// Documents YAML 1.2 forbids that the parser takes.
 }
