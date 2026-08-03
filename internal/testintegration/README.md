@@ -11,29 +11,43 @@ them.
 ## What is broken right now
 
 ```sh
-go test -v -run 'Outstanding|WronglyAccepted' ./internal/testintegration/yamlgen/
+go test -v -run 'Outstanding|WronglyAccepted|ValidDocuments' ./internal/testintegration/yamlgen/
 ```
 
 That is the work list. It passes either way — it reports rather than asserts,
 so a suite red for known reasons still gets read. The `-v` is not optional: `go
 test` swallows the report without it.
 
-Two kinds of entry come out, and they fail in opposite directions:
+Three kinds of entry come out. The first two fail in opposite directions; the
+third differs by how it was found rather than by what it says:
 
 | | The library is | Where it is recorded |
 |---|---|---|
 | `still failing` | too strict, or reads a valid document wrongly | `yamlgen.Ledger` |
 | `still read` | too lax — it reads a document that is not YAML | `yamlgen.Lax` |
+| `still refused` | too strict, on a document nothing here generates | `yamlgen.Strict` |
+
+`Ledger` names a *shape*, because the generator draws a different document
+every run and there is nothing to point at. `Lax` and `Strict` name
+*documents*: one that survived the mutation hunt, and one somebody met by hand
+while fixing something else.
+
+That last list exists because the harness cannot find its own blind spots. Every
+entry in it is a document the generator does not produce, so nothing here was
+watching it — and four of the five are an empty node standing where the
+generator only ever puts a full one.
 
 ## Fixing one
 
 Every entry names a document. Start there, not with the generator.
 
 1. Reproduce with the document alone. The pinned cases are in
-   `defects_test.go` and `laxity.go`, each small enough to paste.
+   `defects_test.go`, `laxity.go` and `strictness.go`, each small enough to
+   paste.
 2. Fix it.
-3. Run the work list again. The entry flips to `NOW HOLDS` or `NOW REFUSED`.
-4. Delete it — from `Ledger` or `Lax`, from the outstanding list, and from
+3. Run the work list again. The entry flips to `NOW HOLDS`, `NOW REFUSED` or
+   `NOW READ`.
+4. Delete it — from `Ledger`, `Lax` or `Strict`, from the outstanding list, and from
    `defects_test.go`. Move the case to `fixed_test.go`, which is where shapes
    the generator once found go to stay found.
 
@@ -93,6 +107,7 @@ accept documents that break them.
 | `yamlgen/mutate.go` | ways of breaking a document, for the laxity hunt |
 | `yamlgen/divergence.go` | `Ledger` — shapes the library gets wrong |
 | `yamlgen/laxity.go` | `Lax` — documents it should refuse and does not |
+| `yamlgen/strictness.go` | `Strict` — valid documents it refuses, found by hand |
 | `yamlgen/reduce.go` | shrinking a failure to something pasteable |
 | `grammar/` | the YAML 1.2 recognizer |
 
