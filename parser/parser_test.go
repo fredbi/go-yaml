@@ -1720,10 +1720,14 @@ baz:
 	if len(f.Docs) != 1 {
 		t.Fatal("failed to parse content with next line with sequence")
 	}
+	// The comment was written on the entry's own line and stays there. Moving
+	// it to a line of its own above the entry kept the text and lost what it
+	// was attached to: read back, it is the entry's head comment rather than
+	// its line comment, so the document does not settle.
 	expected := `
 foo:
-# comment
-- bar: 1
+- # comment
+  bar: 1
 baz:
 - xxx`
 	got := f.Docs[0].String()

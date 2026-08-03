@@ -170,9 +170,17 @@ func newTagNode(ctx *context, tk *Token) (*ast.TagNode, error) {
 func newSequenceNode(ctx *context, tk *Token, isFlow bool) (*ast.SequenceNode, error) {
 	node := ast.Sequence(tk.RawToken(), isFlow)
 	node.SetPath(ctx.path)
-	if err := setLineComment(ctx, node, tk); err != nil {
-		return nil, err
+	if isFlow {
+		// tk is the '[' that opens the collection, so a comment on it was
+		// written about the collection. A block sequence opens on the '-' of
+		// its first entry, and a comment there is that entry's -- read as the
+		// whole sequence's it came back twice, once at the head and once where
+		// it was written.
+		if err := setLineComment(ctx, node, tk); err != nil {
+			return nil, err
+		}
 	}
+
 	return node, nil
 }
 

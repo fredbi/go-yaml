@@ -4,7 +4,6 @@
 package yamlgen_test
 
 import (
-	"flag"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -17,37 +16,21 @@ import (
 
 // The three invariants a YAML library should hold, stated without excuses.
 //
-// The properties next door tolerate the ledger, because a suite that is red for
-// known reasons stops being read. These do not tolerate anything: they say what
-// the parser and renderer ought to do, and they fail today. That is what makes
-// them useful to somebody fixing a defect rather than to somebody guarding
-// against a regression.
+// They were written when they failed, guarded behind a flag so that a suite red
+// for known reasons would still be read. They hold now, and the ledger next
+// door is empty, so the guard is gone and these run like any other test.
 //
-// Run them with:
+// Worth running deeper than the default hundred checks before trusting them:
 //
-//	go test -run TestInvariant ./internal/testintegration/yamlgen/ -args -yamlgen.invariants -rapid.checks=10000
+//	go test -run TestInvariant ./internal/testintegration/yamlgen/ -args -rapid.checks=50000
 //
-// The flags go after -args because go test validates the ones it does not
-// recognize against the package in the current directory, which is not this
-// one. From this directory `go test -yamlgen.invariants .` works as written.
-//
-// Ten thousand checks rather than the default hundred: the rarer shapes are
-// drawn a few times in a hundred thousand, so a short run reports success it
-// has not earned.
+// The rarer shapes are drawn a few times in a hundred thousand, so a short run
+// reports a success it has not earned. The flags go after -args because go test
+// validates the ones it does not recognize against the package in the current
+// directory, which is not this one.
 //
 // Every failure arrives reduced to the smallest document that still shows it,
-// with a test case to paste. When the last one passes, the ledger next door is
-// empty and these can simply replace the tolerant versions.
-var runInvariants = flag.Bool("yamlgen.invariants", false,
-	"assert the invariants the parser should hold, which currently fail")
-
-func requireInvariantMode(t *testing.T) {
-	t.Helper()
-
-	if !*runInvariants {
-		t.Skip("known to fail: pass -yamlgen.invariants to assert the invariants the parser should hold")
-	}
-}
+// with a test case to paste.
 
 // TestInvariantEveryPresentationReadsAsTheValue: writing one value down in any
 // style and reading it back gives that value.
@@ -57,8 +40,6 @@ func requireInvariantMode(t *testing.T) {
 // comes from the generator, so shrinking the document would change what it is
 // supposed to say. rapid shrinks the value and the style instead.
 func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -86,8 +67,6 @@ func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
 // This is the one the library's reason for existing rests on. A tool that
 // rewrites a file to change one field must not quietly change another.
 func TestInvariantRenderingPreservesTheValue(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -110,8 +89,6 @@ func TestInvariantRenderingPreservesTheValue(t *testing.T) {
 // time it is used, so every save produces a diff whether or not anything
 // changed.
 func TestInvariantRenderingSettles(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -131,27 +108,16 @@ func TestInvariantRenderingSettles(t *testing.T) {
 // TestInvariantsAreStillOutstanding reports which invariants fail today,
 // without failing itself.
 //
-// It runs in an ordinary test run, so the state of the work is visible without
-// anyone having to remember the flag. Each named document is one the generator
-// found and reduced; they are the same defects the ledger records, in the form
-// a fixer can act on.
+// The list is empty, and the machinery is kept for the next defect: a document
+// the generator finds and reduces goes here, where it names the invariant it
+// breaks and says so on every run until somebody fixes it. Nothing else in the
+// suite states an outstanding defect in a form a fixer can act on.
 func TestInvariantsAreStillOutstanding(t *testing.T) {
 	outstanding := []struct {
 		invariant string
 		src       string
 		fails     func([]byte) bool
-	}{
-		{
-			invariant: "rendering settles after one cycle",
-			src:       "-\n# c\n - x\n",
-			fails:     renderDoesNotSettle,
-		},
-		{
-			invariant: "rendering keeps every comment",
-			src:       "# c1\n-  # c2\n",
-			fails:     commentsAreLost,
-		},
-	}
+	}{}
 
 	var open int
 	for _, o := range outstanding {
@@ -165,6 +131,5 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 			o.invariant, o.src)
 	}
 
-	t.Logf("%d of %d known documents still violate an invariant; run with -yamlgen.invariants to search for more",
-		open, len(outstanding))
+	t.Logf("%d of %d known documents still violate an invariant", open, len(outstanding))
 }

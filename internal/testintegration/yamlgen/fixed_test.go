@@ -124,3 +124,47 @@ func TestFixedBlockScalarsRenderTheirChomping(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedCommentOnASequenceEntryStaysThere: a comment written on a sequence
+// entry's own line is kept on that line.
+//
+// It is recorded on the entry rather than on its value, because an entry whose
+// value is written below it -- or is not written at all -- has nothing on that
+// line to carry it. Rendering read only the values, so such a comment was
+// dropped; and the one on the first entry's dash was read a second time as the
+// whole sequence's comment, which is how it also reappeared at the head of the
+// document. Neither survived a second pass unchanged.
+func TestFixedCommentOnASequenceEntryStaysThere(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"on an entry with no value":      {"-  # c\n", "-  # c\n"},
+		"under a head comment":           {"# c1\n-  # c2\n", "# c1\n-  # c2\n"},
+		"beside a sibling":               {"-  # c\n- y\n", "-  # c\n- y\n"},
+		"on an entry holding a sequence": {"-  # c\n  - x\n", "- # c\n  - x\n"},
+		"on an entry holding a mapping":  {"-  # c\n  a: 1\n", "- # c\n  a: 1\n"},
+		"written below the dash":         {"-\n# c\n - x\n", "- # c\n  - x\n"},
+
+		// A scalar on the entry's line carries its own comment, and a block
+		// scalar's header is what shares the line -- a comment after it is
+		// where YAML puts one.
+		"on a scalar entry":      {"- x # c\n", "- x # c\n"},
+		"after a block header":   {"- | # c\n  x\n", "- | # c\n  x\n"},
+		"on a mapping entry key": {"k: # c\n  j: 1\n", "k: # c\n  j: 1\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+
+			rendered := file.String()
+			assert.Equal(t, test.want, rendered)
+
+			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			require.NoError(t, err, "the rendered document must still parse")
+			assert.Equal(t, rendered, reread.String(), "and rendering settles in one pass")
+		})
+	}
+}

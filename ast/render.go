@@ -460,13 +460,42 @@ func (r *Renderer) sequence(n *SequenceNode) string {
 			// else the sequence reads it off the entry's first token.
 			blank = blankLineBefore(value)
 		}
-		lines = append(lines, blank+"- "+text)
+		comment := r.entryLineComment(n, i)
+		if comment != "" && !r.fitsOnKeyLine(value) && !carriesOwnIndent(value) {
+			// Everything after the '#' is commented out, so a value that would
+			// share the dash's line goes below it instead. A block scalar is
+			// exempt: its header is all that shares the line, and a comment
+			// after the header is where YAML puts one.
+			lines = append(lines, blank+"-"+comment, r.indented(r.String(value)))
+
+			continue
+		}
+		lines = append(lines, blank+"- "+text+comment)
 	}
 	if r.comments && n.FootComment != nil {
 		lines = append(lines, r.String(n.FootComment))
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// entryLineComment returns the comment written on the entry's own line.
+//
+// It is recorded on the entry rather than on its value, because an entry whose
+// value is written below it -- or is not written at all -- has nothing on that
+// line to carry it. Reading the entries is the only way to find it, and not
+// reading them is how such a comment used to be dropped.
+func (r *Renderer) entryLineComment(n *SequenceNode, i int) string {
+	if !r.comments || i >= len(n.Entries) || n.Entries[i] == nil {
+		return ""
+	}
+
+	comment := n.Entries[i].LineComment
+	if comment == nil {
+		return ""
+	}
+
+	return " " + r.String(comment)
 }
 
 func (r *Renderer) anchor(n *AnchorNode) string {
