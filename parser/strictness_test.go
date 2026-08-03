@@ -96,6 +96,21 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "[&a {1: 2}]\n",
 		},
 
+		// A directive opens a line and nothing else does, so a '%' anywhere
+		// else is not one -- and it cannot open a plain scalar either.
+		"percent sign as a value": {
+			invalid: " k: %\n",
+			valid:   " k: a%b\n",
+		},
+		"percent sign as a sequence entry": {
+			invalid: " - %\n",
+			valid:   " - 100%\n",
+		},
+		"percent sign opening a block value": {
+			invalid: "k:\n  %\n",
+			valid:   "%YAML 1.2\n---\nk: 1\n",
+		},
+
 		// A plain scalar cannot open on an indicator. Inside one they are
 		// ordinary characters, and inside a flow collection they are claimed
 		// before a scalar could begin -- so an anchor on an empty node keeps

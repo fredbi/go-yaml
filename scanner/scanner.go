@@ -1674,7 +1674,11 @@ func (s *Scanner) scanDirective(ctx *Context) bool {
 	if ctx.existsBuffer() {
 		return false
 	}
-	if s.indentNum != 0 {
+	if s.column != 1 {
+		// c-directive opens a line and nothing else does, so a '%' anywhere
+		// else is not one. Measured by the indentation count before, which is
+		// zero for a '%' that opens a line and also for one written after a
+		// key on a line that carries no indentation of its own.
 		return false
 	}
 
@@ -2012,6 +2016,9 @@ func (s *Scanner) scan(ctx *Context) error {
 		case '%':
 			if s.scanDirective(ctx) {
 				continue
+			}
+			if err := s.scanPlainFirst(ctx, c); err != nil {
+				return err
 			}
 		case '?':
 			if s.scanMapKey(ctx) {
