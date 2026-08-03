@@ -60,6 +60,8 @@ func TestWronglyAcceptedDocumentsAreStillWronglyAccepted(t *testing.T) {
 			open++
 			assert.Equalf(t, l.Reads, got,
 				"%q is still read, but as something else than it was; the entry's Reads is stale", l.Src)
+
+			t.Logf("still read -- %s: %q as %#v", l.Name, l.Src, l.Reads)
 		})
 	}
 
