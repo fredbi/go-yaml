@@ -10,6 +10,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -57,6 +58,38 @@ func renderDoesNotSettle(src []byte) bool {
 	}
 
 	return second.String() != once
+}
+
+// TestRenderWritesValidYAML asks the grammar what the library cannot be asked:
+// is the text the renderer produced a YAML document at all.
+//
+// Re-reading it, which is what every other test here does, cannot answer that.
+// A renderer and a parser that make the same mistake agree with each other, and
+// a round trip through both of them is green while the file on disk is one no
+// other tool will read. Only something outside the library can tell.
+//
+// It holds today, and that is worth stating: both open render divergences write
+// perfectly valid documents that mean something other than what went in, which
+// is a defect in what the renderer chose to say and not in how it said it.
+func TestRenderWritesValidYAML(t *testing.T) {
+	oracle := grammar.NewRecognizer(1024)
+
+	rapid.Check(t, func(rt *rapid.T) {
+		value := yamlgen.Values().Draw(rt, "value")
+		style := yamlgen.Styles().Draw(rt, "style")
+		src := yamlgen.Emit(value, style)
+
+		file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+		if err != nil {
+			return
+		}
+
+		rendered := file.String()
+		if !oracle.Stream([]byte(rendered)).OK {
+			rt.Fatalf("style %s: rendering wrote something that is not YAML 1.2.\nfrom:\n%s\nto:\n%s",
+				style, indent(src), indent(rendered))
+		}
+	})
 }
 
 // TestRenderPreservesValue is the property that matters most for a library

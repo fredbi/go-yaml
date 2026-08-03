@@ -12,6 +12,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
@@ -57,16 +58,46 @@ func TestPresentationInvariance(t *testing.T) {
 	tally.report(t, yamlgen.Decode)
 }
 
+// TestEveryEmittedDocumentIsValidYAML gates the emitter against the grammar
+// rather than against the library.
+//
+// This is the one test here whose failures are always ours. The emitter decides
+// how to write a value down; the YAML 1.2 grammar decides whether that is a
+// document at all. Neither of them is the code under test, so a disagreement is
+// an emitter defect and there is no ledger entry to hide behind.
+//
+// It has already earned its place. The emitter refused control characters in
+// unquoted scalars but let the byte order mark through, because U+FEFF is not a
+// control character -- and nb-char excludes it, so those documents were not
+// YAML. Every property test was green throughout: the library reads them, and
+// reading them back gives the value.
+func TestEveryEmittedDocumentIsValidYAML(t *testing.T) {
+	oracle := grammar.NewRecognizer(1024)
+
+	rapid.Check(t, func(rt *rapid.T) {
+		value := yamlgen.Values().Draw(rt, "value")
+		style := yamlgen.Styles().Draw(rt, "style")
+
+		src := yamlgen.Emit(value, style)
+
+		if !oracle.Stream([]byte(src)).OK {
+			rt.Fatalf("style %s wrote something that is not YAML 1.2:\n%s", style, indent(src))
+		}
+	})
+}
+
 // TestEmitParses is the weaker half of the same idea, kept separate because it
 // fails for a different reason: whatever the value, every style has to produce
 // something the parser will read.
 //
-// A failure here is a document the emitter believes is valid YAML and the
-// library does not, which is either an emitter defect or a parser defect. The
-// grammar oracle is what will tell the two apart; until then it is worth
-// knowing that the disagreement exists.
+// With the grammar to hand, a failure here says which side is wrong rather than
+// only that the two disagree. The emitter is gated above, so a document that
+// reaches this point is valid YAML 1.2 and the refusal to read it is the
+// library's -- which is what makes an entry in the ledger a parser defect
+// rather than a note that something, somewhere, does not line up.
 func TestEmitParses(t *testing.T) {
 	tally := newTally()
+	oracle := grammar.NewRecognizer(1024)
 
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
@@ -84,12 +115,21 @@ func TestEmitParses(t *testing.T) {
 		}
 
 		if err != nil {
-			rt.Fatalf("style %s produced a document that does not parse:\n%s\n---\nerror: %v",
-				style, src, err)
+			rt.Fatalf("style %s produced a document that does not parse, and %s:\n%s\n---\nerror: %v",
+				style, verdict(oracle, src), indent(src), err)
 		}
 	})
 
 	tally.report(t, yamlgen.Parses)
+}
+
+// verdict names which side of a disagreement to look at first.
+func verdict(oracle *grammar.Recognizer, src string) string {
+	if oracle.Stream([]byte(src)).OK {
+		return "the YAML 1.2 grammar accepts it, so the fault is the parser's"
+	}
+
+	return "the YAML 1.2 grammar rejects it too, so the fault is the emitter's"
 }
 
 // TestEmitterAgreesOnKnownDocuments guards the emitter itself.
@@ -166,6 +206,11 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, yamlgen.Emit(tc.value, tc.style))
+
+			// A hand-written expectation is as capable of not being YAML as a
+			// generated one, and rather more likely to be believed.
+			assert.Truef(t, grammar.Stream([]byte(tc.want)).OK,
+				"the expected document is not valid YAML 1.2:\n%s", indent(tc.want))
 
 			var got any
 			require.NoError(t, yaml.Unmarshal([]byte(tc.want), &got))

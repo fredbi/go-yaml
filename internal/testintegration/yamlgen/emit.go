@@ -378,20 +378,46 @@ func canPlain(s string) bool {
 	return true
 }
 
-// canSingle reports whether a single-quoted scalar written on one line
-// reproduces s exactly. Line breaks fold, so anything with one is out.
-func canSingle(s string) bool {
-	if s == "" || strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") {
-		return false
-	}
+// bom is the byte order mark, which YAML 1.2 admits at the start of a stream
+// and nowhere else: nb-char is c-printable less the line breaks and less this.
+//
+// It is easy to miss, because it is not a control character and so a check for
+// those lets it through -- into a single-quoted or block scalar that no reader
+// following the spec will accept, whatever this library does with it. Double
+// quoting escapes it, which is why that style needs no check.
+const bom = '\uFEFF'
 
+// writableRaw reports whether s can stand as itself, unescaped, in a scalar
+// whose only structure is its line breaks.
+func writableRaw(s string) bool {
 	for _, r := range s {
-		if r == '\n' || r == '\r' || r == '\t' || unicode.IsControl(r) {
+		if r != '\n' && (r == '\r' || r == bom || unicode.IsControl(r)) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// canSingle reports whether a single-quoted scalar written on one line
+// reproduces s exactly.
+//
+// Only two things stop it. A line break folds, so a string holding one comes
+// back as something else. A character the spec forbids cannot be written raw at
+// all, and single quotes escape nothing but the quote itself.
+//
+// Everything else the quotes take care of, which is the point of them: the
+// delimiters are what make leading and trailing whitespace survive, so refusing
+// those was refusing the case this style exists to handle. It used to refuse
+// them, and tabs, and the empty string -- a third of all drawn strings fell
+// back to double quotes for no reason, taking with them exactly the shapes this
+// library has had defects in.
+func canSingle(s string) bool {
+	if strings.ContainsAny(s, "\n\r") {
+		return false
+	}
+
+	return writableRaw(s)
 }
 
 // canLiteral reports whether s can be written as a literal block scalar.
@@ -424,13 +450,7 @@ func canLiteral(s string, indicator bool) bool {
 		}
 	}
 
-	for _, r := range s {
-		if r != '\n' && (r == '\r' || unicode.IsControl(r)) {
-			return false
-		}
-	}
-
-	return true
+	return writableRaw(s)
 }
 
 // doubleQuote writes s as a double-quoted scalar, which can express any string.
@@ -451,7 +471,7 @@ func doubleQuote(s string) string {
 		case '\r':
 			b.WriteString(`\r`)
 		default:
-			if unicode.IsControl(r) {
+			if r == bom || unicode.IsControl(r) {
 				fmt.Fprintf(&b, `\u%04X`, r)
 
 				continue
@@ -542,11 +562,5 @@ func canFolded(s string) bool {
 		}
 	}
 
-	for _, r := range s {
-		if r != '\n' && (r == '\r' || unicode.IsControl(r)) {
-			return false
-		}
-	}
-
-	return true
+	return writableRaw(s)
 }

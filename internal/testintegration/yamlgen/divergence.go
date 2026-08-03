@@ -91,29 +91,31 @@ func (p Property) String() string {
 // actually diverged -- so an entry that has been fixed shows up as one that no
 // longer diverges, rather than sitting here forever.
 //
-// One entry, found by generating anchors: every other shape the generator has
-// drawn holds all four properties. That is a claim the property tests re-earn
-// on every run rather than a note about how things once stood -- a new
-// divergence fails because it is missing from here, and a fixed one fails
-// because it is still listed.
-// It is empty. Every shape the generator has drawn holds all four properties,
-// which is a claim the property tests re-earn on every run rather than a note
-// about how things once stood: a new divergence fails because it is missing
-// from here, and a fixed one fails because it is still listed.
+// Three entries, all of them block scalars. Every other shape the generator
+// draws holds all five properties, which is a claim the property tests re-earn
+// on every run rather than a note about how things once stood: a new divergence
+// fails because it is missing from here, and a fixed one fails because it is
+// still listed.
+//
+// Every entry here is a parser or renderer defect rather than an open question.
+// The emitter is gated against the YAML 1.2 grammar, so each of these documents
+// is known to be one the library is obliged to read.
 var Ledger = []Divergence{
 	{
-		Name: "a-kept-blank-line-under-a-stated-indent-is-rejected",
+		Name: "a-trailing-blank-line-under-a-stated-indent-is-rejected",
 		// The document is not read at all, so there is no value to compare and
 		// nothing to render: it fails the two questions asked before those.
 		Property: Parses | Decode,
-		Reason: "a block scalar whose header states its indentation and whose " +
-			"chomping keeps the trailing blank lines is rejected, because the " +
-			"blank lines carry no indentation of their own. An empty line is " +
-			"allowed to have less indentation than the header states -- l-empty " +
-			"admits s-indent(<n) -- and the same document without the indicator " +
-			"is accepted, as is one whose blank line is padded out to the stated " +
-			"width, and so is a blank line anywhere but the end. So the " +
-			"indicator and the trailing blank line are only rejected together",
+		Reason: "a block scalar whose header states its indentation is rejected " +
+			"when it ends on a blank line that is not padded out to the stated " +
+			"width. An empty line is allowed to have less indentation than the " +
+			"header states -- l-empty admits s-indent(<n), and the grammar " +
+			"accepts every one of these -- and the same document is accepted " +
+			"with the indicator dropped, with the blank line padded out, or with " +
+			"the blank line anywhere but the end. Chomping has nothing to do " +
+			"with it: |2 and |2+ are both rejected, and both are accepted once " +
+			"the line is padded. It is only the emitter that ties the two " +
+			"together, since a trailing blank line is what keep chomping is for",
 		Match: func(v Value, st Style) bool {
 			if st.Flow || !st.BlockIndicator {
 				return false

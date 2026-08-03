@@ -25,17 +25,38 @@ import (
 // point. It is not minimal in any formal sense; it is small enough to paste
 // into a bug report, which is the whole requirement.
 func Reduce(src []byte, interesting func([]byte) bool) []byte {
-	if !interesting(src) {
-		return src
-	}
-
 	// A candidate has to stay a document the emitter could have written. The
 	// byte and line passes are happy to produce ones it could not -- an alias
 	// whose anchor was on a line that got dropped, an anchor left sitting on an
 	// alias -- and those are interesting for reasons of their own, which is how
 	// a reduction arrives at a defect that has nothing to do with the one that
 	// was found.
-	within := func(b []byte) bool { return anchorsResolve(b) && interesting(b) }
+	return reduce(src, anchorsResolve, interesting)
+}
+
+// ReduceMutant shrinks a document that is not YAML, without holding it to the
+// space the emitter explores.
+//
+// The guard [Reduce] applies would be backwards here. An alias whose anchor was
+// dropped is exactly the kind of document a mutation is looking for, and
+// refusing to reduce towards one would leave the reproducer carrying the
+// structure it arrived with.
+//
+// Reduction can still land on a document that breaks a different rule than the
+// one the mutation broke, and here that is allowed: the claim being made is
+// about the text rather than about the generator, so any smaller text that is
+// still not YAML and still read anyway is the same claim, better stated. Which
+// rule it breaks is settled when the entry is written, not when it is found.
+func ReduceMutant(src []byte, interesting func([]byte) bool) []byte {
+	return reduce(src, func([]byte) bool { return true }, interesting)
+}
+
+func reduce(src []byte, allowed, interesting func([]byte) bool) []byte {
+	if !interesting(src) {
+		return src
+	}
+
+	within := func(b []byte) bool { return allowed(b) && interesting(b) }
 
 	best := src
 	for range maxReductionRounds {

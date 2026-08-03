@@ -1,0 +1,102 @@
+# Conformance harness
+
+For anyone fixing the parser, the scanner or the renderer.
+
+This module generates YAML documents, checks the library against them, and
+checks both against a recognizer compiled from the YAML 1.2 spec grammar. It is
+a measurement rather than a sample: the YAML Test Suite is four hundred
+documents someone thought to write down, and this explores the space around
+them.
+
+## What is broken right now
+
+```sh
+go test -v -run 'Outstanding|WronglyAccepted' ./internal/testintegration/yamlgen/
+```
+
+That is the work list. It passes either way — it reports rather than asserts,
+so a suite red for known reasons still gets read. The `-v` is not optional: `go
+test` swallows the report without it.
+
+Two kinds of entry come out, and they fail in opposite directions:
+
+| | The library is | Where it is recorded |
+|---|---|---|
+| `still failing` | too strict, or reads a valid document wrongly | `yamlgen.Ledger` |
+| `still read` | too lax — it reads a document that is not YAML | `yamlgen.Lax` |
+
+## Fixing one
+
+Every entry names a document. Start there, not with the generator.
+
+1. Reproduce with the document alone. The pinned cases are in
+   `defects_test.go` and `laxity.go`, each small enough to paste.
+2. Fix it.
+3. Run the work list again. The entry flips to `NOW HOLDS` or `NOW REFUSED`.
+4. Delete it — from `Ledger` or `Lax`, from the outstanding list, and from
+   `defects_test.go`. Move the case to `fixed_test.go`, which is where shapes
+   the generator once found go to stay found.
+
+Leaving an entry in place after fixing it is what the suite is built to catch:
+the property tests count how often each entry is drawn and how often it still
+diverges, so one that has stopped diverging shows up as such.
+
+## Hunting for more
+
+Both hunts are behind flags, because both currently find something and a suite
+that is red by default stops being read.
+
+```sh
+# valid documents the library refuses, or reads as the wrong value
+go test -run TestInvariant ./internal/testintegration/yamlgen/ \
+    -args -yamlgen.invariants -rapid.checks=100000
+
+# documents that are not YAML 1.2 and that the library reads anyway
+go test -run TestEveryDocument ./internal/testintegration/yamlgen/ \
+    -args -yamlgen.laxity -rapid.checks=100000
+```
+
+Custom flags go after `-args` because `go test` validates the ones it does not
+recognize against the package in the current directory, which is not this one.
+
+Failures arrive reduced to the smallest document that still shows the problem,
+with a test case to paste. The rarer shapes turn up a few times in a hundred
+thousand, so a short run reports a success it has not earned.
+
+## Before you believe a finding
+
+The recognizer is `internal/testintegration/grammar`, compiled from the 211
+productions the spec publishes as a data structure. It is the only thing here
+that is neither the library nor our own emitter, which is what lets it say
+which side of a disagreement is wrong.
+
+It is not infallible, and the two directions do not rest on it equally.
+
+A finding in `Ledger` needs the grammar's **acceptance** to be right. A finding
+in `Lax` needs its **refusal** to be right — a much stronger claim, and one the
+recognizer has already got wrong once: it refused a compact collection written
+under a wider parent, which this library's renderer emits and every other
+parser reads. So each `Lax` entry names the production it breaks, and that
+production is what to check against the spec text. The recognizer is not
+evidence for its own verdict.
+
+It also cannot see anything that is not syntax. Alias resolution, distinct
+mapping keys and tag meaning are all outside a grammar, so it will happily
+accept documents that break them.
+
+## What is where
+
+| | |
+|---|---|
+| `yamlgen/value.go` | what a document means, generated first |
+| `yamlgen/style.go`, `emit.go` | ways of writing that meaning down |
+| `yamlgen/mutate.go` | ways of breaking a document, for the laxity hunt |
+| `yamlgen/divergence.go` | `Ledger` — shapes the library gets wrong |
+| `yamlgen/laxity.go` | `Lax` — documents it should refuse and does not |
+| `yamlgen/reduce.go` | shrinking a failure to something pasteable |
+| `grammar/` | the YAML 1.2 recognizer |
+
+The property tests are in `yamlgen/invariance_test.go` and
+`yamlgen/roundtrip_test.go`. Two of them gate our own side rather than the
+library's — `TestEveryEmittedDocumentIsValidYAML` and
+`TestRenderWritesValidYAML` — and a failure in either is ours, not yours.
