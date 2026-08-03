@@ -5,6 +5,7 @@ package grammar
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -72,6 +73,13 @@ func newCompiler(spec []byte) (*compiler, error) {
 		c.raw[name] = body
 		c.slots[name] = &slot{name: name, id: id, params: declaredParams(body)}
 		id++
+	}
+
+	// Asserted rather than attempted, so that a newer grammar file which either
+	// fixes the omission or moves it says so here instead of quietly dropping
+	// the patch and taking a class of valid document with it.
+	if !patchBlockIndented(c.raw["s-l+block-indented"]) {
+		return nil, errors.New("s-l+block-indented is not the shape the auto-detected m is patched into")
 	}
 
 	for name := range c.raw {
@@ -184,14 +192,10 @@ func (c *compiler) matchString(form string) expr {
 }
 
 func (c *compiler) matchForm(form map[string]any) expr {
-	// The forms that need mutable parse state are block context and document
-	// structure, and this spike does not implement them. They are recognized
-	// here, before the arity check, because (if) and (set) appear together as a
-	// two-key form in the chomping and indentation indicator rules.
-	for _, key := range []string{"(set)", "(if)", "(ord)", "(exclude)"} {
-		if _, ok := form[key]; ok {
-			return unsupported(key)
-		}
+	// (if) and (set) are the one two-key form in the grammar, so they are
+	// handled before the arity check rather than in the switch below.
+	if assignment, ok := form["(set)"]; ok {
+		return c.set(assignment, form["(if)"])
 	}
 
 	if len(form) != 1 {
@@ -222,6 +226,8 @@ func (c *compiler) matchForm(form map[string]any) expr {
 			return c.caseOf(arg)
 		case "(max)":
 			return limitTo(int(arg.(float64)))
+		case "(exclude)":
+			return c.exclude(arg)
 		case "(<<<)":
 			return capture(c.matcher(arg))
 		case "(<)":
@@ -260,29 +266,54 @@ func (c *compiler) each(arg any) []expr {
 
 // call binds a rule's declared parameters from the call site's arguments and
 // invokes it through the memo table.
+//
+// A parameter the call site passed as the bare variable of the same name is
+// passed by reference: whatever the callee left it at comes back. That is the
+// only way c-b-block-header(m,t) can report a header, and it is narrow enough
+// to be safe -- l-literal-content(n+m, t) passes an expression for n, so the
+// callee's n stays the callee's.
 func (c *compiler) call(s *slot, arg any) expr {
 	args := c.arguments(s, arg)
 
-	return func(st *state, e env) bool {
+	return func(st *state, e env) (env, bool) {
 		callee := e
-		for i, p := range s.params {
-			assign(&callee, p, args[i](st, e))
+		for i, a := range args {
+			assign(&callee, s.params[i], a.of(st, e))
 		}
 
-		return invoke(s, st, callee)
+		out, ok := invoke(s, st, callee)
+		if !ok {
+			return e, false
+		}
+
+		result := e
+		for i, a := range args {
+			if a.byName {
+				assign(&result, s.params[i], read(out, s.params[i]))
+			}
+		}
+
+		return result, true
 	}
+}
+
+// argument is one compiled call-site argument, and whether it was written as
+// the bare variable the callee names it by.
+type argument struct {
+	of     value
+	byName bool
 }
 
 // arguments compiles a call site's argument list. A rule taking one parameter
 // receives the whole value; a rule taking several receives a sequence, and the
 // two cannot be confused because the arity comes from the callee.
-func (c *compiler) arguments(s *slot, arg any) []value {
+func (c *compiler) arguments(s *slot, arg any) []argument {
 	if len(s.params) == 0 {
 		return nil
 	}
 
 	if len(s.params) == 1 {
-		return []value{c.value(arg)}
+		return []argument{c.argument(s.params[0], arg)}
 	}
 
 	list, ok := arg.([]any)
@@ -290,12 +321,18 @@ func (c *compiler) arguments(s *slot, arg any) []value {
 		panic(fmt.Sprintf("grammar: %s takes %d arguments, call site passes %#v", s.name, len(s.params), arg))
 	}
 
-	out := make([]value, 0, len(list))
-	for _, item := range list {
-		out = append(out, c.value(item))
+	out := make([]argument, 0, len(list))
+	for i, item := range list {
+		out = append(out, c.argument(s.params[i], item))
 	}
 
 	return out
+}
+
+func (c *compiler) argument(param string, arg any) argument {
+	name, _ := arg.(string)
+
+	return argument{of: c.value(arg), byName: name == param}
 }
 
 // value compiles a form appearing in argument position, where scalars name
@@ -327,10 +364,15 @@ func (c *compiler) valueString(form string) value {
 		return func(_ *state, e env) any { return e.t }
 	case "(match)":
 		return func(s *state, _ env) any { return string(s.src[s.mark:s.pos]) }
+	case "auto-detect":
+		// A block scalar header that states no width. Detecting it here is too
+		// early -- the content has not been reached -- so it travels as a
+		// sentinel and arithmetic resolves it where n+m is computed.
+		return constant(mAuto)
 	case "<auto-detect-indent>":
-		return func(_ *state, _ env) any {
-			panic("grammar: <auto-detect-indent> is block context, outside the spike")
-		}
+		return func(s *state, e env) any { return detectCollectionIndent(s, e.n) }
+	case "<auto-detect-compact-indent>":
+		return func(s *state, _ env) any { return detectCompactIndent(s) }
 	}
 
 	// A context or chomping name: "flow-in", "keep", and the like. Resolved to
@@ -360,6 +402,8 @@ func (c *compiler) valueForm(form map[string]any) value {
 			inner := c.value(arg)
 
 			return func(s *state, e env) any { return len(inner(s, e).(string)) }
+		case "(ord)":
+			return c.ordinal(arg)
 		}
 
 		if s, ok := c.slots[key]; ok {
@@ -382,7 +426,16 @@ func (c *compiler) arithmetic(arg any, sign int) value {
 			return nNull
 		}
 
-		return l + sign*toInt(right(s, e))
+		r := toInt(right(s, e))
+		if r == mAuto {
+			// n + auto-detect. Only c-l+literal and c-l+folded compute this,
+			// and only after s-b-comment has consumed the header's line break,
+			// so the position is the first line of the content -- which is the
+			// one place the width can be read off.
+			return detectScalarIndent(s, l)
+		}
+
+		return l + sign*r
 	}
 }
 
@@ -393,8 +446,8 @@ func (c *compiler) callValue(s *slot, arg any) value {
 
 	return func(st *state, e env) any {
 		callee := e
-		for i, p := range s.params {
-			assign(&callee, p, args[i](st, e))
+		for i, a := range args {
+			assign(&callee, s.params[i], a.of(st, e))
 		}
 
 		return s.val(st, callee)
@@ -412,7 +465,7 @@ func (c *compiler) flip(arg any) value {
 		panic(fmt.Sprintf("grammar: (flip) switches on %q, only c was expected", name))
 	}
 
-	var arms [numContexts]value
+	var arms [numArms]value
 	for k, v := range form {
 		if k == "var" {
 			continue
@@ -436,9 +489,9 @@ func (c *compiler) caseOf(arg any) expr {
 	form := arg.(map[string]any)
 	name := form["var"].(string)
 
-	var arms [numContexts]expr
+	var arms [numArms]expr
 	if name == "t" {
-		arms = [numContexts]expr{}
+		arms = [numArms]expr{}
 	}
 	for k, v := range form {
 		if k == "var" {
@@ -448,7 +501,7 @@ func (c *compiler) caseOf(arg any) expr {
 	}
 
 	if name == "t" {
-		return func(s *state, e env) bool {
+		return func(s *state, e env) (env, bool) {
 			arm := arms[e.t]
 			if arm == nil {
 				// The grammar leaves arms out where the spec says the
@@ -461,7 +514,7 @@ func (c *compiler) caseOf(arg any) expr {
 		}
 	}
 
-	return func(s *state, e env) bool {
+	return func(s *state, e env) (env, bool) {
 		arm := arms[e.c]
 		if arm == nil {
 			panic(fmt.Sprintf("grammar: (case) has no arm for c=%d", e.c))
@@ -494,24 +547,25 @@ func (c *compiler) subtract(arg any) expr {
 		minus = append(minus, c.matcher(item))
 	}
 
-	return func(s *state, e env) bool {
+	return func(s *state, e env) (env, bool) {
 		start := s.pos
-		if !first(s, e) {
-			return false
+		out, ok := first(s, e)
+		if !ok {
+			return e, false
 		}
 		end := s.pos
 
 		for _, m := range minus {
 			s.pos = start
-			if m(s, e) {
+			if _, ok := m(s, e); ok {
 				s.pos = start
 
-				return false
+				return e, false
 			}
 		}
 		s.pos = end
 
-		return true
+		return out, true
 	}
 }
 
@@ -523,12 +577,12 @@ func (c *compiler) repeatExactly(count string, inner expr) expr {
 
 	name := count
 
-	return func(s *state, e env) bool {
+	return func(s *state, e env) (env, bool) {
 		n := readInt(e, name)
 		if n == nNull || n < 0 {
 			// s-indent(n) with a negative n matches nothing, successfully:
 			// there is no indentation to consume.
-			return n != nNull
+			return e, n != nNull
 		}
 
 		return repeat(inner, n, n)(s, e)
@@ -541,13 +595,13 @@ func (c *compiler) compare(arg any, orEqual bool) expr {
 	list := arg.([]any)
 	left, right := c.value(list[0]), c.value(list[1])
 
-	return func(s *state, e env) bool {
+	return func(s *state, e env) (env, bool) {
 		l, r := toInt(left(s, e)), toInt(right(s, e))
 		if orEqual {
-			return l <= r
+			return e, l <= r
 		}
 
-		return l < r
+		return e, l < r
 	}
 }
 
@@ -561,6 +615,22 @@ func assign(e *env, param string, v any) {
 		e.c = v.(ctxCode)
 	case "t":
 		e.t = v.(chompCodeT)
+	default:
+		panic(fmt.Sprintf("grammar: unknown parameter %q", param))
+	}
+}
+
+// read is assign's inverse, for handing an out-parameter back to the call site.
+func read(e env, param string) any {
+	switch param {
+	case "n":
+		return e.n
+	case "m":
+		return e.m
+	case "c":
+		return e.c
+	case "t":
+		return e.t
 	default:
 		panic(fmt.Sprintf("grammar: unknown parameter %q", param))
 	}
@@ -599,10 +669,4 @@ func decodeHex(code string) rune {
 	}
 
 	return rune(n)
-}
-
-func unsupported(form string) expr {
-	return func(_ *state, _ env) bool {
-		panic(fmt.Sprintf("grammar: %s is block context, outside the spike", form))
-	}
 }
