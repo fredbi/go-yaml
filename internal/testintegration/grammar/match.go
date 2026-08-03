@@ -285,12 +285,36 @@ func (s *state) rune() (rune, int) {
 	return r, size
 }
 
+// byteOrderMark is c-byte-order-mark encoded, which is how it appears in the
+// source rather than as the code point the grammar names.
+const byteOrderMark = "\xef\xbb\xbf"
+
+// startOfLine reports whether the position begins a line.
+//
+// A byte order mark does not put anything on the line it precedes.
+// l-document-prefix admits one in front of every document, and nb-char excludes
+// it from content, so the only place it can appear is exactly the place where
+// treating it as content is wrong.
+//
+// Counting it made the position after it look mid-line, which was enough to
+// refuse a marked "a: 1" and a marked "# c". Both s-l-comments and
+// s-separate-in-line ask this question, and every block collection and every
+// comment goes through one of them. A marked "---" survived only because
+// c-directives-end is a literal that asks nobody.
 func startOfLine(s *state, e env) (env, bool) {
-	if s.pos == 0 {
+	pos := s.pos
+
+	// A prefix per document, and l-yaml-stream repeats the prefix, so more than
+	// one mark can stand here.
+	for pos >= len(byteOrderMark) && string(s.src[pos-len(byteOrderMark):pos]) == byteOrderMark {
+		pos -= len(byteOrderMark)
+	}
+
+	if pos == 0 {
 		return e, true
 	}
 
-	prev := s.src[s.pos-1]
+	prev := s.src[pos-1]
 
 	return e, prev == '\n' || prev == '\r'
 }

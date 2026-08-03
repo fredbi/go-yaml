@@ -173,7 +173,25 @@ var streamCases = []struct {
 	{"extra words on a yaml directive", "%YAML 1.2 foo\n---\n", false},
 	{"comment run into a yaml directive", "%YAML 1.1#...\n---\n", false},
 	{"a reserved directive takes parameters", "%FOO bar baz\n---\n", true},
+
+	// A byte order mark stands in front of a document without putting anything
+	// on the line, so what follows it still begins one. l-document-prefix
+	// admits one before every document, not only the first.
+	{"marked document", bom + "a: 1\n", true},
+	{"marked comment", bom + "# c\n", true},
+	{"marked marker", bom + "---\na: 1\n", true},
+	{"mark alone", bom, true},
+	{"mark after a suffix", "a: 1\n...\n" + bom + "b: 2\n", true},
+	{"two marks", bom + bom + "a: 1\n", true},
+
+	// Inside a document it is not a prefix, and nb-char excludes it from
+	// content, so there is nowhere for it to be.
+	{"mark inside a document", "---\n" + bom + "a: 1\n", false},
 }
+
+// bom is written as a code point because a byte order mark in Go source is a
+// compile error, which is its own small demonstration of the problem.
+var bom = string(rune(0xFEFF))
 
 func TestStream(t *testing.T) {
 	for _, tc := range streamCases {
