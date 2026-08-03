@@ -149,6 +149,30 @@ var streamCases = []struct {
 	{"trailing blank line under a stated indent", "|2\n a\n\n", true},
 	{"stated wider than the content", "a: |2\nx\n", false},
 	{"leading empty line indented more", "a: |\n    \n  a\n", false},
+
+	// A block header takes its two indicators in either order, and the comment
+	// that follows has to be tried against both.
+	{"indent then chomp", "- |2-\n  x\n", true},
+	{"chomp then indent", "- |-2\n  x\n", true},
+
+	// Zero is not an indentation indicator: a block scalar's content is always
+	// more indented than the node holding it.
+	{"stated indent of zero", "|0\n", false},
+	{"stated indent of zero after a marker", "--- |0\n", false},
+
+	// Properties standing alone in key position. The node they name is empty,
+	// and the reading where they belong to the enclosing collection instead has
+	// to be given up when the comment it would need is not there.
+	{"anchor as a whole key", "&a : a\n", true},
+	{"tag as a whole key", "!!str : a\n", true},
+	{"anchor and tag as a key", "&a !!str : a\n", true},
+	{"anchor on an entry with a sibling", "- &a\n- a\n", true},
+
+	// Directives, where the opposite holds: the first reading that matches is
+	// the only one, or every malformed directive would parse as a reserved one.
+	{"extra words on a yaml directive", "%YAML 1.2 foo\n---\n", false},
+	{"comment run into a yaml directive", "%YAML 1.1#...\n---\n", false},
+	{"a reserved directive takes parameters", "%FOO bar baz\n---\n", true},
 }
 
 func TestStream(t *testing.T) {
