@@ -400,13 +400,20 @@ func writableRaw(s string) bool {
 }
 
 // canSingle reports whether a single-quoted scalar written on one line
-// reproduces s exactly. Line breaks fold, so anything with one is out.
+// reproduces s exactly.
+//
+// Only two things stop it. A line break folds, so a string holding one comes
+// back as something else. A character the spec forbids cannot be written raw at
+// all, and single quotes escape nothing but the quote itself.
+//
+// Everything else the quotes take care of, which is the point of them: the
+// delimiters are what make leading and trailing whitespace survive, so refusing
+// those was refusing the case this style exists to handle. It used to refuse
+// them, and tabs, and the empty string -- a third of all drawn strings fell
+// back to double quotes for no reason, taking with them exactly the shapes this
+// library has had defects in.
 func canSingle(s string) bool {
-	if s == "" || strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") {
-		return false
-	}
-
-	if strings.ContainsAny(s, "\n\r\t") {
+	if strings.ContainsAny(s, "\n\r") {
 		return false
 	}
 
