@@ -3,7 +3,10 @@
 
 package yamlgen
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
 //
@@ -88,6 +91,58 @@ var Lax = []Laxity{
 		Reads: map[string]any{"k": "?"},
 		Match: loneQuestionMark.MatchString,
 	},
+	{
+		Name: "a-byte-order-mark-standing-as-content",
+		Src:  "a: \ufeffb\n",
+		Rule: "nb-char ::= c-printable - b-char - c-byte-order-mark, so a mark is " +
+			"not a character any node may hold. It marks an l-document-prefix and " +
+			"nothing else -- which is why one opening the stream is dropped rather " +
+			"than refused, and why one anywhere a node may go is neither",
+		Reads: map[string]any{"a": "\ufeffb"},
+		// Anywhere past the prefix the stream may open with. A mark inside a
+		// double-quoted scalar is left out on purpose: nb-double-char reaches
+		// it through c-ns-esc-char and the recognizer accepts it, so it is a
+		// different question from this one.
+		Match: byteOrderMarkAsContent,
+	},
+	{
+		Name: "a-value-level-with-an-empty-key",
+		Src:  ":\n1\n",
+		Rule: "s-l+block-node(n,c) puts the value of a block mapping entry at " +
+			"s-indent(n+1), so a token level with the entry can only open the " +
+			"next one -- and \"1\" opens nothing. The same document with a key " +
+			"written out, \"k:\\n1\", is refused, and so is the same empty key " +
+			"carrying a property, \": &a\\n1\". What is left is the entry whose " +
+			"key is e-node and carries nothing: there is no key token to measure " +
+			"the column against, and the ':' has not been made to stand for one",
+		Reads: map[string]any{"null": uint64(1)},
+		// A line that is nothing but ':' followed by one starting hard against
+		// the left margin. Narrow on purpose: the indented spellings of the
+		// same shape are a separate question, and one of them may well be a
+		// document.
+		Match: regexp.MustCompile("(?m)^:[ \t]*\n[^ \t\n]").MatchString,
+	},
+}
+
+// byteOrderMarkAsContent reports whether src holds a byte order mark past the
+// prefix the stream may open with, outside a double-quoted scalar.
+func byteOrderMarkAsContent(src string) bool {
+	const mark = "\ufeff"
+
+	rest := strings.TrimLeft(src, mark)
+	if !strings.Contains(rest, mark) {
+		return false
+	}
+
+	// A line carrying a double quote is left to the entry that owns that
+	// question rather than absorbed silently here.
+	for line := range strings.SplitSeq(rest, "\n") {
+		if strings.Contains(line, mark) && !strings.Contains(line, `"`) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // loneQuestionMark matches a '?' with nothing after it standing where only a
