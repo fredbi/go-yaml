@@ -4,7 +4,6 @@
 package yamlgen
 
 import (
-	"regexp"
 	"strings"
 	"unicode/utf8"
 )
@@ -157,22 +156,6 @@ var Lax = []Laxity{
 		Reads: nil,
 		Match: anchorTouchingAFlowIndicator,
 	},
-	{
-		Name: "two-chomping-indicators",
-		Src:  "|--\n",
-		Rule: "c-b-block-header(m,t) takes one indentation indicator and one " +
-			"chomping indicator, in either order, and not two of either",
-		Reads: "",
-		Match: twoChomping.MatchString,
-	},
-	{
-		Name: "a-comment-with-nothing-in-front-of-it",
-		Src:  "|-#\n",
-		Rule: "s-b-comment requires s-separate-in-line before c-nb-comment-text. " +
-			"A bare | or > is refused, so it is the indicator that lets the " +
-			"comment run into the header",
-		Reads: "",
-	},
 }
 
 // indicators is YAML 1.2's c-indicator: the characters a plain scalar may not
@@ -197,11 +180,6 @@ func printable(r rune) bool {
 		return r >= 0x10000 && r <= 0x10FFFF
 	}
 }
-
-// twoChomping matches a block scalar header carrying more than one chomping
-// indicator. Anchored to the whole document because a longer one is refused,
-// and a predicate wider than the finding would be claiming more than was seen.
-var twoChomping = regexp.MustCompile(`\A[|>][-+]{2,}\n\z`)
 
 // tabInIndentation reports whether any line's leading whitespace holds a tab.
 func tabInIndentation(src string) bool {

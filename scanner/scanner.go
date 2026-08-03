@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/token"
@@ -1444,28 +1443,35 @@ func (s *Scanner) scanMultiLineHeader(ctx *Context) (bool, error) {
 	return true, nil
 }
 
+// validateMultiLineHeaderOption checks the indicators a block scalar header
+// carries.
+//
+// c-b-block-header(m,t) takes one indentation indicator and one chomping
+// indicator, in either order, and either may be left out. Two of either is not
+// a header: "|--" used to pass because the check trimmed one indicator off each
+// end and found nothing left in the middle.
 func (s *Scanner) validateMultiLineHeaderOption(opt string) error {
-	if len(opt) == 0 {
-		return nil
+	var chomping, indentation bool
+
+	for _, c := range opt {
+		switch {
+		case c == '-' || c == '+':
+			if chomping {
+				return fmt.Errorf("invalid header option: %q", opt)
+			}
+			chomping = true
+		case c >= '1' && c <= '9':
+			// c-indentation-indicator is ns-dec-digit less '0': a block cannot
+			// be introduced by no indentation at all.
+			if indentation {
+				return fmt.Errorf("invalid header option: %q", opt)
+			}
+			indentation = true
+		default:
+			return fmt.Errorf("invalid header option: %q", opt)
+		}
 	}
-	orgOpt := opt
-	opt = strings.TrimPrefix(opt, "-")
-	opt = strings.TrimPrefix(opt, "+")
-	opt = strings.TrimSuffix(opt, "-")
-	opt = strings.TrimSuffix(opt, "+")
-	if len(opt) == 0 {
-		return nil
-	}
-	if opt == "0" {
-		return fmt.Errorf("invalid header option: %q", orgOpt)
-	}
-	i, err := strconv.ParseInt(opt, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid header option: %q", orgOpt)
-	}
-	if i > 9 {
-		return fmt.Errorf("invalid header option: %q", orgOpt)
-	}
+
 	return nil
 }
 
@@ -1497,6 +1503,19 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	commentValueIndex := strings.Index(value, "#")
 	opt := value
 	if commentValueIndex > 0 {
+		// s-b-comment puts s-separate-in-line in front of c-nb-comment-text, so
+		// a '#' pressed up against the indicators starts no comment and is just
+		// a character the header may not hold.
+		if prev := value[commentValueIndex-1]; prev != ' ' && prev != '\t' {
+			invalidTk := token.Invalid(
+				"comment must be separated from the block scalar header by a space",
+				string(ctx.obuf), s.pos(),
+			)
+			s.progressColumn(ctx, progress)
+
+			return ErrInvalidToken(invalidTk)
+		}
+
 		opt = value[:commentValueIndex]
 	}
 	opt = strings.TrimRightFunc(opt, func(r rune) bool {
