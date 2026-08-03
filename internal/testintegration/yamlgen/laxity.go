@@ -34,7 +34,8 @@ type Laxity struct {
 	// severities. Reading an invalid document as the obvious thing is a
 	// permissive extension and mostly harmless. Reading it as something else is
 	// worse than refusing it, since nothing downstream is in a position to
-	// notice -- which is what the escape entries below do.
+	// notice -- which is what the entries below that swallow a byte or a value
+	// do.
 	Reads any
 	// Match recognizes other documents of the same class, so that the hunt
 	// stops re-reporting one it is standing on. Nil means only Src itself.
@@ -172,15 +173,6 @@ var Lax = []Laxity{
 			"comment run into the header",
 		Reads: "",
 	},
-	{
-		Name: "an-escape-whose-digits-are-not-hex",
-		Src:  "\"\\xZZ\"\n",
-		Rule: "ns-esc-8-bit ::= \"x\" ns-hex-digit x 2, and Z is not a hex digit. " +
-			"The count is checked and the digits are not, so \"\\u12\" is refused " +
-			"while \"\\uu0BA\" is read as U+450BA",
-		Reads: "\u02ca",
-		Match: escapeWithNonHexDigits,
-	},
 }
 
 // indicators is YAML 1.2's c-indicator: the characters a plain scalar may not
@@ -239,35 +231,6 @@ func anchorTouchingAFlowIndicator(src string) bool {
 		if j > i+1 && j < len(src) && strings.IndexByte(",[]{}", src[j]) >= 0 {
 			return true
 		}
-	}
-
-	return false
-}
-
-// escapeWithNonHexDigits reports whether a numeric escape is followed by
-// something other than the hex digits it takes.
-//
-// The count is what this library checks, so the escapes that reach here are the
-// ones with enough characters after them and the wrong characters in them.
-func escapeWithNonHexDigits(src string) bool {
-	widths := map[byte]int{'x': 2, 'u': 4, 'U': 8}
-
-	for i := 0; i+1 < len(src); i++ {
-		if src[i] != '\\' {
-			continue
-		}
-
-		width, numeric := widths[src[i+1]]
-		if !numeric || i+2+width > len(src) {
-			continue
-		}
-
-		for _, c := range []byte(src[i+2 : i+2+width]) {
-			if strings.IndexByte("0123456789abcdefABCDEF", c) < 0 {
-				return true
-			}
-		}
-		i += 1 + width
 	}
 
 	return false

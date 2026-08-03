@@ -299,22 +299,36 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 	)
 }
 
-func hexToInt(b rune) int {
-	if b >= 'A' && b <= 'F' {
-		return int(b) - 'A' + 10
+// hexToInt returns the value of one hexadecimal digit, and whether the rune is
+// one at all. Answering that is the point: subtracting '0' from whatever turned
+// up gave a number for every rune, so an escape whose digits were not digits
+// decoded to some other character instead of being refused.
+func hexToInt(b rune) (int, bool) {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b) - '0', true
+	case b >= 'a' && b <= 'f':
+		return int(b) - 'a' + 10, true
+	case b >= 'A' && b <= 'F':
+		return int(b) - 'A' + 10, true
+	default:
+		return 0, false
 	}
-	if b >= 'a' && b <= 'f' {
-		return int(b) - 'a' + 10
-	}
-	return int(b) - '0'
 }
 
-func hexRunesToInt(b []rune) int {
+// hexRunesToInt returns the value a run of hexadecimal digits spells, and
+// whether every rune in it was a digit.
+func hexRunesToInt(b []rune) (int, bool) {
 	sum := 0
-	for i := 0; i < len(b); i++ {
-		sum += hexToInt(b[i]) << (uint(len(b)-i-1) * 4)
+	for i, r := range b {
+		digit, isHex := hexToInt(r)
+		if !isHex {
+			return 0, false
+		}
+		sum += digit << (uint(len(b)-i-1) * 4)
 	}
-	return sum
+
+	return sum, true
 }
 
 func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
@@ -455,15 +469,26 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				ctx.addOriginBuf(nextChar)
 				value = append(value, 0x2029)
 			case 'x':
+				// \x00 style must have 3 characters at least.
 				if idx+3 >= size {
-					progress = 1
-					ctx.addOriginBuf(nextChar)
-					value = append(value, nextChar)
-				} else {
-					progress = 3
-					codeNum := hexRunesToInt(src[idx+2 : idx+progress+1])
-					value = append(value, rune(codeNum))
+					return nil, ErrInvalidToken(
+						token.Invalid(
+							"not enough length for escaped 8-bit character",
+							string(ctx.obuf), s.pos(),
+						),
+					)
 				}
+				progress = 3
+				codeNum, isHex := hexRunesToInt(src[idx+2 : idx+progress+1])
+				if !isHex {
+					return nil, ErrInvalidToken(
+						token.Invalid(
+							"found a character that is not a hexadecimal digit in escaped 8-bit character",
+							string(ctx.obuf), s.pos(),
+						),
+					)
+				}
+				value = append(value, rune(codeNum))
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
@@ -475,7 +500,15 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 					)
 				}
 				progress = 5
-				codeNum := hexRunesToInt(src[idx+2 : idx+6])
+				codeNum, isHex := hexRunesToInt(src[idx+2 : idx+6])
+				if !isHex {
+					return nil, ErrInvalidToken(
+						token.Invalid(
+							"found a character that is not a hexadecimal digit in escaped UTF-16 character",
+							string(ctx.obuf), s.pos(),
+						),
+					)
+				}
 
 				// handle surrogate pairs.
 				if codeNum >= 0xD800 && codeNum <= 0xDBFF {
@@ -500,7 +533,15 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 						)
 					}
 
-					low := hexRunesToInt(src[idx+8 : idx+12])
+					low, isHex := hexRunesToInt(src[idx+8 : idx+12])
+					if !isHex {
+						return nil, ErrInvalidToken(
+							token.Invalid(
+								"found a character that is not a hexadecimal digit in the low surrogate",
+								string(ctx.obuf), s.pos(),
+							),
+						)
+					}
 					if low < 0xDC00 || low > 0xDFFF {
 						return nil, ErrInvalidToken(
 							token.Invalid(
@@ -524,7 +565,15 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 					)
 				}
 				progress = 9
-				codeNum := hexRunesToInt(src[idx+2 : idx+10])
+				codeNum, isHex := hexRunesToInt(src[idx+2 : idx+10])
+				if !isHex {
+					return nil, ErrInvalidToken(
+						token.Invalid(
+							"found a character that is not a hexadecimal digit in escaped UTF-32 character",
+							string(ctx.obuf), s.pos(),
+						),
+					)
+				}
 				value = append(value, rune(codeNum))
 			case '\n':
 				isFirstLineChar = true

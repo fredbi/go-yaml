@@ -79,6 +79,28 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			invalid: "quoted: \"a\nb\nc\"\n",
 			valid:   "quoted: \"a\n b\n c\"\n",
 		},
+
+		// A numeric escape takes hexadecimal digits, and how many is fixed by
+		// which escape it is. Only the count used to be checked, so an escape
+		// with the wrong characters in it decoded to some other character
+		// rather than being refused -- the one kind of laxity nothing
+		// downstream is in a position to notice.
+		"escaped 8-bit character with no hex digits": {
+			invalid: `"\xZZ"` + "\n",
+			valid:   `"\x41"` + "\n",
+		},
+		"escaped UTF-16 character shifted by a letter": {
+			invalid: `"\uu0BA"` + "\n",
+			valid:   `"º"` + "\n",
+		},
+		"escaped UTF-32 character with no hex digits": {
+			invalid: `"\U0000004G"` + "\n",
+			valid:   `"\U00000041"` + "\n",
+		},
+		"low surrogate with no hex digits": {
+			invalid: `"\uD83D\uDEZZ"` + "\n",
+			valid:   `"😀"` + "\n",
+		},
 	}
 
 	for name, test := range tests {
