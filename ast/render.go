@@ -651,15 +651,74 @@ func isFolded(tk *token.Token) bool {
 // stripped -- not by the least indented line. The two differ exactly when the
 // header states a width and every content line starts with spaces of its own,
 // and those spaces are part of the value.
+//
+// The blank lines the source ends on are not read back from it. They are what
+// the chomping indicator decides, and the value is where that decision has
+// already been made: the source ends the same way whether the header says ">",
+// ">-" or ">+", so writing its tail back would keep blank lines for the two
+// styles that discard them.
 func (r *Renderer) foldedFromSource(n *LiteralNode, indent int) string {
-	lbc := lineBreakOf(n.Value.GetToken().Origin)
-	content := strings.TrimRight(n.Value.GetToken().Origin, " \n\r")
-	content = dedentBy(content, introducedIndent(content, n.Value.Value, lbc))
-	if content == "" {
-		return ""
+	value := n.Value.Value
+	origin := n.Value.GetToken().Origin
+	lbc := lineBreakOf(origin)
+
+	var content string
+	if strings.Trim(value, "\r\n") != "" {
+		// A value that is nothing but line breaks has no content lines to write
+		// back, whatever the source looks like: every one of its lines was
+		// blank, and the tail below is the whole of it.
+		lead := introducedIndent(origin, value, lbc)
+		content = dedentBy(trimTrailingBlankLines(origin, lbc, lead), lead)
 	}
 
-	return lbc + indentLinesWith(content, indent, lbc)
+	blanks := trailingBreaks(value, lineBreakOf(value))
+	if content != "" {
+		// One of the value's trailing breaks ends its last line of content
+		// rather than standing for a blank line of its own.
+		blanks--
+	}
+
+	var body strings.Builder
+	if content != "" {
+		body.WriteString(indentLinesWith(content, indent, lbc))
+		body.WriteString(lbc)
+	}
+	for range max(blanks, 0) {
+		body.WriteString(lbc)
+	}
+
+	// The last break belongs to whatever follows the node, the same way the
+	// literal spelling leaves it.
+	return lbc + strings.TrimSuffix(body.String(), lbc)
+}
+
+// trimTrailingBlankLines removes the lines with nothing on them that a block
+// scalar's source ends on, and the break closing its last line of content.
+//
+// A line of spaces is blank only up to the width that introduced the block.
+// Past that width the spaces are content -- a folded scalar treats a line
+// indented further than its neighbors literally, so those are the one kind of
+// trailing whitespace that has to be written back.
+func trimTrailingBlankLines(text, lbc string, lead int) string {
+	lines := strings.Split(text, lbc)
+
+	end := len(lines)
+	for end > 0 && strings.TrimLeft(lines[end-1], " \t") == "" && len(lines[end-1]) <= lead {
+		end--
+	}
+
+	return strings.Join(lines[:end], lbc)
+}
+
+// trailingBreaks counts the line breaks a value ends on.
+func trailingBreaks(value, lbc string) int {
+	count := 0
+	for strings.HasSuffix(value, lbc) {
+		value = strings.TrimSuffix(value, lbc)
+		count++
+	}
+
+	return count
 }
 
 // blockScalarBody writes a block scalar's content: every line indented and

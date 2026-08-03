@@ -111,25 +111,14 @@ func render(t *testing.T, src string) string {
 
 // TestDefectKeepChompingLosesItsBlankLinesWhenFolded: >+ is written back
 // without the trailing blank lines it exists to preserve.
+// Shapes the generator found that still diverge.
 //
-// The literal spelling of the same value round trips, which is what says this
-// is one of the two block scalar styles rather than chomping in general.
-func TestDefectKeepChompingLosesItsBlankLinesWhenFolded(t *testing.T) {
-	const src = "k: >+\n  trail\n\n"
-
-	var before any
-	require.NoError(t, yaml.Unmarshal([]byte(src), &before))
-	assert.Equal(t, map[string]any{"k": "trail\n\n"}, before, "reading is correct")
-
-	rendered := render(t, src)
-	assert.Equal(t, "k: >+\n  trail\n", rendered,
-		"the kept blank line is dropped -- if this now round trips, the defect is fixed")
-
-	var after any
-	require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
-	assert.Equal(t, map[string]any{"k": "trail\n"}, after, "and the value changed")
-
-	t.Run("the literal spelling keeps them", func(t *testing.T) {
-		assert.Equal(t, "k: |+\n  trail\n\n", render(t, "k: |+\n  trail\n\n"))
-	})
-}
+// Each one pins today's behavior rather than the correct behavior, so that a
+// fix breaks the test that says it was broken. The corresponding entry in
+// [yamlgen.Ledger] is what keeps the property tests from failing on it
+// meanwhile; when both go, the case moves to fixed_test.go.
+//
+// Nothing outstanding. A case arriving here needs a helper that asserts the
+// document is valid YAML 1.2 before asking anything of the library -- see
+// TestFixedKeepChompingKeepsItsBlankLinesWhenFolded, which was the last one to
+// leave.

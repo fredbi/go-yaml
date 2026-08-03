@@ -151,6 +151,9 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 			src:       "|2\n a\n",
 			fails:     renderChangesValue,
 		},
+		// Empty. The last entry to leave was "k: >+\n  trail\n\n" against
+		// "rendering preserves the value"; it is pinned the other way round now,
+		// in TestFixedKeepChompingKeepsItsBlankLinesWhenFolded.
 	}
 
 	var open int

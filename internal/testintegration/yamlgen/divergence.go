@@ -97,7 +97,12 @@ func (p Property) String() string {
 // fails because it is missing from here, and a fixed one fails because it is
 // still listed.
 //
-// Every entry here is a parser or renderer defect rather than an open question.
+// Empty. Every shape the generator draws holds all five properties, which is a
+// claim the property tests re-earn on every run rather than a note about how
+// things once stood: a new divergence fails because it is missing from here,
+// and a fixed one fails because it is still listed.
+//
+// An entry here is a parser or renderer defect rather than an open question.
 // The emitter is gated against the YAML 1.2 grammar, so each of these documents
 // is known to be one the library is obliged to read.
 var Ledger = []Divergence{
