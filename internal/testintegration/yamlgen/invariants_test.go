@@ -7,9 +7,11 @@ import (
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
 	"pgregory.net/rapid"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -17,12 +19,12 @@ import (
 // The three invariants a YAML library should hold, stated without excuses.
 //
 // They are guarded behind a flag whenever anything is known to break them, so
-// that a suite red for known reasons still gets read. The ledger is empty and
-// the guard is off; put it back the next time an entry goes in.
+// that a suite red for known reasons still gets read. Take the guard off once
+// the ledger is empty.
 //
 // Worth running deeper than the default hundred checks before trusting them:
 //
-//	go test -run TestInvariant ./internal/testintegration/yamlgen/ -args -rapid.checks=100000
+//	go test -run TestInvariant ./internal/testintegration/yamlgen/ -args -yamlgen.invariants -rapid.checks=100000
 //
 // The rarer shapes are drawn a few times in a hundred thousand, so a short run
 // reports a success it has not earned. The flags go after -args because go test
@@ -141,6 +143,12 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 
 	var open int
 	for _, o := range outstanding {
+		// Every document here is an accusation, so it had better be YAML. One
+		// that is not would be this suite's own defect, filed under the
+		// library's name and left there.
+		require.Truef(t, grammar.Stream([]byte(o.src)).OK,
+			"%q is not valid YAML 1.2, so it says nothing about the library", o.src)
+
 		if o.fails([]byte(o.src)) {
 			open++
 			t.Logf("still failing -- %s: %q", o.invariant, o.src)
