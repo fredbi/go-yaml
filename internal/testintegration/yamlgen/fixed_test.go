@@ -168,3 +168,59 @@ func TestFixedCommentOnASequenceEntryStaysThere(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedAnchoredEmptyEntryEndsWhereItsLineDoes: an entry whose line ends on
+// an anchor that names nothing keeps the entries after it as siblings.
+//
+// Whatever such an anchor names has to be written inside the entry, further in
+// than its '-' or its key. The parser looked only for the next entry of the
+// same collection at the same column, so anything else -- a comment line, or
+// the key of an enclosing mapping written level with the entry because a block
+// sequence sits at its key's own column -- was taken as the anchor's value, and
+// every later entry went down into it. Two siblings came back as one nested in
+// the other: a document that still parses, still settles, and means something
+// else.
+func TestFixedAnchoredEmptyEntryEndsWhereItsLineDoes(t *testing.T) {
+	values := map[string]any{
+		"a comment then a sibling":            []any{nil, "x"},
+		"an indented comment then a sibling":  []any{nil, "x"},
+		"a mapping entry does the same":       map[string]any{"k": nil, "j": "x"},
+		"an outer key level with the entry":   map[string]any{"": []any{nil}, " ": nil},
+		"no comment":                          []any{nil, "x"},
+		"nothing follows":                     []any{"x", nil},
+		"the anchor names an indented value":  []any{[]any{"x"}},
+		"the anchor names a mapping":          map[string]any{"k": map[string]any{"a": uint64(1)}, "j": "x"},
+		"the anchor names an indented nested": []any{nil, "x"},
+	}
+	sources := map[string]string{
+		"a comment then a sibling":            "- &a1\n#\n- x\n",
+		"an indented comment then a sibling":  "- &a1\n  #\n- x\n",
+		"a mapping entry does the same":       "k: &a1\n#\nj: x\n",
+		"an outer key level with the entry":   "\"\": &a2\n - &a1\n\" \":\n",
+		"no comment":                          "- &a1\n- x\n",
+		"nothing follows":                     "- x\n- &a1\n#\n",
+		"the anchor names an indented value":  "- &a1\n  - x\n",
+		"the anchor names a mapping":          "k: &a1\n  a: 1\n#\nj: x\n",
+		"the anchor names an indented nested": "- &a1\n  # c\n- x\n",
+	}
+
+	for name, src := range sources {
+		t.Run(name, func(t *testing.T) {
+			var before any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &before))
+			assert.Equal(t, values[name], before, "reading is correct")
+
+			file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+			require.NoError(t, err)
+			rendered := file.String()
+
+			var after any
+			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
+			assert.Equal(t, before, after, "and rendering keeps it")
+
+			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
+		})
+	}
+}
