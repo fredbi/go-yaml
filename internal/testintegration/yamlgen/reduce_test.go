@@ -57,26 +57,36 @@ func TestReduce(t *testing.T) {
 	}
 }
 
+// interestingHere stands in for a defect while none is outstanding.
+//
+// The reducer and its report do not care what makes a document interesting,
+// only that something does -- and wiring them to whichever defect happens to be
+// open would leave them untested the moment it is fixed, which is exactly when
+// the next one needs them.
+func interestingHere(src []byte) bool {
+	return bytes.Contains(src, []byte("BANG"))
+}
+
 // TestReduceKeepsThePredicateTrue is the property that matters for a reducer:
 // whatever it returns must still be a case of the thing being reduced.
 func TestReduceKeepsThePredicateTrue(t *testing.T) {
-	src := "a: 1\nb:\n-\n# c\n - x\n"
-	require.True(t, renderDoesNotSettle([]byte(src)), "the fixture must show the defect to begin with")
+	src := "a: 1\nb: BANG\nc: 3\n"
+	require.True(t, interestingHere([]byte(src)), "the fixture must be interesting to begin with")
 
-	small := yamlgen.Reduce([]byte(src), renderDoesNotSettle)
+	small := yamlgen.Reduce([]byte(src), interestingHere)
 
-	require.True(t, renderDoesNotSettle(small),
-		"the reduced document no longer shows the defect: %q", small)
+	require.True(t, interestingHere(small),
+		"the reduced document is no longer interesting: %q", small)
 	assert.Less(t, len(small), len(src), "and it should be smaller than what it started from")
 	t.Logf("reduced %q to %q", src, string(small))
 }
 
-// TestReducedReportIsUseful exercises the whole failure path on a document that
-// is known to fail, because the report is only ever produced when something has
-// already gone wrong -- which is precisely when nobody wants to discover that
-// the reporting itself is broken.
+// TestReducedReportIsUseful exercises the whole failure path, because the
+// report is only ever produced when something has already gone wrong -- which
+// is precisely when nobody wants to discover that the reporting itself is
+// broken.
 func TestReducedReportIsUseful(t *testing.T) {
-	report := reduced("Defect", "a: 1\nb:\n-\n# c\n - x\n", renderDoesNotSettle)
+	report := reduced("Defect", "a: 1\nb: BANG\nc: 3\n", interestingHere)
 
 	assert.Contains(t, report, "as generated")
 	assert.Contains(t, report, "reduced to")
