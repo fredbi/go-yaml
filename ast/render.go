@@ -368,7 +368,13 @@ func (r *Renderer) value(n Node, keyCommented bool) string {
 		return ""
 	}
 
-	if r.fitsOnKeyLine(n) && (!keyCommented || !isCollection(n)) {
+	if r.fitsOnKeyLine(n) && (!keyCommented || !isCollection(n)) &&
+		(!isCollection(n) || !strings.Contains(text, "\n")) {
+		// A flow collection fits on the key's line only while it stays on one
+		// line. A comment forces it onto several, and then the lines below it
+		// carry no indentation of their own: its closing bracket would land in
+		// column one, outside the mapping it belongs to, and the document it
+		// wrote would not read back.
 		return " " + text
 	}
 	if sequence, ok := n.(*SequenceNode); ok && !sequence.IsFlowStyle && !r.indentSequence {
