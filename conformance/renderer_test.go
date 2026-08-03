@@ -220,10 +220,28 @@ func TestRendererFlowCollectionsWithComments(t *testing.T) {
 			source: "[a, b\n# note\n]\n",
 			want:   "[\n  a,\n  b\n  # note\n]\n",
 		},
-		// Without a comment there is nothing to make room for.
+		// Under a key the whole collection moves below it. Left on the key's
+		// line, the lines under it carry no indentation of their own and the
+		// closing bracket lands in column one, outside the mapping it belongs
+		// to -- a document that no longer reads back.
+		"comment in a flow mapping under a key": {
+			source: "foo: {a: 1,\n  # note\n  b: 2}\n",
+			want:   "foo:\n  {\n    a: 1,\n    # note\n    b: 2\n  }\n",
+		},
+		"comment in a flow sequence in an entry": {
+			source: "- {a: 1,\n  # note\n  b: 2}\n",
+			want:   "- {\n    a: 1,\n    # note\n    b: 2\n  }\n",
+		},
+
+		// Without a comment there is nothing to make room for, and the
+		// collection stays where it was written.
 		"no comment": {
 			source: "[a, b]\n",
 			want:   "[a, b]\n",
+		},
+		"no comment under a key": {
+			source: "foo: {a: 1, b: 2}\n",
+			want:   "foo: {a: 1, b: 2}\n",
 		},
 	}
 
