@@ -285,6 +285,50 @@ func readNode(p []byte, node Node) (int, error) {
 	return size, nil
 }
 
+// linesSpannedBy returns how many lines past its first the scalar tk occupies.
+//
+// A block scalar is measured by its value, because that is what chomping has
+// already settled: the blank lines a "|+" keeps are content and are lines the
+// scalar is written on, while the ones a "|" clips away are not the scalar's at
+// all. Every other scalar is measured by its source text, whose trailing blank
+// lines run on to whatever comes next rather than belonging to it.
+func linesSpannedBy(tk *token.Token, lbc string) int {
+	if isBlockScalarContent(tk) {
+		lines := strings.Count(tk.Value, lbc)
+		if !strings.HasSuffix(tk.Value, lbc) {
+			lines++
+		}
+		if lines < 1 {
+			return 0
+		}
+
+		return lines - 1
+	}
+
+	body := strings.TrimSpace(tk.Origin)
+
+	return strings.Count(strings.TrimRight(body, lbc), lbc)
+}
+
+// isBlockScalarContent reports whether tk holds the content of a literal or
+// folded block scalar, which is to say that its header is what precedes it.
+func isBlockScalarContent(tk *token.Token) bool {
+	for prev := tk.Prev; prev != nil; prev = prev.Prev {
+		switch prev.Type {
+		case token.CommentType:
+			// A header may carry a comment, which stands between it and the
+			// content without separating them.
+			continue
+		case token.LiteralType, token.FoldedType:
+			return true
+		default:
+			return false
+		}
+	}
+
+	return false
+}
+
 func checkLineBreak(t *token.Token) bool {
 	if t.Prev != nil {
 		lbc := "\n"
@@ -306,10 +350,11 @@ func checkLineBreak(t *token.Token) bool {
 		if lineDiff > 0 {
 			switch prev.Type {
 			case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
-				// Remove any line breaks included in multiline string. A quoted
-				// scalar spans lines just as a plain one does, and the lines it
-				// occupies are not a gap the author left.
-				adjustment += strings.Count(strings.TrimRight(strings.TrimSpace(prev.Origin), lbc), lbc)
+				// A scalar may span lines: a quoted one written across two, a
+				// block one whose content is several, and the blank lines a
+				// "|+" keeps. Those lines are the scalar's own, and none of
+				// them is a gap the author left above t.
+				adjustment += linesSpannedBy(prev, lbc)
 			}
 			// Due to the way that comment parsing works its assumed that when a null value does not have new line in origin
 			// it was squashed therefore difference is ignored.

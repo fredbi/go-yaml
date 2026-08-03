@@ -142,11 +142,6 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		fails     func([]byte) bool
 	}{
 		{
-			invariant: "rendering preserves the value",
-			src:       "k: |+\n  trail\n\n",
-			fails:     renderChangesValue,
-		},
-		{
 			invariant: "rendering settles after one cycle",
 			src:       "-\n# c\n - x\n",
 			fails:     renderDoesNotSettle,
