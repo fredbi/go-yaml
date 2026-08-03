@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-// Package grammar is a spike: a YAML 1.2 recognizer compiled from the spec grammar.
+// Package grammar is a YAML 1.2 recognizer compiled from the spec grammar.
 //
 // It answers one question -- is this byte sequence a valid YAML 1.2 document --
 // and nothing else. No AST, no events, no error messages. That is the whole
@@ -35,18 +35,34 @@
 // lookups through the decoded JSON on every step costs two orders of magnitude
 // more than a closure call.
 //
-// # Scope of the spike
+// # Out-parameters
 //
-// Implemented: everything reachable from ns-flow-node, which is 131 of the 192
-// reachable productions and 24 of the 26 DSL forms -- flow collections, all
-// four scalar styles, plain-scalar context sensitivity, comments, separation
-// and indentation.
+// Most of the DSL reads as a PEG with arguments, and would run on an env passed
+// by value. Block context does not. A block scalar's header does not so much
+// consume text as report what it found:
 //
-// Not implemented: the forms that need mutable parse state, which is to say
-// block context and document structure -- (set), (if), (ord), (exclude) and
-// <auto-detect-indent>. Every production still compiles, so the whole grammar
-// is known to translate; reaching one of those forms panics with its name,
-// which keeps the boundary explicit rather than silently failing to match.
+//	c-l+literal(n) ::= "|" c-b-block-header(m,t) l-literal-content(n+m, t)
+//
+// The m and t that c-b-block-header (set) are read by the step after it, not by
+// anything inside it. So a matcher takes an env and hands one back, and a
+// sequence threads it from step to step. A call site that passed the bare
+// variable of the same name gets the callee's back -- which is by-reference for
+// variables, narrow enough that l-literal-content(n+m, t) cannot disturb the
+// caller's n, and the only reading under which the grammar's own rules for
+// block collections work out.
+//
+// Handing the env back rather than mutating a shared one is what keeps
+// backtracking free: a failed alternative's env is discarded by the combinator
+// that tried it, because the combinator still holds the one it started with.
+//
+// # What is measured rather than stated
+//
+// Two things in block context are not in the text. A block collection's
+// indentation is read off its first line. A block scalar's is too, when its
+// header declines to state one -- and that cannot be done where the grammar
+// sets it, since the header has not reached the content yet, so it travels as a
+// sentinel and resolves where n+m is computed. Both are in block.go, with the
+// spec's rules for the cases that have no first line to read.
 //
 // # Memoization
 //

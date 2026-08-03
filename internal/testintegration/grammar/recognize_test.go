@@ -20,8 +20,9 @@ func TestCompiles(t *testing.T) {
 }
 
 // flowCases are documents that are exactly one flow node, and documents that
-// are not. They are the spike's correctness gate: not a conformance claim, just
-// enough to show the engine agrees with the spec where we can check it by hand.
+// are not. They are the flow half of the correctness gate: not a conformance
+// claim, just enough to show the engine agrees with the spec where it can be
+// checked by hand.
 var flowCases = []struct {
 	name  string
 	src   string
@@ -75,6 +76,90 @@ func TestFlowNode(t *testing.T) {
 	}
 }
 
+// streamCases are whole documents, which is what the harness actually asks
+// about. They exercise the forms flow context never reaches: indentation that
+// is measured rather than stated, block scalar headers, and the markers that
+// end one document and start the next.
+//
+// Each expectation is read off the spec by hand. That is the point of having
+// them: the generative cross-check says the oracle and the library agree, which
+// is worth nothing if they agree on the wrong thing.
+var streamCases = []struct {
+	name  string
+	src   string
+	valid bool
+}{
+	// Streams and documents.
+	{"empty stream", ``, true},
+	{"one break", "\n", true},
+	{"only a comment", "# nothing else\n", true},
+	{"bare scalar", "a\n", true},
+	{"explicit document", "---\na\n", true},
+	{"directive", "%YAML 1.2\n---\na\n", true},
+	{"suffix", "---\na\n...\n", true},
+	{"two bare documents", "a\n---\nb\n", true},
+	{"two sequences", "---\n- a\n---\n- b\n", true},
+
+	// Block mappings.
+	{"one pair", "a: b\n", true},
+	{"two pairs", "a: b\nc: d\n", true},
+	{"empty value", "a:\n", true},
+	{"nested mapping", "a:\n  b: c\n", true},
+	{"explicit key", "? a\n: b\n", true},
+	{"explicit key alone", "? a\n", true},
+	{"blank line between", "a:\n\n  b: c\n", true},
+	{"anchor on its own line", "a: &x\n  b: c\n", true},
+	{"flow value", "a: [1, {b: c}]\n", true},
+	{"a value cannot outdent", "a: b\n  c: d\n", false},
+	{"a key needs a colon", "a: b\nb\n", false},
+	{"two colons", "a: b: c\n", false},
+	{"tabs do not indent", "a: b\n\tc: d\n", false},
+
+	// Block sequences.
+	{"two entries", "- a\n- b\n", true},
+	{"sequence under a key", "a:\n- x\n- y\n", true},
+	{"compact sequence", "- - a\n", true},
+	{"compact mapping", "- a: 1\n  b: 2\n", true},
+
+	// A compact collection is indented by an m of its own, counted from the
+	// dash it follows. These three differ only in what the enclosing sequence
+	// detected, which is what the rule inherits if nothing detects it here.
+	{"compact under a wider parent", "- &z\n  - a: x\n", true},
+	{"compact after two spaces", "-  - a: x\n", true},
+	{"compact three deep", "&c\n- &b\n  - \"\": &a null\n", true},
+
+	// Plain scalars fold across lines, which is why the two above are not
+	// simply "a" followed by junk.
+	{"plain over two lines", "a\nb\n", true},
+	{"an indented dash continues a plain scalar", "- a\n - b\n", true},
+
+	// Block scalars. The indentation indicator counts from the enclosing node,
+	// and at the root that node sits at -1, so |1 is content in column 0.
+	{"literal", "a: |\n  x\n", true},
+	{"literal strip", "a: |-\n  x\n", true},
+	{"literal keep", "a: |+\n  x\n\n", true},
+	{"folded", "a: >\n  x\n", true},
+	{"folded paragraphs", "a: >\n  one\n\n  two\n", true},
+	{"stated indent", "a: |2\n   x\n", true},
+	{"stated indent one", "a: |1\n x\n", true},
+	{"stated indent at the root counts from -1", "|2\n a\n", true},
+	{"leading empty line", "a: |\n\n  x\n", true},
+	{"leading empty line indented less", "a: |\n \n  x\n", true},
+	{"empty scalar before a sibling", "a: |\nb: c\n", true},
+	{"trailing blank line under a stated indent", "|2\n a\n\n", true},
+	{"stated wider than the content", "a: |2\nx\n", false},
+	{"leading empty line indented more", "a: |\n    \n  a\n", false},
+}
+
+func TestStream(t *testing.T) {
+	for _, tc := range streamCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := grammar.Stream([]byte(tc.src))
+			assert.Equalf(t, tc.valid, got.OK, "%q: %s", tc.src, got)
+		})
+	}
+}
+
 // TestMemoAgrees checks that memoization is an optimization and not a change of
 // behavior. A parameterized PEG makes this worth asserting: if the memo key
 // missed one of the four variables, this is where it would show.
@@ -86,9 +171,20 @@ func TestMemoAgrees(t *testing.T) {
 			require.Equalf(t, memo.OK, plain.OK, "%q: memo=%s plain=%s", tc.src, memo, plain)
 		})
 	}
+
+	// Block context is where the key could go wrong now: a rule that reports an
+	// m or a t decides differently under a different one, and a rule inside a
+	// bare document is asked with less input than the same rule outside one.
+	for _, tc := range streamCases {
+		t.Run(tc.name, func(t *testing.T) {
+			memo := grammar.Match("l-yaml-stream", []byte(tc.src), -1, "block-in")
+			plain := grammar.MatchNoMemo("l-yaml-stream", []byte(tc.src), -1, "block-in")
+			require.Equalf(t, memo.OK, plain.OK, "%q: memo=%s plain=%s", tc.src, memo, plain)
+		})
+	}
 }
 
-// throughputCases are the documents the spike measures against: small, but
+// throughputCases are the documents throughput is measured against: small, but
 // shaped like the ones a generator would produce.
 var throughputCases = []string{
 	`[a, b, c]`,
@@ -99,8 +195,8 @@ var throughputCases = []string{
 	`a fairly long plain scalar that keeps going for a while yet`,
 }
 
-// TestThroughput is the measurement the spike was built for: how long a
-// hundred thousand oracle calls would take, and what memoization is worth.
+// TestThroughput reports how long a hundred thousand oracle calls would take,
+// and what memoization is worth.
 //
 // It reports rather than asserts. The number is the input to a decision, not a
 // property to defend.

@@ -5,8 +5,8 @@ package grammar
 
 import "fmt"
 
-// Result is the oracle's verdict, with the instrumentation the spike exists to
-// collect.
+// Result is the oracle's verdict, with the instrumentation that says what it
+// cost to reach.
 type Result struct {
 	// OK reports whether the whole input matched the production.
 	OK bool
@@ -24,12 +24,20 @@ func (r Result) String() string {
 
 // FlowNode reports whether src is exactly one YAML 1.2 flow node.
 //
-// It is the spike's entry point because ns-flow-node reaches 131 of the
-// grammar's 192 reachable productions -- every scalar style, plain-scalar
-// context sensitivity, comments, separation and indentation -- without needing
-// the block-context forms this spike does not implement.
+// Narrower than Stream, and worth keeping separate: a failure against one node
+// says the fault is in that node, where the same failure against a whole stream
+// could be anywhere above it.
 func FlowNode(src []byte) Result {
 	return Match("ns-flow-node", src, 0, "flow-out")
+}
+
+// Stream reports whether src is a valid YAML 1.2 stream.
+//
+// This is the question the conformance harness asks: not whether some fragment
+// is well formed, but whether a document the generator wrote is one the library
+// is obliged to read.
+func Stream(src []byte) Result {
+	return Match("l-yaml-stream", src, -1, "block-in")
 }
 
 // Match reports whether src is exactly one instance of the named production,
@@ -43,7 +51,7 @@ func Match(rule string, src []byte, n int, c string) Result {
 	var st state
 	st.reset(src, true)
 
-	matched := invoke(s, &st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
+	_, matched := invoke(s, &st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
 
 	return Result{
 		OK:    matched && st.pos == len(src),
@@ -52,8 +60,9 @@ func Match(rule string, src []byte, n int, c string) Result {
 	}
 }
 
-// MatchNoMemo is Match with the memo table disabled, so that the spike can
-// report what memoization is worth rather than assume it.
+// MatchNoMemo is Match with the memo table disabled, so that a test can check
+// memoization changed nothing, and report what it is worth rather than assume
+// it.
 func MatchNoMemo(rule string, src []byte, n int, c string) Result {
 	s, ok := grammarCompiler.slots[rule]
 	if !ok {
@@ -63,7 +72,7 @@ func MatchNoMemo(rule string, src []byte, n int, c string) Result {
 	var st state
 	st.reset(src, false)
 
-	matched := invoke(s, &st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
+	_, matched := invoke(s, &st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
 
 	return Result{
 		OK:    matched && st.pos == len(src),
@@ -102,7 +111,7 @@ func (r *Recognizer) Match(rule string, src []byte, n int, c string) Result {
 
 	r.st.reset(src, true)
 
-	matched := invoke(s, &r.st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
+	_, matched := invoke(s, &r.st, env{n: n, m: 0, c: contextCode[c], t: chompCode["clip"]})
 
 	return Result{
 		OK:    matched && r.st.pos == len(src),
@@ -114,4 +123,9 @@ func (r *Recognizer) Match(rule string, src []byte, n int, c string) Result {
 // FlowNode reports whether src is exactly one YAML 1.2 flow node.
 func (r *Recognizer) FlowNode(src []byte) Result {
 	return r.Match("ns-flow-node", src, 0, "flow-out")
+}
+
+// Stream reports whether src is a valid YAML 1.2 stream.
+func (r *Recognizer) Stream(src []byte) Result {
+	return r.Match("l-yaml-stream", src, -1, "block-in")
 }
