@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -160,6 +161,7 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 	tests = append(tests, commentCases()...)
 	tests = append(tests, anchorCases()...)
 	tests = append(tests, blockScalarCases()...)
+	tests = append(tests, foldedCases()...)
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -386,5 +388,112 @@ func blockScalarCases() []struct {
 			style: plain,
 			want:  "k: \"  indented\\n\"\n",
 		},
+	}
+}
+
+// foldedCases pin the folded block scalar, which is the one presentation that
+// rewrites the text it is given.
+//
+// Folding joins two lines with a space and turns n+1 breaks into n, so the
+// emitter is solving the inverse of what the parser does. Get that inverse
+// wrong and the document still looks perfectly reasonable while meaning
+// something else -- so these are written out by hand, and every one of them
+// asserts the text reads back as the value as well as being the text expected.
+func foldedCases() []struct {
+	name  string
+	value yamlgen.Value
+	style yamlgen.Style
+	want  string
+} {
+	folded := yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, Folded: true, NullSpelling: "null"}
+	stated := folded
+	stated.BlockIndicator = true
+
+	pair := func(v yamlgen.Value) yamlgen.Value {
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: v}}}
+	}
+
+	return []struct {
+		name  string
+		value yamlgen.Value
+		style yamlgen.Style
+		want  string
+	}{
+		{
+			name:  "one line needs no fold at all",
+			value: pair(yamlgen.Str{V: "one\n"}),
+			style: folded,
+			want:  "k: >\n  one\n",
+		},
+		{
+			name:  "a break in the value is written as a blank line",
+			value: pair(yamlgen.Str{V: "one\ntwo\n"}),
+			style: folded,
+			want:  "k: >\n  one\n\n  two\n",
+		},
+		{
+			name:  "three lines, two blank lines",
+			value: pair(yamlgen.Str{V: "one\ntwo\nthree\n"}),
+			style: folded,
+			want:  "k: >\n  one\n\n  two\n\n  three\n",
+		},
+		{
+			name:  "no trailing break strips",
+			value: pair(yamlgen.Str{V: "one\ntwo"}),
+			style: folded,
+			want:  "k: >-\n  one\n\n  two\n",
+		},
+		{
+			name:  "more than one trailing break keeps",
+			value: pair(yamlgen.Str{V: "one\n\n"}),
+			style: folded,
+			want:  "k: >+\n  one\n\n",
+		},
+		{
+			name:  "the indicator comes before the chomping",
+			value: pair(yamlgen.Str{V: "one\ntwo"}),
+			style: stated,
+			want:  "k: >2-\n  one\n\n  two\n",
+		},
+		{
+			name:  "at the root it states one more than its column",
+			value: yamlgen.Str{V: "one\ntwo\n"},
+			style: stated,
+			want:  ">3\n  one\n\n  two\n",
+		},
+	}
+}
+
+// TestEveryBlockScalarStyleIsActuallyReached guards against an axis that is
+// wired up everywhere except where it is switched on.
+//
+// A presentation the generator never produces costs nothing to keep and proves
+// nothing: the properties pass, the ledger stays empty, and the axis reads as
+// covered. Folded scalars were drawn zero times out of twenty thousand
+// documents before the style generator was taught the field, and every property
+// was green throughout.
+func TestEveryBlockScalarStyleIsActuallyReached(t *testing.T) {
+	seen := map[string]int{}
+
+	rapid.Check(t, func(rt *rapid.T) {
+		src := yamlgen.Emit(
+			yamlgen.Values().Draw(rt, "value"),
+			yamlgen.Styles().Draw(rt, "style"),
+		)
+
+		for name, marker := range map[string]*regexp.Regexp{
+			"literal":       regexp.MustCompile(`\|[0-9]?[-+]?\n`),
+			"folded":        regexp.MustCompile(`>[0-9]?[-+]?\n`),
+			"stated indent": regexp.MustCompile(`[|>][0-9][-+]?\n`),
+		} {
+			if marker.MatchString(src) {
+				seen[name]++
+			}
+		}
+	})
+
+	for _, name := range []string{"literal", "folded", "stated indent"} {
+		assert.Positivef(t, seen[name], "no document used a %s block scalar", name)
+		t.Logf("%-13s reached %d times", name, seen[name])
 	}
 }

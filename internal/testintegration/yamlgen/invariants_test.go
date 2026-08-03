@@ -117,7 +117,27 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		invariant string
 		src       string
 		fails     func([]byte) bool
-	}{}
+	}{
+		{
+			invariant: "reading any presentation gives the value",
+			src:       "k: |2+\n  one\n\n",
+			fails: func(b []byte) bool {
+				var got any
+
+				return yaml.Unmarshal(b, &got) != nil
+			},
+		},
+		{
+			invariant: "rendering preserves the value",
+			src:       "k: >+\n  trail\n\n",
+			fails:     renderChangesValue,
+		},
+		{
+			invariant: "rendering preserves the value",
+			src:       "|2\n a\n",
+			fails:     renderChangesValue,
+		},
+	}
 
 	var open int
 	for _, o := range outstanding {

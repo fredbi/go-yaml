@@ -73,6 +73,14 @@ type Style struct {
 	Quoting Quoting
 	// Literal writes multi-line strings as | block scalars where possible.
 	Literal bool
+	// Folded writes multi-line strings as > block scalars where possible.
+	//
+	// Folding is the one presentation that rewrites the text it is given: a
+	// single break between two lines becomes a space, and n+1 breaks become n.
+	// So a value's break has to be written as a blank line, and the emitter is
+	// solving the inverse of what the parser does rather than just laying the
+	// value out.
+	Folded bool
 	// BlockIndicator states a block scalar's indentation in its header, as the
 	// `2` in `|2`.
 	//
@@ -119,9 +127,12 @@ func (s Style) String() string {
 	lit := ""
 	if s.Literal {
 		lit = " literal"
-		if s.BlockIndicator {
-			lit += "=" + itoa(s.Indent)
-		}
+	}
+	if s.Folded {
+		lit += " folded"
+	}
+	if lit != "" && s.BlockIndicator {
+		lit += "=" + itoa(s.Indent)
 	}
 
 	markers := ""
@@ -141,6 +152,7 @@ func Styles() *rapid.Generator[Style] {
 			Indent:  rapid.IntRange(1, 6).Draw(t, "indent"),
 			Quoting: Quoting(rapid.IntRange(0, 2).Draw(t, "quoting")),
 			Literal: rapid.Bool().Draw(t, "literal"),
+			Folded:  rapid.Bool().Draw(t, "folded"),
 			// The indicator is a single digit, so it can only state an
 			// indentation the Indent range above can actually reach.
 			BlockIndicator: rapid.Bool().Draw(t, "blockindicator"),
