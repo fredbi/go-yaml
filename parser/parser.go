@@ -854,12 +854,16 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 		return newNullNode(ctx, ctx.insertNullToken(colonTk))
 	}
 
-	if tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
-		ctx.nextToken().Column() == keyCol && p.isMapToken(ctx.nextToken()) {
+	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
+		next.Column() == keyCol && p.isMapToken(next) {
 		// in this case,
 		// ----
 		// key: &anchor
 		// next
+		//
+		// A comment may stand between the two. It belongs to the entry below
+		// and says nothing about where this one ends, so what follows the
+		// anchor is looked for past it.
 		group := &TokenGroup{
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
@@ -892,7 +896,7 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 	}
 
 	if tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
-		ctx.nextToken().Column() < keyCol {
+		ctx.nextNotCommentToken().Column() < keyCol {
 		// in this case,
 		// ----
 		//   key: &anchor
@@ -1358,12 +1362,21 @@ func (p *parser) parseSequenceValue(ctx *context, seqTk *Token) (ast.Node, error
 		return newNullNode(ctx, ctx.insertNullToken(seqTk))
 	}
 
-	if tk.Line() == seqLine && tk.GroupType() == TokenGroupAnchorName &&
-		ctx.nextToken().Column() == seqCol && ctx.nextToken().Type() == token.SequenceEntryType {
+	if next := ctx.nextNotCommentToken(); tk.Line() == seqLine && tk.GroupType() == TokenGroupAnchorName &&
+		next.Column() <= seqCol {
 		// in this case,
 		// ----
 		// - &anchor
 		// -
+		//
+		// Whatever an anchor at the end of an entry's line names has to be
+		// written inside that entry, which means further in than its '-'. A
+		// token back at that column or before it belongs to something the
+		// entry is part of, so the anchor names the empty node.
+		//
+		// A comment may stand between the two. It belongs to what comes after
+		// and says nothing about where this entry ends, so what follows the
+		// anchor is looked for past it.
 		group := &TokenGroup{
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
@@ -1396,7 +1409,7 @@ func (p *parser) parseSequenceValue(ctx *context, seqTk *Token) (ast.Node, error
 	}
 
 	if tk.Line() == seqLine && tk.GroupType() == TokenGroupAnchorName &&
-		ctx.nextToken().Column() < seqCol {
+		ctx.nextNotCommentToken().Column() < seqCol {
 		// in this case,
 		// ----
 		//   - &anchor
