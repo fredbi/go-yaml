@@ -224,3 +224,97 @@ func TestFixedAnchoredEmptyEntryEndsWhereItsLineDoes(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedBlankLineUnderAStatedIndent: a block scalar may state its
+// indentation and keep its trailing blank lines at the same time.
+//
+// A blank line carries no indentation of its own, and YAML allows that:
+// l-empty admits s-indent(<n), so an empty line may be indented less than the
+// header states. Holding the last line to the stated width refused every such
+// document -- and only when both features were present, since the padded and
+// mid-content spellings were always accepted.
+func TestFixedBlankLineUnderAStatedIndent(t *testing.T) {
+	values := map[string]any{
+		"a kept blank line":          map[string]any{"k": "one\n\n"},
+		"two kept blank lines":       map[string]any{"k": "one\n\n\n"},
+		"the blank line padded out":  map[string]any{"k": "one\n\n"},
+		"a blank line in the middle": map[string]any{"k": "one\n\ntwo\n"},
+		"without the indicator":      map[string]any{"k": "one\n\n"},
+	}
+	sources := map[string]string{
+		"a kept blank line":          "k: |2+\n  one\n\n",
+		"two kept blank lines":       "k: |2+\n  one\n\n\n",
+		"the blank line padded out":  "k: |2+\n  one\n  \n",
+		"a blank line in the middle": "k: |2\n  one\n\n  two\n",
+		"without the indicator":      "k: |+\n  one\n\n",
+	}
+
+	for name, src := range sources {
+		t.Run(name, func(t *testing.T) {
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+			assert.Equal(t, values[name], got)
+		})
+	}
+
+	// Content that really is indented less than the header states is still
+	// refused: it is the empty line that is exempt, not the rule.
+	for name, src := range map[string]string{
+		"content short of the stated width": "k: |2\n x\n",
+		"content short by more":             "k: |4\n  x\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var v any
+			assert.Error(t, yaml.Unmarshal([]byte(src), &v))
+		})
+	}
+}
+
+// TestFixedStatedIndentFollowsTheContent: a block scalar that states its
+// indentation has the header rewritten when the content moves.
+//
+// The width is counted from the indentation of whatever encloses the scalar,
+// and the renderer writes the content at its own width, so carrying the
+// source's number over left the header describing a layout that was no longer
+// there -- the value gained a column on every cycle. A document encloses
+// nothing, and the spec gives its node an indentation of -1, so at the root the
+// same content is stated one higher than anywhere else.
+func TestFixedStatedIndentFollowsTheContent(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"at the document root":         {"|2\n a\n", "|3\n  a\n"},
+		"already at the root width":    {"|3\n  a\n", "|3\n  a\n"},
+		"behind an anchor at the root": {"&a |2\n x\n", "&a |3\n  x\n"},
+		"under a mapping key":          {"k: |2\n   x\n", "k: |2\n   x\n"},
+		"under a sequence entry":       {"- |2\n   x\n", "- |2\n   x\n"},
+		"narrower than the renderer":   {"k: |1\n  x\n", "k: |2\n   x\n"},
+
+		// A property stays on the line the header ends, so what it names is
+		// still indented from the start of that line and not from the property.
+		"behind an anchor in a sequence": {"- &a |\n  x\n", "- &a |\n  x\n"},
+		"behind a tag in a sequence":     {"- !!str |\n  x\n", "- !!str |\n  x\n"},
+		"behind an anchor under a key":   {"k: &a |\n  x\n", "k: &a |\n  x\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var before any
+			require.NoError(t, yaml.Unmarshal([]byte(test.source), &before))
+
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			rendered := file.String()
+			assert.Equal(t, test.want, rendered)
+
+			var after any
+			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
+			assert.Equal(t, before, after, "the value survives the move")
+
+			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
+		})
+	}
+}
