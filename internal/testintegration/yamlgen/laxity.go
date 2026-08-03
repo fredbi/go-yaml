@@ -3,6 +3,8 @@
 
 package yamlgen
 
+import "regexp"
+
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
 //
 // This is the other direction from [Divergence], and it is recorded differently
@@ -70,9 +72,26 @@ func KnownlyAccepted(src string) *Laxity {
 //
 // The list is not a survey. It is what a few hundred thousand mutations turned
 // up and a person then confirmed, so absence from it means nothing.
-//
-// Empty. Every mutant the hunt has produced and the recognizer refused is
-// refused by the library too, which is a claim
-// TestEveryDocumentTheGrammarRefusesIsRefused re-earns on every run rather than
-// a note about how things once stood.
-var Lax = []Laxity{}
+var Lax = []Laxity{
+	{
+		Name: "a-lone-question-mark-where-only-a-flow-node-fits",
+		Src:  "k: ?\n",
+		Rule: "ns-plain-first(c) admits '?' only when what follows it is " +
+			"ns-plain-safe(c), and a line break is not one. Where a block node " +
+			"may appear the '?' is read as c-l-block-map-explicit-key instead, " +
+			"which is why \"- ?\", \"?\" and \"k:\\n  ?\" are all documents. A " +
+			"value written on its key's line is an ns-flow-node and so is every " +
+			"node inside a flow collection, and neither leaves the '?' anything " +
+			"to be -- so \"[?]\" goes the same way. The distinction is the " +
+			"context the node sits in rather than the characters around it, " +
+			"which is why this is recorded rather than refused in the scanner",
+		Reads: map[string]any{"k": "?"},
+		Match: loneQuestionMark.MatchString,
+	},
+}
+
+// loneQuestionMark matches a '?' with nothing after it standing where only a
+// flow node fits: as a value on its key's line, or as an entry of a flow
+// collection. Written out rather than described because the two are the whole
+// of the class -- everywhere else the same '?' opens an explicit key.
+var loneQuestionMark = regexp.MustCompile(`(?m): \?[ \t]*$|[\[{,][ \t]*\?[ \t]*[,\]}]`)
