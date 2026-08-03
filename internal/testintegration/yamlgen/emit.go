@@ -116,7 +116,7 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 		return "", false
 	case Str:
 		// A literal block scalar is the one scalar that is not one line.
-		if !flow && e.st.Literal && canLiteral(n.V) {
+		if !flow && e.st.Literal && canLiteral(n.V, e.st.BlockIndicator) {
 			return "", false
 		}
 
@@ -136,9 +136,9 @@ func (e *emitter) block(v Value, indent int) {
 		e.pad(indent)
 		e.buf.WriteString("&" + n.Name)
 
-		if s, ok := n.V.(Str); ok && e.st.Literal && canLiteral(s.V) {
+		if s, ok := n.V.(Str); ok && e.st.Literal && canLiteral(s.V, e.st.BlockIndicator) {
 			e.buf.WriteString(" ")
-			e.literal(s.V, indent+e.st.Indent)
+			e.literal(s.V, indent+e.st.Indent, e.st.Indent+1)
 
 			return
 		}
@@ -165,7 +165,7 @@ func (e *emitter) block(v Value, indent int) {
 		// The content of a block scalar is indented relative to the header, so
 		// it cannot sit at the header's own column -- at the root that would be
 		// column zero, which is not indentation at all.
-		e.literal(n.V, indent+e.st.Indent)
+		e.literal(n.V, indent+e.st.Indent, e.st.Indent+1)
 	default:
 		e.pad(indent)
 		e.buf.WriteString(e.simpleScalar(v, false))
@@ -185,10 +185,10 @@ func (e *emitter) child(v Value, indent int) {
 		v = a.V
 	}
 
-	if s, ok := v.(Str); ok && !e.st.Flow && e.st.Literal && canLiteral(s.V) {
+	if s, ok := v.(Str); ok && !e.st.Flow && e.st.Literal && canLiteral(s.V, e.st.BlockIndicator) {
 		e.buf.WriteString(anchor)
 		e.buf.WriteString(" ")
-		e.literal(s.V, indent+e.st.Indent)
+		e.literal(s.V, indent+e.st.Indent, e.st.Indent)
 
 		return
 	}
@@ -218,18 +218,29 @@ func (e *emitter) child(v Value, indent int) {
 
 // literal writes a string as a block scalar, choosing the chomping indicator
 // that reproduces its trailing newlines exactly.
-func (e *emitter) literal(s string, indent int) {
+// stated is what the indentation indicator should say when the style asks for
+// one: the content's column counted from the enclosing node's indentation. A
+// block scalar at the root of a document is measured from -1, not from 0, so
+// the root passes one more than the column it writes at.
+func (e *emitter) literal(s string, indent, stated int) {
 	body := strings.TrimRight(s, "\n")
 	trailing := len(s) - len(body)
 
+	e.buf.WriteString("|")
+
+	if e.st.BlockIndicator {
+		e.buf.WriteString(itoa(stated))
+	}
+
 	switch trailing {
 	case 0:
-		e.buf.WriteString("|-\n")
+		e.buf.WriteString("-")
 	case 1:
-		e.buf.WriteString("|\n")
 	default:
-		e.buf.WriteString("|+\n")
+		e.buf.WriteString("+")
 	}
+
+	e.buf.WriteString("\n")
 
 	for _, line := range strings.Split(body, "\n") {
 		if line != "" {
@@ -377,23 +388,33 @@ func canSingle(s string) bool {
 	return true
 }
 
-// canLiteral reports whether s can be written as a literal block scalar
-// without an explicit indentation indicator.
+// canLiteral reports whether s can be written as a literal block scalar.
 //
-// The indicator is needed when the first line is empty or a content line
-// begins with a space, because then the indentation cannot be detected from
-// the content. Those are left out here rather than emitted wrongly.
-func canLiteral(s string) bool {
-	if s == "" || strings.HasPrefix(s, "\n") {
+// Without an explicit indentation indicator the parser works the indentation
+// out from the first content line, so content whose first line is empty, or
+// whose lines begin with a space, has nothing to work it out from. The
+// indicator states it instead, and those strings become writable -- which is
+// the whole reason to generate one.
+func canLiteral(s string, indicator bool) bool {
+	// A block scalar needs at least one line with something on it. Without one
+	// there is no content for the trailing breaks to trail after, and the
+	// header cannot say how many of them the value has.
+	if strings.TrimRight(s, "\n") == "" {
 		return false
 	}
 
-	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
-		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+	if !indicator {
+		if strings.HasPrefix(s, "\n") {
 			return false
 		}
-		if line != "" && strings.TrimSpace(line) == "" {
-			return false
+
+		for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+			if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+				return false
+			}
+			if line != "" && strings.TrimSpace(line) == "" {
+				return false
+			}
 		}
 	}
 
