@@ -80,6 +80,47 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "quoted: \"a\n b\n c\"\n",
 		},
 
+		// ns-anchor-name is one character or more, and it ends at a flow
+		// indicator. A collection opening straight onto it is a node with no
+		// separation in front of it.
+		"anchor with no name": {
+			invalid: "& e\n",
+			valid:   "&a e\n",
+		},
+		"flow sequence touching the anchor in front of it": {
+			invalid: "&a[]\n",
+			valid:   "&a []\n",
+		},
+		"flow mapping touching the anchor in front of it": {
+			invalid: "[&a{1: 2}]\n",
+			valid:   "[&a {1: 2}]\n",
+		},
+
+		// A plain scalar cannot open on an indicator. Inside one they are
+		// ordinary characters, and inside a flow collection they are claimed
+		// before a scalar could begin -- so an anchor on an empty node keeps
+		// working there.
+		"closing brace as a whole document": {
+			invalid: "}\n",
+			valid:   "{}\n",
+		},
+		"comma as a whole document": {
+			invalid: ",\n",
+			valid:   "a,b\n",
+		},
+		"comma after an anchor outside a flow collection": {
+			invalid: "&a,\n",
+			valid:   "[&a, b]\n",
+		},
+		"closing brace after an anchor outside a flow mapping": {
+			invalid: "&a}\n",
+			valid:   "{&a: b}\n",
+		},
+		"closing bracket after an anchor outside a flow sequence": {
+			invalid: "&a]\n",
+			valid:   "[&a]\n",
+		},
+
 		// A block scalar header takes one indentation indicator and one
 		// chomping indicator, in either order, and either may be left out. Two
 		// of either is not a header.
