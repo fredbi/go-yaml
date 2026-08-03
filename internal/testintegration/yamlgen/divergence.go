@@ -107,25 +107,6 @@ var Ledger = []Divergence{
 			return hasSeqEntryWithoutInlineScalar(v, st)
 		},
 	},
-	{
-		Name:     "keep-chomping-loses-the-newlines-it-keeps",
-		Property: Render,
-		Reason: "rendering a literal block scalar with keep chomping (|+) writes " +
-			"the indicator but not the blank lines it exists to preserve, so " +
-			"\"a\\n\\n\" comes back as \"a\\n\"; reading the same document is correct, " +
-			"so this is the renderer alone",
-		Match: func(v Value, st Style) bool {
-			if st.Flow || !st.Literal {
-				return false
-			}
-
-			return anyValueString(v, func(s string) bool {
-				// Keep chomping is what the emitter picks for more than one
-				// trailing newline.
-				return canLiteral(s) && len(s)-len(strings.TrimRight(s, "\n")) >= 2
-			})
-		},
-	},
 }
 
 // Known returns the ledger entry describing this pairing for the given
@@ -206,35 +187,6 @@ func leavesItsLineEmpty(v Value, st Style) bool {
 	case Str:
 		// A literal block scalar puts its content below, not on the line.
 		return st.Literal && canLiteral(n.V)
-	default:
-		return false
-	}
-}
-
-// anyValueString reports whether any string in a value position satisfies pred.
-//
-// Mapping keys are excluded: a key is always written on one line, so the
-// presentation choices that apply to a value do not apply to it.
-func anyValueString(v Value, pred func(string) bool) bool {
-	switch n := v.(type) {
-	case Str:
-		return pred(n.V)
-	case Seq:
-		for _, item := range n.Items {
-			if anyValueString(item, pred) {
-				return true
-			}
-		}
-
-		return false
-	case Map:
-		for _, p := range n.Pairs {
-			if anyValueString(p.Val, pred) {
-				return true
-			}
-		}
-
-		return false
 	default:
 		return false
 	}

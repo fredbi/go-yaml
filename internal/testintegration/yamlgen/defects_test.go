@@ -9,7 +9,6 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -23,30 +22,6 @@ import (
 // They therefore fail when the defect is fixed. That is the point: the fix
 // arrives together with the deletion of its ledger entry and the correction of
 // the expectation here, and none of the three can be forgotten.
-
-// TestDefectKeepChompingLosesTheNewlinesItKeeps: rendering writes the `|+`
-// indicator without the blank lines it exists to preserve.
-//
-// Reading is correct; only rendering loses them. It is silent data loss in the
-// round trip the library exists for.
-func TestDefectKeepChompingLosesTheNewlinesItKeeps(t *testing.T) {
-	const src = "k: |+\n  trail\n\n"
-
-	var before any
-	require.NoError(t, yaml.Unmarshal([]byte(src), &before))
-	assert.Equal(t, map[string]any{"k": "trail\n\n"}, before, "reading is correct")
-
-	file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
-	require.NoError(t, err)
-	rendered := file.String()
-
-	assert.Equal(t, "k: |+\n  trail\n", rendered,
-		"the kept blank line is dropped -- if this now round trips, the defect is fixed")
-
-	var after any
-	require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
-	assert.Equal(t, map[string]any{"k": "trail\n"}, after, "and the value changed")
-}
 
 // TestDefectCommentOnASequenceEntryMovesOrIsLost: a comment on a sequence entry
 // with nothing else on its line is not kept where it was.

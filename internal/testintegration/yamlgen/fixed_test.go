@@ -85,3 +85,42 @@ func TestFixedStripChompingKeepsTrailingSpaces(t *testing.T) {
 		assert.Equal(t, "a", got)
 	})
 }
+
+// TestFixedBlockScalarsRenderTheirChomping: rendering writes back every line
+// the chomping indicator settled on.
+//
+// A "|+" used to write the indicator without the blank lines it exists to
+// preserve, so "a\n\n" came back as "a\n" -- the indicator was kept and its
+// whole effect thrown away. Rendering took the content from the source text and
+// trimmed the trailing whitespace off it, which is right for a "|" and wrong
+// for the two indicators that exist to say what happens to that whitespace.
+//
+// The content now comes from the value, which is what chomping has already
+// settled, so the indicator needs no arithmetic here at all.
+func TestFixedBlockScalarsRenderTheirChomping(t *testing.T) {
+	sources := map[string]string{
+		"keep one blank line":    "k: |+\n  trail\n\n",
+		"keep two":               "k: |+\n  trail\n\n\n",
+		"keep with no content":   "k: |+\n\n\n",
+		"clip":                   "k: |\n  trail\n",
+		"strip":                  "k: |-\n  trail\n",
+		"strip a trailing space": "k: |-\n  trail \n",
+		"a stated indent":        "k: |2\n   x\n",
+		"several lines":          "k: |\n  a\n  b\n",
+		"a blank line inside":    "k: |\n  a\n\n  b\n",
+		"in a sequence":          "- |+\n  keep\n\n- x\n",
+	}
+
+	for name, src := range sources {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, src, file.String(), "the document is written back as it was read")
+
+			var before, after any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &before))
+			require.NoError(t, yaml.Unmarshal([]byte(file.String()), &after))
+			assert.Equal(t, before, after, "and means the same")
+		})
+	}
+}

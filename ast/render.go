@@ -526,16 +526,8 @@ func (r *Renderer) literal(n *LiteralNode) string {
 		header += " " + r.String(n.Comment)
 	}
 
-	// Take the content from the source text, which keeps the line breaks and
-	// trailing spaces the value has already lost, but strip the indentation
-	// that introduced it by the width the decoder stripped -- not by the least
-	// indented line. The two differ exactly when the header states a width and
-	// every content line starts with spaces of its own, and those spaces are
-	// part of the value.
-	lbc := lineBreakOf(n.Value.GetToken().Origin)
-	content := strings.TrimRight(n.Value.GetToken().Origin, " \n\r")
-	content = dedentBy(content, introducedIndent(content, n.Value.Value, lbc))
-	if content == "" {
+	value := n.Value.Value
+	if value == "" {
 		// An empty block scalar is its header. Writing the line break that
 		// would introduce content leaves a blank line the parser reads as
 		// content indented differently from what the header announced.
@@ -549,7 +541,68 @@ func (r *Renderer) literal(n *LiteralNode) string {
 		indent = stated
 	}
 
-	return header + lbc + indentLinesWith(content, indent, lbc)
+	if isFolded(n.Start) {
+		// A folded scalar's value has lost its line structure -- that is what
+		// folding is -- so it can only be written from the text it was read
+		// from.
+		return header + r.foldedFromSource(n, indent)
+	}
+
+	// A literal scalar's value is its content exactly, and the header says how
+	// to write it: each line indented and closed by a break, with the last
+	// break left to whatever follows the node. The chomping indicator needs no
+	// arithmetic here -- it is what decided how many trailing breaks the value
+	// has, and writing them all back is what makes "|+" keep the blank lines it
+	// exists for.
+	lbc := lineBreakOf(value)
+	body := blockScalarBody(value, indent, lbc)
+
+	return header + lbc + strings.TrimSuffix(body, lbc)
+}
+
+func isFolded(tk *token.Token) bool {
+	return tk.Type == token.FoldedType
+}
+
+// foldedFromSource writes a folded scalar's content back from the source text,
+// stripping the indentation that introduced it by the width the decoder
+// stripped -- not by the least indented line. The two differ exactly when the
+// header states a width and every content line starts with spaces of its own,
+// and those spaces are part of the value.
+func (r *Renderer) foldedFromSource(n *LiteralNode, indent int) string {
+	lbc := lineBreakOf(n.Value.GetToken().Origin)
+	content := strings.TrimRight(n.Value.GetToken().Origin, " \n\r")
+	content = dedentBy(content, introducedIndent(content, n.Value.Value, lbc))
+	if content == "" {
+		return ""
+	}
+
+	return lbc + indentLinesWith(content, indent, lbc)
+}
+
+// blockScalarBody writes a block scalar's content: every line indented and
+// closed by a line break. A line with nothing on it stays empty -- indenting it
+// would leave trailing spaces on a blank line.
+func blockScalarBody(value string, indent int, lbc string) string {
+	lines := strings.Split(value, lbc)
+	if strings.HasSuffix(value, lbc) {
+		// The split leaves an empty element past the final break, which is not
+		// a line of the content.
+		lines = lines[:len(lines)-1]
+	}
+
+	pad := strings.Repeat(" ", indent)
+
+	var body strings.Builder
+	for _, line := range lines {
+		if line != "" {
+			body.WriteString(pad)
+			body.WriteString(line)
+		}
+		body.WriteString(lbc)
+	}
+
+	return body.String()
 }
 
 // lineBreakOf returns the line break a scalar's content is written with.
