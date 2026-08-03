@@ -38,6 +38,41 @@ func TestParseBlockScalarAtTheDocumentRoot(t *testing.T) {
 	})
 }
 
+// TestParseEmptyDocumentsKeepTheirStream covers a document with nothing in it
+// between two others.
+//
+// It is a document like any other, and so is everything after it. One "---"
+// straight after another used to end the parse: the empty document was
+// returned and the rest of the stream was dropped without a word, so
+// "a: 1\n---\n---\nb: 2\n" came back as two documents and the second value
+// was simply gone.
+func TestParseEmptyDocumentsKeepTheirStream(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		docs   int
+	}{
+		"an empty document in the middle":  {"a: 1\n---\n---\nb: 2\n", 3},
+		"a blank line between the markers": {"a: 1\n---\n\n---\nb: 2\n", 3},
+		"a comment between the markers":    {"a: 1\n---\n# c\n---\nb: 2\n", 3},
+		"an empty document first":          {"---\n---\nb: 2\n", 2},
+		"two in a row":                     {"---\n---\n---\nc: 3\n", 3},
+		"an empty document last":           {"a: 1\n---\n", 2},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Without ParseComments the comment is not even a token, which is
+			// how the drop went unnoticed: the shape it needs is two markers
+			// with nothing between them.
+			for _, mode := range []parser.Mode{0, parser.ParseComments} {
+				file, err := parser.ParseBytes([]byte(test.source), mode)
+				require.NoErrorf(t, err, "mode %d", mode)
+				assert.Lenf(t, file.Docs, test.docs, "mode %d: %q", mode, test.source)
+			}
+		})
+	}
+}
+
 // TestParseDocumentsAfterASuffix covers what may follow the "..." that ends a
 // document.
 //
