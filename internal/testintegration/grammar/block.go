@@ -171,6 +171,86 @@ func patchBlockIndented(body any) bool {
 	return true
 }
 
+// patchBlockHeader distributes c-b-block-header's two indicator orders over the
+// comment that follows them, and returns whether it found the shape to do it to.
+//
+// The production is written as a choice of the two orders followed by
+// s-b-comment. Reading that as a PEG, the first order wins as soon as it
+// matches and is never reconsidered: for "|-2" it matches an absent indentation
+// indicator and the "-", leaves the "2" to the comment, and the comment fails.
+// The second order, which reads both indicators, is never tried.
+//
+// Distributing the comment into each arm is what the spec's notation means and
+// costs one extra copy of s-b-comment. It is done here rather than in allForm
+// because a choice inside a sequence is not generally distributive: l-directive
+// depends on ns-yaml-directive winning over ns-reserved-directive and staying
+// won, and "%YAML 1.2 foo" is refused only because of it.
+func patchBlockHeader(body any) bool {
+	m, ok := body.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	steps, ok := m["(all)"].([]any)
+	if !ok || len(steps) != 2 {
+		return false
+	}
+
+	orders, ok := steps[0].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	arms, ok := orders["(any)"].([]any)
+	if !ok || len(arms) != 2 {
+		return false
+	}
+
+	if steps[1] != "s-b-comment" {
+		return false
+	}
+
+	distributed := make([]any, 0, len(arms))
+	for _, arm := range arms {
+		distributed = append(distributed, map[string]any{"(all)": []any{arm, steps[1]}})
+	}
+
+	delete(m, "(all)")
+	m["(any)"] = distributed
+
+	return true
+}
+
+// patchIndentationIndicator excludes "0", and returns whether it found the
+// digit range to exclude it from.
+//
+// The grammar file gives c-indentation-indicator ns-dec-digit, which is x30 to
+// x39. The spec's own note on the production says the indicator is "a decimal
+// digit in the range 1-9", since a block scalar's content is always more
+// indented than the node holding it and an indicator of zero states otherwise.
+// So "|0" is not a header, and the grammar file records the range rather than
+// the note.
+func patchIndentationIndicator(body any) bool {
+	m, ok := body.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	arms, ok := m["(any)"].([]any)
+	if !ok || len(arms) == 0 {
+		return false
+	}
+
+	first, ok := arms[0].(map[string]any)
+	if !ok || first["(if)"] != "ns-dec-digit" {
+		return false
+	}
+
+	first["(if)"] = map[string]any{"(---)": []any{"ns-dec-digit", "x30"}}
+
+	return true
+}
+
 // detectCompactIndent counts the spaces between a sequence entry's "-" and a
 // collection written on the same line.
 //

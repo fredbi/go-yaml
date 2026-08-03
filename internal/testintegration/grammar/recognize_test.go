@@ -149,7 +149,49 @@ var streamCases = []struct {
 	{"trailing blank line under a stated indent", "|2\n a\n\n", true},
 	{"stated wider than the content", "a: |2\nx\n", false},
 	{"leading empty line indented more", "a: |\n    \n  a\n", false},
+
+	// A block header takes its two indicators in either order, and the comment
+	// that follows has to be tried against both.
+	{"indent then chomp", "- |2-\n  x\n", true},
+	{"chomp then indent", "- |-2\n  x\n", true},
+
+	// Zero is not an indentation indicator: a block scalar's content is always
+	// more indented than the node holding it.
+	{"stated indent of zero", "|0\n", false},
+	{"stated indent of zero after a marker", "--- |0\n", false},
+
+	// Properties standing alone in key position. The node they name is empty,
+	// and the reading where they belong to the enclosing collection instead has
+	// to be given up when the comment it would need is not there.
+	{"anchor as a whole key", "&a : a\n", true},
+	{"tag as a whole key", "!!str : a\n", true},
+	{"anchor and tag as a key", "&a !!str : a\n", true},
+	{"anchor on an entry with a sibling", "- &a\n- a\n", true},
+
+	// Directives, where the opposite holds: the first reading that matches is
+	// the only one, or every malformed directive would parse as a reserved one.
+	{"extra words on a yaml directive", "%YAML 1.2 foo\n---\n", false},
+	{"comment run into a yaml directive", "%YAML 1.1#...\n---\n", false},
+	{"a reserved directive takes parameters", "%FOO bar baz\n---\n", true},
+
+	// A byte order mark stands in front of a document without putting anything
+	// on the line, so what follows it still begins one. l-document-prefix
+	// admits one before every document, not only the first.
+	{"marked document", bom + "a: 1\n", true},
+	{"marked comment", bom + "# c\n", true},
+	{"marked marker", bom + "---\na: 1\n", true},
+	{"mark alone", bom, true},
+	{"mark after a suffix", "a: 1\n...\n" + bom + "b: 2\n", true},
+	{"two marks", bom + bom + "a: 1\n", true},
+
+	// Inside a document it is not a prefix, and nb-char excludes it from
+	// content, so there is nowhere for it to be.
+	{"mark inside a document", "---\n" + bom + "a: 1\n", false},
 }
+
+// bom is written as a code point because a byte order mark in Go source is a
+// compile error, which is its own small demonstration of the problem.
+var bom = string(rune(0xFEFF))
 
 func TestStream(t *testing.T) {
 	for _, tc := range streamCases {

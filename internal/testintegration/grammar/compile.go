@@ -82,6 +82,14 @@ func newCompiler(spec []byte) (*compiler, error) {
 		return nil, errors.New("s-l+block-indented is not the shape the auto-detected m is patched into")
 	}
 
+	if !patchBlockHeader(c.raw["c-b-block-header"]) {
+		return nil, errors.New("c-b-block-header is not the shape the two indicator orders are distributed over")
+	}
+
+	if !patchIndentationIndicator(c.raw["c-indentation-indicator"]) {
+		return nil, errors.New("c-indentation-indicator is not the shape the zero digit is excluded from")
+	}
+
 	for name := range c.raw {
 		c.compileRule(c.slots[name])
 	}
@@ -207,7 +215,7 @@ func (c *compiler) matchForm(form map[string]any) expr {
 		case "(any)":
 			return choice(c.each(arg))
 		case "(all)":
-			return sequence(c.each(arg))
+			return c.allForm(arg)
 		case "(+++)":
 			return repeat(c.matcher(arg), 1, -1)
 		case "(***)":
@@ -248,6 +256,77 @@ func (c *compiler) matchForm(form map[string]any) expr {
 	}
 
 	panic("unreachable")
+}
+
+// allForm compiles (all), giving the optional steps inside it the meaning the
+// spec's notation gives them rather than the one a PEG would.
+//
+// A PEG's optional is possessive: in "A? B", an A that matched is kept even
+// when B then fails, and the sequence fails with it. The spec writes BNF, where
+// "A? B" reads as "(A B) | B" and both are to be tried. s-l+block-collection is
+// where the difference is visible: an anchor written on a mapping key matches
+// as the collection's own properties, the comment that must follow them is not
+// there, and the sequence fails without ever trying the reading where the
+// anchor belongs to the key. That is a valid document refused.
+//
+// So a sequence holding k optionals compiles to 2^k sequences, the one taking
+// every optional first, which leaves the greedy reading in front wherever it
+// already worked. The grammar has 25 sequences with one optional and 6 with
+// two, so k is never above two and the choice never wider than four.
+func (c *compiler) allForm(arg any) expr {
+	list, ok := arg.([]any)
+	if !ok {
+		return sequence([]expr{c.matcher(arg)})
+	}
+
+	var optional []int
+
+	for i, item := range list {
+		if optionalBody(item) != nil {
+			optional = append(optional, i)
+		}
+	}
+
+	if len(optional) == 0 {
+		return sequence(c.each(list))
+	}
+
+	alts := make([]expr, 0, 1<<len(optional))
+	for mask := 1<<len(optional) - 1; mask >= 0; mask-- {
+		steps := make([]expr, 0, len(list))
+		taken := 0
+
+		for i, item := range list {
+			if taken < len(optional) && optional[taken] == i {
+				// The first optional is the high bit, so counting the mask
+				// down tries them greedily from the left.
+				bit := len(optional) - 1 - taken
+				taken++
+
+				if mask&(1<<bit) != 0 {
+					steps = append(steps, c.matcher(optionalBody(item)))
+				}
+
+				continue
+			}
+
+			steps = append(steps, c.matcher(item))
+		}
+
+		alts = append(alts, sequence(steps))
+	}
+
+	return choice(alts)
+}
+
+// optionalBody reports the body of a (???) form, or nil for anything else.
+func optionalBody(item any) any {
+	form, ok := item.(map[string]any)
+	if !ok || len(form) != 1 {
+		return nil
+	}
+
+	return form["(???)"]
 }
 
 func (c *compiler) each(arg any) []expr {

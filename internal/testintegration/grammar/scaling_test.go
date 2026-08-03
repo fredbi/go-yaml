@@ -40,6 +40,12 @@ var shapes = map[string]func(int) string{
 // the oracle degrades sharply with document size then throughput measured on
 // forty-character documents means nothing, because a generator will not confine
 // itself to forty characters.
+//
+// The gap between the two columns is the point. Giving the grammar's optionals
+// the meaning the spec's notation gives them, rather than the one a PEG would,
+// widened the search enough to cost the unmemoized nested case three orders of
+// magnitude and the memoized one about a sixth. Memoization is not an
+// optimisation here; it is what makes the correct reading affordable.
 func TestScaling(t *testing.T) {
 	for name, build := range shapes {
 		t.Run(name, func(t *testing.T) {
@@ -71,7 +77,10 @@ func measureShape(t *testing.T, build func(int) string, memo bool) {
 	var prev time.Duration
 	var prevSteps int64
 
-	for _, n := range []int{10, 20, 40, 80, 160} {
+	// The ladder starts below the first size worth reporting because the
+	// unmemoized nested case grows about twelvefold per level of nesting, and
+	// a first rung it cannot finish would report nothing at all.
+	for _, n := range []int{5, 10, 20, 40, 80, 160} {
 		src := []byte(build(n))
 
 		// A run that is already too slow says everything the next one would.
