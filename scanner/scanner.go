@@ -1595,32 +1595,129 @@ func (s *Scanner) scanDirective(ctx *Context) bool {
 	return true
 }
 
-func (s *Scanner) scanAnchor(ctx *Context) bool {
+func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
 	if ctx.existsBuffer() {
-		return false
+		return false, nil
 	}
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('&')
+	if err := s.validateAnchorName(ctx, "an anchor"); err != nil {
+		s.progressColumn(ctx, 1)
+
+		return false, err
+	}
 	ctx.addToken(token.Anchor(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAnchor = true
 	ctx.clear()
-	return true
+	return true, nil
 }
 
-func (s *Scanner) scanAlias(ctx *Context) bool {
+func (s *Scanner) scanAlias(ctx *Context) (bool, error) {
 	if ctx.existsBuffer() {
-		return false
+		return false, nil
 	}
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('*')
+	if err := s.validateAnchorName(ctx, "an alias"); err != nil {
+		s.progressColumn(ctx, 1)
+
+		return false, err
+	}
 	ctx.addToken(token.Alias(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAlias = true
 	ctx.clear()
-	return true
+	return true, nil
+}
+
+// validateAnchorName checks the name an '&' or '*' introduces.
+//
+// ns-anchor-name is one ns-anchor-char or more, so an indicator with nothing
+// after it names nothing -- "& e" used to read as the empty document rather
+// than being refused.
+//
+// A flow collection opening straight onto the name is the other half: what
+// follows a property has to be separated from it by s-separate, and an alias is
+// a whole node with no room for another behind it. "&a []" is the empty
+// sequence with an anchor on it, where "&a[]" used to read as nothing at all --
+// losing a value rather than merely admitting a document.
+func (s *Scanner) validateAnchorName(ctx *Context, what string) error {
+	start := ctx.idx + 1
+	end := anchorNameEnd(ctx.src, start)
+
+	switch {
+	case end == start:
+		return ErrInvalidToken(
+			token.Invalid(what+" must be followed by a name", string(ctx.obuf), s.pos()),
+		)
+	case end < len(ctx.src) && (ctx.src[end] == '[' || ctx.src[end] == '{'):
+		return ErrInvalidToken(
+			token.Invalid(
+				what+" must be separated from the node that follows it",
+				string(ctx.obuf), s.pos(),
+			),
+		)
+	default:
+		return nil
+	}
+}
+
+// anchorNameEnd returns where the name starting at start ends.
+//
+// ns-anchor-char is ns-char less the flow indicators, so a name runs up to
+// whitespace, a line break, the end of the input, or one of ',', '[', ']', '{'
+// or '}'. A ':' is none of those and belongs to the name, which is why
+// "{&a: b}" anchors a node named "a:".
+func anchorNameEnd(src []rune, start int) int {
+	end := start
+	for end < len(src) && !endsAnchorName(src[end]) {
+		end++
+	}
+
+	return end
+}
+
+func endsAnchorName(c rune) bool {
+	switch c {
+	case ' ', '\t', '\r', '\n', ',', '[', ']', '{', '}':
+		return true
+	default:
+		return false
+	}
+}
+
+// scanPlainFirst reports an indicator that no scan function claimed.
+//
+// ns-plain-first(c) is ns-char less c-indicator, so a plain scalar cannot open
+// on one of them. Inside a scalar they are ordinary characters -- "a: b}c"
+// holds a '}' and means it -- so this refuses only one that would start a
+// token, which is what a '}' outside a flow mapping or a ',' outside a flow
+// collection does.
+//
+// A buffer holding an anchor or alias name is not a scalar in progress: the
+// name ends at a flow indicator, so one arriving there starts the next token
+// rather than continuing this one. Inside a flow collection the indicator is
+// claimed before it reaches here, which is what keeps "[&a, b]" -- an anchor on
+// an empty node -- apart from "&a," at the root.
+func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
+	if ctx.existsBuffer() && !s.isAnchor && !s.isAlias {
+		return nil
+	}
+
+	ctx.addBuf(c)
+	ctx.addOriginBuf(c)
+	err := ErrInvalidToken(
+		token.Invalid(
+			fmt.Sprintf("a plain scalar cannot begin with %q", c),
+			string(ctx.obuf), s.pos(),
+		),
+	)
+	s.progressColumn(ctx, 1)
+
+	return err
 }
 
 // scanCommentIndicator reports the '#' that scanComment declined.
@@ -1748,6 +1845,9 @@ func (s *Scanner) scan(ctx *Context) error {
 			if s.scanFlowMapEnd(ctx) {
 				continue
 			}
+			if err := s.scanPlainFirst(ctx, c); err != nil {
+				return err
+			}
 		case '.':
 			if s.scanDocumentEnd(ctx) {
 				continue
@@ -1783,9 +1883,15 @@ func (s *Scanner) scan(ctx *Context) error {
 			if s.scanFlowArrayEnd(ctx) {
 				continue
 			}
+			if err := s.scanPlainFirst(ctx, c); err != nil {
+				return err
+			}
 		case ',':
 			if s.scanFlowEntry(ctx, c) {
 				continue
+			}
+			if err := s.scanPlainFirst(ctx, c); err != nil {
+				return err
 			}
 		case ':':
 			scanned, err := s.scanMapDelim(ctx)
@@ -1820,11 +1926,19 @@ func (s *Scanner) scan(ctx *Context) error {
 				continue
 			}
 		case '&':
-			if s.scanAnchor(ctx) {
+			scanned, err := s.scanAnchor(ctx)
+			if err != nil {
+				return err
+			}
+			if scanned {
 				continue
 			}
 		case '*':
-			if s.scanAlias(ctx) {
+			scanned, err := s.scanAlias(ctx)
+			if err != nil {
+				return err
+			}
+			if scanned {
 				continue
 			}
 		case '#':

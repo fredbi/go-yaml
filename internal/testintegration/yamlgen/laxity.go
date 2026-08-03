@@ -112,55 +112,7 @@ var Lax = []Laxity{
 		Reads: map[string]any{"": "a"},
 		Match: tabInIndentation,
 	},
-	{
-		Name:  "an-anchor-with-no-name",
-		Src:   "& e\n",
-		Rule:  "c-ns-anchor-property ::= \"&\" ns-anchor-name, and ns-anchor-name is one character or more",
-		Reads: nil,
-		// ns-anchor-char is ns-char less the flow indicators, so a name is
-		// ended -- and with nothing in it, missing -- by whitespace, a break,
-		// end of input, or one of , [ ] { }.
-		Match: func(src string) bool {
-			for i := range len(src) {
-				if src[i] != '&' && src[i] != '*' {
-					continue
-				}
-				if i+1 == len(src) || strings.IndexByte(" \t\r\n,[]{}", src[i+1]) >= 0 {
-					return true
-				}
-			}
-
-			return false
-		},
-	},
-	{
-		Name:  "a-plain-scalar-opening-on-an-indicator",
-		Src:   "}\n",
-		Rule:  "ns-plain-first(c) excludes c-indicator, of which } is one",
-		Reads: "}",
-		// A whole document that is one indicator and a line break. Narrow
-		// enough to be exact: the same character with anything after it is a
-		// different question, and most of the set is refused anyway.
-		Match: func(src string) bool {
-			return len(src) == 2 && src[1] == '\n' && strings.IndexByte(indicators, src[0]) >= 0
-		},
-	},
-	{
-		Name: "a-node-touching-the-anchor-in-front-of-it",
-		Src:  "&a[]\n",
-		Rule: "c-flow-indicator ends ns-anchor-name, and what follows a " +
-			"c-ns-properties has to be separated from it by s-separate. \"&a []\" " +
-			"is valid and reads as the empty sequence; without the space the " +
-			"sequence is read as nothing at all, so this one loses a value rather " +
-			"than merely admitting a document",
-		Reads: nil,
-		Match: anchorTouchingAFlowIndicator,
-	},
 }
-
-// indicators is YAML 1.2's c-indicator: the characters a plain scalar may not
-// begin with.
-const indicators = "-?:,[]{}#&*!|>'\"%@`"
 
 // printable is YAML 1.2's c-printable, which is the set of characters a stream
 // may contain at all.
@@ -186,27 +138,6 @@ func tabInIndentation(src string) bool {
 	for line := range strings.SplitSeq(src, "\n") {
 		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 		if strings.ContainsRune(indent, '\t') {
-			return true
-		}
-	}
-
-	return false
-}
-
-// anchorTouchingAFlowIndicator reports whether an anchor or alias name runs
-// straight into one of the characters that ends it.
-func anchorTouchingAFlowIndicator(src string) bool {
-	for i := range len(src) {
-		if src[i] != '&' && src[i] != '*' {
-			continue
-		}
-
-		j := i + 1
-		for j < len(src) && strings.IndexByte(" \t\r\n,[]{}", src[j]) < 0 {
-			j++
-		}
-
-		if j > i+1 && j < len(src) && strings.IndexByte(",[]{}", src[j]) >= 0 {
 			return true
 		}
 	}
