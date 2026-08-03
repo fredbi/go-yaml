@@ -353,6 +353,15 @@ func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 		"a flow collection level with it":   "a:\n[1, 2]\n",
 		"an alias level with it":            "k: &x 1\na:\n*x\n",
 		"nested one level in":               "top:\n  a:\n  b\n",
+
+		// A property standing on the key's line names a block node, which is
+		// indented past the key like any other value. The property used to
+		// swallow whatever came next whatever column it sat at, so "k: &a\n1"
+		// read as {k: 1}.
+		"an anchor on the key's line":    "k: &a\n1\n",
+		"a tag on the key's line":        "k: !!str\n1\n",
+		"an anchor under an empty key":   ": &a\n1\n",
+		"an anchor, nested one level in": "top:\n  k: &a\n  1\n",
 	}
 
 	for name, source := range invalid {
@@ -369,6 +378,14 @@ func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 		"an empty value at the end":            "a:\n",
 		"a comment between them":               "a:\n# c\nb: 1\n",
 		"a new document":                       "a:\n---\nb: 1\n",
+
+		// The same property with its node where a node belongs.
+		"an anchor naming an indented value":     "k: &a\n  1\n",
+		"an anchor naming a sequence":            "k: &a\n- 1\n",
+		"an anchor under an empty key, indented": ": &a\n  1\n",
+		"an anchor naming nothing at all":        ": &a\n",
+		"an anchor before the next entry":        "k: &a\nnext: 1\n",
+		"an anchor before a new document":        "k: &a\n---\nb: 1\n",
 	}
 
 	for name, source := range valid {

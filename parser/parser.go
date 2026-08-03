@@ -774,6 +774,12 @@ func isScalarKeyToken(tk *token.Token) bool {
 	}
 }
 
+// carriesProperty reports whether a token is an anchor or a tag: a property
+// naming the node that follows it rather than a node of its own.
+func carriesProperty(tk *Token) bool {
+	return tk.GroupType() == TokenGroupAnchorName || tk.Type() == token.TagType
+}
+
 func (p *parser) removeLeftWhiteSpace(src string) string {
 	// CR or LF or CRLF
 	return strings.TrimLeftFunc(src, func(r rune) bool {
@@ -852,6 +858,23 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 		// key: <value does not defined>
 		// next
 		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+	}
+
+	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && carriesProperty(tk) &&
+		next != nil && next.Column() <= keyCol && !p.isMapToken(next) &&
+		next.Type() != token.SequenceEntryType && next.Type() != token.DocumentHeaderType &&
+		next.Type() != token.DocumentEndType {
+		// key: &anchor
+		// next
+		// ^
+		//
+		// The property stands on the key's line, so the node it names is a
+		// block node and has to be indented past the key like any other value.
+		// Level with the key a token can only open the next entry, and this one
+		// opens nothing -- so the property names nothing and the token belongs
+		// nowhere. Read as the property's node it made "k: &a\n1" the mapping
+		// {k: 1}, which no other implementation reads at all.
+		return nil, errors.ErrSyntax("value is not indented past its key", next.RawToken())
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
