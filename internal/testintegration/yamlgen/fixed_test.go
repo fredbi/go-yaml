@@ -318,3 +318,66 @@ func TestFixedStatedIndentFollowsTheContent(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedKeepChompingKeepsItsBlankLinesWhenFolded: `>+` is written back with
+// the trailing blank lines it exists to preserve.
+//
+// A folded scalar's value has lost its line structure, so the renderer writes
+// its content back from the source text -- and the source ends the same way
+// whatever the header says, since `>`, `>-` and `>+` differ only in what they
+// make of the blank lines after the content. Reading the tail back from the
+// source would have kept them under all three, so it was cut under all three,
+// and keep chomping lost the only thing that distinguishes it. What the value
+// ends on is where that decision has already been made, and the tail is
+// rebuilt from there.
+func TestFixedKeepChompingKeepsItsBlankLinesWhenFolded(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"keep":                     {"k: >+\n  trail\n\n", "k: >+\n  trail\n\n"},
+		"keep, several":            {"k: >+\n  trail\n\n\n", "k: >+\n  trail\n\n\n"},
+		"keep, nothing but blanks": {"k: >+\n\n\n", "k: >+\n\n\n"},
+		"keep, folded over a gap":  {"k: >+\n  a\n\n  b\n\n", "k: >+\n  a\n\n  b\n\n"},
+		"keep, stated width":       {"k: >2+\n   trail\n\n", "k: >2+\n   trail\n\n"},
+		"keep, under a sequence":   {"- >+\n  trail\n\n", "- >+\n  trail\n\n"},
+		"keep, at the root":        {">+\n  trail\n\n", ">+\n  trail\n\n"},
+
+		// The other two chomping modes drop the blank lines when reading, so
+		// the tail they are written with is empty -- which is what the source
+		// text alone could not tell them apart by.
+		"clip":  {"k: >\n  trail\n\n", "k: >\n  trail\n"},
+		"strip": {"k: >-\n  trail\n\n", "k: >-\n  trail\n"},
+
+		// A line of spaces is blank up to the width that introduced the block
+		// and content past it: a folded scalar treats a line indented further
+		// than its neighbors literally, so those spaces are the value.
+		"a blank line of the block's own width": {"k: >+\n  a\n  \n", "k: >+\n  a\n\n"},
+		"a blank line indented further":         {"k: >+\n  a\n     \n", "k: >+\n  a\n     \n"},
+		"and one under strip chomping":          {"k: >-\n  a\n     \n", "k: >-\n  a\n     \n"},
+
+		// Trailing spaces on a line of content are content under every mode,
+		// the same way they are for the literal spelling.
+		"a space before the break": {"k: >+\n  trail \n\n", "k: >+\n  trail \n\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var before any
+			require.NoError(t, yaml.Unmarshal([]byte(test.source), &before))
+
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			rendered := file.String()
+			assert.Equal(t, test.want, rendered)
+
+			var after any
+			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
+			assert.Equal(t, before, after, "the value survives being written out")
+
+			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
+		})
+	}
+}
