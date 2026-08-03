@@ -100,11 +100,109 @@ func (p Property) String() string {
 // which is a claim the property tests re-earn on every run rather than a note
 // about how things once stood: a new divergence fails because it is missing
 // from here, and a fixed one fails because it is still listed.
-// It is empty. Every shape the generator has drawn holds all four properties,
-// which is a claim the property tests re-earn on every run rather than a note
-// about how things once stood: a new divergence fails because it is missing
-// from here, and a fixed one fails because it is still listed.
-var Ledger = []Divergence{}
+var Ledger = []Divergence{
+	{
+		Name: "a-kept-blank-line-under-a-stated-indent-is-rejected",
+		// The document is not read at all, so there is no value to compare and
+		// nothing to render: it fails the two questions asked before those.
+		Property: Parses | Decode,
+		Reason: "a block scalar whose header states its indentation and whose " +
+			"chomping keeps the trailing blank lines is rejected, because the " +
+			"blank lines carry no indentation of their own. An empty line is " +
+			"allowed to have less indentation than the header states -- l-empty " +
+			"admits s-indent(<n) -- and the same document without the indicator " +
+			"is accepted, as is one whose blank line is padded out to the stated " +
+			"width, and so is a blank line anywhere but the end. So the " +
+			"indicator and the trailing blank line are only rejected together",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || !st.BlockIndicator {
+				return false
+			}
+
+			return anyValueString(v, func(s string) bool {
+				// Keep chomping is what the emitter picks for more than one
+				// trailing newline, and it is what writes them out.
+				return writtenAsBlockScalar(s, st) && len(s)-len(strings.TrimRight(s, "\n")) >= 2
+			})
+		},
+	},
+	{
+		Name:     "keep-chomping-loses-its-blank-lines-when-folded",
+		Property: Render,
+		Reason: "a folded block scalar with keep chomping (>+) is written back " +
+			"without the trailing blank lines it exists to preserve, so " +
+			"\"trail\\n\\n\" comes back as \"trail\\n\". Reading it is correct, and " +
+			"the same value in a literal scalar (|+) round trips, so this is the " +
+			"one of the two block styles the fix did not reach",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || !st.Folded {
+				return false
+			}
+
+			return anyValueString(v, func(s string) bool {
+				return canFolded(s) && len(s)-len(strings.TrimRight(s, "\n")) >= 2
+			})
+		},
+	},
+	{
+		Name: "a-stated-indent-is-not-updated-when-the-content-is-re-indented",
+		// Reading is correct; the renderer writes the content at its own indent
+		// and leaves the header saying what the old one was. Settle joins it
+		// because the mismatch grows by a column on every cycle rather than
+		// reaching a fixed point.
+		Property: Render | Settle,
+		Reason: "a block scalar that states its indentation is re-indented to " +
+			"the renderer's own width without the indicator being updated, so " +
+			"the value gains a leading space on every cycle. A scalar with no " +
+			"indicator round trips, because then the renderer is free to choose " +
+			"the width and the content says what it is. Where the two widths " +
+			"already agree nothing moves, which is why the entry draws more " +
+			"documents than it diverges on",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || !st.BlockIndicator {
+				return false
+			}
+
+			return anyValueString(v, func(str string) bool {
+				return writtenAsBlockScalar(str, st)
+			})
+		},
+	},
+}
+
+// anyValueString reports whether any string in a value position satisfies pred.
+//
+// Mapping keys are excluded: a key is always written on one line, so the
+// presentation choices that apply to a value do not apply to it.
+func anyValueString(v Value, pred func(string) bool) bool {
+	switch n := v.(type) {
+	case Anchored:
+		return anyValueString(n.V, pred)
+	case Alias:
+		// Written at the anchor, which this walk reaches on its own.
+		return false
+	case Str:
+		return pred(n.V)
+	case Seq:
+		for _, item := range n.Items {
+			if anyValueString(item, pred) {
+				return true
+			}
+		}
+
+		return false
+	case Map:
+		for _, p := range n.Pairs {
+			if anyValueString(p.Val, pred) {
+				return true
+			}
+		}
+
+		return false
+	default:
+		return false
+	}
+}
 
 // Known returns the ledger entry describing this pairing for the given
 // property, or nil.
@@ -140,3 +238,13 @@ func CommentsIn(src string) []string {
 }
 
 var commentMarker = regexp.MustCompile(`#\s*c\d+`)
+
+// writtenAsBlockScalar reports whether st writes s as a block scalar, in
+// whichever of the two styles applies.
+//
+// It mirrors the emitter's own choice rather than restating it: a predicate
+// that guessed differently would excuse documents that were never drawn and
+// leave drawn ones unaccounted for.
+func writtenAsBlockScalar(s string, st Style) bool {
+	return (st.Folded && canFolded(s)) || (st.Literal && canLiteral(s, st.BlockIndicator))
+}

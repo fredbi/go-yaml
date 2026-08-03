@@ -116,7 +116,7 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 		return "", false
 	case Str:
 		// A literal block scalar is the one scalar that is not one line.
-		if !flow && e.st.Literal && canLiteral(n.V, e.st.BlockIndicator) {
+		if !flow && e.blockScalar(n.V) {
 			return "", false
 		}
 
@@ -136,7 +136,7 @@ func (e *emitter) block(v Value, indent int) {
 		e.pad(indent)
 		e.buf.WriteString("&" + n.Name)
 
-		if s, ok := n.V.(Str); ok && e.st.Literal && canLiteral(s.V, e.st.BlockIndicator) {
+		if s, ok := n.V.(Str); ok && e.blockScalar(s.V) {
 			e.buf.WriteString(" ")
 			e.literal(s.V, indent+e.st.Indent, e.st.Indent+1)
 
@@ -185,7 +185,7 @@ func (e *emitter) child(v Value, indent int) {
 		v = a.V
 	}
 
-	if s, ok := v.(Str); ok && !e.st.Flow && e.st.Literal && canLiteral(s.V, e.st.BlockIndicator) {
+	if s, ok := v.(Str); ok && !e.st.Flow && e.blockScalar(s.V) {
 		e.buf.WriteString(anchor)
 		e.buf.WriteString(" ")
 		e.literal(s.V, indent+e.st.Indent, e.st.Indent)
@@ -223,6 +223,12 @@ func (e *emitter) child(v Value, indent int) {
 // block scalar at the root of a document is measured from -1, not from 0, so
 // the root passes one more than the column it writes at.
 func (e *emitter) literal(s string, indent, stated int) {
+	if e.folds(s) {
+		e.folded(s, indent, stated)
+
+		return
+	}
+
 	body := strings.TrimRight(s, "\n")
 	trailing := len(s) - len(body)
 
@@ -457,4 +463,90 @@ func doubleQuote(s string) string {
 	b.WriteByte('"')
 
 	return b.String()
+}
+
+// folds reports whether s should be written as a folded block scalar.
+//
+// Folded is preferred over literal where both can express the value, so that
+// the axis is actually exercised: literal is the default everywhere else.
+func (e *emitter) folds(s string) bool {
+	return e.st.Folded && canFolded(s)
+}
+
+// blockScalar reports whether s can be written as a block scalar at all, in
+// whichever of the two styles this presentation allows.
+func (e *emitter) blockScalar(s string) bool {
+	return e.folds(s) || (e.st.Literal && canLiteral(s, e.st.BlockIndicator))
+}
+
+// folded writes a string as a folded block scalar.
+//
+// Folding joins two lines with a space and turns n+1 breaks into n, so a break
+// in the value is written as a blank line and the lines of the value end up
+// separated by one. That is the whole trick, and it is why canFolded refuses
+// any value whose own lines are empty: those would need a run of breaks one
+// longer again, and the arithmetic stops being obvious enough to trust.
+func (e *emitter) folded(s string, indent, stated int) {
+	body := strings.TrimRight(s, "\n")
+	trailing := len(s) - len(body)
+
+	e.buf.WriteString(">")
+
+	if e.st.BlockIndicator {
+		e.buf.WriteString(itoa(stated))
+	}
+
+	switch trailing {
+	case 0:
+		e.buf.WriteString("-")
+	case 1:
+	default:
+		e.buf.WriteString("+")
+	}
+
+	e.buf.WriteString("\n")
+
+	for i, line := range strings.Split(body, "\n") {
+		if i > 0 {
+			// The blank line that folds away into the break it stands for.
+			e.buf.WriteString("\n")
+		}
+		e.pad(indent)
+		e.buf.WriteString(line)
+		e.buf.WriteString("\n")
+	}
+
+	// Clip already wrote the one trailing newline; keep needs the rest.
+	for range max(trailing-1, 0) {
+		e.buf.WriteString("\n")
+	}
+}
+
+// canFolded reports whether folding can reproduce s exactly.
+//
+// Deliberately narrow. Folding is the one presentation where a wrong emitter
+// writes a document that means something else while looking perfectly
+// reasonable, so everything whose inverse is not obvious is refused rather
+// than guessed at: more-indented lines are not folded at all, trailing spaces
+// before a fold are their own question, and a value containing its own blank
+// line needs a run of breaks this does not write.
+func canFolded(s string) bool {
+	body := strings.TrimRight(s, "\n")
+	if body == "" || strings.Contains(body, "\n\n") {
+		return false
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		if line == "" || strings.TrimSpace(line) != line {
+			return false
+		}
+	}
+
+	for _, r := range s {
+		if r != '\n' && (r == '\r' || unicode.IsControl(r)) {
+			return false
+		}
+	}
+
+	return true
 }
