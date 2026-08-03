@@ -65,6 +65,8 @@ func TestPresentationInvariance(t *testing.T) {
 // grammar oracle is what will tell the two apart; until then it is worth
 // knowing that the disagreement exists.
 func TestEmitParses(t *testing.T) {
+	tally := newTally()
+
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -72,11 +74,21 @@ func TestEmitParses(t *testing.T) {
 		src := yamlgen.Emit(value, style)
 
 		var got any
-		if err := yaml.Unmarshal([]byte(src), &got); err != nil {
+		err := yaml.Unmarshal([]byte(src), &got)
+
+		if known := yamlgen.Known(yamlgen.Parses, value, style); known != nil {
+			tally.record(known.Name, err != nil)
+
+			return
+		}
+
+		if err != nil {
 			rt.Fatalf("style %s produced a document that does not parse:\n%s\n---\nerror: %v",
 				style, src, err)
 		}
 	})
+
+	tally.report(t, yamlgen.Parses)
 }
 
 // TestEmitterAgreesOnKnownDocuments guards the emitter itself.
@@ -147,6 +159,7 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 
 	tests = append(tests, commentCases()...)
 	tests = append(tests, anchorCases()...)
+	tests = append(tests, blockScalarCases()...)
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,6 +317,74 @@ func anchorCases() []struct {
 			}},
 			style: block,
 			want:  "- &a1\n  - 1\n- *a1\n",
+		},
+	}
+}
+
+// blockScalarCases pins the block scalar header, which is where the emitter
+// makes the most decisions per character written.
+//
+// The indicator cases matter most: they are the only way the generator can
+// write content whose first line is empty or whose lines begin with a space,
+// so if they are wrong those strings are silently mis-tested rather than
+// untested.
+func blockScalarCases() []struct {
+	name  string
+	value yamlgen.Value
+	style yamlgen.Style
+	want  string
+} {
+	plain := yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, Literal: true, NullSpelling: "null"}
+	stated := plain
+	stated.BlockIndicator = true
+	deep := stated
+	deep.Indent = 3
+
+	pair := func(v yamlgen.Value) yamlgen.Value {
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: v}}}
+	}
+
+	return []struct {
+		name  string
+		value yamlgen.Value
+		style yamlgen.Style
+		want  string
+	}{
+		{
+			name:  "the indicator goes before the chomping indicator",
+			value: pair(yamlgen.Str{V: "one\ntwo"}),
+			style: stated,
+			want:  "k: |2-\n  one\n  two\n",
+		},
+		{
+			name:  "and states the indent actually used",
+			value: pair(yamlgen.Str{V: "one\n"}),
+			style: deep,
+			want:  "k: |3\n   one\n",
+		},
+		{
+			name:  "content whose first line is empty needs it",
+			value: pair(yamlgen.Str{V: "\ntwo\n"}),
+			style: stated,
+			want:  "k: |2\n\n  two\n",
+		},
+		{
+			name:  "so does content whose lines begin with a space",
+			value: pair(yamlgen.Str{V: "  indented\n"}),
+			style: stated,
+			want:  "k: |2\n    indented\n",
+		},
+		{
+			name:  "a line of nothing but spaces is content too",
+			value: pair(yamlgen.Str{V: "a\n \nb\n"}),
+			style: stated,
+			want:  "k: |2\n  a\n   \n  b\n",
+		},
+		{
+			name:  "without it those strings are not written as block scalars",
+			value: pair(yamlgen.Str{V: "  indented\n"}),
+			style: plain,
+			want:  "k: \"  indented\\n\"\n",
 		},
 	}
 }

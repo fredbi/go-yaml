@@ -73,6 +73,14 @@ type Style struct {
 	Quoting Quoting
 	// Literal writes multi-line strings as | block scalars where possible.
 	Literal bool
+	// BlockIndicator states a block scalar's indentation in its header, as the
+	// `2` in `|2`.
+	//
+	// It is what lets content whose first line is empty, or whose lines begin
+	// with a space, be written as a block scalar at all: without it the parser
+	// detects the indentation from the first content line, and there is nothing
+	// there to detect.
+	BlockIndicator bool
 	// Markers opens the document with ---.
 	Markers bool
 	// NullSpelling is how the empty value is written: YAML has three, and one
@@ -111,6 +119,9 @@ func (s Style) String() string {
 	lit := ""
 	if s.Literal {
 		lit = " literal"
+		if s.BlockIndicator {
+			lit += "=" + itoa(s.Indent)
+		}
 	}
 
 	markers := ""
@@ -126,14 +137,17 @@ func (s Style) String() string {
 func Styles() *rapid.Generator[Style] {
 	return rapid.Custom(func(t *rapid.T) Style {
 		return Style{
-			Flow:         rapid.Bool().Draw(t, "flow"),
-			Indent:       rapid.IntRange(1, 6).Draw(t, "indent"),
-			Quoting:      Quoting(rapid.IntRange(0, 2).Draw(t, "quoting")),
-			Literal:      rapid.Bool().Draw(t, "literal"),
-			Markers:      rapid.Bool().Draw(t, "markers"),
-			NullSpelling: rapid.SampledFrom([]string{"null", "~", "", "Null", "NULL"}).Draw(t, "null"),
-			BoolCase:     rapid.IntRange(0, 2).Draw(t, "boolcase"),
-			Comments:     Commenting(rapid.IntRange(0, 3).Draw(t, "comments")),
+			Flow:    rapid.Bool().Draw(t, "flow"),
+			Indent:  rapid.IntRange(1, 6).Draw(t, "indent"),
+			Quoting: Quoting(rapid.IntRange(0, 2).Draw(t, "quoting")),
+			Literal: rapid.Bool().Draw(t, "literal"),
+			// The indicator is a single digit, so it can only state an
+			// indentation the Indent range above can actually reach.
+			BlockIndicator: rapid.Bool().Draw(t, "blockindicator"),
+			Markers:        rapid.Bool().Draw(t, "markers"),
+			NullSpelling:   rapid.SampledFrom([]string{"null", "~", "", "Null", "NULL"}).Draw(t, "null"),
+			BoolCase:       rapid.IntRange(0, 2).Draw(t, "boolcase"),
+			Comments:       Commenting(rapid.IntRange(0, 3).Draw(t, "comments")),
 		}
 	})
 }

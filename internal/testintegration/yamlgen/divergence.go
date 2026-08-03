@@ -54,6 +54,13 @@ const (
 	// poorer than the one that went in, which for a library that offers to
 	// preserve them is the whole failure.
 	CommentsKept
+	// Parses: the emitted document is one the library will read at all.
+	//
+	// Weaker than Decode and worth separating: a document that is rejected
+	// outright is a different failure from one that is read as the wrong
+	// value, and it is the only one where the library and the grammar can be
+	// asked the same question.
+	Parses
 )
 
 func (p Property) String() string {
@@ -69,6 +76,9 @@ func (p Property) String() string {
 	}
 	if p&CommentsKept != 0 {
 		names = append(names, "comments")
+	}
+	if p&Parses != 0 {
+		names = append(names, "parses")
 	}
 
 	return strings.Join(names, "|")
@@ -90,7 +100,91 @@ func (p Property) String() string {
 // which is a claim the property tests re-earn on every run rather than a note
 // about how things once stood: a new divergence fails because it is missing
 // from here, and a fixed one fails because it is still listed.
-var Ledger = []Divergence{}
+var Ledger = []Divergence{
+	{
+		Name: "a-kept-blank-line-under-a-stated-indent-is-rejected",
+		// The document is not read at all, so there is no value to compare and
+		// nothing to render: it fails the two questions asked before those.
+		Property: Parses | Decode,
+		Reason: "a block scalar whose header states its indentation and whose " +
+			"chomping keeps the trailing blank lines is rejected, because the " +
+			"blank lines carry no indentation of their own. An empty line is " +
+			"allowed to have less indentation than the header states -- l-empty " +
+			"admits s-indent(<n) -- and the same document without the indicator " +
+			"is accepted, as is one whose blank line is padded out to the stated " +
+			"width, and so is a blank line anywhere but the end. So the " +
+			"indicator and the trailing blank line are only rejected together",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || !st.Literal || !st.BlockIndicator {
+				return false
+			}
+
+			return anyValueString(v, func(s string) bool {
+				// Keep chomping is what the emitter picks for more than one
+				// trailing newline, and it is what writes them out.
+				return canLiteral(s, true) && len(s)-len(strings.TrimRight(s, "\n")) >= 2
+			})
+		},
+	},
+	{
+		Name: "a-stated-indent-is-not-updated-when-the-content-is-re-indented",
+		// Reading is correct; the renderer writes the content at its own indent
+		// and leaves the header saying what the old one was. Settle joins it
+		// because the mismatch grows by a column on every cycle rather than
+		// reaching a fixed point.
+		Property: Render | Settle,
+		Reason: "a block scalar that states its indentation is re-indented to " +
+			"the renderer's own width without the indicator being updated, so " +
+			"the value gains a leading space on every cycle. A scalar with no " +
+			"indicator round trips, because then the renderer is free to choose " +
+			"the width and the content says what it is. Where the two widths " +
+			"already agree nothing moves, which is why the entry draws more " +
+			"documents than it diverges on",
+		Match: func(v Value, st Style) bool {
+			if st.Flow || !st.Literal || !st.BlockIndicator {
+				return false
+			}
+
+			return anyValueString(v, func(str string) bool {
+				return canLiteral(str, true)
+			})
+		},
+	},
+}
+
+// anyValueString reports whether any string in a value position satisfies pred.
+//
+// Mapping keys are excluded: a key is always written on one line, so the
+// presentation choices that apply to a value do not apply to it.
+func anyValueString(v Value, pred func(string) bool) bool {
+	switch n := v.(type) {
+	case Anchored:
+		return anyValueString(n.V, pred)
+	case Alias:
+		// Written at the anchor, which this walk reaches on its own.
+		return false
+	case Str:
+		return pred(n.V)
+	case Seq:
+		for _, item := range n.Items {
+			if anyValueString(item, pred) {
+				return true
+			}
+		}
+
+		return false
+	case Map:
+		for _, p := range n.Pairs {
+			if anyValueString(p.Val, pred) {
+				return true
+			}
+		}
+
+		return false
+	default:
+		return false
+	}
+}
 
 // Known returns the ledger entry describing this pairing for the given
 // property, or nil.
