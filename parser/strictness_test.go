@@ -197,6 +197,50 @@ func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 	}
 }
 
+// TestParseRefusesWhatIsNotAStream covers the source itself rather than what it
+// says.
+//
+// c-printable is the set of characters a YAML stream may hold, so the control
+// characters below x20 other than tab, line feed and carriage return are not
+// YAML however they arrive. A stream is Unicode too, and a byte belonging to no
+// character is not one: it used to be turned into U+FFFD on the way in, so the
+// byte was gone and nothing had said so.
+//
+// Escapes are unaffected. They are the mechanism the spec provides for writing
+// these characters down, and what they produce is a value rather than source.
+func TestParseRefusesWhatIsNotAStream(t *testing.T) {
+	invalid := map[string]string{
+		"a NUL as the whole document":  "\x00\n",
+		"a NUL in a value":             "a: \x00\n",
+		"a control character in a key": "a\x01b: 1\n",
+		"a byte that is not text":      "\xbf\n",
+		"a truncated character":        "a: \xe2\x82\n",
+	}
+
+	for name, source := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.Errorf(t, err, "accepted %q", source)
+		})
+	}
+
+	valid := map[string]string{
+		"a NUL written as an escape":  "k: \"\\x00\"\n",
+		"text outside ASCII":          "k: héllo\n",
+		"a character outside the BMP": "k: 😀\n",
+		"a replacement character":     "k: \uFFFD\n",
+		"a next-line character":       "k: \u0085\n",
+		"a non-breaking space":        "k: \u00a0\n",
+	}
+
+	for name, source := range valid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.NoErrorf(t, err, "rejected %q", source)
+		})
+	}
+}
+
 // TestParseTabWhereIndentationBelongs covers a tab opening a line at the root.
 //
 // s-indent(n) is s-space x n, so block structure is introduced by spaces and
