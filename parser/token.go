@@ -724,12 +724,23 @@ func createDocumentTokens(tokens []*Token) ([]*Token, error) {
 				}), nil
 			}
 			if tokens[i+1].Type() == token.DocumentHeaderType {
-				return append(ret, &Token{
+				// One "---" straight after another: this document holds
+				// nothing. It is a document all the same, and so is everything
+				// after it -- stopping here returned the empty one and dropped
+				// the rest of the stream without a word.
+				rest, err := createDocumentTokens(tokens[i+1:])
+				if err != nil {
+					return nil, err
+				}
+
+				empty := &Token{
 					Group: &TokenGroup{
 						Type:   TokenGroupDocument,
 						Tokens: []*Token{tk},
 					},
-				}), nil
+				}
+
+				return append(append(ret, empty), rest...), nil
 			}
 			if tokens[i].Line() == tokens[i+1].Line() {
 				switch tokens[i+1].GroupType() {
