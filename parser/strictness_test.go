@@ -256,6 +256,39 @@ func TestParseRefusesWhatIsNotAStream(t *testing.T) {
 	}
 }
 
+// TestParseDropsAByteOrderMarkOpeningTheStream covers a mark written by an
+// editor at the head of a file.
+//
+// nb-char is c-printable less b-char and c-byte-order-mark, so a mark is not a
+// character any node may hold: it marks an l-document-prefix and nothing else.
+// Read as an ordinary character it became part of whatever came next -- the
+// key of the first entry, or the '%' of a directive, which then stopped being
+// one. The document it opens is refused for the same reason.
+func TestParseDropsAByteOrderMarkOpeningTheStream(t *testing.T) {
+	const mark = "\ufeff"
+
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"before a mapping key":     {mark + "a: 1\n", "a: 1\n"},
+		"before a document marker": {mark + "---\na: 1\n", "---\na: 1\n"},
+		"before a comment":         {mark + "# c\na: 1\n", "# c\na: 1\n"},
+		"before a directive":       {mark + "%YAML 1.2\n---\na: 1\n", "%YAML 1.2\n---\na: 1\n"},
+
+		// l-document-prefix is a run, so more than one is a run of them.
+		"twice over": {mark + mark + "a: 1\n", "a: 1\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoErrorf(t, err, "rejected %q", test.source)
+			assert.Equal(t, test.want, file.String())
+		})
+	}
+}
+
 // TestParseTabWhereIndentationBelongs covers a tab opening a line at the root.
 //
 // s-indent(n) is s-space x n, so block structure is introduced by spaces and

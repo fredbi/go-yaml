@@ -65,6 +65,14 @@ type Scanner struct {
 	initErr error
 }
 
+// byteOrderMark is YAML 1.2's c-byte-order-mark.
+//
+// nb-char is c-printable less b-char and this, so a byte order mark is not a
+// character any node may hold: it marks a document prefix and nothing else. One
+// opening the stream is therefore dropped rather than read, which is what a
+// file saved by an editor that writes one needs.
+const byteOrderMark = '\ufeff'
+
 // validateStream checks that the source is text a YAML stream may hold.
 //
 // c-printable is the set of characters a stream may contain at all, so the
@@ -2102,7 +2110,7 @@ func (s *Scanner) scan(ctx *Context) error {
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
 	s.initErr = validateStream(text)
-	src := []rune(text)
+	src := []rune(strings.TrimLeft(text, string(byteOrderMark)))
 	s.source = src
 	s.sourcePos = 0
 	s.sourceSize = len(src)

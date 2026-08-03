@@ -13,7 +13,7 @@ package yamlgen
 // this list the harness would go on not watching it.
 //
 // That is what every entry below has in common, and it is the reason to keep
-// them: four of the five are an empty node standing where the generator only
+// them: four of the six are an empty node standing where the generator only
 // ever puts a full one. Widening the generator to reach them wants Pair.Key to
 // become a Value, which is a larger change than pinning them here.
 type Strictness struct {
@@ -82,5 +82,14 @@ var Strict = []Strictness{
 		Rule: "ns-flow-node admits c-ns-properties followed by e-scalar, and " +
 			"c-ns-tag-property admits the bare \"!\" as the non-specific tag",
 		Error: "[1:1] sequence end token ']' not found",
+	},
+	{
+		Name: "a-byte-order-mark-before-a-later-document",
+		Src:  "a: 1\n...\n\ufeff---\nb: 2\n",
+		Rule: "l-document-prefix ::= c-byte-order-mark? l-comment*, and " +
+			"l-yaml-stream puts a run of them after every l-document-suffix. A " +
+			"mark opening the stream is dropped; one opening a later document " +
+			"still reaches the parser as content",
+		Error: "[4:1] value is not allowed in this context",
 	},
 }
