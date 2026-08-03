@@ -146,6 +146,7 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 	}
 
 	tests = append(tests, commentCases()...)
+	tests = append(tests, anchorCases()...)
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -220,6 +221,89 @@ func commentCases() []struct {
 			value: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}},
 			style: both,
 			want:  "# c1\n- 1 # c2\n",
+		},
+	}
+}
+
+// anchorCases pins where an anchor is written and what an alias looks like.
+//
+// This is the first axis that changes the value rather than its presentation,
+// so a mistake here would not merely write a document oddly -- it would write a
+// different document and blame the library for reading it as one. Each case
+// also asserts that the text decodes to the value, which is what catches an
+// anchor written somewhere the parser attaches to the wrong node.
+func anchorCases() []struct {
+	name  string
+	value yamlgen.Value
+	style yamlgen.Style
+	want  string
+} {
+	block := yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, NullSpelling: "null"}
+	flow := yamlgen.Style{Flow: true, Indent: 2, Quoting: yamlgen.QuotePlain, NullSpelling: "null"}
+	literal := yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, Literal: true, NullSpelling: "null"}
+
+	one := yamlgen.Anchored{Name: "a1", V: yamlgen.Int{V: 1}}
+	seq := yamlgen.Anchored{Name: "a1", V: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}}}
+
+	return []struct {
+		name  string
+		value yamlgen.Value
+		style yamlgen.Style
+		want  string
+	}{
+		{
+			name:  "an anchored scalar keeps the anchor on its line",
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: one}}},
+			style: block,
+			want:  "k: &a1 1\n",
+		},
+		{
+			name: "an alias refers back to it",
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{
+				{Key: "a", Val: one},
+				{Key: "b", Val: yamlgen.Alias{Name: "a1", V: yamlgen.Int{V: 1}}},
+			}},
+			style: block,
+			want:  "a: &a1 1\nb: *a1\n",
+		},
+		{
+			name:  "an anchored block collection takes the line above it",
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: seq}}},
+			style: block,
+			want:  "k: &a1\n  - 1\n",
+		},
+		{
+			name:  "an anchor in flow style sits inside the brackets",
+			value: yamlgen.Seq{Items: []yamlgen.Value{one}},
+			style: flow,
+			want:  "[&a1 1]\n",
+		},
+		{
+			name:  "an anchored block scalar keeps its header on the line",
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: yamlgen.Anchored{Name: "a1", V: yamlgen.Str{V: "x\n"}}}}},
+			style: literal,
+			want:  "k: &a1 |\n  x\n",
+		},
+		{
+			name:  "an anchored empty node is the anchor alone",
+			value: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Anchored{Name: "a1", V: yamlgen.Null{}}}},
+			style: yamlgen.Style{Indent: 2, Quoting: yamlgen.QuotePlain, NullSpelling: ""},
+			want:  "- &a1\n",
+		},
+		{
+			name:  "an anchor at the root of a block collection",
+			value: seq,
+			style: block,
+			want:  "&a1\n- 1\n",
+		},
+		{
+			name: "a sequence entry can be an alias",
+			value: yamlgen.Seq{Items: []yamlgen.Value{
+				seq,
+				yamlgen.Alias{Name: "a1", V: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}}},
+			}},
+			style: block,
+			want:  "- &a1\n  - 1\n- *a1\n",
 		},
 	}
 }

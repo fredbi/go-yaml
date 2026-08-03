@@ -87,6 +87,21 @@ func (e *emitter) root(v Value) {
 // collection has no spelling, so `[]` and `{}` are the only way to write one.
 func (e *emitter) inline(v Value, flow bool) (string, bool) {
 	switch n := v.(type) {
+	case Alias:
+		// An alias is always one token, wherever it stands.
+		return "*" + n.Name, true
+	case Anchored:
+		inner, ok := e.inline(n.V, flow)
+		if !ok {
+			return "", false
+		}
+		if inner == "" {
+			// An anchored empty node is the anchor and nothing else; a space
+			// after it would be trailing whitespace with no content behind it.
+			return "&" + n.Name, true
+		}
+
+		return "&" + n.Name + " " + inner, true
 	case Seq:
 		if flow || len(n.Items) == 0 {
 			return e.flowSeq(n), true
@@ -114,6 +129,22 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 // block writes v starting at the given indentation, on its own lines.
 func (e *emitter) block(v Value, indent int) {
 	switch n := v.(type) {
+	case Anchored:
+		// A block scalar takes its anchor in front of the header, where the
+		// header still ends the line. A block collection cannot: its first line
+		// belongs to its first entry, so the anchor takes a line of its own.
+		e.pad(indent)
+		e.buf.WriteString("&" + n.Name)
+
+		if s, ok := n.V.(Str); ok && e.st.Literal && canLiteral(s.V) {
+			e.buf.WriteString(" ")
+			e.literal(s.V, indent+e.st.Indent)
+
+			return
+		}
+
+		e.buf.WriteString("\n")
+		e.block(n.V, indent)
 	case Seq:
 		for _, item := range n.Items {
 			e.headComment(indent)
@@ -145,15 +176,32 @@ func (e *emitter) block(v Value, indent int) {
 // child writes the value of a mapping pair or a sequence entry, having already
 // written the `-` or the `key:` it belongs to.
 func (e *emitter) child(v Value, indent int) {
+	// An anchor stays on the line that introduced the entry, whatever the value
+	// turns out to need: `k: &a` then the collection below it, or `k: &a |`
+	// then the scalar's content.
+	anchor := ""
+	if a, ok := v.(Anchored); ok {
+		anchor = " &" + a.Name
+		v = a.V
+	}
+
 	if s, ok := v.(Str); ok && !e.st.Flow && e.st.Literal && canLiteral(s.V) {
+		e.buf.WriteString(anchor)
 		e.buf.WriteString(" ")
 		e.literal(s.V, indent+e.st.Indent)
 
 		return
 	}
 
+	e.buf.WriteString(anchor)
+
 	if inline, ok := e.inline(v, e.st.Flow); ok {
-		e.buf.WriteString(" ")
+		// An empty node is written as nothing at all, so the separating space
+		// would be the only thing on the line after the `-` or the `key:` --
+		// trailing whitespace, and invisible in any failure it caused.
+		if inline != "" {
+			e.buf.WriteString(" ")
+		}
 		e.buf.WriteString(inline)
 		e.lineComment()
 		e.buf.WriteString("\n")

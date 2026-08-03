@@ -6,6 +6,7 @@ package yamlgen
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -28,10 +29,18 @@ func Reduce(src []byte, interesting func([]byte) bool) []byte {
 		return src
 	}
 
+	// A candidate has to stay a document the emitter could have written. The
+	// byte and line passes are happy to produce ones it could not -- an alias
+	// whose anchor was on a line that got dropped, an anchor left sitting on an
+	// alias -- and those are interesting for reasons of their own, which is how
+	// a reduction arrives at a defect that has nothing to do with the one that
+	// was found.
+	within := func(b []byte) bool { return anchorsResolve(b) && interesting(b) }
+
 	best := src
 	for range maxReductionRounds {
-		next := reduceLines(best, interesting)
-		next = reduceBytes(next, interesting)
+		next := reduceLines(best, within)
+		next = reduceBytes(next, within)
 		if bytes.Equal(next, best) {
 			break
 		}
@@ -76,10 +85,22 @@ func reduceLines(src []byte, interesting func([]byte) bool) []byte {
 
 // reduceBytes drops single bytes, which is what shortens the scalars once the
 // lines are gone.
+//
+// The line break ending the document is not one of them. Removing it is the
+// single most productive byte to drop -- it changes what a block scalar means,
+// so a great many predicates stay true without it -- and the result is a
+// document the generator would never have written. A reduction that leaves the
+// space the generator explores is not a smaller case of the same defect; it is
+// a different defect, and handing that to somebody as a reproducer sends them
+// after the wrong thing.
 func reduceBytes(src []byte, interesting func([]byte) bool) []byte {
 	best := src
 
 	for i := 0; i < len(best); {
+		if endsTheDocument(best, i) {
+			break
+		}
+
 		candidate := make([]byte, 0, len(best)-1)
 		candidate = append(candidate, best[:i]...)
 		candidate = append(candidate, best[i+1:]...)
@@ -93,6 +114,47 @@ func reduceBytes(src []byte, interesting func([]byte) bool) []byte {
 	}
 
 	return best
+}
+
+// anchorsResolve reports whether the anchors and aliases in src are ones the
+// emitter could have written.
+//
+// Two rules, both of which a dropped line can break: an alias refers to an
+// anchor introduced earlier, and an anchor never names a node that is itself an
+// alias -- YAML gives an alias node no properties, so `&a *a` is not a document
+// at all, and what a parser makes of one says nothing about round tripping.
+func anchorsResolve(src []byte) bool {
+	if anchorOnAlias.Match(src) {
+		return false
+	}
+
+	defined := make(map[string]bool)
+	for _, m := range anchorOrAlias.FindAllSubmatch(src, -1) {
+		name := string(m[2])
+		if m[1][0] == '&' {
+			defined[name] = true
+
+			continue
+		}
+		if !defined[name] {
+			return false
+		}
+	}
+
+	return true
+}
+
+var (
+	anchorOrAlias = regexp.MustCompile(`([&*])([A-Za-z0-9_-]+)`)
+	anchorOnAlias = regexp.MustCompile(`&[A-Za-z0-9_-]+(?:\s|#[^\n]*\n)*\*`)
+)
+
+// endsTheDocument reports whether i is the line break the document ends on.
+//
+// The byte pass walks forwards and only ever shortens what is ahead of it, so
+// reaching this index means everything else has been considered already.
+func endsTheDocument(src []byte, i int) bool {
+	return i == len(src)-1 && src[i] == '\n'
 }
 
 func splitAfter(src []byte) [][]byte {

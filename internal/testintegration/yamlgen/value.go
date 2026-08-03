@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"fmt"
 	"math"
 	"sort"
 
@@ -41,6 +42,26 @@ type (
 	// Map is an ordered set of pairs with distinct keys. Order is kept so that
 	// emitting is deterministic; it carries no meaning.
 	Map struct{ Pairs []Pair }
+
+	// Anchored is a value carrying a name that an Alias can refer to.
+	//
+	// The anchor changes nothing about what the value means, which is the point:
+	// it is presentation that lives in the tree rather than in the Style,
+	// because which node carries it is structural.
+	Anchored struct {
+		Name string
+		V    Value
+	}
+
+	// Alias stands in for a value anchored earlier in the same document.
+	//
+	// It holds the anchored value rather than just the name, so Decoded needs no
+	// symbol table and cannot disagree with the document about what the name
+	// refers to.
+	Alias struct {
+		Name string
+		V    Value
+	}
 )
 
 // Pair is one mapping entry. Keys are strings because that is what decoding
@@ -81,6 +102,16 @@ func (s Seq) Decoded() any {
 	return out
 }
 
+func (a Anchored) Decoded() any { return a.V.Decoded() }
+
+// Decoded returns what the anchored value decodes to, built afresh.
+//
+// Two occurrences of an alias decode to two structures that are equal and not
+// identical, which is what comparing with ObjectsAreEqual sees. Whether the
+// library shares the underlying object is a question about the library, not
+// about what the document means.
+func (a Alias) Decoded() any { return a.V.Decoded() }
+
 func (m Map) Decoded() any {
 	out := make(map[string]any, len(m.Pairs))
 	for _, p := range m.Pairs {
@@ -109,9 +140,87 @@ var awkwardStrings = []string{
 	"2001-12-14", "12:34:56", "a: b: c",
 }
 
-// Values generates a Value tree.
+// Values generates a Value tree, some of whose nodes carry anchors and some of
+// which are aliases to them.
 func Values() *rapid.Generator[Value] {
-	return values(0)
+	return rapid.Custom(func(t *rapid.T) Value {
+		return withAliases(t, values(0).Draw(t, "tree"))
+	})
+}
+
+// withAliases rewrites a tree so that some nodes are anchored and some later
+// nodes are replaced by an alias to one of them.
+//
+// The tree is generated first and rewritten afterwards, which is what makes the
+// two rules an alias has to obey true by construction rather than by checking:
+//
+//   - an anchor enters the pool only once its own subtree is finished, so a node
+//     can only alias something that was completed before it began. Since the
+//     walk is in document order, the anchor is always written above the alias;
+//   - a finished subtree cannot contain the node currently being visited, so no
+//     alias can point at one of its own ancestors and no cycle is possible.
+//
+// Generating the aliases during the tree walk instead would need both rules
+// enforced by hand, and a rejected draw every time one was broken.
+func withAliases(t *rapid.T, v Value) Value {
+	a := &aliaser{t: t}
+
+	return a.walk(v)
+}
+
+type aliaser struct {
+	t *rapid.T
+	// pool holds the anchors whose subtree is complete, in document order.
+	pool []Anchored
+	// n numbers the anchors, so a name says where it was introduced.
+	n int
+}
+
+// aliasOdds and anchorOdds are one in N. Anchors have to be more common than
+// aliases, or the pool stays empty and the axis is never exercised; both stay
+// low enough that most documents are still ordinary trees.
+const (
+	aliasOdds  = 5
+	anchorOdds = 6
+)
+
+func (a *aliaser) walk(v Value) Value {
+	if len(a.pool) > 0 && rapid.IntRange(0, aliasOdds).Draw(a.t, "alias") == 0 {
+		target := rapid.SampledFrom(a.pool).Draw(a.t, "target")
+
+		// An alias says exactly what its anchor said: the same name, standing
+		// for the same value.
+		return Alias(target)
+	}
+
+	var out Value
+
+	switch n := v.(type) {
+	case Seq:
+		items := make([]Value, 0, len(n.Items))
+		for _, item := range n.Items {
+			items = append(items, a.walk(item))
+		}
+		out = Seq{Items: items}
+	case Map:
+		pairs := make([]Pair, 0, len(n.Pairs))
+		for _, p := range n.Pairs {
+			pairs = append(pairs, Pair{Key: p.Key, Val: a.walk(p.Val)})
+		}
+		out = Map{Pairs: pairs}
+	default:
+		out = v
+	}
+
+	if rapid.IntRange(0, anchorOdds).Draw(a.t, "anchor") != 0 {
+		return out
+	}
+
+	a.n++
+	anchored := Anchored{Name: fmt.Sprintf("a%d", a.n), V: out}
+	a.pool = append(a.pool, anchored)
+
+	return anchored
 }
 
 const maxDepth = 3
