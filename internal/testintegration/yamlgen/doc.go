@@ -38,64 +38,49 @@
 // deleted, rather than sitting there forever describing a world that has moved
 // on.
 //
-// # The direction this package cannot see
+// # The direction Emit cannot see
 //
 // [Ledger] records one kind of defect: a valid document the library refuses, or
 // reads as the wrong value. It cannot record the opposite -- an invalid
 // document the library reads anyway -- and no amount of running it deeper will
 // change that.
 //
-// The reason is structural, not accidental. TestEveryEmittedDocumentIsValidYAML
-// holds every generated document to the YAML 1.2 grammar, so being valid is a
-// property of the corpus rather than a question asked of it. The library
-// accepting one is never news.
+// The reason is structural. TestEveryEmittedDocumentIsValidYAML holds every
+// generated document to the YAML 1.2 grammar, so being valid is a property of
+// the corpus rather than a question asked of it, and the library accepting one
+// is never news.
 //
-// Finding the other direction needs documents that are not YAML, and the
-// recognizer is what makes generating them practical. YAML is nearly total, so
-// a mutation of a valid document is usually another valid document; without an
-// oracle there is no way to tell which mutants are worth trying, and a mutator
-// spends almost its whole budget re-asking the question already answered above.
-// With one, the mutator can be as crude as you like:
-//
-//	oracle := grammar.NewRecognizer(1024)
-//	broken := mutate(rt, yamlgen.Emit(value, style))
-//
-//	if oracle.Stream([]byte(broken)).OK {
-//		return // still YAML: nothing here the existing tests do not cover
-//	}
-//
-//	var got any
-//	if err := yaml.Unmarshal([]byte(broken), &got); err == nil {
-//		// The library read a document the grammar refuses. Candidate.
-//	}
-//
-// Mutations worth making are the ones that break a rule rather than a byte:
-// a tab in the indentation, an indent that does not line up, an unterminated
-// quote, an unknown escape, an alias with no anchor, a document marker inside a
-// scalar, a second colon in an implicit key, a block scalar indicator wider
-// than its content.
+// [Mutate] is the generator for the other direction: it breaks a document, and
+// makes no claim that the result is invalid. YAML is nearly total, so most ways
+// of disturbing a document leave another good one -- about nine in ten. The
+// recognizer is what makes that affordable, since one call sorts the mutants
+// worth asking about from the ones already covered. What survives goes in
+// [Lax], one entry per document rather than per shape, because the mutants that
+// get that far are few enough to reduce and read.
 //
 // # Reading a wrongly-accepted finding
 //
-// Two things about that ledger differ from this one, and both matter.
-//
-// It is keyed on documents rather than on shapes. [Divergence.Match] describes
-// a shape because every run draws different documents and there is nothing to
-// name; a mutation corpus is the opposite -- the interesting mutants are few,
-// and each one can be checked in, named and shrunk to the smallest document the
-// oracle still refuses.
-//
-// And it rests on the oracle being right in the harder direction. A finding
-// here is entirely a claim that the grammar's rejection is correct, where a
-// finding in [Ledger] only needs its acceptance to be. The recognizer has
-// already been wrong in exactly that way once, refusing a compact collection
-// written under a wider parent -- which the renderer emits, and which every
-// other parser reads. Had that surfaced while hunting over-permissiveness it
-// would have read as a library defect. So before an entry goes in: shrink it,
-// name the production that refuses it, and check that production against the
-// spec text rather than against the recognizer.
-//
 // Severity does not follow the direction. Accepting an invalid document is
-// harmless when the value is the obvious one and worse than a rejection when it
-// is not, because nothing downstream has any way to notice.
+// mostly harmless when the value is the obvious one, and worse than a rejection
+// when it is not, because nothing downstream is in a position to notice. Both
+// are in [Lax]: an anchor written against a flow collection loses the
+// collection, and a numeric escape with non-hex digits produces some other
+// character entirely.
+//
+// A finding here rests on the grammar's refusal being right, where a finding in
+// [Ledger] only needs its acceptance to be. The recognizer has already been
+// wrong in exactly that way once, refusing a compact collection written under a
+// wider parent -- which this library's renderer emits and every other parser
+// reads. So each entry names the production it breaks, and that production is
+// what to check against the spec. The recognizer is not evidence for its own
+// verdict.
+//
+// # What no grammar can see
+//
+// A grammar says what a document looks like and nothing more. An alias
+// resolving to an anchor, the keys of a mapping being distinct, a tag having a
+// meaning: none of these are syntax, so the recognizer admits documents that
+// break all three. A mutation aimed at one of them is filtered out as valid --
+// which is how the alias mutation that used to be in [Mutate] was found to be
+// dead weight. Those classes need an oracle this package does not have.
 package yamlgen
