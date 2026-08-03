@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -59,6 +60,72 @@ type Scanner struct {
 	flowIndent  int
 	indentState IndentState
 	savedPos    *token.Position
+	// initErr holds what is wrong with the source itself, found before any
+	// token was read and reported by the first Scan.
+	initErr error
+}
+
+// validateStream checks that the source is text a YAML stream may hold.
+//
+// c-printable is the set of characters a stream may contain at all, so the
+// control characters below x20 other than tab, line feed and carriage return
+// are not YAML however they are arrived at.
+//
+// A stream is also Unicode, and a byte that is part of no character is not one.
+// Converting the source to runes turns each of them into U+FFFD, so by the time
+// anything else looks the byte is gone and nothing has said so -- which is why
+// this reads the string rather than the runes the rest of the scanner works on.
+func validateStream(text string) error {
+	line, column, offset := 1, 1, 1
+
+	for i, r := range text {
+		if r == utf8.RuneError {
+			// Either a byte that is not text, or a U+FFFD the author wrote:
+			// only the width tells them apart.
+			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
+				return ErrInvalidToken(token.Invalid(
+					"found a byte that is part of no character",
+					text[i:i+1], &token.Position{Line: line, Column: column, Offset: offset},
+				))
+			}
+		}
+
+		if !printable(r) {
+			return ErrInvalidToken(token.Invalid(
+				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
+				string(r), &token.Position{Line: line, Column: column, Offset: offset},
+			))
+		}
+
+		offset++
+		if r == '\n' {
+			line++
+			column = 1
+
+			continue
+		}
+		column++
+	}
+
+	return nil
+}
+
+// printable is YAML 1.2's c-printable.
+func printable(r rune) bool {
+	switch {
+	case r == 0x09 || r == 0x0A || r == 0x0D:
+		return true
+	case r >= 0x20 && r <= 0x7E:
+		return true
+	case r == 0x85:
+		return true
+	case r >= 0xA0 && r <= 0xD7FF:
+		return true
+	case r >= 0xE000 && r <= 0xFFFD:
+		return true
+	default:
+		return r >= 0x10000 && r <= 0x10FFFF
+	}
 }
 
 func (s *Scanner) pos() *token.Position {
@@ -2027,6 +2094,7 @@ func (s *Scanner) scan(ctx *Context) error {
 
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
+	s.initErr = validateStream(text)
 	src := []rune(text)
 	s.source = src
 	s.sourcePos = 0
@@ -2047,6 +2115,21 @@ func (s *Scanner) clearState() {
 
 // Scan scans the next token and returns the token collection. The source end is indicated by io.EOF.
 func (s *Scanner) Scan() (token.Tokens, error) {
+	if err := s.initErr; err != nil {
+		// The source is not a YAML stream at all, so there is nothing to
+		// tokenize. Reported once, and the source is then spent: a caller that
+		// loops until io.EOF would otherwise never reach it.
+		s.initErr = nil
+		s.sourcePos = s.sourceSize
+
+		var invalidTokenErr *InvalidTokenError
+		if errors.As(err, &invalidTokenErr) {
+			return token.Tokens{invalidTokenErr.Token}, err
+		}
+
+		return nil, err
+	}
+
 	if s.sourcePos >= s.sourceSize {
 		return nil, io.EOF
 	}

@@ -3,10 +3,6 @@
 
 package yamlgen
 
-import (
-	"unicode/utf8"
-)
-
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
 //
 // This is the other direction from [Divergence], and it is recorded differently
@@ -74,53 +70,9 @@ func KnownlyAccepted(src string) *Laxity {
 //
 // The list is not a survey. It is what a few hundred thousand mutations turned
 // up and a person then confirmed, so absence from it means nothing.
-var Lax = []Laxity{
-	{
-		Name: "a-character-the-spec-forbids",
-		Src:  "\x00\n",
-		Rule: "c-printable, which admits x09, x0A, x0D and x20-x7E and no other " +
-			"character below xA0",
-		Reads: "\x00",
-		Match: func(src string) bool {
-			if !utf8.ValidString(src) {
-				return false
-			}
-
-			for _, r := range src {
-				if !printable(r) {
-					return true
-				}
-			}
-
-			return false
-		},
-	},
-	{
-		Name: "bytes-that-are-not-text",
-		Src:  "\xbf\n",
-		Rule: "a YAML stream is Unicode; xBF is a continuation byte with nothing " +
-			"to continue, so it is not a character and c-printable cannot admit " +
-			"it. It is read as U+FFFD, so the byte is gone and nothing said so",
-		Reads: "�",
-		Match: func(src string) bool { return !utf8.ValidString(src) },
-	},
-}
-
-// printable is YAML 1.2's c-printable, which is the set of characters a stream
-// may contain at all.
-func printable(r rune) bool {
-	switch {
-	case r == 0x09 || r == 0x0A || r == 0x0D:
-		return true
-	case r >= 0x20 && r <= 0x7E:
-		return true
-	case r == 0x85:
-		return true
-	case r >= 0xA0 && r <= 0xD7FF:
-		return true
-	case r >= 0xE000 && r <= 0xFFFD:
-		return true
-	default:
-		return r >= 0x10000 && r <= 0x10FFFF
-	}
-}
+//
+// Empty. Every mutant the hunt has produced and the recognizer refused is
+// refused by the library too, which is a claim
+// TestEveryDocumentTheGrammarRefusesIsRefused re-earns on every run rather than
+// a note about how things once stood.
+var Lax = []Laxity{}
