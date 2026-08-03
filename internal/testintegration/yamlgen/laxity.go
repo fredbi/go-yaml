@@ -4,7 +4,6 @@
 package yamlgen
 
 import (
-	"strings"
 	"unicode/utf8"
 )
 
@@ -105,13 +104,6 @@ var Lax = []Laxity{
 		Reads: "�",
 		Match: func(src string) bool { return !utf8.ValidString(src) },
 	},
-	{
-		Name:  "a-tab-where-indentation-belongs",
-		Src:   "\t\"\": a\n",
-		Rule:  "s-indent(n) ::= s-space x n, so indentation is spaces and a tab is not one",
-		Reads: map[string]any{"": "a"},
-		Match: tabInIndentation,
-	},
 }
 
 // printable is YAML 1.2's c-printable, which is the set of characters a stream
@@ -131,16 +123,4 @@ func printable(r rune) bool {
 	default:
 		return r >= 0x10000 && r <= 0x10FFFF
 	}
-}
-
-// tabInIndentation reports whether any line's leading whitespace holds a tab.
-func tabInIndentation(src string) bool {
-	for line := range strings.SplitSeq(src, "\n") {
-		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		if strings.ContainsRune(indent, '\t') {
-			return true
-		}
-	}
-
-	return false
 }
