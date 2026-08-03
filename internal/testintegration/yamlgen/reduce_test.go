@@ -26,14 +26,16 @@ func TestReduce(t *testing.T) {
 			src:         "a: 1\nb: 2\nBANG: 3\nd: 4\n",
 			interesting: func(b []byte) bool { return bytes.Contains(b, []byte("BANG")) },
 			// Reduction does not stop at the line: once the other lines are
-			// gone the byte pass takes the rest of this one with them.
-			want: "BANG",
+			// gone the byte pass takes the rest of this one with them. The
+			// break the document ends on stays, because a document without one
+			// is not one the generator would have written.
+			want: "BANG\n",
 		},
 		{
 			name:        "shortens a scalar once the lines are gone",
 			src:         "key: aaaaaaaaaa\nother: bbbb\n",
 			interesting: func(b []byte) bool { return bytes.Contains(b, []byte("aa")) },
-			want:        "aa",
+			want:        "aa\n",
 		},
 		{
 			name:        "leaves an already minimal document alone",
@@ -94,6 +96,25 @@ func TestReducedReportIsUseful(t *testing.T) {
 	assert.Contains(t, report, "reads as:")
 	assert.Contains(t, report, "func TestDefect(t *testing.T) {")
 	t.Log(report)
+}
+
+// TestReduceKeepsTheDocumentEndingInABreak: the byte pass will not remove the
+// line break the document ends on.
+//
+// It is the most productive byte in the document to remove -- without it a
+// block scalar means something else, so many predicates stay true -- and the
+// result is a document no emitter here would produce. Reduction that leaves the
+// generated space arrives at a different defect than the one that was found,
+// which is worse than not reducing at all.
+func TestReduceKeepsTheDocumentEndingInABreak(t *testing.T) {
+	src := "k: |\n  g\n"
+	// True of the reduced form that drops the final break, and false of the
+	// document itself: exactly the drift being prevented.
+	interesting := func(b []byte) bool { return bytes.Contains(b, []byte("g")) }
+
+	got := yamlgen.Reduce([]byte(src), interesting)
+
+	assert.True(t, bytes.HasSuffix(got, []byte("\n")), "reduced to %q", got)
 }
 
 func TestReproducerIsValidGo(t *testing.T) {
