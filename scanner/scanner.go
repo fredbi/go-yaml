@@ -42,8 +42,12 @@ type Scanner struct {
 	// prevLineIndentNum indicates the number of spaces used for indentation at previous line.
 	prevLineIndentNum int
 	// indentLevel indicates the level of indent depth. This value does not match the column value.
-	indentLevel            int
-	isFirstCharAtLine      bool
+	indentLevel       int
+	isFirstCharAtLine bool
+	// indentHasTab records that a tab stood among this line's leading
+	// whitespace. Block structure is introduced by s-indent(n), which is spaces
+	// and nothing else, so an entry on such a line is not one.
+	indentHasTab           bool
 	isAnchor               bool
 	isAlias                bool
 	isDirective            bool
@@ -113,6 +117,7 @@ func (s *Scanner) progressLine(ctx *Context) {
 	s.offset++
 	s.indentNum = 0
 	s.isFirstCharAtLine = true
+	s.indentHasTab = false
 	s.isAnchor = false
 	s.isAlias = false
 	s.isDirective = false
@@ -187,6 +192,7 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 	if s.isFirstCharAtLine && c == '\t' {
 		// found tab indent.
 		// In this case, scanTab returns error.
+		s.indentHasTab = true
 		return
 	}
 	if !s.isFirstCharAtLine {
@@ -1224,6 +1230,25 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if strings.HasPrefix(strings.TrimPrefix(string(ctx.obuf), " "), "\t") && !strings.HasPrefix(string(ctx.buf), "\t") {
 		invalidTk := token.Invalid("tab character cannot use as a map key directly", string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)
+		return false, ErrInvalidToken(invalidTk)
+	}
+
+	if s.indentHasTab && !s.isFlowMode() {
+		// A block mapping entry is introduced by s-indent(n), which is spaces
+		// and nothing else, so a tab among this line's indentation leaves the
+		// entry with nothing to sit on. A tab is separation rather than
+		// indentation, which is why it is allowed in front of a flow node or a
+		// scalar in the same place -- "\t{}" is a document and "\tfoo: 1" is
+		// not.
+		//
+		// The check above reads the origin buffer, which a quoted key resets:
+		// "\tfoo: 1" was refused there and "\t\"\": 1" was not.
+		invalidTk := token.Invalid(
+			"tab character cannot stand for the indentation a mapping entry needs",
+			string(ctx.obuf), s.pos(),
+		)
+		s.progressColumn(ctx, 1)
+
 		return false, ErrInvalidToken(invalidTk)
 	}
 

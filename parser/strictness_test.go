@@ -197,6 +197,54 @@ func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 	}
 }
 
+// TestParseTabWhereIndentationBelongs covers a tab opening a line at the root.
+//
+// s-indent(n) is s-space x n, so block structure is introduced by spaces and
+// nothing else and a tab cannot stand in for them. A tab is separation rather
+// than indentation, though, and a flow node or a scalar at the root is reached
+// through s-separate -- so the same tab that makes "\tfoo: 1" invalid leaves
+// "\t{}" a perfectly good document.
+//
+// The distinction was lost at the root, where the entry has no enclosing level
+// to be measured against: a tab there was read as the indentation it may not
+// be. It survived for a quoted key longest, since the check it slipped past
+// read the origin buffer and a quoted scalar resets it.
+func TestParseTabWhereIndentationBelongs(t *testing.T) {
+	invalid := map[string]string{
+		"a tab before a quoted key at the root": "\t\"\": a\n",
+		"a tab before a single-quoted key":      "\t'k': v\n",
+		"a tab before a plain key at the root":  "\tfoo: a\n",
+		"a tab before a sequence at the root":   "\t- a\n",
+		"a tab before a key, further entries":   "\ta: 1\nb: 2\n",
+	}
+
+	for name, source := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.Errorf(t, err, "accepted %q", source)
+		})
+	}
+
+	// The same tab in front of something reached through s-separate.
+	valid := map[string]string{
+		"a tab before a flow mapping":     "\t{}\n",
+		"a tab before a flow sequence":    "\t[\n\t]\n",
+		"a tab before a flow pair":        "\t{a: 1}\n",
+		"a tab before a plain scalar":     "\tfoo\n",
+		"a tab before a quoted scalar":    "\t\"foo\"\n",
+		"a tab before a comment":          "\t#c\n",
+		"a tab after a space of indent":   "foo:\n \tbar\n",
+		"a tab inside a folded plain one": "x:\n - x\n  \tx\n",
+	}
+
+	for name, source := range valid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.NoErrorf(t, err, "rejected %q", source)
+		})
+	}
+}
+
 // TestParseWhitespaceOnlyLines covers a line that holds nothing but whitespace.
 //
 // It is a blank line however it is spelled. A tab cannot be indentation and is
