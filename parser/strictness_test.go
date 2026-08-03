@@ -80,6 +80,28 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "quoted: \"a\n b\n c\"\n",
 		},
 
+		// A block scalar header takes one indentation indicator and one
+		// chomping indicator, in either order, and either may be left out. Two
+		// of either is not a header.
+		"two chomping indicators": {
+			invalid: "|--\n",
+			valid:   "|-\n",
+		},
+		"two chomping indicators, folded": {
+			invalid: ">++\n",
+			valid:   ">+\n",
+		},
+		"two indentation indicators": {
+			invalid: "|12\n  a\n",
+			valid:   "|1\n  a\n",
+		},
+		// The comment after a header is separated from it, like every other
+		// comment. Pressed up against the indicators it starts nothing.
+		"comment touching a block scalar header": {
+			invalid: "|-#\n",
+			valid:   "|- #\n",
+		},
+
 		// A numeric escape takes hexadecimal digits, and how many is fixed by
 		// which escape it is. Only the count used to be checked, so an escape
 		// with the wrong characters in it decoded to some other character
