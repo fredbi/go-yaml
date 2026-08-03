@@ -826,11 +826,19 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		} else {
 			ctx.addBuf(c)
 		}
-		state.updateIndentColumn(s.column)
-		if err := state.validateIndentColumn(); err != nil {
-			invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
-			s.progressColumn(ctx, 1)
-			return ErrInvalidToken(invalidTk)
+		if !s.isNewLineChar(c) {
+			// A line that ends here without content is empty, and an empty line
+			// is allowed less indentation than the header states: l-empty
+			// admits s-indent(<n). Holding it to the stated width refused every
+			// document whose block scalar both states its indentation and keeps
+			// its trailing blank lines.
+			state.updateIndentColumn(s.column)
+			if err := state.validateIndentColumn(); err != nil {
+				invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
+				s.progressColumn(ctx, 1)
+
+				return ErrInvalidToken(invalidTk)
+			}
 		}
 		value := ctx.bufferedSrc()
 		ctx.addToken(token.String(string(value), string(ctx.obuf), s.pos()))

@@ -4,7 +4,6 @@
 package yamlgen_test
 
 import (
-	"flag"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -33,17 +32,6 @@ import (
 // Every failure arrives reduced to the smallest document that still shows it,
 // with a test case to paste.
 
-var runInvariants = flag.Bool("yamlgen.invariants", false,
-	"assert the invariants the parser should hold, which currently fail")
-
-func requireInvariantMode(t *testing.T) {
-	t.Helper()
-
-	if !*runInvariants {
-		t.Skip("known to fail: pass -yamlgen.invariants to assert the invariants the parser should hold")
-	}
-}
-
 // TestInvariantEveryPresentationReadsAsTheValue: writing one value down in any
 // style and reading it back gives that value.
 //
@@ -52,8 +40,6 @@ func requireInvariantMode(t *testing.T) {
 // comes from the generator, so shrinking the document would change what it is
 // supposed to say. rapid shrinks the value and the style instead.
 func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -81,8 +67,6 @@ func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
 // This is the one the library's reason for existing rests on. A tool that
 // rewrites a file to change one field must not quietly change another.
 func TestInvariantRenderingPreservesTheValue(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -105,8 +89,6 @@ func TestInvariantRenderingPreservesTheValue(t *testing.T) {
 // time it is used, so every save produces a diff whether or not anything
 // changed.
 func TestInvariantRenderingSettles(t *testing.T) {
-	requireInvariantMode(t)
-
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -135,22 +117,7 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		invariant string
 		src       string
 		fails     func([]byte) bool
-	}{
-		{
-			invariant: "reading any presentation gives the value",
-			src:       "k: |2+\n  one\n\n",
-			fails: func(b []byte) bool {
-				var got any
-
-				return yaml.Unmarshal(b, &got) != nil
-			},
-		},
-		{
-			invariant: "rendering preserves the value",
-			src:       "|2\n a\n",
-			fails:     renderChangesValue,
-		},
-	}
+	}{}
 
 	var open int
 	for _, o := range outstanding {

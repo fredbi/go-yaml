@@ -158,7 +158,7 @@ func (r *Renderer) document(n *DocumentNode) string {
 		parts = append(parts, n.Start.Value)
 	}
 	if n.Body != nil {
-		parts = append(parts, r.String(n.Body))
+		parts = append(parts, r.documentBody(n.Body))
 	}
 	if n.End != nil {
 		parts = append(parts, n.End.Value)
@@ -509,11 +509,21 @@ func (r *Renderer) tag(n *TagNode) string {
 // prefixed renders a node introduced by a marker -- an anchor name or a tag --
 // which sits on its own line when what follows is a block.
 func (r *Renderer) prefixed(marker string, value Node) string {
+	return r.prefixedAt(marker, value, false)
+}
+
+func (r *Renderer) prefixedAt(marker string, value Node, atDocumentRoot bool) string {
 	if value == nil {
 		return marker
 	}
 
 	text := r.String(value)
+	if atDocumentRoot {
+		// A marker does not enclose what it names: "&a |2" is still the
+		// document's own node, and the width its header states is counted from
+		// the same place.
+		text = r.documentBody(value)
+	}
 	if text == "" {
 		return marker
 	}
@@ -549,8 +559,50 @@ func (r *Renderer) startsBlock(n Node) bool {
 	}
 }
 
+// documentBody renders what a document holds.
+//
+// It differs from String in one respect, and only for a block scalar that
+// states its own indentation. That width is counted from the indentation of
+// whatever encloses the scalar, and a document encloses nothing: the spec gives
+// its node an indentation of -1, so content written one column in is stated as
+// two. Everywhere else the enclosing level is the start of the header's own
+// line and the two numbers agree.
+//
+// A property may stand between the document and the scalar -- "&a |2" is a
+// document whose node is an anchored block scalar -- so those are unwrapped
+// rather than handed to String.
+func (r *Renderer) documentBody(n Node) string {
+	switch node := n.(type) {
+	case *LiteralNode:
+		return r.literalAt(node, true)
+	case *AnchorNode:
+		return r.prefixedAt("&"+r.String(node.Name), node.Value, true)
+	case *TagNode:
+		return r.prefixedAt(node.Start.Value, node.Value, true)
+	default:
+		return r.String(n)
+	}
+}
+
 func (r *Renderer) literal(n *LiteralNode) string {
+	return r.literalAt(n, false)
+}
+
+func (r *Renderer) literalAt(n *LiteralNode, atDocumentRoot bool) string {
 	header := n.Start.Value
+
+	// The content is written at the renderer's own width, so a header that
+	// states a width has to say that one -- carrying the source's over left it
+	// describing a layout that is no longer there, and the value gained a
+	// column on every cycle.
+	if statedIndent(header) > 0 {
+		stated := r.indent
+		if atDocumentRoot {
+			stated++
+		}
+		header = restateIndent(header, stated)
+	}
+
 	if r.comments && n.Comment != nil {
 		header += " " + r.String(n.Comment)
 	}
@@ -563,12 +615,7 @@ func (r *Renderer) literal(n *LiteralNode) string {
 		return header
 	}
 
-	// A header may state its own indentation, as "|2" does. That width is part
-	// of how the content reads, so it wins over the renderer's own.
 	indent := r.indent
-	if stated := statedIndent(n.Start.Value); stated > 0 {
-		indent = stated
-	}
 
 	if isFolded(n.Start) {
 		// A folded scalar's value has lost its line structure -- that is what
@@ -659,6 +706,27 @@ func statedIndent(header string) int {
 	return 0
 }
 
+// restateIndent rewrites the width a block scalar header states, leaving the
+// style and the chomping indicator around it alone. YAML allows one digit, so a
+// width outside that range cannot be written and the header is left as it was.
+func restateIndent(header string, width int) string {
+	if width < 1 || width > 9 {
+		return header
+	}
+
+	var out strings.Builder
+	for _, c := range header {
+		if c >= '1' && c <= '9' {
+			out.WriteByte(byte('0' + width))
+
+			continue
+		}
+		out.WriteRune(c)
+	}
+
+	return out.String()
+}
+
 // stringNode renders a scalar string.
 //
 // A string holding line breaks has no one-line form: it comes out as a block
@@ -708,6 +776,12 @@ func carriesOwnIndent(n Node) bool {
 		return true
 	case *StringNode:
 		return blockScalarHeader(node) != ""
+	case *AnchorNode:
+		// A property stays on the line the header ends, so what it names is
+		// still indented from the start of that line and not from the property.
+		return carriesOwnIndent(node.Value)
+	case *TagNode:
+		return carriesOwnIndent(node.Value)
 	default:
 		return false
 	}
