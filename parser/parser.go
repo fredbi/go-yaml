@@ -895,6 +895,26 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 		return newNullNode(ctx, ctx.insertNullToken(colonTk))
 	}
 
+	if isScalarKeyToken(key.GetToken()) && tk.Column() == keyCol && tk.Line() != keyLine &&
+		tk.Type() != token.SequenceEntryType {
+		// a:
+		// b
+		// ^
+		//
+		// An entry's value is written further in than its key. Level with the
+		// key, a token can only open the next entry -- another key, handled
+		// above, or the '-' of a block sequence, which by convention sits at
+		// its own key's column. Anything else has nowhere to belong, and
+		// reading it as the value made "a:\nb" the mapping {a: b} where every
+		// other implementation refuses the document.
+		//
+		// Only a plain or quoted key is measured this way. Where the key
+		// carries a property or is written after a '?', its first token is the
+		// property or the '?' rather than the key itself, and the column that
+		// token sits at says nothing about where the entry begins.
+		return nil, errors.ErrSyntax("value is not indented past its key", tk.RawToken())
+	}
+
 	if tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
 		ctx.nextNotCommentToken().Column() < keyCol {
 		// in this case,

@@ -145,3 +145,44 @@ func TestParseWhitespaceOnlyLines(t *testing.T) {
 		})
 	}
 }
+
+// TestParseValueMustBeIndentedPastItsKey covers a value written level with the
+// key it belongs to.
+//
+// An entry's value goes further in than its key. Level with the key, a token
+// can only open the next entry: another key, or the '-' of a block sequence,
+// which by convention sits at its own key's column. Anything else has nowhere
+// to belong, and reading it as the value made "a:\nb" the mapping {a: b} where
+// every other implementation refuses the document.
+func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
+	invalid := map[string]string{
+		"a plain scalar level with the key": "a:\nb\n",
+		"a quoted key, same":                "\"a\":\nb\n",
+		"a flow collection level with it":   "a:\n[1, 2]\n",
+		"an alias level with it":            "k: &x 1\na:\n*x\n",
+		"nested one level in":               "top:\n  a:\n  b\n",
+	}
+
+	for name, source := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.Errorf(t, err, "accepted %q", source)
+		})
+	}
+
+	valid := map[string]string{
+		"the value indented past the key":      "a:\n  b\n",
+		"a block sequence at the key's column": "a:\n- x\n",
+		"the next entry":                       "a:\nb: 1\n",
+		"an empty value at the end":            "a:\n",
+		"a comment between them":               "a:\n# c\nb: 1\n",
+		"a new document":                       "a:\n---\nb: 1\n",
+	}
+
+	for name, source := range valid {
+		t.Run(name, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			assert.NoErrorf(t, err, "rejected %q", source)
+		})
+	}
+}
