@@ -286,3 +286,42 @@ func (c *Coverage) Report() string {
 
 	return b.String()
 }
+
+// Signature renders which buckets were entered as a compact string, so that two
+// recognitions can be compared for having gone the same way.
+//
+// It is a fingerprint of the route rather than of the document. For a document
+// the grammar refuses, that is close to a statement of *how* it is wrong, which
+// is what makes it a usable equivalence class: two documents that fail
+// identically are one test case wearing two disguises.
+func (c *Coverage) Signature() string {
+	out := make([]byte, 0, len(c.attempts)/8+1)
+
+	var acc byte
+
+	for i, at := range c.attempts {
+		if at > 0 {
+			acc |= 1 << (i % 8)
+		}
+
+		if i%8 == 7 {
+			out = append(out, acc)
+			acc = 0
+		}
+	}
+
+	return string(append(out, acc))
+}
+
+// Names lists the grammar's productions in the order their ids run, which is
+// name order.
+func (g *Grammar) Names() []string {
+	out := make([]string, 0, len(g.slots))
+	for name := range g.slots {
+		out = append(out, name)
+	}
+
+	slices.Sort(out)
+
+	return out
+}
