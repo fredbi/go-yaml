@@ -77,6 +77,20 @@ type Recognizer struct {
 	st state
 }
 
+// Cover makes this recognizer record which productions it enters, into the
+// given vector. Passing nil stops it.
+//
+// Coverage accumulates until the vector is reset, so a caller measuring one
+// document at a time resets between them and a caller measuring a whole corpus
+// does not.
+func (r *Recognizer) Cover(c *Coverage) {
+	if c != nil && c.g != r.g {
+		panic("grammar: coverage vector from a different grammar")
+	}
+
+	r.st.cover = c
+}
+
 // Recognizer returns a reusable oracle over this grammar, whose memo table is
 // sized for documents of about hint bytes.
 func (g *Grammar) Recognizer(hint int) *Recognizer {
@@ -85,7 +99,9 @@ func (g *Grammar) Recognizer(hint int) *Recognizer {
 
 // Match reports whether src is exactly one instance of the named production.
 func (r *Recognizer) Match(rule string, src []byte, n int, c string) Result {
+	cover := r.st.cover
 	r.st.reset(src, true)
+	r.st.cover = cover
 
 	return r.g.run(rule, &r.st, n, c)
 }

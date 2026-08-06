@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -38,9 +39,23 @@ type compiler struct {
 // Compiling is a few milliseconds of walking a decoded structure, and the
 // result is immutable, so one Grammar is shared by every caller.
 type Grammar struct {
-	name  string
-	slots map[string]*slot
+	name         string
+	slots        map[string]*slot
+	unreferenced []string
 }
+
+// Unreferenced names the productions no other production refers to, in name
+// order.
+//
+// These cannot be entered from any start symbol, so they belong in no coverage
+// denominator. YAML 1.2 has nineteen of them and they are all one thing: the
+// spec names each indicator character as a production -- c-anchor is "&",
+// c-mapping-key is "?" -- for the prose to refer to, and then every rule that
+// uses one writes the character directly instead.
+//
+// Counting them makes a corpus look permanently incomplete and hides the real
+// gaps behind nineteen that can never close.
+func (g *Grammar) Unreferenced() []string { return g.unreferenced }
 
 // Name is what the grammar was compiled as, and appears in the panic when a
 // caller asks for a production it does not define.
@@ -80,7 +95,55 @@ func Compile(name string, spec []byte, patches ...Patch) (*Grammar, error) {
 		return nil, fmt.Errorf("compiling the %s grammar: %w", name, err)
 	}
 
-	return &Grammar{name: name, slots: c.slots}, nil
+	return &Grammar{name: name, slots: c.slots, unreferenced: c.unreferenced()}, nil
+}
+
+// unreferenced finds the productions that appear in no other production's body.
+//
+// A name reaches a rule either as a bare string in matching position or as the
+// key of a call form, so both are collected. A rule referring only to itself is
+// still unreferenced: nothing outside it can start it.
+func (c *compiler) unreferenced() []string {
+	seen := make(map[string]bool, len(c.raw))
+
+	var walk func(from string, body any)
+
+	walk = func(from string, body any) {
+		switch form := body.(type) {
+		case string:
+			if form != from && c.slots[form] != nil {
+				seen[form] = true
+			}
+		case []any:
+			for _, item := range form {
+				walk(from, item)
+			}
+		case map[string]any:
+			for key, arg := range form {
+				if key != from && c.slots[key] != nil {
+					seen[key] = true
+				}
+
+				walk(from, arg)
+			}
+		}
+	}
+
+	for name, body := range c.raw {
+		walk(name, body)
+	}
+
+	out := make([]string, 0, len(c.raw)-len(seen))
+
+	for name := range c.raw {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
 }
 
 // MustCompile is Compile for a grammar that is embedded rather than supplied,
@@ -107,15 +170,25 @@ func newCompiler(spec []byte, patches []Patch) (*compiler, error) {
 
 	// The ":007"-style keys index rule numbers back to the spec. They are not
 	// productions.
-	var id int32
+	names := make([]string, 0, len(raw))
 
 	for name, body := range raw {
 		if strings.HasPrefix(name, ":") {
 			continue
 		}
 		c.raw[name] = body
-		c.slots[name] = &slot{name: name, id: id, params: declaredParams(body)}
-		id++
+		names = append(names, name)
+	}
+
+	// Numbered in name order rather than in map order, so that a production's
+	// id is the same in every process. Coverage vectors are indexed by it, and
+	// a greedy selection over an unstably-indexed vector would choose a
+	// different corpus on every run -- which is not something a checked-in
+	// corpus can afford.
+	slices.Sort(names)
+
+	for id, name := range names {
+		c.slots[name] = &slot{name: name, id: int32(id), params: declaredParams(c.raw[name])}
 	}
 
 	for _, p := range patches {
@@ -559,6 +632,11 @@ func (c *compiler) arithmetic(arg any, sign int) value {
 
 // callValue invokes a (flip) rule, which matches nothing and returns a value
 // derived from the variables it is passed.
+//
+// This is the one production entry that does not go through [invoke], because a
+// (flip) rule has no matching form to run. So it records coverage itself:
+// leaving it out made in-flow and seq-spaces look unreachable when both are
+// used on every flow collection in the grammar.
 func (c *compiler) callValue(s *slot, arg any) value {
 	args := c.arguments(s, arg)
 
@@ -566,6 +644,14 @@ func (c *compiler) callValue(s *slot, arg any) value {
 		callee := e
 		for i, a := range args {
 			assign(&callee, s.params[i], a.of(st, e))
+		}
+
+		if st.cover != nil {
+			// A (flip) rule cannot fail: it maps its arguments to a value and
+			// returns it, so being entered and being satisfied are the same
+			// event here.
+			st.cover.attempt(s.id, callee.c)
+			st.cover.succeed(s.id, callee.c)
 		}
 
 		return s.val(st, callee)

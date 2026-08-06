@@ -88,6 +88,10 @@ type state struct {
 	// the throughput test is to read them.
 	steps int64
 	hits  int64
+
+	// cover records which productions were entered, when something is
+	// collecting. Nil the rest of the time, which is nearly always.
+	cover *Coverage
 }
 
 // memoEntry records what one rule decided at one position.
