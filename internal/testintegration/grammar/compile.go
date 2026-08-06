@@ -5,17 +5,11 @@ package grammar
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-
-	_ "embed"
 )
-
-//go:embed testdata/yaml-spec-1.2.json
-var specJSON []byte
 
 // hexCode matches the grammar's way of writing a character by code point.
 //
@@ -39,20 +33,68 @@ type compiler struct {
 	slots map[string]*slot
 }
 
-// grammarCompiler is compiled once. Compiling is a few milliseconds of walking
-// a 52KB structure, and the result is immutable and safe to share.
-var grammarCompiler = mustCompile()
-
-func mustCompile() *compiler {
-	c, err := newCompiler(specJSON)
-	if err != nil {
-		panic(fmt.Sprintf("compiling the YAML 1.2 grammar: %v", err))
-	}
-
-	return c
+// Grammar is a compiled set of productions, ready to recognize with.
+//
+// Compiling is a few milliseconds of walking a decoded structure, and the
+// result is immutable, so one Grammar is shared by every caller.
+type Grammar struct {
+	name  string
+	slots map[string]*slot
 }
 
-func newCompiler(spec []byte) (*compiler, error) {
+// Name is what the grammar was compiled as, and appears in the panic when a
+// caller asks for a production it does not define.
+func (g *Grammar) Name() string { return g.name }
+
+// Rules reports how many productions the grammar defines, so a test can assert
+// the whole file compiled rather than some prefix of it.
+func (g *Grammar) Rules() int { return len(g.slots) }
+
+// Patch is a departure from the grammar file, applied before compiling.
+//
+// Some rules a spec states only in prose never reach its published grammar, so
+// a faithful compilation of the file is not a faithful compilation of the
+// language. Rather than special-case those at match time, the raw body is
+// rewritten here and the rest of the compiler stays honest.
+//
+// Apply reports whether the body was the shape it expected. A patch that does
+// not recognize its target fails the compile: a newer grammar file which either
+// fixes the omission or moves it then says so, instead of quietly dropping the
+// patch and taking a class of document with it.
+type Patch struct {
+	// Rule is the production to rewrite.
+	Rule string
+	// Because says what the grammar file leaves out, and appears in the error
+	// when Apply refuses.
+	Because string
+	// Apply rewrites the rule body in place, and reports whether it recognized
+	// it.
+	Apply func(body any) bool
+}
+
+// Compile builds a Grammar from a spec in the productions format, applying
+// patches in order before any rule is compiled.
+func Compile(name string, spec []byte, patches ...Patch) (*Grammar, error) {
+	c, err := newCompiler(spec, patches)
+	if err != nil {
+		return nil, fmt.Errorf("compiling the %s grammar: %w", name, err)
+	}
+
+	return &Grammar{name: name, slots: c.slots}, nil
+}
+
+// MustCompile is Compile for a grammar that is embedded rather than supplied,
+// where a failure is a defect in this package rather than bad input.
+func MustCompile(name string, spec []byte, patches ...Patch) *Grammar {
+	g, err := Compile(name, spec, patches...)
+	if err != nil {
+		panic("grammar: " + err.Error())
+	}
+
+	return g
+}
+
+func newCompiler(spec []byte, patches []Patch) (*compiler, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(spec, &raw); err != nil {
 		return nil, fmt.Errorf("decoding the grammar: %w", err)
@@ -66,6 +108,7 @@ func newCompiler(spec []byte) (*compiler, error) {
 	// The ":007"-style keys index rule numbers back to the spec. They are not
 	// productions.
 	var id int32
+
 	for name, body := range raw {
 		if strings.HasPrefix(name, ":") {
 			continue
@@ -75,19 +118,15 @@ func newCompiler(spec []byte) (*compiler, error) {
 		id++
 	}
 
-	// Asserted rather than attempted, so that a newer grammar file which either
-	// fixes the omission or moves it says so here instead of quietly dropping
-	// the patch and taking a class of valid document with it.
-	if !patchBlockIndented(c.raw["s-l+block-indented"]) {
-		return nil, errors.New("s-l+block-indented is not the shape the auto-detected m is patched into")
-	}
+	for _, p := range patches {
+		body, ok := c.raw[p.Rule]
+		if !ok {
+			return nil, fmt.Errorf("no production named %q to patch, though %s", p.Rule, p.Because)
+		}
 
-	if !patchBlockHeader(c.raw["c-b-block-header"]) {
-		return nil, errors.New("c-b-block-header is not the shape the two indicator orders are distributed over")
-	}
-
-	if !patchIndentationIndicator(c.raw["c-indentation-indicator"]) {
-		return nil, errors.New("c-indentation-indicator is not the shape the zero digit is excluded from")
+		if !p.Apply(body) {
+			return nil, fmt.Errorf("%s is not the shape it is patched into, where %s", p.Rule, p.Because)
+		}
 	}
 
 	for name := range c.raw {
