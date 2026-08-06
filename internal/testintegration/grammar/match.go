@@ -18,6 +18,13 @@ import "unicode/utf8"
 func invoke(s *slot, st *state, e env) (env, bool) {
 	st.steps++
 
+	// The one funnel every production entry passes through, which is why the
+	// coverage hook is here and nowhere else. A nil vector is how it is turned
+	// off, so the cost when nothing is measuring is one comparison.
+	if st.cover != nil {
+		st.cover.attempt(s.id, e.c)
+	}
+
 	// A nil table is how memoization is turned off, to measure what it is
 	// worth rather than assume it.
 	memoizing := st.memo != nil
@@ -35,6 +42,10 @@ func invoke(s *slot, st *state, e env) (env, bool) {
 				e.t = got.outT
 			}
 
+			if st.cover != nil && got.ok {
+				st.cover.succeed(s.id, e.c)
+			}
+
 			return e, got.ok
 		}
 	}
@@ -43,6 +54,10 @@ func invoke(s *slot, st *state, e env) (env, bool) {
 	if !ok {
 		st.pos = start
 		out = e
+	}
+
+	if st.cover != nil && ok {
+		st.cover.succeed(s.id, e.c)
 	}
 
 	if memoizing {

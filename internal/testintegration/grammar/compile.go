@@ -5,17 +5,12 @@ package grammar
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
-
-	_ "embed"
 )
-
-//go:embed testdata/yaml-spec-1.2.json
-var specJSON []byte
 
 // hexCode matches the grammar's way of writing a character by code point.
 //
@@ -39,20 +34,130 @@ type compiler struct {
 	slots map[string]*slot
 }
 
-// grammarCompiler is compiled once. Compiling is a few milliseconds of walking
-// a 52KB structure, and the result is immutable and safe to share.
-var grammarCompiler = mustCompile()
-
-func mustCompile() *compiler {
-	c, err := newCompiler(specJSON)
-	if err != nil {
-		panic(fmt.Sprintf("compiling the YAML 1.2 grammar: %v", err))
-	}
-
-	return c
+// Grammar is a compiled set of productions, ready to recognize with.
+//
+// Compiling is a few milliseconds of walking a decoded structure, and the
+// result is immutable, so one Grammar is shared by every caller.
+type Grammar struct {
+	name         string
+	slots        map[string]*slot
+	unreferenced []string
 }
 
-func newCompiler(spec []byte) (*compiler, error) {
+// Unreferenced names the productions no other production refers to, in name
+// order.
+//
+// These cannot be entered from any start symbol, so they belong in no coverage
+// denominator. YAML 1.2 has nineteen of them and they are all one thing: the
+// spec names each indicator character as a production -- c-anchor is "&",
+// c-mapping-key is "?" -- for the prose to refer to, and then every rule that
+// uses one writes the character directly instead.
+//
+// Counting them makes a corpus look permanently incomplete and hides the real
+// gaps behind nineteen that can never close.
+func (g *Grammar) Unreferenced() []string { return g.unreferenced }
+
+// Name is what the grammar was compiled as, and appears in the panic when a
+// caller asks for a production it does not define.
+func (g *Grammar) Name() string { return g.name }
+
+// Rules reports how many productions the grammar defines, so a test can assert
+// the whole file compiled rather than some prefix of it.
+func (g *Grammar) Rules() int { return len(g.slots) }
+
+// Patch is a departure from the grammar file, applied before compiling.
+//
+// Some rules a spec states only in prose never reach its published grammar, so
+// a faithful compilation of the file is not a faithful compilation of the
+// language. Rather than special-case those at match time, the raw body is
+// rewritten here and the rest of the compiler stays honest.
+//
+// Apply reports whether the body was the shape it expected. A patch that does
+// not recognize its target fails the compile: a newer grammar file which either
+// fixes the omission or moves it then says so, instead of quietly dropping the
+// patch and taking a class of document with it.
+type Patch struct {
+	// Rule is the production to rewrite.
+	Rule string
+	// Because says what the grammar file leaves out, and appears in the error
+	// when Apply refuses.
+	Because string
+	// Apply rewrites the rule body in place, and reports whether it recognized
+	// it.
+	Apply func(body any) bool
+}
+
+// Compile builds a Grammar from a spec in the productions format, applying
+// patches in order before any rule is compiled.
+func Compile(name string, spec []byte, patches ...Patch) (*Grammar, error) {
+	c, err := newCompiler(spec, patches)
+	if err != nil {
+		return nil, fmt.Errorf("compiling the %s grammar: %w", name, err)
+	}
+
+	return &Grammar{name: name, slots: c.slots, unreferenced: c.unreferenced()}, nil
+}
+
+// unreferenced finds the productions that appear in no other production's body.
+//
+// A name reaches a rule either as a bare string in matching position or as the
+// key of a call form, so both are collected. A rule referring only to itself is
+// still unreferenced: nothing outside it can start it.
+func (c *compiler) unreferenced() []string {
+	seen := make(map[string]bool, len(c.raw))
+
+	var walk func(from string, body any)
+
+	walk = func(from string, body any) {
+		switch form := body.(type) {
+		case string:
+			if form != from && c.slots[form] != nil {
+				seen[form] = true
+			}
+		case []any:
+			for _, item := range form {
+				walk(from, item)
+			}
+		case map[string]any:
+			for key, arg := range form {
+				if key != from && c.slots[key] != nil {
+					seen[key] = true
+				}
+
+				walk(from, arg)
+			}
+		}
+	}
+
+	for name, body := range c.raw {
+		walk(name, body)
+	}
+
+	out := make([]string, 0, len(c.raw)-len(seen))
+
+	for name := range c.raw {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+// MustCompile is Compile for a grammar that is embedded rather than supplied,
+// where a failure is a defect in this package rather than bad input.
+func MustCompile(name string, spec []byte, patches ...Patch) *Grammar {
+	g, err := Compile(name, spec, patches...)
+	if err != nil {
+		panic("grammar: " + err.Error())
+	}
+
+	return g
+}
+
+func newCompiler(spec []byte, patches []Patch) (*compiler, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(spec, &raw); err != nil {
 		return nil, fmt.Errorf("decoding the grammar: %w", err)
@@ -65,29 +170,36 @@ func newCompiler(spec []byte) (*compiler, error) {
 
 	// The ":007"-style keys index rule numbers back to the spec. They are not
 	// productions.
-	var id int32
+	names := make([]string, 0, len(raw))
+
 	for name, body := range raw {
 		if strings.HasPrefix(name, ":") {
 			continue
 		}
 		c.raw[name] = body
-		c.slots[name] = &slot{name: name, id: id, params: declaredParams(body)}
-		id++
+		names = append(names, name)
 	}
 
-	// Asserted rather than attempted, so that a newer grammar file which either
-	// fixes the omission or moves it says so here instead of quietly dropping
-	// the patch and taking a class of valid document with it.
-	if !patchBlockIndented(c.raw["s-l+block-indented"]) {
-		return nil, errors.New("s-l+block-indented is not the shape the auto-detected m is patched into")
+	// Numbered in name order rather than in map order, so that a production's
+	// id is the same in every process. Coverage vectors are indexed by it, and
+	// a greedy selection over an unstably-indexed vector would choose a
+	// different corpus on every run -- which is not something a checked-in
+	// corpus can afford.
+	slices.Sort(names)
+
+	for id, name := range names {
+		c.slots[name] = &slot{name: name, id: int32(id), params: declaredParams(c.raw[name])}
 	}
 
-	if !patchBlockHeader(c.raw["c-b-block-header"]) {
-		return nil, errors.New("c-b-block-header is not the shape the two indicator orders are distributed over")
-	}
+	for _, p := range patches {
+		body, ok := c.raw[p.Rule]
+		if !ok {
+			return nil, fmt.Errorf("no production named %q to patch, though %s", p.Rule, p.Because)
+		}
 
-	if !patchIndentationIndicator(c.raw["c-indentation-indicator"]) {
-		return nil, errors.New("c-indentation-indicator is not the shape the zero digit is excluded from")
+		if !p.Apply(body) {
+			return nil, fmt.Errorf("%s is not the shape it is patched into, where %s", p.Rule, p.Because)
+		}
 	}
 
 	for name := range c.raw {
@@ -520,6 +632,11 @@ func (c *compiler) arithmetic(arg any, sign int) value {
 
 // callValue invokes a (flip) rule, which matches nothing and returns a value
 // derived from the variables it is passed.
+//
+// This is the one production entry that does not go through [invoke], because a
+// (flip) rule has no matching form to run. So it records coverage itself:
+// leaving it out made in-flow and seq-spaces look unreachable when both are
+// used on every flow collection in the grammar.
 func (c *compiler) callValue(s *slot, arg any) value {
 	args := c.arguments(s, arg)
 
@@ -527,6 +644,14 @@ func (c *compiler) callValue(s *slot, arg any) value {
 		callee := e
 		for i, a := range args {
 			assign(&callee, s.params[i], a.of(st, e))
+		}
+
+		if st.cover != nil {
+			// A (flip) rule cannot fail: it maps its arguments to a value and
+			// returns it, so being entered and being satisfied are the same
+			// event here.
+			st.cover.attempt(s.id, callee.c)
+			st.cover.succeed(s.id, callee.c)
 		}
 
 		return s.val(st, callee)

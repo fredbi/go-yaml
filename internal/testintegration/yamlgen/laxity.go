@@ -126,18 +126,21 @@ var Lax = []Laxity{
 
 // byteOrderMarkAsContent reports whether src holds a byte order mark past the
 // prefix the stream may open with, outside a double-quoted scalar.
+//
+// The quotes are tracked rather than the lines carrying them: "\"\": \ufeff" is
+// a mark standing where a value goes and belongs here, where the same mark
+// written between the quotes does not.
 func byteOrderMarkAsContent(src string) bool {
-	const mark = "\ufeff"
+	const mark = '\ufeff'
 
-	rest := strings.TrimLeft(src, mark)
-	if !strings.Contains(rest, mark) {
-		return false
-	}
-
-	// A line carrying a double quote is left to the entry that owns that
-	// question rather than absorbed silently here.
-	for line := range strings.SplitSeq(rest, "\n") {
-		if strings.Contains(line, mark) && !strings.Contains(line, `"`) {
+	var quoted bool
+	for _, r := range strings.TrimLeft(src, string(mark)) {
+		switch {
+		case r == '\n':
+			quoted = false
+		case r == '"':
+			quoted = !quoted
+		case r == mark && !quoted:
 			return true
 		}
 	}
