@@ -53,9 +53,9 @@ func TestTheGrammarCannotSeeAnyOfThis(t *testing.T) {
 // TestThePatternsDisagreeWithTheGrammarExactlyWhereTheyShould pins which of
 // them are violations.
 //
-// The count matters as much as the membership. Three of nine patterns are
-// documents a conforming parser must refuse and the grammar accepts, and six
-// are documents both accept -- and the six are not filler. A parser is at least
+// The count matters as much as the membership. Three of the twelve are
+// documents a conforming parser must refuse and the grammar accepts; the other
+// nine are documents both accept, and they are not filler. A parser is at least
 // as likely to wrongly refuse a legal anchor as to wrongly accept an illegal
 // alias, and only one of those two mistakes is the one everybody thinks to test
 // for.
@@ -76,8 +76,8 @@ func TestThePatternsDisagreeWithTheGrammarExactlyWhereTheyShould(t *testing.T) {
 		t.Errorf("%d patterns are violations, expected 3: %v", len(violations), violations)
 	}
 
-	if len(legal) != 6 {
-		t.Errorf("%d patterns are legal, expected 6: %v", len(legal), legal)
+	if len(legal) != 9 {
+		t.Errorf("%d patterns are legal, expected 9: %v", len(legal), legal)
 	}
 }
 
@@ -85,12 +85,13 @@ func TestThePatternsDisagreeWithTheGrammarExactlyWhereTheyShould(t *testing.T) {
 //
 // A tag a pattern puts on a document and no rule settles is a document nobody
 // can score, which is the failure mode this whole layer was built to avoid. The
-// one exception is stated rather than tolerated: whether a parser can represent
-// a cycle is a property of its data model, not of YAML.
+// one exception is stated rather than tolerated, and it is deliberately not the
+// obvious one: that a recursive alias *resolves* is settled, and whether the
+// cycle it produces can be *held* is the consumer's to decide.
 func TestEveryRuleIsSettledOrDeliberatelyNot(t *testing.T) {
 	rules := yamlcorpus.AnchorRules()
 
-	open := map[stance.Tag]bool{yamlcorpus.TagAliasRecursive: true}
+	open := map[stance.Tag]bool{yamlcorpus.TagCyclicMeaning: true}
 
 	for _, p := range yamlcorpus.Patterns() {
 		for _, tag := range p.Exhibits {
@@ -193,4 +194,75 @@ func TestAPatternKeepsTheDocumentItWasBuiltAround(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestACycleParsesAndMayStillBeRefused is the split the recursive patterns
+// exist to make.
+//
+// Two consumers disagree about the same document and both are right. A loader
+// into a Go value holding pointers reads it; anything that has to reach JSON
+// cannot, because JSON has no cycles. Neither is a defect, so neither may be
+// scored as one -- and a parser that refused it as *malformed* would be, which
+// is why the parse half is a rule and the meaning half is not.
+func TestACycleParsesAndMayStillBeRefused(t *testing.T) {
+	rules := yamlcorpus.AnchorRules()
+
+	doc := stance.Doc{
+		Name:       "a sequence holding an alias to itself",
+		WellFormed: true,
+		Tags:       []stance.Tag{yamlcorpus.TagAliasRecursive, yamlcorpus.TagCyclicMeaning},
+	}
+
+	graph := stance.Table{
+		Name:     "a loader into a model that can hold a cycle",
+		Requires: rules,
+		Stands:   map[stance.Tag]stance.Stand{yamlcorpus.TagCyclicMeaning: stance.Accepts},
+	}
+
+	tree := stance.Table{
+		Name:     "a loader that has to reach JSON",
+		Requires: rules,
+		Stands:   map[stance.Tag]stance.Stand{yamlcorpus.TagCyclicMeaning: stance.Refuses},
+	}
+
+	if out, why := graph.Expect(doc); out != stance.Accept {
+		t.Errorf("a graph-shaped model should read a cycle, got %s (%s)", out, why)
+	}
+
+	if out, why := tree.Expect(doc); out != stance.Reject {
+		t.Errorf("a tree-shaped model cannot hold a cycle, got %s (%s)", out, why)
+	}
+
+	// And neither may decline the parse: refusing "&x [ *x ]" as malformed is
+	// a defect whichever model is underneath.
+	if _, settled := rules.Of(yamlcorpus.TagAliasRecursive); !settled {
+		t.Error("that a recursive alias resolves is not settled, so a parser could refuse it and be scored right")
+	}
+}
+
+// TestTheTestSuiteHasNoCycleAtAll is why these are generated rather than
+// borrowed.
+//
+// Four hundred hand-written documents, chosen over years to be unlike each
+// other, and not one of them closes a reference into a cycle. It is the same
+// finding as the escapes the suite never writes in flow context: the shapes a
+// hand-written corpus misses are not random, they are the ones nobody thinks of.
+func TestTheTestSuiteHasNoCycleAtAll(t *testing.T) {
+	var cyclic int
+
+	for _, p := range yamlcorpus.Patterns() {
+		for _, tag := range p.Exhibits {
+			if tag == yamlcorpus.TagCyclicMeaning {
+				cyclic++
+
+				break
+			}
+		}
+	}
+
+	if cyclic == 0 {
+		t.Error("no pattern produces a cycle, so nothing here covers the case the suite misses")
+	}
+
+	t.Logf("%d of the patterns produce a cycle; the YAML Test Suite produces none", cyclic)
 }

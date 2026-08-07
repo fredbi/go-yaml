@@ -204,6 +204,15 @@ func (t Table) Expect(d Doc) (Outcome, string) {
 	}
 
 	for _, tag := range d.Tags {
+		// A settled rule has already had its say. An Accept one fell through
+		// the loop above deliberately, so that the grammar still decides
+		// whether the document is well formed -- but the stance gets no vote on
+		// a construct the language declared legal, and demanding a declaration
+		// for one would make every such document unscored.
+		if _, settled := t.Requires.Of(tag); settled {
+			continue
+		}
+
 		switch t.Stand(tag) {
 		case Refuses:
 			return Reject, string(tag) + ": " + t.Name + " refuses this on purpose"

@@ -93,7 +93,21 @@ const (
 	// because it is the shape a parser is most likely to have simply dropped.
 	TagAnchorUnused stance.Tag = "anchor/unused"
 	// TagAliasRecursive is an alias inside the node its own anchor names.
+	//
+	// This is about the parse and it is settled: an anchor identifies its node
+	// when the node starts, so "&a [" has established a before "*a" is read,
+	// and the alias resolves. A parser refusing it as malformed is wrong.
 	TagAliasRecursive stance.Tag = "anchor/alias-recursive"
+	// TagCyclicMeaning is a document whose representation graph contains a
+	// cycle, which is a different question from whether it parses.
+	//
+	// YAML's representation is a graph and admits cycles; a tree does not. So
+	// what a consumer can do with one depends entirely on the model it loads
+	// into -- a Go value holding pointers can carry a cycle, and anything that
+	// has to reach JSON cannot carry one at all. That is a real position rather
+	// than an implementation whim, and it is the consumer's to take, so it is a
+	// stance and not a rule.
+	TagCyclicMeaning stance.Tag = "anchor/cyclic-meaning"
 	// TagAliasAsKey is an alias used as a mapping key.
 	TagAliasAsKey stance.Tag = "anchor/alias-as-key"
 	// TagAnchorOnEmptyNode is an anchor on a node with no content.
@@ -106,10 +120,16 @@ const (
 // parser accepting an undefined alias is wrong, not differently opinionated, so
 // a stance must not be able to vote it into conformance -- see [stance.Rule].
 //
-// The recursive alias is deliberately not here. Whether a parser can represent
-// a cycle is a property of its data model rather than of YAML, and the spec's
-// representation is a graph, so that one is a genuine stance and belongs in a
-// table.
+// The recursive alias is here, and only half of it is. That a recursive alias
+// *resolves* is settled -- see TagAliasRecursive -- and that the resulting
+// graph can be *held* is not, so the two are separate tags and only the first
+// is a rule. Splitting them is what keeps a corpus from telling a correct
+// parser it is broken for reading a document it read correctly, while still
+// holding a JSON-bound consumer to refusing a cycle it cannot represent.
+//
+// Schema resolution will be the second instance of this same split, and if a
+// third appears the parse-versus-load axis is probably worth making explicit
+// rather than spelling it out one tag at a time.
 func AnchorRules() stance.Rules {
 	return stance.Rules{
 		{
@@ -145,6 +165,11 @@ func AnchorRules() stance.Rules {
 		{
 			Tag:     TagAnchorOnEmptyNode,
 			Because: "7.1: the empty node is a node, and may be anchored",
+			Then:    stance.Accept,
+		},
+		{
+			Tag:     TagAliasRecursive,
+			Because: "3.2.1: an anchor identifies its node from where the node begins, so an alias within it resolves",
 			Then:    stance.Accept,
 		},
 	}
@@ -220,12 +245,39 @@ func Patterns() []Pattern {
 			},
 		},
 		{
-			Name:     "an alias inside the collection its own anchor names",
+			Name:     "a sequence holding an alias to itself",
 			Because:  "the representation is a graph, so a cycle is a node and not an error",
-			Exhibits: []stance.Tag{TagAliasRecursive},
+			Exhibits: []stance.Tag{TagAliasRecursive, TagCyclicMeaning},
 			Valid:    true,
 			build: func(a Around) []byte {
 				return join(a.Document, entry("recursive", []byte("&x [ *x ]")))
+			},
+		},
+		{
+			Name:     "a mapping whose value is an alias to itself",
+			Because:  "the same cycle through a mapping, which is the shape a loader is likelier to meet",
+			Exhibits: []stance.Tag{TagAliasRecursive, TagCyclicMeaning},
+			Valid:    true,
+			build: func(a Around) []byte {
+				return join(a.Document, entry("recursive", []byte("&x { self: *x }")))
+			},
+		},
+		{
+			Name:     "two collections holding aliases to each other",
+			Because:  "a cycle of length two, which a guard written for self-reference alone will miss",
+			Exhibits: []stance.Tag{TagAliasRecursive, TagCyclicMeaning},
+			Valid:    true,
+			build: func(a Around) []byte {
+				return join(a.Document, entry("mutual", []byte("&x [ &y [ *x ], *y ]")))
+			},
+		},
+		{
+			Name:     "a cycle reached through a block sequence entry",
+			Because:  "block style takes a different route through the grammar, and arrives at the same cycle",
+			Exhibits: []stance.Tag{TagAliasRecursive, TagCyclicMeaning},
+			Valid:    true,
+			build: func(a Around) []byte {
+				return join(a.Document, []byte("recursive: &x\n  - *x\n"))
 			},
 		},
 		{
