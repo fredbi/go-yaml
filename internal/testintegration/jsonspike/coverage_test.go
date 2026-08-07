@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package jsonspike_test
+
+import (
+	"testing"
+
+	"github.com/go-openapi/go-yaml/internal/testintegration/jsonspike"
+)
+
+// TestWhatTheOfficialSuiteReaches measures how much of RFC 8259 the 318
+// hand-written documents of JSONTestSuite actually exercise.
+//
+// This is the number the whole corpus argument turns on. If a suite built over
+// years by deliberately hunting parser disagreements still leaves productions
+// untouched, then "we wrote down the cases we thought of" has a measurable
+// ceiling, and generating against the grammar has somewhere to go.
+func TestWhatTheOfficialSuiteReaches(t *testing.T) {
+	cov := jsonspike.NewCoverage()
+	rec := jsonspike.NewRecognizer(1024)
+	rec.Cover(cov)
+
+	var n int
+
+	forEachFixture(t, func(_ *testing.T, _ string, src []byte) {
+		rec.Text(jsonspike.Normalize(src))
+		n++
+	})
+
+	t.Logf("%d documents of JSONTestSuite reach %s", n, cov)
+	t.Logf("%s", cov.Report())
+}
+
+// TestTheEncodingShapesAddNoGrammarCoverage is the demonstration that the
+// division of labor is real rather than tidy.
+//
+// A byte order mark appears in no grammar. So 55 documents built entirely to
+// exercise encoding must reach nothing the ordinary suite has not already
+// reached -- and that is exactly why no coverage-guided search would ever have
+// produced them, and why enumerating them by hand is not laziness but the only
+// thing that works.
+func TestTheEncodingShapesAddNoGrammarCoverage(t *testing.T) {
+	suite := jsonspike.NewCoverage()
+	rec := jsonspike.NewRecognizer(1024)
+	rec.Cover(suite)
+
+	forEachFixture(t, func(_ *testing.T, _ string, src []byte) {
+		rec.Text(jsonspike.Normalize(src))
+	})
+
+	shapes := jsonspike.NewCoverage()
+	rec.Cover(shapes)
+
+	for _, shape := range jsonspike.EncodingShapes() {
+		rec.Text(jsonspike.Normalize(shape.Src))
+	}
+
+	if shapes.AddsTo(suite) {
+		t.Log("the encoding shapes did reach somewhere the suite did not, which is worth understanding")
+	}
+
+	t.Logf("the suite reaches      %s", suite)
+	t.Logf("the encoding shapes    %s", shapes)
+}
