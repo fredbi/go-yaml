@@ -483,7 +483,18 @@ func (c *compiler) call(s *slot, arg any) expr {
 	return func(st *state, e env) (env, bool) {
 		callee := e
 		for i, a := range args {
-			assign(&callee, s.params[i], a.of(st, e))
+			v := a.of(st, e)
+
+			// An indentation auto-detection reports the spec's error cases as
+			// an impossible column, and this is where that has to bite: there
+			// is no node at a column no document can have, so the rule is not
+			// entered. Left to the rule, a body that is optional throughout
+			// would match nothing and report success.
+			if n, ok := v.(int); ok && impossible(n) {
+				return e, false
+			}
+
+			assign(&callee, s.params[i], v)
 		}
 
 		out, ok := invoke(s, st, callee)
@@ -815,6 +826,10 @@ func (c *compiler) compare(arg any, orEqual bool) expr {
 
 	return func(s *state, e env) (env, bool) {
 		l, r := toInt(left(s, e)), toInt(right(s, e))
+		if impossible(l) || impossible(r) {
+			return e, false
+		}
+
 		if orEqual {
 			return e, l <= r
 		}
