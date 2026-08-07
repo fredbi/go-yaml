@@ -59,7 +59,9 @@ func Describe(name string, src []byte) stance.Doc {
 //     grammar rather than more lenient.
 var DefaultLexer = stance.Table{
 	Name:    "go-openapi/core/json default lexer",
-	Because: "strict about what the bytes are, neutral about what the values mean",
+	Because: "strict about what the bytes are, and never gets as far as what the values mean",
+	At:      stance.Parse,
+	Speaks:  Vocabulary(),
 	Stands: map[stance.Tag]stance.Stand{
 		// Encoding: UTF-8 or nothing. The specification also blesses UTF-16 and
 		// UTF-32 for YAML and this library refuses both there too; a caller who
@@ -70,17 +72,51 @@ var DefaultLexer = stance.Table{
 		stance.TagUTF32:   stance.Refuses,
 		stance.TagBOM:     stance.Accepts,
 
-		// Values: the lexer hands back the text of a number and converts
-		// nothing, so it has no range to exceed. A parser that converts would
-		// declare Refuses or Either here and be scored fairly against the same
-		// corpus.
-		TagNumberOutOfRange: stance.Accepts,
-
-		// Strings: surrogate pairing is checked, so a lone surrogate escape is
-		// refused even though it is four grammatical hex digits.
+		// Strings: surrogate pairing is checked while lexing, so a lone
+		// surrogate escape is refused even though it is four grammatical hex
+		// digits.
 		TagLoneSurrogate: stance.Refuses,
 
 		// Structure: no configured depth limit.
 		TagDeepNesting: stance.Accepts,
+
+		// Numbers are not here, and their absence is the point. The lexer hands
+		// back a number's text and converts nothing, so it never reaches the
+		// stage where a range can be exceeded -- and it used to say Accepts,
+		// which read as a position on numbers and was really a statement about
+		// how far this consumer goes. That is what At records now.
 	},
+}
+
+// Vocabulary places every JSON tag at the stage its question arises.
+//
+// It belongs to the language, so the same map serves the lexer, a decoder, and
+// anybody else's parser. Only two of the six sit past parsing, which is why
+// JSON needed no stages until YAML made the cost visible: a language whose
+// composing stage is empty can pretend the axis is not there.
+func Vocabulary() stance.Vocabulary {
+	return stance.Vocabulary{
+		// Encoding is settled before parsing begins and is deliberately not a
+		// stage of its own -- see stance.Stage. Placing these at Parse keeps
+		// them in front of every consumer, which is where a question about the
+		// bytes belongs.
+		stance.TagNotUTF8: stance.Parse,
+		stance.TagUTF16:   stance.Parse,
+		stance.TagUTF32:   stance.Parse,
+		stance.TagBOM:     stance.Parse,
+
+		// A lone surrogate escape is four hex digits that pair with nothing,
+		// which is visible to a lexer. Placed at the earliest stage that *can*
+		// ask, not the latest that might: a parser deferring it to string
+		// construction is answering the same question later, and a table's
+		// stage being a floor is what makes that fair.
+		TagLoneSurrogate: stance.Parse,
+
+		// Depth is exceeded while parsing, by whatever is holding the stack.
+		TagDeepNesting: stance.Parse,
+
+		// A number's range is a property of the type it is read into, and
+		// nothing before construction has one.
+		TagNumberOutOfRange: stance.Construct,
+	}
 }
