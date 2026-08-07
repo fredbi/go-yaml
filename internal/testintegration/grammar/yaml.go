@@ -19,6 +19,22 @@ var YAML = MustCompile("YAML 1.2", yamlSpec, yamlPatches()...)
 //
 // Each one is a rule the spec states in prose and never puts in the grammar
 // file. They are asserted rather than attempted: see [Patch].
+//
+// They are applied in order, and one pair depends on it: patchBlockHeaderEnd
+// works on the shape patchBlockHeader leaves.
+//
+// The largest group is a single omission repeated. The spec writes each
+// indicator character into the grammar and then constrains what may follow it
+// in the surrounding prose, so five rules read an indicator that the language
+// does not let them read. That pattern is worth more than the list: it says
+// where to look next.
+//
+// Two of them are what the calibration measures and four are not. Every
+// indicator lookahead turns out to refuse only what the separation after it
+// already refused, so they change no verdict, only the route the recognizer
+// takes to reach one. See whitespaceAhead. Keeping the count straight matters:
+// a patch adopted on the strength of a score it did not move is a patch nobody
+// has actually checked.
 func yamlPatches() []Patch {
 	return []Patch{
 		{
@@ -32,12 +48,74 @@ func yamlPatches() []Patch {
 			Apply:   patchBlockHeader,
 		},
 		{
+			Rule:    "c-b-block-header",
+			Because: "a block scalar's header ends at the end of its line",
+			Apply:   patchBlockHeaderEnd,
+		},
+		{
 			Rule:    "c-indentation-indicator",
 			Because: "zero is not a legal indentation indicator",
 			Apply:   patchIndentationIndicator,
 		},
+		{
+			Rule:    "ns-flow-map-entry",
+			Because: "a \"?\" with no space after it opens a plain scalar, not an explicit key",
+			Apply:   patchFlowMapExplicitKey,
+		},
+		{
+			Rule:    "ns-flow-pair",
+			Because: "a \"?\" with no space after it opens a plain scalar, not an explicit key",
+			Apply:   patchFlowPairExplicitKey,
+		},
+		{
+			Rule:    "c-l-block-map-explicit-key",
+			Because: "a \"?\" with no space after it opens a plain scalar, not an explicit key",
+			Apply:   patchBlockMapExplicitKey,
+		},
+		{
+			Rule:    "c-directives-end",
+			Because: "a directives-end marker is a line holding only the three dashes",
+			Apply:   patchDirectivesEnd,
+		},
+		{
+			Rule:    "ns-flow-yaml-node",
+			Because: "a flow collection carrying properties is still a flow node",
+			Apply:   patchFlowYAMLNode,
+		},
+		{
+			Rule:    "s-l+block-collection",
+			Because: "properties belong to the collection only if the line ends after them",
+			Apply:   patchBlockCollectionProperties,
+		},
 	}
 }
+
+// Rules yaml-reference-parser patches and this does not, with why.
+//
+// Their patch file is the closest thing to a second opinion on this material,
+// so a place we do not follow it is worth writing down rather than leaving as
+// an absence. All of them are mechanism: things their combinators need and ours
+// do not, which would cost documents if adopted as though they were rules.
+//
+//   - c-b-block-header(n), c-indentation-indicator(n), c-chomping-indicator
+//     with no t: they thread the block header's results downward as arguments
+//     where we hand them back through the env. Two spellings of one mechanism.
+//
+//   - (m>0) and (->m) forms on the block collection rules, in place of the
+//     (set) the grammar file writes. The same detection, declared differently.
+//
+//   - s-l+block-collection's second and third alternatives are adopted, but
+//     their reason is not ours: theirs compensates for an optional a PEG cannot
+//     reconsider. Ours needs them because c-ns-properties is a rule and a rule
+//     commits to its first success. Same shape, and worth knowing why.
+//
+//   - l-yaml-stream taking l-document-prefix once rather than repeatedly. The
+//     problem it solves is that l-document-prefix matches the empty string, so
+//     repeating it is an unbounded loop over nothing -- which our repeat
+//     combinator already stops, on the first step that consumed no input.
+//     Adopting it anyway would refuse two consecutive byte order marks, which
+//     the published grammar admits and no prose in the spec forbids. Left for
+//     libfyaml to settle.
 
 // FlowNode reports whether src is exactly one YAML 1.2 flow node.
 //

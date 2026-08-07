@@ -187,6 +187,46 @@ var streamCases = []struct {
 	// Inside a document it is not a prefix, and nb-char excludes it from
 	// content, so there is nowhere for it to be.
 	{"mark inside a document", "---\n" + bom + "a: 1\n", false},
+
+	// An indicator with the constraint on it left in the prose. Each pair is
+	// the same bytes with and without the space the indicator needs, and both
+	// are valid: "?a" is a plain scalar and "? a" is an explicit key, so the
+	// lookahead decides which document this is rather than whether it is one.
+	//
+	// Nothing here would fail without the patches, and that is the measurement
+	// rather than an oversight -- every one of these indicators is followed by
+	// a rule wanting a separation, which refuses the same documents one step
+	// later. They are asserted so that the pairs stay distinguishable.
+	{"a question mark opens a plain scalar", "?a: b\n", true},
+	{"a question mark alone is an explicit key", "? a: b\n", true},
+	{"a question mark opens a flow scalar", "{?a: b}\n", true},
+	{"a question mark alone in flow", "{? a: b}\n", true},
+	{"three dashes with content behind them", "---foo\n", true},
+	{"three dashes on their own line", "---\nfoo\n", true},
+	{"a block header ends its line", "a: |2x\n  x\n", false},
+	{"a block header with a comment", "a: |2 # c\n   x\n", true},
+
+	// A flow collection carrying properties is still a flow node, which
+	// ns-flow-yaml-node did not say: it offered only the plain and quoted
+	// kinds after properties, so an anchored sequence had no reading at all.
+	{"an anchored flow sequence as a key", "{&a [a]: b}\n", true},
+	{"an anchored flow mapping", "&a {a: b}\n", true},
+
+	// Properties are the collection's only if the line ends after them, and
+	// the alternatives matter: c-ns-properties reads a tag and an anchor
+	// together, so where only the tag belongs to the collection something has
+	// to offer the shorter reading.
+	{"a tag on its own line before a mapping", "!!map\n&a !!str k: v\n", true},
+	{"an anchor on its own line before a mapping", "&a\n!!str k: v\n", true},
+	{"properties on their own line before a mapping", "&a !!map\n&b !!str k: v\n", true},
+
+	// An auto-detected indentation the spec calls an error, rather than a
+	// width. The reading to refuse is not the obvious one: taking the first
+	// non-empty line's width accepts the document, and so does giving up and
+	// letting the scalar match empty -- which quietly hands its lines to
+	// whatever encloses it.
+	{"a leading empty line wider than a comment", "a: >\n \n  \n   \n # c\n", false},
+	{"a leading empty line wider than the content", "a: >\n   \n \nb: 1\n", false},
 }
 
 // bom is written as a code point because a byte order mark in Go source is a

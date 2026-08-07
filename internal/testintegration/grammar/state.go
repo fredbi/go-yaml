@@ -26,7 +26,22 @@ const mAuto = math.MinInt32 + 1
 // line. Returning a width there would pick some reading of a document that has
 // none, and the readings differ -- taking the first non-empty line's width
 // accepts it, which is exactly wrong.
+//
+// Being a large number is not enough on its own, and both of the ways it is not
+// have the same shape: something reads it as a bound rather than as a refusal,
+// and then matches nothing rather than failing. s-indent-le(n) compares the
+// other way round, so it reads as "any indentation will do". l-folded-content
+// is entirely optional, so it reads as "the content is empty" -- and a block
+// scalar then shrinks to its own header and lets the lines it could not explain
+// be taken as comments by whatever encloses it.
+//
+// So a rule is not entered at an impossible indentation and a comparison
+// against one does not hold, which between them leave nowhere for the reading
+// to survive.
 const indentImpossible = math.MaxInt32 / 2
+
+// impossible reports whether an indentation is one no document can satisfy.
+func impossible(n int) bool { return n == indentImpossible }
 
 // env holds the four variables the grammar's rules are parameterized by.
 //
