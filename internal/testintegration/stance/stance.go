@@ -102,6 +102,10 @@ type Table struct {
 	// Stands is the position taken on each tag. A tag absent from the map is
 	// Undeclared.
 	Stands map[Tag]Stand
+	// Requires are the language's settled rules, which are not this parser's to
+	// choose and are consulted before Stands. Empty means the language states
+	// nothing outside its grammar, which is true of very few languages.
+	Requires Rules
 }
 
 // Stand returns the position taken on a tag.
@@ -168,6 +172,11 @@ type Doc struct {
 //
 // The reasoning, in the order it is applied:
 //
+//   - A rule the language settled outright decides first, and the stance does
+//     not get a vote. Declining it -- declaring Either -- leaves the document
+//     unscored, which is the honest answer for a parser that does not
+//     implement the check; claiming Accepts is reported by
+//     [Rules.Contradicted] and ignored here.
 //   - A property the parser refuses forces a rejection, whatever else is true.
 //     Refusing on purpose is conformant.
 //   - A property the parser has not ruled on, or declines to guarantee, makes
@@ -179,6 +188,21 @@ type Doc struct {
 //     input decoded before a grammar can say anything about it.
 //   - Otherwise the grammar decides, on the normalized document.
 func (t Table) Expect(d Doc) (Outcome, string) {
+	for _, tag := range d.Tags {
+		rule, settled := t.Requires.Of(tag)
+		if !settled || rule.Then != Reject {
+			// An Accept rule says the construct is legal, not that this
+			// document is. The grammar still has to agree, so it falls through.
+			continue
+		}
+
+		if t.Stand(tag) == Either {
+			return Undecided, string(tag) + ": " + t.Name + " does not implement this check"
+		}
+
+		return Reject, string(tag) + ": " + rule.Because
+	}
+
 	for _, tag := range d.Tags {
 		switch t.Stand(tag) {
 		case Refuses:
@@ -210,6 +234,11 @@ func (t Table) Undeclared(docs []Doc) []Tag {
 
 	for _, d := range docs {
 		for _, tag := range d.Tags {
+			// A settled rule needs no declaring: the language declared it.
+			if _, settled := t.Requires.Of(tag); settled {
+				continue
+			}
+
 			if t.Stand(tag) == Undeclared && !slices.Contains(missing, tag) {
 				missing = append(missing, tag)
 			}
