@@ -40,9 +40,13 @@ type compiler struct {
 // Compiling is a few milliseconds of walking a decoded structure, and the
 // result is immutable, so one Grammar is shared by every caller.
 type Grammar struct {
-	name         string
-	digest       string
-	slots        map[string]*slot
+	name   string
+	digest string
+	slots  map[string]*slot
+	// raw is the patched rule bodies the slots were compiled from, kept because
+	// a compiled rule is a closure and closures cannot be walked. Static
+	// reachability needs to read the grammar's shape, not run it -- see Reach.
+	raw          map[string]any
 	unreferenced []string
 }
 
@@ -108,6 +112,7 @@ func Compile(name string, spec []byte, patches ...Patch) (*Grammar, error) {
 		name:         name,
 		digest:       fmt.Sprintf("sha256:%x", sha256.Sum256(spec)),
 		slots:        c.slots,
+		raw:          c.raw,
 		unreferenced: c.unreferenced(),
 	}, nil
 }
@@ -675,8 +680,8 @@ func (c *compiler) callValue(s *slot, arg any) value {
 			// A (flip) rule cannot fail: it maps its arguments to a value and
 			// returns it, so being entered and being satisfied are the same
 			// event here.
-			st.cover.attempt(s.id, callee.c)
-			st.cover.succeed(s.id, callee.c)
+			st.cover.attempt(s.id, callee)
+			st.cover.succeed(s.id, callee)
 		}
 
 		return s.val(st, callee)
