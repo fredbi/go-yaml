@@ -148,3 +148,84 @@ func realBehaviour(short string) (stance.Outcome, bool) {
 		return got, ok
 	}
 }
+
+// TestOneCorpusScoresTwoStages is the demonstration that the axis pays for
+// itself, on the artifact that is actually checked in.
+//
+// The lexer stops at parsing and never converts a number, so the corpus's
+// out-of-range cases are not its question and it is scored on the rest. A
+// consumer that does convert reaches them, and the same bytes become evidence
+// about it. Before the stages this needed the lexer to declare Accepts on a
+// property it has no way to have an opinion about.
+//
+// The converting table below is illustrative and says so: unlike DefaultLexer
+// it is not measured against anything, because there is nothing here to measure
+// it against. What is being demonstrated is the mechanism, not a parser.
+func TestOneCorpusScoresTwoStages(t *testing.T) {
+	_, cases, err := jsonspike.SmokeSuite()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	converting := stance.Table{
+		Name:    "an illustrative consumer that reads numbers into float64",
+		Because: "demonstrates a construct-stage position; not measured against any parser",
+		At:      stance.Construct,
+		Speaks:  jsonspike.Vocabulary(),
+		Stands: map[stance.Tag]stance.Stand{
+			stance.TagNotUTF8:             stance.Refuses,
+			stance.TagUTF16:               stance.Refuses,
+			stance.TagUTF32:               stance.Refuses,
+			stance.TagBOM:                 stance.Accepts,
+			jsonspike.TagLoneSurrogate:    stance.Refuses,
+			jsonspike.TagDeepNesting:      stance.Accepts,
+			jsonspike.TagNumberOutOfRange: stance.Refuses,
+		},
+	}
+
+	var reachesLexer, reachesConverter int
+
+	for _, c := range cases {
+		doc := stance.Doc{
+			Name:       c.Name,
+			Src:        c.Src,
+			WellFormed: c.WellFormed,
+			Opaque:     c.Opaque,
+			Tags:       tagsOf(c),
+		}
+
+		if !hasTag(doc.Tags, jsonspike.TagNumberOutOfRange) {
+			continue
+		}
+
+		if out, _ := jsonspike.DefaultLexer.Expect(doc); out == stance.Accept {
+			reachesLexer++
+		}
+
+		if out, _ := converting.Expect(doc); out == stance.Reject {
+			reachesConverter++
+		}
+	}
+
+	if reachesLexer == 0 {
+		t.Fatal("no out-of-range case in the corpus, so this proves nothing")
+	}
+
+	if reachesConverter != reachesLexer {
+		t.Errorf("%d cases the lexer reads, %d the converter refuses; the same cases should be both",
+			reachesLexer, reachesConverter)
+	}
+
+	t.Logf("%d cases are accepted by a lexer and refused by a converter, from one corpus and one set of bytes",
+		reachesLexer)
+}
+
+func hasTag(tags []stance.Tag, want stance.Tag) bool {
+	for _, tag := range tags {
+		if tag == want {
+			return true
+		}
+	}
+
+	return false
+}

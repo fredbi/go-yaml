@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/jsonspike"
@@ -196,14 +195,10 @@ func tagsOf(c suite.Case) []stance.Tag {
 	return out
 }
 
-// known is the tag vocabulary this stance has ruled on.
-func known() []string {
-	out := make([]string, 0, len(jsonspike.DefaultLexer.Stands))
-	for tag := range jsonspike.DefaultLexer.Stands {
-		out = append(out, string(tag))
-	}
-
-	slices.Sort(out)
-
-	return out
-}
+// known is the language's tag vocabulary.
+//
+// Not the table's declarations: a consumer legitimately declares nothing about
+// a tag belonging to a stage it never reaches, and reading that silence as
+// ignorance would report the lexer as incomplete for not having an opinion
+// about numbers it never converts.
+func known() []string { return jsonspike.Vocabulary().Tags() }

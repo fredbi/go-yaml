@@ -85,13 +85,17 @@ func TestThePatternsDisagreeWithTheGrammarExactlyWhereTheyShould(t *testing.T) {
 //
 // A tag a pattern puts on a document and no rule settles is a document nobody
 // can score, which is the failure mode this whole layer was built to avoid. The
-// one exception is stated rather than tolerated, and it is deliberately not the
-// obvious one: that a recursive alias *resolves* is settled, and whether the
-// cycle it produces can be *held* is the consumer's to decide.
+// The exceptions are stated rather than tolerated, and both are construct-stage
+// questions: that a recursive alias *resolves* is settled, and whether the
+// cycle it produces can be *held* is the consumer's to decide -- as is whether
+// a key that is not a scalar fits the model underneath.
 func TestEveryRuleIsSettledOrDeliberatelyNot(t *testing.T) {
 	rules := yamlcorpus.AnchorRules()
 
-	open := map[stance.Tag]bool{yamlcorpus.TagCyclicMeaning: true}
+	open := map[stance.Tag]bool{
+		yamlcorpus.TagCyclicMeaning: true,
+		yamlcorpus.TagKeyNotAScalar: true,
+	}
 
 	for _, p := range yamlcorpus.Patterns() {
 		for _, tag := range p.Exhibits {

@@ -108,11 +108,50 @@ const (
 	// than an implementation whim, and it is the consumer's to take, so it is a
 	// stance and not a rule.
 	TagCyclicMeaning stance.Tag = "anchor/cyclic-meaning"
-	// TagAliasAsKey is an alias used as a mapping key.
+	// TagAliasAsKey is an alias used as a mapping key. Legal wherever a node is
+	// legal, which is a question about composing and not about the model
+	// underneath.
 	TagAliasAsKey stance.Tag = "anchor/alias-as-key"
+	// TagKeyNotAScalar is a mapping key that resolves to a collection.
+	//
+	// A different question from TagAliasAsKey and one stage later: aliasing a
+	// collection into key position composes perfectly well, and then has to be
+	// held by something. A string-keyed map cannot, and neither can JSON. This
+	// is the first member of the non-string-key family rather than a fact about
+	// aliases, and an ordinary flow collection written as a key carries it too.
+	TagKeyNotAScalar stance.Tag = "key/not-a-scalar"
 	// TagAnchorOnEmptyNode is an anchor on a node with no content.
 	TagAnchorOnEmptyNode stance.Tag = "anchor/on-empty-node"
 )
+
+// Vocabulary places every tag this package puts on a document at the stage its
+// question arises.
+//
+// It is the language's view and not any parser's. A tag sits at the earliest
+// stage where the question can be asked; a consumer that notices it later is
+// still answering the same question, which is why a table's stage is a floor.
+func Vocabulary() stance.Vocabulary {
+	return stance.Vocabulary{
+		// Whether "*x" resolves at all is settled while composing, and the
+		// three failures are the three ways it does not.
+		TagAliasUndefined:       stance.Compose,
+		TagAliasForward:         stance.Compose,
+		TagAliasAcrossDocuments: stance.Compose,
+		TagAnchorRedefined:      stance.Compose,
+		TagAnchorUnused:         stance.Compose,
+		TagAnchorOnEmptyNode:    stance.Compose,
+		TagAliasAsKey:           stance.Compose,
+
+		// That an anchor is in scope inside its own node is decided by where
+		// the anchor attaches, which is a parsing question.
+		TagAliasRecursive: stance.Parse,
+
+		// What the resulting graph can be held in is the model's business, and
+		// nothing before construction has an opinion.
+		TagCyclicMeaning: stance.Construct,
+		TagKeyNotAScalar: stance.Construct,
+	}
+}
 
 // AnchorRules is what the specification settles about the above.
 //
@@ -127,9 +166,11 @@ const (
 // parser it is broken for reading a document it read correctly, while still
 // holding a JSON-bound consumer to refusing a cycle it cannot represent.
 //
-// Schema resolution will be the second instance of this same split, and if a
-// third appears the parse-versus-load axis is probably worth making explicit
-// rather than spelling it out one tag at a time.
+// The axis those two tags were standing in for is now explicit -- see
+// [stance.Stage] -- so a third construct of the same shape needs a stage and
+// not a second tag. They stay two tags because they are two properties: one
+// document can resolve a recursive alias and another can be cyclic without
+// aliasing recursively, once merge keys arrive.
 func AnchorRules() stance.Rules {
 	return stance.Rules{
 		{
@@ -309,7 +350,7 @@ func Patterns() []Pattern {
 		{
 			Name:     "an unused anchor on a collection, aliased into a key",
 			Because:  "aliasing a collection shares it rather than copying it, which is where a key stops being a scalar",
-			Exhibits: []stance.Tag{TagAliasAsKey, TagAnchorRedefined},
+			Exhibits: []stance.Tag{TagAliasAsKey, TagAnchorRedefined, TagKeyNotAScalar},
 			Valid:    true,
 			build: func(a Around) []byte {
 				return join(

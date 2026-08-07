@@ -106,6 +106,23 @@ type Table struct {
 	// choose and are consulted before Stands. Empty means the language states
 	// nothing outside its grammar, which is true of very few languages.
 	Requires Rules
+	// Speaks places each tag at the stage it bites at, and belongs to the
+	// language rather than to this parser.
+	Speaks Vocabulary
+	// At is how far this consumer takes a document, and it is a floor rather
+	// than an exact level: "I go at least this far".
+	//
+	// A floor because a stage is not always a property of the tag alone. A lone
+	// surrogate escape is detectable while lexing and some parsers wait until
+	// they construct a string to care; both are conformant, and the one that
+	// notices earlier is not answering a different question. So the vocabulary
+	// records the earliest stage a question can arise and a consumer declares
+	// how far it goes, which makes every question at or below that line one it
+	// is answerable for.
+	//
+	// The zero value is Parse, which is the right default: a table that says
+	// nothing is a table about a grammar.
+	At Stage
 }
 
 // Stand returns the position taken on a tag.
@@ -149,6 +166,12 @@ type Doc struct {
 	// losslessly normalizable properties have been normalized away -- for JSON,
 	// after a leading byte order mark is removed.
 	//
+	// It is the answer at [Parse] and at no other stage. A document may be well
+	// formed and fail to compose, or compose and fail to construct, and neither
+	// is recorded here -- those are carried by [Doc.Tags] and resolved against
+	// a consumer's stage. The name predates the stages and is kept because it
+	// is a stored field in every published artifact.
+	//
 	// Normalizing first is what keeps a tolerated property from costing a
 	// scoreable case. A parser that skips a byte order mark is reading the
 	// bytes after it, so that is what the oracle should have judged; leaving
@@ -172,6 +195,9 @@ type Doc struct {
 //
 // The reasoning, in the order it is applied:
 //
+//   - A property belonging to a stage past where this consumer stops is not its
+//     question, and is skipped before anything else. A lexer is not wrong about
+//     numbers it never converts.
 //   - A rule the language settled outright decides first, and the stance does
 //     not get a vote. Declining it -- declaring Either -- leaves the document
 //     unscored, which is the honest answer for a parser that does not
@@ -189,6 +215,10 @@ type Doc struct {
 //   - Otherwise the grammar decides, on the normalized document.
 func (t Table) Expect(d Doc) (Outcome, string) {
 	for _, tag := range d.Tags {
+		if t.beyond(tag) {
+			continue
+		}
+
 		rule, settled := t.Requires.Of(tag)
 		if !settled || rule.Then != Reject {
 			// An Accept rule says the construct is legal, not that this
@@ -204,6 +234,10 @@ func (t Table) Expect(d Doc) (Outcome, string) {
 	}
 
 	for _, tag := range d.Tags {
+		if t.beyond(tag) {
+			continue
+		}
+
 		// A settled rule has already had its say. An Accept one fell through
 		// the loop above deliberately, so that the grammar still decides
 		// whether the document is well formed -- but the stance gets no vote on
@@ -243,8 +277,9 @@ func (t Table) Undeclared(docs []Doc) []Tag {
 
 	for _, d := range docs {
 		for _, tag := range d.Tags {
-			// A settled rule needs no declaring: the language declared it.
-			if _, settled := t.Requires.Of(tag); settled {
+			// A settled rule needs no declaring: the language declared it. Nor
+			// does a question this consumer never reaches.
+			if _, settled := t.Requires.Of(tag); settled || t.beyond(tag) {
 				continue
 			}
 
