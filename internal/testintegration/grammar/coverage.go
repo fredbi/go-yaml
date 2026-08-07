@@ -80,11 +80,12 @@ func (c *Coverage) Reset() {
 	clear(c.successes)
 }
 
-// Buckets is how many production-by-context pairs the vector holds.
+// Buckets is how many production-by-context pairs the vector has room for.
 //
-// Most of them are unreachable: the great majority of productions are only ever
-// entered in one or two contexts, so a full vector is not the target and a
-// percentage against this number means very little.
+// This is not a denominator. The vector is indexed rather than mapped because
+// indexing is cheap, so it holds a slot for every production in every context
+// and most of those combinations do not exist -- 605 of YAML's 1,477 can be
+// entered. Score against [Reach] instead; see [Coverage.Against].
 func (c *Coverage) Buckets() int { return len(c.attempts) }
 
 // Reached is how many buckets have been entered at least once.
@@ -181,11 +182,12 @@ func (c *Coverage) Unreached() []string {
 // decorative rule: both are unreferenced, since nothing in a grammar refers to
 // its root, and the difference is that a recognition begins at one of them.
 //
-// This is the denominator worth quoting. Against the full rule count a corpus
-// looks permanently short by however many named-but-unused productions the
-// grammar happens to define -- nineteen in YAML 1.2, every one of them an
-// indicator character the spec names for the prose and then writes literally
-// wherever it is actually used.
+// It is a production denominator, and it is measured rather than derived: a
+// production counts as live once something has entered it, so a rule nothing
+// has reached yet is indistinguishable from one nothing can. [Reach] answers
+// the same question statically, per context, and without needing a corpus to
+// have run first. Prefer it; this remains for the one-line summary, where a
+// production count is what is wanted and a start symbol is not to hand.
 func (c *Coverage) Reachable() int {
 	dead := 0
 

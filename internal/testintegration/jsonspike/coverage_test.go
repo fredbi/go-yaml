@@ -63,3 +63,25 @@ func TestTheEncodingShapesAddNoGrammarCoverage(t *testing.T) {
 	t.Logf("the suite reaches      %s", suite)
 	t.Logf("the encoding shapes    %s", shapes)
 }
+
+// TestTheDenominatorIsTheRuleCount checks the reachability analysis against the
+// case where the answer is obvious.
+//
+// RFC 8259 has no contexts, so every reachable bucket is a production entered in
+// the unset context and the bucket count must be the production count. YAML is
+// where the analysis earns its keep and JSON is where it can be checked by
+// inspection, which is the only reason this is worth asserting.
+func TestTheDenominatorIsTheRuleCount(t *testing.T) {
+	reach := jsonspike.JSON.Reach("JSON-text", "")
+
+	if reach.Buckets() != reach.Rules() {
+		t.Errorf("%d buckets over %d productions, in a grammar with one context",
+			reach.Buckets(), reach.Rules())
+	}
+
+	t.Logf("%s", reach)
+
+	if unreachable := reach.Unreachable(); len(unreachable) > 0 {
+		t.Logf("unreachable: %v", unreachable)
+	}
+}
