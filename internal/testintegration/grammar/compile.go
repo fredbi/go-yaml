@@ -680,8 +680,8 @@ func (c *compiler) callValue(s *slot, arg any) value {
 			// A (flip) rule cannot fail: it maps its arguments to a value and
 			// returns it, so being entered and being satisfied are the same
 			// event here.
-			st.cover.attempt(s.id, callee.c)
-			st.cover.succeed(s.id, callee.c)
+			st.cover.attempt(s.id, callee)
+			st.cover.succeed(s.id, callee)
 		}
 
 		return s.val(st, callee)

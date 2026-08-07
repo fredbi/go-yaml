@@ -22,7 +22,7 @@ func invoke(s *slot, st *state, e env) (env, bool) {
 	// coverage hook is here and nowhere else. A nil vector is how it is turned
 	// off, so the cost when nothing is measuring is one comparison.
 	if st.cover != nil {
-		st.cover.attempt(s.id, e.c)
+		st.cover.attempt(s.id, e)
 	}
 
 	// A nil table is how memoization is turned off, to measure what it is
@@ -43,7 +43,7 @@ func invoke(s *slot, st *state, e env) (env, bool) {
 			}
 
 			if st.cover != nil && got.ok {
-				st.cover.succeed(s.id, e.c)
+				st.cover.succeed(s.id, e)
 			}
 
 			return e, got.ok
@@ -57,7 +57,7 @@ func invoke(s *slot, st *state, e env) (env, bool) {
 	}
 
 	if st.cover != nil && ok {
-		st.cover.succeed(s.id, e.c)
+		st.cover.succeed(s.id, e)
 	}
 
 	if memoizing {

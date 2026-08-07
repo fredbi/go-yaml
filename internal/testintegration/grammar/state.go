@@ -169,6 +169,50 @@ const (
 	numArms     = max(numContexts, numChomps)
 )
 
+// numIndentBins is how many classes an indentation is reduced to, for coverage.
+const numIndentBins = 9
+
+// indentBin classifies an indentation, so that coverage can tell two
+// recognitions apart by where they were indented without needing a bucket per
+// column.
+//
+// n and m are unbounded, so they cannot go into a vector as themselves. Leaving
+// them out entirely is worse: two documents identical apart from their
+// indentation then produce the same coverage signature, the minimizer reads
+// them as one route and keeps one -- and indentation is the single largest
+// thing the grammar's verdict cannot see, as well as where this library and
+// this recognizer have both had their bugs. A corpus that discards it is
+// discarding the evidence.
+//
+// The three sentinels are separated because they are not indentations at all
+// but answers: no level, detect it later, and no document can satisfy this.
+// Below them the boundaries are where the language changes its mind -- the root
+// sits at -1, zero is the outermost column, one and two are where nesting
+// starts and where nearly every real document lives, and past eight the
+// distinctions stop being about the grammar.
+func indentBin(v int) int {
+	switch {
+	case v == nNull:
+		return 0
+	case v == mAuto:
+		return 1
+	case v == indentImpossible:
+		return 2
+	case v < 0:
+		return 3
+	case v == 0:
+		return 4
+	case v == 1:
+		return 5
+	case v <= 3:
+		return 6
+	case v <= 8:
+		return 7
+	default:
+		return 8
+	}
+}
+
 // reset prepares the state for another document, keeping the memo buckets'
 // capacity so that a reused recognizer stops allocating after the first few
 // documents.

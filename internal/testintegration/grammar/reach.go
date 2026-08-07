@@ -346,6 +346,12 @@ func quoteContext(c string) string {
 func (c *Coverage) Against(r *Reach) (reached, matched, total int) {
 	c.mustReach(r)
 
+	// r is indexed by production and context; the vector adds the two
+	// indentation classes underneath. So each live slot folds a square of the
+	// vector: the question here is whether a rule ran in a context, not how far
+	// in it was indented.
+	const fold = numIndentBins * numIndentBins
+
 	for i, live := range r.in {
 		if !live {
 			continue
@@ -353,17 +359,19 @@ func (c *Coverage) Against(r *Reach) (reached, matched, total int) {
 
 		total++
 
-		if c.attempts[i] > 0 {
+		if slices.ContainsFunc(c.attempts[i*fold:(i+1)*fold], positive) {
 			reached++
 		}
 
-		if c.successes[i] > 0 {
+		if slices.ContainsFunc(c.successes[i*fold:(i+1)*fold], positive) {
 			matched++
 		}
 	}
 
 	return reached, matched, total
 }
+
+func positive(n uint32) bool { return n > 0 }
 
 // Missing names the buckets a recognition could have entered and none did, in
 // name order.
@@ -372,7 +380,7 @@ func (c *Coverage) Against(r *Reach) (reached, matched, total int) {
 // as a production, so a rule reached everywhere but flow-key reports the one
 // hole rather than looking finished.
 func (c *Coverage) Missing(r *Reach) []string {
-	return c.buckets(r, func(live bool, at uint32) bool { return live && at == 0 })
+	return c.buckets(r, func(live, entered bool) bool { return live && !entered })
 }
 
 // Impossible names the buckets something entered that [Reach] says cannot be
@@ -383,18 +391,21 @@ func (c *Coverage) Missing(r *Reach) []string {
 // direction -- reporting a corpus as complete because the buckets it never
 // filled were quietly left out of the count.
 func (c *Coverage) Impossible(r *Reach) []string {
-	return c.buckets(r, func(live bool, at uint32) bool { return !live && at > 0 })
+	return c.buckets(r, func(live, entered bool) bool { return !live && entered })
 }
 
-func (c *Coverage) buckets(r *Reach, want func(live bool, attempts uint32) bool) []string {
+func (c *Coverage) buckets(r *Reach, want func(live, entered bool) bool) []string {
 	c.mustReach(r)
+
+	const fold = numIndentBins * numIndentBins
 
 	names := c.g.Names()
 
 	var out []string
 
 	for i, live := range r.in {
-		if !want(live, c.attempts[i]) {
+		entered := slices.ContainsFunc(c.attempts[i*fold:(i+1)*fold], positive)
+		if !want(live, entered) {
 			continue
 		}
 

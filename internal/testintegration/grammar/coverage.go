@@ -4,6 +4,8 @@
 package grammar
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"strings"
@@ -31,10 +33,17 @@ import (
 // in flow-key, and a vector that could not tell those apart would call a
 // grammar covered while a whole half of it had never run.
 //
-// The indentation parameters n and m are deliberately left out. They are
-// unbounded, so they need a binning nobody has designed, and the omission is a
-// known gap rather than a judgement that indentation does not matter -- it is
-// exactly where both this library and this recognizer have had their bugs.
+// The indentation parameters n and m are in it too, reduced to nine classes
+// each by [indentBin], because they are unbounded and cannot be in it as
+// themselves. That is what keeps two documents differing only in how far they
+// are indented from looking identical to the minimizer -- see [indentBin] for
+// why that mattered enough to pay four dimensions for.
+//
+// The two halves of the bucket are not used for the same thing, and the
+// difference is worth holding on to. Progress is measured over production by
+// context, because that is the part with a denominator [Reach] can compute; a
+// document's route is fingerprinted over all four, because that is the part
+// that decides whether two documents are the same test.
 //
 // # Attempts and successes are different questions
 //
@@ -52,11 +61,19 @@ type Coverage struct {
 	g         *Grammar
 	attempts  []uint32
 	successes []uint32
+	// touched is every index this vector has entered, in first-entry order.
+	//
+	// The vector has around 120,000 slots for YAML and a document enters a few
+	// hundred, so every operation that would otherwise walk it -- resetting,
+	// merging, comparing, fingerprinting -- walks this instead. Without it the
+	// binned vector would be about eighty times the work per document, which is
+	// the whole reason the parameters could not simply be added.
+	touched []int32
 }
 
 // NewCoverage returns a vector sized for this grammar, with every bucket empty.
 func (g *Grammar) NewCoverage() *Coverage {
-	n := len(g.slots) * numContexts
+	n := len(g.slots) * numContexts * numIndentBins * numIndentBins
 
 	return &Coverage{
 		g:         g,
@@ -65,19 +82,39 @@ func (g *Grammar) NewCoverage() *Coverage {
 	}
 }
 
-func (c *Coverage) attempt(id int32, ctx ctxCode) {
-	c.attempts[int(id)*numContexts+int(ctx)]++
+func (c *Coverage) attempt(id int32, e env) {
+	at := bucketOf(id, e)
+	if c.attempts[at] == 0 && c.successes[at] == 0 {
+		c.touched = append(c.touched, int32(at))
+	}
+
+	c.attempts[at]++
 }
 
-func (c *Coverage) succeed(id int32, ctx ctxCode) {
-	c.successes[int(id)*numContexts+int(ctx)]++
+// succeed never has to record a touch: a rule is attempted before it can
+// succeed, and both land on the same bucket.
+func (c *Coverage) succeed(id int32, e env) {
+	c.successes[bucketOf(id, e)]++
+}
+
+// bucketOf packs a production, the context it was entered in, and the classes
+// of its two indentation parameters into one index.
+func bucketOf(id int32, e env) int {
+	at := int(id)*numContexts + int(e.c)
+	at = at*numIndentBins + indentBin(e.n)
+
+	return at*numIndentBins + indentBin(e.m)
 }
 
 // Reset empties every bucket, keeping the allocation, so that a builder asking
 // about one document after another does not allocate per document.
 func (c *Coverage) Reset() {
-	clear(c.attempts)
-	clear(c.successes)
+	for _, at := range c.touched {
+		c.attempts[at] = 0
+		c.successes[at] = 0
+	}
+
+	c.touched = c.touched[:0]
 }
 
 // Buckets is how many production-by-context pairs the vector has room for.
@@ -89,20 +126,18 @@ func (c *Coverage) Reset() {
 func (c *Coverage) Buckets() int { return len(c.attempts) }
 
 // Reached is how many buckets have been entered at least once.
-func (c *Coverage) Reached() int { return countNonZero(c.attempts) }
+func (c *Coverage) Reached() int { return len(c.touched) }
 
 // Matched is how many buckets have been entered and matched at least once.
 //
 // The gap between this and [Coverage.Reached] is the part of the grammar that
 // has been *considered* but never satisfied, which is a different kind of hole
 // and often the more interesting one.
-func (c *Coverage) Matched() int { return countNonZero(c.successes) }
-
-func countNonZero(v []uint32) int {
+func (c *Coverage) Matched() int {
 	var n int
 
-	for _, at := range v {
-		if at > 0 {
+	for _, at := range c.touched {
+		if c.successes[at] > 0 {
 			n++
 		}
 	}
@@ -115,9 +150,13 @@ func countNonZero(v []uint32) int {
 func (c *Coverage) Merge(o *Coverage) {
 	c.mustAgree(o)
 
-	for i, at := range o.attempts {
-		c.attempts[i] += at
-		c.successes[i] += o.successes[i]
+	for _, at := range o.touched {
+		if c.attempts[at] == 0 && c.successes[at] == 0 {
+			c.touched = append(c.touched, at)
+		}
+
+		c.attempts[at] += o.attempts[at]
+		c.successes[at] += o.successes[at]
 	}
 }
 
@@ -132,12 +171,12 @@ func (c *Coverage) Merge(o *Coverage) {
 func (c *Coverage) AddsTo(seen *Coverage) bool {
 	c.mustAgree(seen)
 
-	for i, at := range c.attempts {
-		if at > 0 && seen.attempts[i] == 0 {
+	for _, at := range c.touched {
+		if seen.attempts[at] == 0 {
 			return true
 		}
 
-		if c.successes[i] > 0 && seen.successes[i] == 0 {
+		if c.successes[at] > 0 && seen.successes[at] == 0 {
 			return true
 		}
 	}
@@ -222,14 +261,25 @@ func (c *Coverage) Considered() []string {
 	return out
 }
 
+// span is every index belonging to one production, over all contexts and both
+// indentation classes. Folding it is how the coarse questions are answered from
+// the fine vector.
+func span(id int32) (from, to int) {
+	width := numContexts * numIndentBins * numIndentBins
+
+	return int(id) * width, (int(id) + 1) * width
+}
+
 func (c *Coverage) enteredAnywhere(id int32) bool {
-	return slices.ContainsFunc(c.attempts[int(id)*numContexts:(int(id)+1)*numContexts],
-		func(at uint32) bool { return at > 0 })
+	from, to := span(id)
+
+	return slices.ContainsFunc(c.attempts[from:to], func(at uint32) bool { return at > 0 })
 }
 
 func (c *Coverage) matchedAnywhere(id int32) bool {
-	return slices.ContainsFunc(c.successes[int(id)*numContexts:(int(id)+1)*numContexts],
-		func(at uint32) bool { return at > 0 })
+	from, to := span(id)
+
+	return slices.ContainsFunc(c.successes[from:to], func(at uint32) bool { return at > 0 })
 }
 
 // Entered reports how often a production was entered and matched in one
@@ -242,9 +292,20 @@ func (c *Coverage) Entered(rule, ctx string) (attempts, matches uint32) {
 		panic(fmt.Sprintf("grammar: no context named %q", ctx))
 	}
 
-	at := int(s.id)*numContexts + int(code)
+	// Folded over the indentation classes: the caller asked about a production
+	// in a context, and answering with one column's worth would be answering a
+	// question nobody asked.
+	from := (int(s.id)*numContexts + int(code)) * numIndentBins * numIndentBins
 
-	return c.attempts[at], c.successes[at]
+	for _, at := range c.attempts[from : from+numIndentBins*numIndentBins] {
+		attempts += at
+	}
+
+	for _, at := range c.successes[from : from+numIndentBins*numIndentBins] {
+		matches += at
+	}
+
+	return attempts, matches
 }
 
 // String summarizes what has been reached, for a test that wants one line.
@@ -289,30 +350,37 @@ func (c *Coverage) Report() string {
 	return b.String()
 }
 
-// Signature renders which buckets were entered as a compact string, so that two
-// recognitions can be compared for having gone the same way.
+// Signature digests which buckets were entered, so that two recognitions can be
+// compared for having gone the same way.
 //
 // It is a fingerprint of the route rather than of the document. For a document
 // the grammar refuses, that is close to a statement of *how* it is wrong, which
 // is what makes it a usable equivalence class: two documents that fail
 // identically are one test case wearing two disguises.
+//
+// A digest rather than the bitset it used to be. The vector is around 120,000
+// slots once indentation is in it, so the bitset would be fifteen kilobytes per
+// document -- and its one use is as a map key over every document a build
+// draws, where that is the difference between a corpus that builds and one that
+// does not.
 func (c *Coverage) Signature() string {
-	out := make([]byte, 0, len(c.attempts)/8+1)
+	// Sorted rather than taken in entry order: two documents that entered the
+	// same buckets in a different sequence took the same route through the
+	// grammar, and reporting them as different would defeat the grouping.
+	entered := slices.Clone(c.touched)
+	slices.Sort(entered)
 
-	var acc byte
+	var (
+		sum  = sha256.New()
+		word [4]byte
+	)
 
-	for i, at := range c.attempts {
-		if at > 0 {
-			acc |= 1 << (i % 8)
-		}
-
-		if i%8 == 7 {
-			out = append(out, acc)
-			acc = 0
-		}
+	for _, at := range entered {
+		binary.LittleEndian.PutUint32(word[:], uint32(at))
+		sum.Write(word[:])
 	}
 
-	return string(append(out, acc))
+	return string(sum.Sum(nil))
 }
 
 // Names lists the grammar's productions in the order their ids run, which is

@@ -141,6 +141,15 @@ func (b Build) cases() []suite.Case {
 		// where a parser's bugs live. So a quota per route runs alongside it,
 		// and the same rule applies to valid and refused documents, because
 		// the argument does not depend on which they are.
+		//
+		// The quota is a hedge against a blindness, and one part of that
+		// blindness has a name: indentation. Two documents alike but for how
+		// far they are indented once produced the same signature, so the
+		// minimizer read them as one route and kept one. Indentation is now in
+		// the signature -- see grammar.indentBin -- which is why the quota is a
+		// hedge rather than the only defense. It costs JSON nothing, since n
+		// and m never vary here, and it is the difference between a YAML corpus
+		// that carries indentation evidence and one that discards it.
 		signature := fmt.Sprintf("%x", one.Signature())
 		covers := one.AddsTo(seen)
 
