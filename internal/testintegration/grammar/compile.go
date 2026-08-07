@@ -4,6 +4,7 @@
 package grammar
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -40,9 +41,17 @@ type compiler struct {
 // result is immutable, so one Grammar is shared by every caller.
 type Grammar struct {
 	name         string
+	digest       string
 	slots        map[string]*slot
 	unreferenced []string
 }
+
+// Digest identifies the grammar file this was compiled from.
+//
+// A corpus is a cache of what a grammar said, so the corpus has to record which
+// grammar. When this changes, every stored verdict is suspect and the corpus
+// has to be regenerated and compared rather than trusted.
+func (g *Grammar) Digest() string { return g.digest }
 
 // Unreferenced names the productions no other production refers to, in name
 // order.
@@ -95,7 +104,12 @@ func Compile(name string, spec []byte, patches ...Patch) (*Grammar, error) {
 		return nil, fmt.Errorf("compiling the %s grammar: %w", name, err)
 	}
 
-	return &Grammar{name: name, slots: c.slots, unreferenced: c.unreferenced()}, nil
+	return &Grammar{
+		name:         name,
+		digest:       fmt.Sprintf("sha256:%x", sha256.Sum256(spec)),
+		slots:        c.slots,
+		unreferenced: c.unreferenced(),
+	}, nil
 }
 
 // unreferenced finds the productions that appear in no other production's body.
