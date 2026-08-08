@@ -89,7 +89,7 @@ func (b Build) Write(w io.Writer) error {
 		Tier:      b.Tier,
 		Cases:     len(cases),
 		Vocabulary: suite.SpecsFor(
-			vocabularyOf(cases), Vocabulary(), append(AnchorRules(), TagRules()...)),
+			vocabularyOf(cases), Vocabulary(), allRules()),
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -249,7 +249,7 @@ const Reading = "yaml-1.2-core"
 // construction adds is the label the grammar could not produce.
 func Cases() []suite.Case {
 	out := make([]suite.Case, 0,
-		len(Patterns())+len(Resolutions())+len(TagShapes())+len(ReachShapes()))
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -281,6 +281,17 @@ func Cases() []suite.Case {
 
 	// The reach shapes carry no tags and raise no question. They exist because
 	// the grammar has corners the rest of the corpus does not turn.
+	for i, s := range KeyShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/key/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
 	for i, s := range ReachShapes() {
 		out = append(out, suite.Case{
 			Name:       "shape/reach/" + s.Name,
@@ -439,4 +450,12 @@ func verdictAt(e Entry) string {
 	}
 
 	return stance.Parse.String()
+}
+
+// allRules is everything the specification settles that this corpus can label.
+func allRules() stance.Rules {
+	out := AnchorRules()
+	out = append(out, TagRules()...)
+
+	return append(out, KeyRules()...)
 }

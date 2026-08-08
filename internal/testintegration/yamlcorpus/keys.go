@@ -1,0 +1,128 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package yamlcorpus
+
+import "github.com/go-openapi/go-yaml/internal/testintegration/stance"
+
+// Unique keys: the rule that needs resolution rather than spelling.
+//
+// # Why a grammar cannot state it
+//
+// "It is an error for two equal keys to appear in the same mapping node"
+// (3.2.1.1). A production cannot hold the keys it has already seen, so the
+// grammar accepts every document here, the invalid ones included -- the same
+// shape as an undefined alias, and it gets rules for the same reason.
+//
+// # Why *equal* is the hard word
+//
+// Two keys are equal when they resolve to the same node, not when they are
+// written the same way. Three consequences, and every one of them is a document
+// a checker comparing spellings gets wrong:
+//
+//   - "a" and a are written differently and are the same key.
+//   - 1 and !!int 1 are written differently and are the same key.
+//   - 1 and "1" are written almost identically and are *different* keys, one an
+//     integer and one a string. A checker comparing text refuses a valid
+//     document here, which is how this family catches a checker rather than
+//     merely exercising it.
+//   - An alias resolves to whatever it names, so a key can collide with one
+//     written out in full somewhere else entirely.
+//
+// The valid case is carried deliberately. A family of violations alone would be
+// passed by a parser that refused every mapping with two similar-looking keys,
+// and that parser would be badly wrong.
+const (
+	// TagDuplicateKey is two keys with the same spelling.
+	TagDuplicateKey stance.Tag = "key/duplicate"
+	// TagDuplicateAfterResolution is two keys that are equal only once they are
+	// resolved: quoting removed, tags applied, aliases followed.
+	TagDuplicateAfterResolution stance.Tag = "key/duplicate-after-resolution"
+	// TagDistinctAfterResolution is two keys that look nearly alike and are not
+	// equal, because resolution gives them different types.
+	//
+	// The control, and the one that fails a text-comparing checker.
+	TagDistinctAfterResolution stance.Tag = "key/distinct-after-resolution"
+)
+
+// KeyRules is what the specification settles about them.
+//
+// Enforcement is another matter and deliberately not settled here: libfyaml
+// reads every duplicate below and keeps the last, so a parser declining the
+// check is in respectable company. Declining leaves a document unscored, which
+// is the honest answer -- what it may not do is claim a pass.
+func KeyRules() stance.Rules {
+	return stance.Rules{
+		{
+			Tag:     TagDuplicateKey,
+			Because: "3.2.1.1: it is an error for two equal keys to appear in the same mapping node",
+			Then:    stance.Reject,
+		},
+		{
+			Tag:     TagDuplicateAfterResolution,
+			Because: "3.2.1.1: keys are equal when they resolve to the same node, however they are written",
+			Then:    stance.Reject,
+		},
+		{
+			Tag:     TagDistinctAfterResolution,
+			Because: "3.2.1.1: keys resolving to different nodes are different keys, however alike they look",
+			Then:    stance.Accept,
+		},
+	}
+}
+
+// KeyVocabulary places them.
+//
+// A spelling can be compared while parsing; equality after resolution cannot,
+// since resolution is what composing does. That the two sit at different stages
+// is not bookkeeping -- it is the whole difference between the check a parser
+// can do and the check the specification asks for.
+func KeyVocabulary() stance.Vocabulary {
+	return stance.Vocabulary{
+		TagDuplicateKey:             stance.Parse,
+		TagDuplicateAfterResolution: stance.Compose,
+		TagDistinctAfterResolution:  stance.Compose,
+	}
+}
+
+// KeyShapes are the documents.
+func KeyShapes() []stance.Shape {
+	return []stance.Shape{
+		{
+			Name:   "the same key twice",
+			Src:    []byte("a: 1\na: 2\n"),
+			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
+			Name:   "the same key twice inside a flow mapping",
+			Src:    []byte("{a: 1, a: 2}\n"),
+			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
+			Name:   "the same key twice in a nested mapping",
+			Src:    []byte("outer:\n  a: 1\n  a: 2\n"),
+			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
+			Name:   "the same key quoted and plain",
+			Src:    []byte("\"a\": 1\na: 2\n"),
+			Intent: []stance.Tag{TagDuplicateAfterResolution},
+		},
+		{
+			Name:   "the same key tagged and plain",
+			Src:    []byte("1: x\n!!int 1: y\n"),
+			Intent: []stance.Tag{TagDuplicateAfterResolution},
+		},
+		{
+			Name:   "a key colliding with one an alias resolves to",
+			Src:    []byte("k: &a n\n*a : 1\nn: 2\n"),
+			Intent: []stance.Tag{TagDuplicateAfterResolution, TagAliasAsKey},
+		},
+		{
+			// Valid, and the shape that catches a checker comparing spellings.
+			Name:   "two keys alike in text and different once resolved",
+			Src:    []byte("1: x\n\"1\": y\n"),
+			Intent: []stance.Tag{TagDistinctAfterResolution},
+		},
+	}
+}

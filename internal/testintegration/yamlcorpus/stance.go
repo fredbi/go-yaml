@@ -22,7 +22,7 @@ var GoYAML = stance.Table{
 	Because:  "decodes into Go values, which hold more shapes than JSON does and fewer than YAML admits",
 	At:       stance.Construct,
 	Speaks:   Vocabulary(),
-	Requires: append(AnchorRules(), TagRules()...),
+	Requires: allRules(),
 	Stands: map[stance.Tag]stance.Stand{
 		// Measured: "first: &x [1, 2]\n*x : keyed\n" decodes, with the sequence
 		// as a key. A Go map key may be any comparable value and the decoder
@@ -120,6 +120,15 @@ var Departures = []Departure{
 		Corroborated: "contested: PyYAML 6.0.1 refuses, libfyaml 1.0.0a8 accepts",
 	},
 	{
+		Pattern:  "two keys alike in text and different once resolved",
+		Kind:     Verdict,
+		Observed: `"1: x" and "\"1\": y" in one mapping are refused as a duplicate key`,
+		Because: "3.2.1.1: keys are equal when they resolve to the same node, and these resolve to an integer " +
+			"and a string, so they are two keys and the document is valid",
+		Corroborated: "libfyaml 1.0.0a8 keeps both, and merges 1 with !!int 1 -- so its key identity is " +
+			"resolution and not spelling",
+	},
+	{
 		Pattern:  "a sequence holding an alias to itself",
 		Kind:     Value,
 		Observed: "the document is read and the cycle decodes to nil, so &x [ *x ] becomes a one-element list holding nothing",
@@ -148,6 +157,6 @@ var GoYAMLParser = stance.Table{
 	Because:  "answers whether a document is well formed, and nothing about what it means",
 	At:       stance.Parse,
 	Speaks:   Vocabulary(),
-	Requires: append(AnchorRules(), TagRules()...),
+	Requires: allRules(),
 	Stands:   GoYAML.Stands,
 }

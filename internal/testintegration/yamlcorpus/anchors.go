@@ -163,6 +163,10 @@ func Vocabulary() stance.Vocabulary {
 		out[tag] = at
 	}
 
+	for tag, at := range KeyVocabulary() {
+		out[tag] = at
+	}
+
 	return out
 }
 

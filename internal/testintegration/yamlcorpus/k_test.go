@@ -123,6 +123,16 @@ func TestTheCorpusNoLongerAccusesACorrectParser(t *testing.T) {
 	var accused, unscored, scored int
 
 	for _, c := range cases {
+		// An enumerated shape is exempt, and the exemption is the point rather
+		// than a convenience. Its label was put on by construction and is
+		// right, so a correct-looking refusal there is a *finding* -- the key
+		// family carries a document with two keys alike in text and different
+		// once resolved, and this library refuses it. Counting that as the
+		// corpus misbehaving would count a defect as a mistake.
+		if strings.HasPrefix(c.Name, "shape/") {
+			continue
+		}
+
 		doc := stance.Doc{
 			Name: c.Name, Src: c.Src, WellFormed: c.WellFormed,
 			Opaque: c.Opaque, Tags: asTags(c.Tags),
