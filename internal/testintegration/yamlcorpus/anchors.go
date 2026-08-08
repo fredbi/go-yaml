@@ -410,6 +410,13 @@ func anchor(name string, node []byte) []byte {
 
 func alias(name string) []byte { return []byte("*" + name) }
 
+// concat joins fragments into a fresh slice.
+//
+// Fresh matters more than it looks: the mutations build a document out of
+// slices of the one they were given, and a join that aliased its input would
+// have them writing into the document they are supposed to be leaving alone.
+// bytes.Join copies even for a single fragment, which is what substituting a
+// byte relies on.
 func concat(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
 
 // join concatenates document fragments, making sure each ends its line, so that
