@@ -80,7 +80,7 @@ func (b Build) Write(w io.Writer) error {
 		Seed:       b.Seed,
 		Tier:       b.Tier,
 		Cases:      len(cases),
-		Vocabulary: vocabularyOf(cases),
+		Vocabulary: suite.SpecsFor(vocabularyOf(cases), Vocabulary(), nil),
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -190,7 +190,8 @@ func tagNames(tags []stance.Tag) []string {
 	return out
 }
 
-// vocabularyOf collects every tag the corpus uses, for the header.
+// vocabularyOf collects every tag name the corpus uses, which the header then
+// pairs with the stage and settled outcome the language gives it.
 func vocabularyOf(cases []suite.Case) []string {
 	var out []string
 

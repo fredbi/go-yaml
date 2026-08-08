@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // Writer builds an artifact.
@@ -42,7 +43,8 @@ func NewWriter(w io.Writer, h Header) (*Writer, error) {
 	// The vocabulary is sorted rather than taken as given, because two runs
 	// that discovered the same tags in a different order must still produce
 	// identical bytes.
-	h.Vocabulary = slices.Sorted(slices.Values(h.Vocabulary))
+	h.Vocabulary = slices.Clone(h.Vocabulary)
+	slices.SortFunc(h.Vocabulary, func(a, b TagSpec) int { return strings.Compare(a.Tag, b.Tag) })
 
 	gz := gzip.NewWriter(w)
 

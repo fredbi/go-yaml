@@ -13,17 +13,10 @@ import (
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
 )
 
-// around stands in for what the generator will supply, and is deliberately not
-// minimal: a pattern composed around a one-line document would not show that
-// composing preserves the document it was composed around.
-func around() yamlcorpus.Around {
-	return yamlcorpus.Around{
-		Document:   []byte("kept:\n  nested: 1\n  list:\n    - a\n    - b\nalso: |\n  literal\n  content\n"),
-		Scalar:     []byte("plain text"),
-		Other:      []byte("\"quoted\""),
-		Collection: []byte("[1, 2]"),
-	}
-}
+// around is what the corpus composes its patterns around, so that the tests and
+// the artifact are exercising the same documents rather than two sets that
+// happen to look alike.
+func around() yamlcorpus.Around { return yamlcorpus.Corpus() }
 
 // TestTheGrammarCannotSeeAnyOfThis is the measurement that says why this file
 // exists, and it is the one worth failing loudly.

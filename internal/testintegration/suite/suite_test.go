@@ -12,13 +12,16 @@ import (
 
 func sample() (suite.Header, []suite.Case) {
 	return suite.Header{
-			Grammar:    "RFC 8259",
-			Digest:     "sha256:deadbeef",
-			Generator:  "jsonspike/1",
-			Seed:       1,
-			Tier:       "smoke",
-			Cases:      3,
-			Vocabulary: []string{"number/out-of-range", "encoding/bom"},
+			Grammar:   "RFC 8259",
+			Digest:    "sha256:deadbeef",
+			Generator: "jsonspike/1",
+			Seed:      1,
+			Tier:      "smoke",
+			Cases:     3,
+			Vocabulary: []suite.TagSpec{
+				{Tag: "number/out-of-range", Stage: "construct"},
+				{Tag: "encoding/bom", Stage: "parse"},
+			},
 		}, []suite.Case{
 			{Name: "a", Src: []byte(`{"a":1}`), WellFormed: true, Origin: suite.Origin{Document: 0}},
 			{Name: "b", Src: []byte("\xff\xfe{}"), Opaque: true,
@@ -188,4 +191,52 @@ func TestAConsumerCanTellWhenATagIsNewToIt(t *testing.T) {
 	if len(got) != 1 || got[0] != "number/out-of-range" {
 		t.Errorf("a stance missing a tag was told %v", got)
 	}
+}
+
+// TestTheVocabularyOrderDoesNotReachTheBytes guards a determinism hole the
+// vocabulary opened when it stopped being a list of strings.
+//
+// Two builds that discovered the same tags in a different order have to produce
+// the same artifact, or regenerate-and-diff reports a difference that is not
+// one. Sorting a slice of strings was obviously right and easy to keep right; a
+// slice of structs needs a comparator, and a comparator is something that can
+// quietly go missing.
+func TestTheVocabularyOrderDoesNotReachTheBytes(t *testing.T) {
+	forward := suite.Header{
+		Grammar: "RFC 8259", Digest: "sha256:deadbeef", Generator: "g", Tier: "smoke",
+		Vocabulary: []suite.TagSpec{
+			{Tag: "a/one", Stage: "parse"},
+			{Tag: "b/two", Stage: "construct", Settled: "reject", Because: "the spec says so"},
+		},
+	}
+
+	backward := forward
+	backward.Vocabulary = []suite.TagSpec{forward.Vocabulary[1], forward.Vocabulary[0]}
+
+	if a, b := headerBytes(t, forward), headerBytes(t, backward); !bytes.Equal(a, b) {
+		t.Errorf("the vocabulary's order reached the bytes:\n  %s\n  %s", a, b)
+	}
+
+	// And the caller's slice is left alone, since a builder may well be holding
+	// the language's vocabulary rather than a copy of it.
+	if forward.Vocabulary[0].Tag != "a/one" {
+		t.Error("writing reordered the caller's vocabulary in place")
+	}
+}
+
+func headerBytes(t *testing.T, h suite.Header) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	w, err := suite.NewWriter(&buf, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	return buf.Bytes()
 }

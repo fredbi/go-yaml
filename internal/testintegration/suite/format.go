@@ -20,6 +20,26 @@
 // options, and someone else's -- none of them privileged, and none of their
 // opinions frozen into the file.
 //
+// What the header does carry is the contract those opinions are formed
+// against: every tag, the stage its question arises at, and whether the
+// specification settled it. A consumer can therefore derive an expectation from
+// the file alone, with no Go and no import of ours -- which was the claim made
+// for the released artifact from the start and was not true of format 1, where
+// the stages lived only in our source.
+//
+// # Verdicts are not the only thing worth storing
+//
+// Some documents are valid under every reading and mean different things. A
+// cycle is accepted by any conforming parser and is unrepresentable in a tree;
+// "0777" is a valid document that denotes 511 under one schema and 777 under
+// another. A corpus of accept-or-refuse scores both as passes and says nothing.
+//
+// So a case may also carry a [Meaning]: what the document denotes under the
+// specification's own default reading, rendered as JSON. It is optional
+// because most documents raise no such question, and it is one reading rather
+// than all of them because the disagreements are tagged -- a consumer whose
+// reading differs knows exactly which cases to skip.
+//
 // # Reproducibility is a property of the bytes
 //
 // The same seed and the same grammar must produce a byte-identical artifact, or
@@ -35,7 +55,7 @@ package suite
 // It is bumped when a reader written against an older version would
 // misunderstand a newer file -- not when a field is added, which readers are
 // expected to ignore.
-const Format = 1
+const Format = 2
 
 // Header describes an artifact and is the first line of one.
 type Header struct {
@@ -56,13 +76,45 @@ type Header struct {
 	Tier string `json:"tier"`
 	// Cases is how many follow, so a truncated file is detectable.
 	Cases int `json:"cases"`
-	// Vocabulary is every tag name this artifact uses.
+	// Vocabulary is every tag this artifact uses, with the stage its question
+	// arises at and whether the specification settles it.
 	//
-	// It is here so a consumer can fail loudly rather than quietly. A stance
-	// that has never heard of a tag would otherwise treat it as absent and
-	// score the document as though a question it does not understand were
-	// settled.
-	Vocabulary []string `json:"vocabulary"`
+	// It is here so a consumer can fail loudly rather than quietly, and so it
+	// can score at all. A stance that has never heard of a tag would treat it
+	// as absent and score the document as though a question it does not
+	// understand were settled; a stance that does not know a tag's stage cannot
+	// tell a question it never reaches from one it is ducking.
+	//
+	// Sorted by tag, because the same corpus has to come out as the same bytes.
+	Vocabulary []TagSpec `json:"vocabulary"`
+}
+
+// TagSpec is one tag and everything a consumer needs to reason about it.
+//
+// This is the part of the contract that used to live only in our source. A
+// released artifact whose consumer has to guess which stage a tag belongs to is
+// an artifact only we can score against, which defeats the purpose of releasing
+// it.
+type TagSpec struct {
+	// Tag is the name, as it appears in a case.
+	Tag string `json:"tag"`
+	// Stage is where the question arises: "parse", "compose" or "construct".
+	//
+	// A consumer that stops earlier than this is not being asked. A lexer is
+	// not wrong about numbers it never converts, and without this field it had
+	// no way to say so except by declaring a position it does not hold.
+	Stage string `json:"stage"`
+	// Settled is what a conforming consumer must do, for the questions the
+	// specification answered rather than left open: "accept", "reject", or
+	// empty where the consumer chooses.
+	//
+	// A settled tag is not a matter of opinion and a consumer's stance does not
+	// override it. It may be declined -- a parser that never resolves aliases
+	// cannot check one -- which leaves the case unscored rather than passed.
+	Settled string `json:"settled,omitempty"`
+	// Because is what the specification says, and where, so that a consumer
+	// disagreeing with a settled rule has something to argue with.
+	Because string `json:"because,omitempty"`
 }
 
 // Case is one document and everything known about it that is not an opinion.
@@ -81,8 +133,39 @@ type Case struct {
 	Opaque bool `json:"opaque,omitempty"`
 	// Tags are the implementation-defined properties the document exhibits.
 	Tags []string `json:"tags,omitempty"`
+	// Meaning is what the document denotes, where the corpus can say.
+	//
+	// Absent for most cases: a document that is refused denotes nothing, and a
+	// document every reading agrees about raises no question worth storing an
+	// answer to. Present for the families where the verdict is not the
+	// interesting part.
+	Meaning *Meaning `json:"meaning,omitempty"`
 	// Origin traces the case back to what produced it.
 	Origin Origin `json:"origin"`
+}
+
+// Meaning is what a document denotes, under one stated reading.
+//
+// One reading and not all of them, because the readings that differ are exactly
+// what the tags name: a consumer implementing a different one looks at the tags
+// and skips the cases it disagrees about, rather than needing the corpus to
+// enumerate every implementation's answer.
+type Meaning struct {
+	// Under names the reading: "yaml-1.2-core", "rfc8259". It is the
+	// specification's own default, not ours.
+	Under string `json:"under"`
+	// JSON is the value, rendered as JSON. Absent when Cyclic is set, because
+	// then there is no rendering.
+	JSON []byte `json:"json,omitempty"`
+	// Cyclic says the meaning is a graph with a cycle and therefore has no JSON
+	// form at all.
+	//
+	// It is worth a field rather than an omission, because it is checkable and
+	// the check is the only one that finds the interesting failure. A consumer
+	// that produced a value it can serialize to JSON from a document marked
+	// cyclic has not represented the cycle -- it has quietly put something else
+	// there, which is what this library does today.
+	Cyclic bool `json:"cyclic,omitempty"`
 }
 
 // Origin is where a case came from, in enough detail to make it again.

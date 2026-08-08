@@ -49,14 +49,29 @@ func NewReader(r io.Reader) (*Reader, error) {
 		return nil, errors.New("the artifact is empty")
 	}
 
+	// The version is read before anything else, and on its own.
+	//
+	// Decoding the whole header first would mean a format this package cannot
+	// read reports whichever field changed shape -- "cannot unmarshal string
+	// into TagSpec" -- which is a decoding error standing where a version error
+	// belongs. The version field exists precisely so that the answer is "this
+	// is format 1 and I read 2".
+	var version struct {
+		Format int `json:"format"`
+	}
+
+	if err := json.Unmarshal(lines.Bytes(), &version); err != nil {
+		return nil, fmt.Errorf("reading the artifact format: %w", err)
+	}
+
+	if version.Format != Format {
+		return nil, fmt.Errorf("suite: artifact format %d, this package reads %d",
+			version.Format, Format)
+	}
+
 	out := &Reader{lines: lines, gz: gz}
 	if err := json.Unmarshal(lines.Bytes(), &out.header); err != nil {
 		return nil, fmt.Errorf("decoding the artifact header: %w", err)
-	}
-
-	if out.header.Format != Format {
-		return nil, fmt.Errorf("suite: artifact format %d, this package reads %d",
-			out.header.Format, Format)
 	}
 
 	return out, nil
@@ -103,13 +118,28 @@ func (r *Reader) Next() (Case, bool, error) {
 func (h Header) Unknown(known []string) []string {
 	var out []string
 
-	for _, tag := range h.Vocabulary {
-		if !slices.Contains(known, tag) {
-			out = append(out, tag)
+	for _, spec := range h.Vocabulary {
+		if !slices.Contains(known, spec.Tag) {
+			out = append(out, spec.Tag)
 		}
 	}
 
 	return out
+}
+
+// Spec returns what the artifact says about one tag.
+//
+// This is how a consumer with no dependency on our packages scores a case: the
+// header carries the stage and the settled outcome, so an expectation can be
+// derived from the file rather than from an import.
+func (h Header) Spec(tag string) (TagSpec, bool) {
+	for _, spec := range h.Vocabulary {
+		if spec.Tag == tag {
+			return spec, true
+		}
+	}
+
+	return TagSpec{}, false
 }
 
 // ReadAll reads a whole artifact into memory, which is what an embedded corpus
