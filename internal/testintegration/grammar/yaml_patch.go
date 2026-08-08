@@ -434,3 +434,58 @@ func patchBlockCollectionProperties(body any) bool {
 func followedByComments(what any) any {
 	return map[string]any{"(all)": []any{what, "s-l-comments"}}
 }
+
+// patchPlainQuestionMark lets a lone "?" be a plain scalar where a flow
+// collection ends, and returns whether it found the rule to say it in.
+//
+// # Not a rule the spec states, and said so
+//
+// Every other patch here is a rule YAML 1.2 states in prose and leaves out of
+// its grammar. This one is not: the grammar says ns-plain-first admits "?" only
+// when an ns-plain-safe character follows, and "]" is not one, so "[?]" is
+// invalid by the letter of it. Nothing in the prose says otherwise.
+//
+// It is here because the letter of it is alone. libfyaml reads "[?]" as the
+// sequence holding the scalar "?", and so do PyYAML and this library -- three
+// implementations, one of them a strict YAML 1.2 parser written against this
+// same grammar. A corpus that marked those documents invalid would report every
+// real parser as defective, which is not a corpus anybody can use.
+//
+// So this is a departure from the published grammar on the evidence of the
+// implementations, rather than on the evidence of the prose, and it is the only
+// patch of that kind. It is kept narrow for exactly that reason: only "?", only
+// where a flow indicator follows. libfyaml refuses "[-]" and so does this,
+// which is the asymmetry that says the leniency is about "?" specifically and
+// not about bare indicators generally.
+func patchPlainQuestionMark(body any) bool {
+	m, ok := body.(map[string]any)
+	if !ok {
+		return false
+	}
+
+	alternatives, ok := m["(any)"].([]any)
+	if !ok || len(alternatives) != 2 {
+		return false
+	}
+
+	followed, ok := alternatives[1].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	steps, ok := followed["(all)"].([]any)
+	if !ok || len(steps) != 2 {
+		return false
+	}
+
+	if _, ok := steps[1].(map[string]any)["(===)"]; !ok {
+		return false
+	}
+
+	m["(any)"] = append(alternatives, map[string]any{"(all)": []any{
+		"?",
+		map[string]any{"(===)": "c-flow-indicator"},
+	}})
+
+	return true
+}

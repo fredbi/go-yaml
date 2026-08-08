@@ -17,8 +17,14 @@ var YAML = MustCompile("YAML 1.2", yamlSpec, yamlPatches()...)
 // yamlPatches are the places where compiling the published grammar faithfully
 // would not compile YAML faithfully.
 //
-// Each one is a rule the spec states in prose and never puts in the grammar
+// All but one are rules the spec states in prose and never puts in the grammar
 // file. They are asserted rather than attempted: see [Patch].
+//
+// The exception is patchPlainQuestionMark, and it is exceptional in kind rather
+// than in degree: it departs from the published grammar on the evidence of
+// three implementations rather than on the evidence of the prose. Kept
+// separable and labeled, so that nobody has to work out later which patches
+// rest on what.
 //
 // They are applied in order, and one pair depends on it: patchBlockHeaderEnd
 // works on the shape patchBlockHeader leaves.
@@ -35,6 +41,10 @@ var YAML = MustCompile("YAML 1.2", yamlSpec, yamlPatches()...)
 // takes to reach one. See whitespaceAhead. Keeping the count straight matters:
 // a patch adopted on the strength of a score it did not move is a patch nobody
 // has actually checked.
+//
+// The calibration does not measure patchPlainQuestionMark either -- no fixture
+// of the Test Suite writes a lone "?" against a flow indicator -- which is why
+// it took a corpus of a hundred thousand documents and a third parser to find.
 func yamlPatches() []Patch {
 	return []Patch{
 		{
@@ -86,6 +96,11 @@ func yamlPatches() []Patch {
 			Rule:    "s-l+block-collection",
 			Because: "properties belong to the collection only if the line ends after them",
 			Apply:   patchBlockCollectionProperties,
+		},
+		{
+			Rule:    "ns-plain-first",
+			Because: "a lone \"?\" is a plain scalar where a flow collection ends, on the evidence of every implementation rather than of the prose",
+			Apply:   patchPlainQuestionMark,
 		},
 	}
 }
