@@ -37,11 +37,28 @@ type Build struct {
 }
 
 // Smoke is the corpus that lives in the repository.
+//
+// PerSignature is 16, and it is measured rather than chosen. Replaying each
+// build against this library and counting the *distinct* complaints it makes --
+// fifty documents failing the same way are one finding -- gives 6 classes at
+// K=1, 9 at 4, 12 at 16, and 12 again at 32. It saturates at sixteen, so
+// anything above that is bytes for nothing.
+//
+// The JSON corpus landed on sixteen too, from a different measurement on a
+// different grammar. Two data points are not a law, but it is worth noticing.
 func Smoke() Build {
-	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: 4}
+	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: 16}
 }
 
-// Full is the corpus that ships as a release artifact.
+// Full is the corpus that ships as a release artifact, where nothing is
+// discarded.
+//
+// Keeping everything is not belt and braces. The same measurement finds 18
+// distinct complaints with no minimizing at all, against 12 at any K that
+// saturates -- so a third of what the corpus can find is reachable only by
+// keeping documents a signature calls duplicates. Minimizing is lossy, the loss
+// is measured, and the two tiers exist so that it is paid once by the corpus
+// that has to be small and not by the one that does not.
 func Full() Build {
 	return Build{Tier: "full", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: 0}
 }
