@@ -35,7 +35,7 @@ func consumers() (parser, composer, loader stance.Table) {
 func doc(name string, tags ...stance.Tag) stance.Doc {
 	// Every document here is one the grammar accepts. That is what makes the
 	// disagreements below about the stages rather than about the syntax.
-	return stance.Doc{Name: name, WellFormed: true, Tags: tags}
+	return stance.Doc{Name: name, WellFormed: true, VerdictAt: stance.Construct, Tags: tags}
 }
 
 // TestAConsumerIsOnlyAskedItsOwnQuestions is the property the stages exist for.

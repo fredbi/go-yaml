@@ -46,3 +46,20 @@ func SpecsFor(used []string, vocabulary stance.Vocabulary, rules stance.Rules) [
 
 	return out
 }
+
+// StageOf reads a stage name back, defaulting to [stance.Parse].
+//
+// The default is the point rather than a convenience. A case that says nothing
+// about how far its verdict reaches is claiming the least, so a name this does
+// not recognize -- an older artifact, a newer stage, a typo -- costs a scored
+// case and never produces a wrong expectation.
+func StageOf(name string) stance.Stage {
+	switch name {
+	case stance.Compose.String():
+		return stance.Compose
+	case stance.Construct.String():
+		return stance.Construct
+	default:
+		return stance.Parse
+	}
+}

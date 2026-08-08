@@ -65,6 +65,7 @@ func TestTheLibraryMatchesItsDeclaredStance(t *testing.T) {
 			Name:       p.Name,
 			Src:        src,
 			WellFormed: true, // asserted separately: the grammar accepts every pattern
+			VerdictAt:  stance.Construct,
 			Tags:       p.Exhibits,
 		}
 
@@ -175,7 +176,10 @@ func build(t *testing.T, name string) []byte {
 // not -- a ledger with only failures in it is a list of complaints.
 func TestTheLibraryHonoursTheTagRule(t *testing.T) {
 	for _, s := range yamlcorpus.TagShapes() {
-		doc := stance.Doc{Name: s.Name, Src: s.Src, WellFormed: true, Tags: s.Intent}
+		doc := stance.Doc{
+			Name: s.Name, Src: s.Src, WellFormed: true,
+			VerdictAt: stance.Construct, Tags: s.Intent,
+		}
 
 		want, why := yamlcorpus.GoYAML.Expect(doc)
 

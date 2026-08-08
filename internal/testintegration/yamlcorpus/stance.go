@@ -116,3 +116,27 @@ var Departures = []Departure{
 			"a model that cannot hold that has to say so rather than substitute a value the document never had",
 	},
 }
+
+// GoYAMLParser is the same library asked the question it actually answers at
+// parsing: is this a document.
+//
+// Two tables for one library, and the corpus is built to make that ordinary
+// rather than awkward. The decoder above reads a whole stream into Go values
+// and cannot say at which stage it stopped, so a document it refuses may have
+// failed to parse, to compose, or to construct. The parser only parses, so its
+// refusal is a statement about syntax and can be compared against a verdict
+// that is also about syntax.
+//
+// Getting this wrong is not a small error and it does not announce itself. A
+// mutant's acceptance is evidence at parsing and nowhere else; scored against
+// the decoder it is either an accusation -- if the corpus claims construction
+// it has no right to -- or nothing at all, if the corpus is honest and the
+// consumer is the wrong one. Both were tried here before this table existed.
+var GoYAMLParser = stance.Table{
+	Name:     "go-openapi/go-yaml parser",
+	Because:  "answers whether a document is well formed, and nothing about what it means",
+	At:       stance.Parse,
+	Speaks:   Vocabulary(),
+	Requires: append(AnchorRules(), TagRules()...),
+	Stands:   GoYAML.Stands,
+}

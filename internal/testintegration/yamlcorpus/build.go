@@ -42,12 +42,12 @@ type Build struct {
 // turn. See TestMeasureK.
 //
 // The quota saturates at sixteen: replaying each build and counting the
-// *distinct* complaints the library makes gives 6 at K=1, 9 at 4, 12 at 16, and
-// 12 again at 32. Raising it past sixteen is bytes for nothing.
+// *distinct* complaints the library makes gives 8 at K=1, 11 at 4, 14 at 16,
+// and 14 again at 32. Raising it past sixteen is bytes for nothing.
 //
 // But drawing more documents beats raising the quota outright, and not
-// marginally. Keeping everything at 1500 documents finds 18 complaints in
-// 486KB; twice the mutants with the quota still at sixteen finds 19 in 360KB.
+// marginally. Keeping everything at 1500 documents finds 20 complaints in
+// 493KB; twice the mutants with the quota still at sixteen finds 21 in 362KB.
 // So the corpus minimizes hard and generates more, which is the opposite of
 // what the quota curve on its own suggests.
 //
@@ -64,8 +64,8 @@ func Smoke() Build {
 // discarded.
 //
 // Bigger on both axes than the smoke tier, because nothing here has to fit in a
-// repository: four times the documents and no minimizing at all, which finds 37
-// distinct complaints against the smoke tier's 19, in 2MB.
+// repository: four times the documents and no minimizing at all, which finds 39
+// distinct complaints against the smoke tier's 21, in 2MB.
 //
 // That number is still climbing. The library can make around 55 distinct
 // complaints while reading a document, counted from its own source, so a corpus
@@ -159,6 +159,7 @@ func (b Build) cases() []suite.Case {
 			Name:       e.Name,
 			Src:        e.Src,
 			WellFormed: wellFormed,
+			VerdictAt:  verdictAt(e),
 			Opaque:     !utf8.Valid(e.Src),
 			Tags:       encodingTags(e.Src),
 			Meaning:    meaning,
@@ -260,6 +261,7 @@ func Cases() []suite.Case {
 			Name:       "shape/anchor/" + p.Name,
 			Src:        src,
 			WellFormed: rec.Stream(src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Tags:       names(p.Exhibits),
 			Meaning:    meaningOfPattern(p),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
@@ -271,6 +273,7 @@ func Cases() []suite.Case {
 			Name:       "shape/tag/" + s.Name,
 			Src:        s.Src,
 			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Tags:       names(s.Intent),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
@@ -283,6 +286,7 @@ func Cases() []suite.Case {
 			Name:       "shape/reach/" + s.Name,
 			Src:        s.Src,
 			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
 	}
@@ -294,6 +298,7 @@ func Cases() []suite.Case {
 			Name:       "shape/schema/" + r.Scalar,
 			Src:        src,
 			WellFormed: rec.Stream(src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Tags:       names(r.Exhibits),
 			Meaning:    meaningOfResolution(r),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
@@ -415,4 +420,23 @@ var smokeArtifact []byte
 // with one call and no generation, no oracle and no fuzzing.
 func SmokeSuite() (suite.Header, []suite.Case, error) {
 	return suite.FromBytes(smokeArtifact)
+}
+
+// verdictAt says how far a generated case's verdict can be trusted.
+//
+// A document emitted whole is trustworthy all the way: it was written from a
+// value the generator holds, so its anchors resolve and its keys are distinct
+// by construction, and there is nothing for a later stage to discover.
+//
+// A mutant is not. The mutation may have broken an anchor or duplicated a key,
+// leaving a document the grammar accepts and a composer must refuse, and
+// nothing here can tell which mutations did that. So its acceptance is claimed
+// for parsing and no further -- while its *refusal*, which is most of what a
+// mutant is worth, still counts at every stage.
+func verdictAt(e Entry) string {
+	if e.Mutation == "" {
+		return stance.Construct.String()
+	}
+
+	return stance.Parse.String()
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 var measureK = flag.Bool("yamlcorpus.k", false, "rebuild the corpus at several quotas and report what each finds")
@@ -42,16 +43,18 @@ var measureK = flag.Bool("yamlcorpus.k", false, "rebuild the corpus at several q
 // # The quota is not the interesting axis
 //
 // It saturates at sixteen and nothing above it helps. Drawing more documents
-// does: keeping everything at 1500 documents finds 18 complaints in 486KB,
-// where twice the mutants at a quota of sixteen finds 19 in 360KB. Most
+// does: keeping everything at 1500 documents finds 20 complaints in 493KB,
+// where twice the mutants at a quota of sixteen finds 21 in 362KB. Most
 // complaints are singletons -- one document in twenty thousand -- so whether a
 // quota keeps one is luck, and more documents beats more of each.
 //
 // # And not all of those either
 //
-// Some complaints are the corpus's own fault, and they have to come out before
-// the number means anything -- see [Mislabelled]. Counting them would have the
-// quota tuned to preserve the corpus's mistakes.
+// Some complaints used to be the corpus's own fault, and had to come out before
+// the number meant anything -- see [Mislabelled]. That is no longer true and the
+// separation is kept anyway, as the thing that would notice if it became true
+// again: the two columns have been equal since a case started saying how far its
+// verdict reaches.
 func TestMeasureK(t *testing.T) {
 	if !*measureK {
 		t.Skip("pass -yamlcorpus.k to measure the quota")
@@ -98,45 +101,56 @@ func TestMeasureK(t *testing.T) {
 	}
 }
 
-// TestTheCorpusStillMislabelsBrokenReferences measures the defect the quota
-// measurement uncovered, so that it cannot be quietly forgotten.
+// TestTheCorpusNoLongerAccusesACorrectParser is the assertion the stage-bound
+// verdict was added for.
 //
 // A mutation that breaks an anchor leaves a document the grammar accepts and a
 // conforming parser must refuse: the alias resolves to nothing. The corpus
-// records the grammar's verdict and no tag, so it expects the document to be
-// read -- and a library that correctly refuses it is scored wrong.
+// recorded the grammar's verdict and no tag, so it expected the document to be
+// read, and a library that correctly refused it was scored wrong. Thirty-six
+// stored cases did this.
 //
-// This is the corpus accusing a correct parser, which is the one failure the
-// whole design exists to prevent, and it arrived by the predicted route: a
-// generic byte mutation reaching a rule no production can express.
-//
-// It is not fixed here. The fix is not a tagger -- guessing at dangling aliases
-// would apply a settled Reject to documents that do not deserve one, and
-// accuse in the other direction. What it wants is for a case to say at which
-// stage its verdict is evidence: a mutant's verdict is the grammar's, which is
-// a statement about parsing and not about composing.
-func TestTheCorpusStillMislabelsBrokenReferences(t *testing.T) {
+// A mutant now claims its acceptance for parsing and no further, so a consumer
+// that composes scores it on its refusals and leaves its acceptances alone. The
+// refusals are most of what a mutant is worth and they still count everywhere,
+// because a document that does not parse does not compose either.
+func TestTheCorpusNoLongerAccusesACorrectParser(t *testing.T) {
 	_, cases, err := yamlcorpus.SmokeSuite()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var wrong []string
+	var accused, unscored, scored int
 
 	for _, c := range cases {
-		if !strings.HasPrefix(c.Name, "generated/") || !c.WellFormed || len(c.Tags) > 0 {
+		doc := stance.Doc{
+			Name: c.Name, Src: c.Src, WellFormed: c.WellFormed,
+			Opaque: c.Opaque, Tags: asTags(c.Tags),
+			VerdictAt: suite.StageOf(c.VerdictAt),
+		}
+
+		want, _ := yamlcorpus.GoYAML.Expect(doc)
+		if want == stance.Undecided {
+			unscored++
+
 			continue
 		}
 
-		if _, err := readStream(c.Src); err != nil && Mislabelled(err.Error()) {
-			wrong = append(wrong, c.Name)
+		scored++
+
+		if _, err := readStream(c.Src); err != nil && want == stance.Accept && Mislabelled(err.Error()) {
+			accused = accused + 1
+
+			if accused < 4 {
+				t.Errorf("%s: expected to be read, and a correct parser refuses it: %v", c.Name, summarize(err))
+			}
 		}
 	}
 
-	t.Logf("%d cases of %d expect a correct parser to read a document it must refuse", len(wrong), len(cases))
+	t.Logf("%d cases scored at construct, %d left unscored, %d accusations", scored, unscored, accused)
 
-	if len(wrong) == 0 {
-		t.Error("none left, so the mislabelling is fixed and this test and its ledger entry should go")
+	if accused > 0 {
+		t.Errorf("%d cases still accuse a correct parser", accused)
 	}
 }
 
@@ -166,24 +180,43 @@ func complaints(cases []suite.Case) (all, clean map[string]int) {
 		doc := stance.Doc{
 			Name: c.Name, Src: c.Src, WellFormed: c.WellFormed,
 			Opaque: c.Opaque, Tags: asTags(c.Tags),
+			VerdictAt: suite.StageOf(c.VerdictAt),
 		}
 
-		want, _ := yamlcorpus.GoYAML.Expect(doc)
+		// The parser is asked about the verdict and the decoder about the
+		// value, because those are the questions each of them answers. A
+		// verdict scored against the decoder cannot tell a syntax refusal from
+		// a resolution refusal, and a corpus that recorded the grammar's
+		// verdict is talking about syntax.
+		want, _ := yamlcorpus.GoYAMLParser.Expect(doc)
 		if want == stance.Undecided {
 			continue
 		}
 
-		value, err := readStream(c.Src)
-		if (want == stance.Accept) == (err == nil) {
-			if err == nil && c.Meaning != nil && len(c.Meaning.JSON) > 0 {
-				if got, merr := json.Marshal(value); merr != nil || !bytes.Equal(got, c.Meaning.JSON) {
-					all["the value differs"]++
-					clean["the value differs"]++
-				}
+		_, perr := parser.ParseBytes(c.Src, parser.ParseComments)
+
+		if (want == stance.Accept) == (perr == nil) {
+			if perr != nil || c.Meaning == nil || len(c.Meaning.JSON) == 0 {
+				continue
+			}
+
+			value, derr := readStream(c.Src)
+			if derr != nil {
+				all["the value cannot be read: "+summarize(derr)]++
+				clean["the value cannot be read: "+summarize(derr)]++
+
+				continue
+			}
+
+			if got, merr := json.Marshal(value); merr != nil || !bytes.Equal(got, c.Meaning.JSON) {
+				all["the value differs"]++
+				clean["the value differs"]++
 			}
 
 			continue
 		}
+
+		err := perr
 
 		kind := "accepts a document the grammar refuses"
 		if want == stance.Accept {
