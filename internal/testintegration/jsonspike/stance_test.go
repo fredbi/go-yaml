@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/jsonspike"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
+	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 )
 
 // measuredDefaultLexer is what the default lexer actually does with the
@@ -192,6 +193,7 @@ func TestOneCorpusScoresTwoStages(t *testing.T) {
 			WellFormed: c.WellFormed,
 			Opaque:     c.Opaque,
 			Tags:       tagsOf(c),
+			VerdictAt:  suite.StageOf(c.VerdictAt),
 		}
 
 		if !hasTag(doc.Tags, jsonspike.TagNumberOutOfRange) {

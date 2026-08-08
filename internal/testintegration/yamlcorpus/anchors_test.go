@@ -119,6 +119,7 @@ func TestAStanceCannotVoteAwayARule(t *testing.T) {
 	doc := stance.Doc{
 		Name:       "an undefined alias",
 		WellFormed: true, // what the grammar says, and it is not enough
+		VerdictAt:  stance.Construct,
 		Tags:       []stance.Tag{yamlcorpus.TagAliasUndefined},
 	}
 
@@ -147,6 +148,7 @@ func TestAParserMayDeclineACheckWithoutFailingIt(t *testing.T) {
 	doc := stance.Doc{
 		Name:       "an undefined alias",
 		WellFormed: true,
+		VerdictAt:  stance.Construct,
 		Tags:       []stance.Tag{yamlcorpus.TagAliasUndefined},
 	}
 

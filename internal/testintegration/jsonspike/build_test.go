@@ -144,6 +144,7 @@ func TestTheStanceCanScoreEveryStoredCase(t *testing.T) {
 			WellFormed: c.WellFormed,
 			Opaque:     c.Opaque,
 			Tags:       tagsOf(c),
+			VerdictAt:  suite.StageOf(c.VerdictAt),
 		}
 
 		if out, why := jsonspike.DefaultLexer.Expect(doc); out == stance.Undecided {

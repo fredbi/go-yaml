@@ -122,6 +122,7 @@ func (b Build) cases() []suite.Case {
 			WellFormed: doc.WellFormed,
 			Opaque:     doc.Opaque,
 			Tags:       tagNames(doc.Tags),
+			VerdictAt:  stance.Construct.String(),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
 	}

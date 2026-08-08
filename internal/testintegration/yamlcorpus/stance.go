@@ -22,7 +22,7 @@ var GoYAML = stance.Table{
 	Because:  "decodes into Go values, which hold more shapes than JSON does and fewer than YAML admits",
 	At:       stance.Construct,
 	Speaks:   Vocabulary(),
-	Requires: AnchorRules(),
+	Requires: append(AnchorRules(), TagRules()...),
 	Stands: map[stance.Tag]stance.Stand{
 		// Measured: "first: &x [1, 2]\n*x : keyed\n" decodes, with the sequence
 		// as a key. A Go map key may be any comparable value and the decoder
@@ -37,6 +37,17 @@ var GoYAML = stance.Table{
 		// See Departures: the verdict is right and the value is not, and this
 		// table can only speak about verdicts.
 		TagCyclicMeaning: stance.Accepts,
+
+		// Measured on the tag family. Everything the specification leaves to
+		// the application, this library reads: a local tag, a handle a %TAG
+		// declared, a percent escape in a tag URI, a version directive. None of
+		// them is a position anybody would call surprising, and the value of
+		// writing them down is that a change to any of them fails a test rather
+		// than surprising a consumer.
+		TagLocal:         stance.Accepts,
+		TagNamedHandle:   stance.Accepts,
+		TagPercentEscape: stance.Accepts,
+		TagYAMLDirective: stance.Accepts,
 	},
 }
 
@@ -104,4 +115,28 @@ var Departures = []Departure{
 		Because: "3.2.1: the representation is a graph and the alias resolves to the node it is inside; " +
 			"a model that cannot hold that has to say so rather than substitute a value the document never had",
 	},
+}
+
+// GoYAMLParser is the same library asked the question it actually answers at
+// parsing: is this a document.
+//
+// Two tables for one library, and the corpus is built to make that ordinary
+// rather than awkward. The decoder above reads a whole stream into Go values
+// and cannot say at which stage it stopped, so a document it refuses may have
+// failed to parse, to compose, or to construct. The parser only parses, so its
+// refusal is a statement about syntax and can be compared against a verdict
+// that is also about syntax.
+//
+// Getting this wrong is not a small error and it does not announce itself. A
+// mutant's acceptance is evidence at parsing and nowhere else; scored against
+// the decoder it is either an accusation -- if the corpus claims construction
+// it has no right to -- or nothing at all, if the corpus is honest and the
+// consumer is the wrong one. Both were tried here before this table existed.
+var GoYAMLParser = stance.Table{
+	Name:     "go-openapi/go-yaml parser",
+	Because:  "answers whether a document is well formed, and nothing about what it means",
+	At:       stance.Parse,
+	Speaks:   Vocabulary(),
+	Requires: append(AnchorRules(), TagRules()...),
+	Stands:   GoYAML.Stands,
 }

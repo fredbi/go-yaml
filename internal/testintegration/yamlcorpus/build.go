@@ -5,12 +5,228 @@ package yamlcorpus
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
+
+	_ "embed"
 )
+
+// Generator names what produced a corpus, so a change here is as visible in an
+// artifact's header as a change to the grammar.
+const Generator = "yamlcorpus/2"
+
+// Build is the recipe for a corpus: how much to draw, and how much to keep.
+type Build struct {
+	// Tier labels the result.
+	Tier string
+	// Seed reproduces the whole thing.
+	Seed uint64
+	// Documents is how many valid documents to draw.
+	Documents int
+	// MutantsEach is how many times to break each of them.
+	MutantsEach int
+	// PerSignature is how many documents to keep per coverage signature, and
+	// zero means keep every one.
+	PerSignature int
+}
+
+// Smoke is the corpus that lives in the repository.
+//
+// Every number here is measured, and the measurement changed which knob to
+// turn. See TestMeasureK.
+//
+// The quota saturates at sixteen: replaying each build and counting the
+// *distinct* complaints the library makes gives 8 at K=1, 11 at 4, 14 at 16,
+// and 14 again at 32. Raising it past sixteen is bytes for nothing.
+//
+// But drawing more documents beats raising the quota outright, and not
+// marginally. Keeping everything at 1500 documents finds 20 complaints in
+// 493KB; twice the mutants with the quota still at sixteen finds 21 in 362KB.
+// So the corpus minimizes hard and generates more, which is the opposite of
+// what the quota curve on its own suggests.
+//
+// The reason is in the shape of what is being looked for. Most complaints are
+// singletons -- one document in twenty thousand -- so whether a quota keeps one
+// is luck rather than policy, and no cleverness in the sampling helps. A
+// thinning sample that took every power-of-two member of a group was tried and
+// found exactly nothing extra. What finds more of them is more documents.
+func Smoke() Build {
+	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 24, PerSignature: 16}
+}
+
+// Full is the corpus that ships as a release artifact, where nothing is
+// discarded.
+//
+// Bigger on both axes than the smoke tier, because nothing here has to fit in a
+// repository: four times the documents and no minimizing at all, which finds 39
+// distinct complaints against the smoke tier's 21, in 2MB.
+//
+// That number is still climbing. The library can make around 55 distinct
+// complaints while reading a document, counted from its own source, so a corpus
+// finding 37 has found two thirds of them -- and the way to find the rest is
+// more documents rather than a different recipe.
+func Full() Build {
+	return Build{Tier: "full", Seed: 1, Documents: 6000, MutantsEach: 12, PerSignature: 0}
+}
+
+func (b Build) minimizing() bool { return b.PerSignature > 0 }
+
+// Write generates a corpus and writes it as an artifact.
+func (b Build) Write(w io.Writer) error {
+	cases := b.cases()
+
+	header := suite.Header{
+		Grammar:   grammar.YAML.Name(),
+		Digest:    grammar.YAML.Digest(),
+		Generator: Generator,
+		Seed:      b.Seed,
+		Tier:      b.Tier,
+		Cases:     len(cases),
+		Vocabulary: suite.SpecsFor(
+			vocabularyOf(cases), Vocabulary(), append(AnchorRules(), TagRules()...)),
+	}
+
+	out, err := suite.NewWriter(w, header)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range cases {
+		if err := out.Add(c); err != nil {
+			return err
+		}
+	}
+
+	return out.Close()
+}
+
+// cases puts the enumerated families in first and never discards them, then
+// draws documents and keeps the ones that earn a place.
+//
+// The order matters and the exemption matters more. No coverage signal points
+// at an anchor pattern or a schema shape -- an alias reaches the same
+// productions whether it resolves or not, and every plain scalar reaches the
+// same ones whatever it denotes -- so a minimizer selecting on what the grammar
+// saw would keep one of each family and call the rest duplicates.
+func (b Build) cases() []suite.Case {
+	out := Cases()
+
+	rec := grammar.NewRecognizer(4096)
+	seen := grammar.YAML.NewCoverage()
+	one := grammar.YAML.NewCoverage()
+	kept := map[string]int{}
+
+	for _, e := range Generate(b.Seed, b.Documents, b.MutantsEach) {
+		one.Reset()
+		rec.Cover(one)
+		wellFormed := rec.Stream(e.Src).OK
+		rec.Cover(nil)
+
+		signature := fmt.Sprintf("%x", one.Signature())
+		covers := one.AddsTo(seen)
+		meaning := meaningOfEntry(e, wellFormed)
+
+		// A document carrying a meaning is exempt from the quota, for the same
+		// reason the enumerated shapes are: the signature cannot see what makes
+		// it worth keeping.
+		//
+		// A signature fingerprints the route the *grammar* took, and two
+		// documents that took the same route and denote different things are
+		// one test for a recognizer and two for a decoder. Before meanings were
+		// carried this cost nothing, because the two were genuinely
+		// interchangeable. Now it would throw away the entire value half of the
+		// corpus -- fifteen hundred drawn documents came out as two hundred and
+		// fifty-nine, and the ones discarded were not duplicates of anything.
+		//
+		// Mutants are a different case and keep the quota. What a mutant
+		// carries *is* its route: nobody knows what it denotes, which is why it
+		// carries no meaning, so two mutants that fail identically really are
+		// one test wearing two disguises.
+		if b.minimizing() && meaning == nil && !covers && kept[signature] >= b.PerSignature {
+			continue
+		}
+
+		seen.Merge(one)
+		kept[signature]++
+
+		out = append(out, suite.Case{
+			Name:       e.Name,
+			Src:        e.Src,
+			WellFormed: wellFormed,
+			VerdictAt:  verdictAt(e),
+			Opaque:     !utf8.Valid(e.Src),
+			Tags:       encodingTags(e.Src),
+			Meaning:    meaning,
+			Origin: suite.Origin{
+				Document:  -1,
+				Mutation:  e.Mutation,
+				Signature: signature,
+			},
+		})
+	}
+
+	return out
+}
+
+// meaningOfEntry states what a generated document denotes, which is free
+// because the value came before the text.
+//
+// This is the half of the corpus a verdict was always going to be enough for,
+// and it costs nothing to carry more: the generator drew a value and asked the
+// emitter to write it, so the expected decode is already in hand. A mutant
+// carries none -- whatever the mutation left behind is exactly what nobody
+// knows.
+func meaningOfEntry(e Entry, wellFormed bool) *suite.Meaning {
+	if e.Value == nil || !wellFormed {
+		return nil
+	}
+
+	encoded, err := json.Marshal(e.Value.Decoded())
+	if err != nil {
+		return nil
+	}
+
+	return &suite.Meaning{Under: Reading, JSON: encoded}
+}
+
+// encodingTags reports what a document's bytes exhibit, which for a generated
+// one is usually nothing and for a mutant is occasionally a broken rune.
+func encodingTags(src []byte) []string {
+	var out []string
+
+	if !utf8.Valid(src) {
+		out = append(out, string(stance.TagNotUTF8))
+	}
+
+	if len(src) >= 3 && src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF {
+		out = append(out, string(stance.TagBOM))
+	}
+
+	return out
+}
+
+// vocabularyOf collects every tag name the corpus uses.
+func vocabularyOf(cases []suite.Case) []string {
+	var out []string
+
+	for _, c := range cases {
+		for _, tag := range c.Tags {
+			if !slices.Contains(out, tag) {
+				out = append(out, tag)
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
 
 // Reading names the resolution the corpus states a meaning under.
 //
@@ -32,7 +248,8 @@ const Reading = "yaml-1.2-core"
 // The verdict is still recorded, and it is still the grammar's. What the
 // construction adds is the label the grammar could not produce.
 func Cases() []suite.Case {
-	out := make([]suite.Case, 0, len(Patterns())+len(Resolutions()))
+	out := make([]suite.Case, 0,
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -44,8 +261,32 @@ func Cases() []suite.Case {
 			Name:       "shape/anchor/" + p.Name,
 			Src:        src,
 			WellFormed: rec.Stream(src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Tags:       names(p.Exhibits),
 			Meaning:    meaningOfPattern(p),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	for i, s := range TagShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/tag/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	// The reach shapes carry no tags and raise no question. They exist because
+	// the grammar has corners the rest of the corpus does not turn.
+	for i, s := range ReachShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/reach/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
 	}
@@ -57,6 +298,7 @@ func Cases() []suite.Case {
 			Name:       "shape/schema/" + r.Scalar,
 			Src:        src,
 			WellFormed: rec.Stream(src).OK,
+			VerdictAt:  stance.Construct.String(),
 			Tags:       names(r.Exhibits),
 			Meaning:    meaningOfResolution(r),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
@@ -166,4 +408,35 @@ func names(tags []stance.Tag) []string {
 	}
 
 	return out
+}
+
+//go:embed testdata/yaml-smoke.jsonl.gz
+var smokeArtifact []byte
+
+// SmokeSuite returns the corpus checked in beside this package.
+//
+// The second way an artifact is consumed. Released, the same file is read by
+// anyone with a JSON reader and base64; embedded, it is a corpus a Go test gets
+// with one call and no generation, no oracle and no fuzzing.
+func SmokeSuite() (suite.Header, []suite.Case, error) {
+	return suite.FromBytes(smokeArtifact)
+}
+
+// verdictAt says how far a generated case's verdict can be trusted.
+//
+// A document emitted whole is trustworthy all the way: it was written from a
+// value the generator holds, so its anchors resolve and its keys are distinct
+// by construction, and there is nothing for a later stage to discover.
+//
+// A mutant is not. The mutation may have broken an anchor or duplicated a key,
+// leaving a document the grammar accepts and a composer must refuse, and
+// nothing here can tell which mutations did that. So its acceptance is claimed
+// for parsing and no further -- while its *refusal*, which is most of what a
+// mutant is worth, still counts at every stage.
+func verdictAt(e Entry) string {
+	if e.Mutation == "" {
+		return stance.Construct.String()
+	}
+
+	return stance.Parse.String()
 }

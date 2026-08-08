@@ -55,7 +55,7 @@ package suite
 // It is bumped when a reader written against an older version would
 // misunderstand a newer file -- not when a field is added, which readers are
 // expected to ignore.
-const Format = 2
+const Format = 3
 
 // Header describes an artifact and is the first line of one.
 type Header struct {
@@ -133,6 +133,28 @@ type Case struct {
 	Opaque bool `json:"opaque,omitempty"`
 	// Tags are the implementation-defined properties the document exhibits.
 	Tags []string `json:"tags,omitempty"`
+	// VerdictAt is the furthest stage at which WellFormed is evidence, as a
+	// stage name. Empty means parse, which is the least this can claim.
+	//
+	// # Why acceptance needs a bound and refusal does not
+	//
+	// Refusal propagates upward: a document that does not parse does not
+	// compose or construct either, so a recorded refusal is evidence for every
+	// consumer. Acceptance does not. A document can parse perfectly and fail to
+	// compose, and the corpus is only entitled to say a consumer should read it
+	// as far as it actually knows.
+	//
+	// It is not knowing that makes this necessary. A mutation that breaks an
+	// anchor leaves a document the grammar accepts and a conforming parser must
+	// refuse, and the corpus cannot tell which mutations did that -- guessing
+	// would apply a settled rejection to documents that do not deserve one and
+	// accuse in the other direction. So a mutant says "parse", and a consumer
+	// that composes scores it on its refusals and leaves its acceptances alone.
+	//
+	// Empty defaulting to parse is deliberate. The permissive default is what
+	// produced the defect this field exists for: an absent claim read as the
+	// strongest one.
+	VerdictAt string `json:"verdictAt,omitempty"`
 	// Meaning is what the document denotes, where the corpus can say.
 	//
 	// Absent for most cases: a document that is refused denotes nothing, and a

@@ -65,6 +65,7 @@ func TestTheLibraryMatchesItsDeclaredStance(t *testing.T) {
 			Name:       p.Name,
 			Src:        src,
 			WellFormed: true, // asserted separately: the grammar accepts every pattern
+			VerdictAt:  stance.Construct,
 			Tags:       p.Exhibits,
 		}
 
@@ -163,4 +164,36 @@ func build(t *testing.T, name string) []byte {
 	t.Fatalf("no pattern named %q", name)
 
 	return nil
+}
+
+// TestTheLibraryHonoursTheTagRule measures the one tag question the
+// specification settles.
+//
+// Resolving a shorthand needs the table of handles the document declared, which
+// is the same shape as resolving an alias and fails the same way: the grammar
+// accepts "!e!x" whatever precedes it. Unlike the alias rules, this one the
+// library gets right, and saying so is as much a measurement as saying it does
+// not -- a ledger with only failures in it is a list of complaints.
+func TestTheLibraryHonoursTheTagRule(t *testing.T) {
+	for _, s := range yamlcorpus.TagShapes() {
+		doc := stance.Doc{
+			Name: s.Name, Src: s.Src, WellFormed: true,
+			VerdictAt: stance.Construct, Tags: s.Intent,
+		}
+
+		want, why := yamlcorpus.GoYAML.Expect(doc)
+
+		// Undecided would let this test pass by saying nothing, which is the
+		// failure mode a stance is most prone to: a tag nobody ruled on scores
+		// every document carrying it as no evidence.
+		if want == stance.Undecided {
+			t.Errorf("%s cannot be scored: %s", s.Name, why)
+
+			continue
+		}
+
+		if got := reads(s.Src); (want == stance.Accept) != (got == nil) {
+			t.Errorf("%s\n  expected %s, because %s\n  library: %v", s.Name, want, why, got)
+		}
+	}
 }

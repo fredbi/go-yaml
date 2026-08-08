@@ -188,6 +188,12 @@ type Doc struct {
 	Opaque bool
 	// Tags are the implementation-defined properties the raw bytes exhibit.
 	Tags []Tag
+	// VerdictAt is the furthest stage at which WellFormed is evidence.
+	//
+	// The zero value is Parse, the least this can claim, and the default is
+	// what makes the mechanism safe: a case that forgot to say goes unscored
+	// past parsing rather than being scored on a claim nobody made.
+	VerdictAt Stage
 }
 
 // Expect says what a parser holding this stance should do with a document, and
@@ -212,7 +218,10 @@ type Doc struct {
 //     tolerates, are no evidence either: what they denote depends on a decoder
 //     this package does not have. A parser lenient about encodings needs its
 //     input decoded before a grammar can say anything about it.
-//   - Otherwise the grammar decides, on the normalized document.
+//   - A refusal by the grammar decides, whatever stage the consumer reaches:
+//     a document that does not parse does not compose either.
+//   - An acceptance decides only as far as the case claims. See
+//     [Doc.VerdictAt]: acceptance does not propagate the way refusal does.
 func (t Table) Expect(d Doc) (Outcome, string) {
 	for _, tag := range d.Tags {
 		if t.beyond(tag) {
@@ -262,11 +271,19 @@ func (t Table) Expect(d Doc) (Outcome, string) {
 		}
 	}
 
-	if d.WellFormed {
-		return Accept, "the grammar accepts it and no property this parser refuses is present"
+	if !d.WellFormed {
+		// Refusal propagates: a document that does not parse does not compose
+		// or construct either, so this is evidence whatever stage the consumer
+		// reaches.
+		return Reject, "the grammar refuses it, and no implementation-defined property explains why"
 	}
 
-	return Reject, "the grammar refuses it, and no implementation-defined property explains why"
+	if t.At > d.VerdictAt {
+		return Undecided, "the grammar accepts it, and nothing here knows whether it survives " +
+			t.At.String() + " -- this case only claims " + d.VerdictAt.String()
+	}
+
+	return Accept, "the grammar accepts it and no property this parser refuses is present"
 }
 
 // Undeclared lists the tags appearing in docs that this table says nothing
