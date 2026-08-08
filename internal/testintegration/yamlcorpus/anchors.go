@@ -131,7 +131,7 @@ const (
 // stage where the question can be asked; a consumer that notices it later is
 // still answering the same question, which is why a table's stage is a floor.
 func Vocabulary() stance.Vocabulary {
-	return stance.Vocabulary{
+	out := stance.Vocabulary{
 		// Whether "*x" resolves at all is settled while composing, and the
 		// three failures are the three ways it does not.
 		TagAliasUndefined:       stance.Compose,
@@ -151,6 +151,15 @@ func Vocabulary() stance.Vocabulary {
 		TagCyclicMeaning: stance.Construct,
 		TagKeyNotAScalar: stance.Construct,
 	}
+
+	// Schema resolution is a separate family with its own file, and every one
+	// of its questions arises at the same place, but it is one vocabulary
+	// because a consumer has one.
+	for tag, at := range SchemaVocabulary() {
+		out[tag] = at
+	}
+
+	return out
 }
 
 // AnchorRules is what the specification settles about the above.
