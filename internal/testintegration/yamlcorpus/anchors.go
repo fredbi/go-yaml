@@ -159,6 +159,10 @@ func Vocabulary() stance.Vocabulary {
 		out[tag] = at
 	}
 
+	for tag, at := range TagVocabulary() {
+		out[tag] = at
+	}
+
 	return out
 }
 

@@ -177,11 +177,20 @@ func TestTheCorpusReachesMostOfTheGrammar(t *testing.T) {
 	reached, matched, total := cover.Against(reach)
 	t.Logf("%d of %d buckets entered, %d matched", reached, total, matched)
 
-	// A floor rather than a target. What it is guarding against is a change
-	// that quietly narrows the generator -- a style axis dropped, an alphabet
-	// trimmed -- which shows up here long before it shows up as a missed defect.
-	if reached*4 < total*3 {
-		t.Errorf("the corpus enters %d of %d buckets, which is less of the grammar than it was", reached, total)
+	// All of them, and asserted exactly rather than as a floor.
+	//
+	// A floor was right while the last few were open; now that they are closed
+	// the exact number is the stronger guard, and the failure it catches is a
+	// change that quietly narrows the generator -- a style axis dropped, an
+	// alphabet trimmed -- which shows up here long before it shows up as a
+	// missed defect.
+	//
+	// Reaching every bucket is not the same as covering the grammar and should
+	// not be read as it. Entry is easy to saturate; matching is not, and the
+	// gap between the two numbers is the part of the language the corpus makes
+	// the grammar consider and never satisfies.
+	if reached != total {
+		t.Errorf("the corpus enters %d of %d buckets", reached, total)
 	}
 
 	// What is left out is one coherent list rather than a scatter, which is

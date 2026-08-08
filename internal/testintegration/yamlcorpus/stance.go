@@ -22,7 +22,7 @@ var GoYAML = stance.Table{
 	Because:  "decodes into Go values, which hold more shapes than JSON does and fewer than YAML admits",
 	At:       stance.Construct,
 	Speaks:   Vocabulary(),
-	Requires: AnchorRules(),
+	Requires: append(AnchorRules(), TagRules()...),
 	Stands: map[stance.Tag]stance.Stand{
 		// Measured: "first: &x [1, 2]\n*x : keyed\n" decodes, with the sequence
 		// as a key. A Go map key may be any comparable value and the decoder
@@ -37,6 +37,17 @@ var GoYAML = stance.Table{
 		// See Departures: the verdict is right and the value is not, and this
 		// table can only speak about verdicts.
 		TagCyclicMeaning: stance.Accepts,
+
+		// Measured on the tag family. Everything the specification leaves to
+		// the application, this library reads: a local tag, a handle a %TAG
+		// declared, a percent escape in a tag URI, a version directive. None of
+		// them is a position anybody would call surprising, and the value of
+		// writing them down is that a change to any of them fails a test rather
+		// than surprising a consumer.
+		TagLocal:         stance.Accepts,
+		TagNamedHandle:   stance.Accepts,
+		TagPercentEscape: stance.Accepts,
+		TagYAMLDirective: stance.Accepts,
 	},
 }
 

@@ -60,7 +60,7 @@ func (b Build) Write(w io.Writer) error {
 		Tier:      b.Tier,
 		Cases:     len(cases),
 		Vocabulary: suite.SpecsFor(
-			vocabularyOf(cases), Vocabulary(), AnchorRules()),
+			vocabularyOf(cases), Vocabulary(), append(AnchorRules(), TagRules()...)),
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -218,7 +218,8 @@ const Reading = "yaml-1.2-core"
 // The verdict is still recorded, and it is still the grammar's. What the
 // construction adds is the label the grammar could not produce.
 func Cases() []suite.Case {
-	out := make([]suite.Case, 0, len(Patterns())+len(Resolutions()))
+	out := make([]suite.Case, 0,
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -232,6 +233,27 @@ func Cases() []suite.Case {
 			WellFormed: rec.Stream(src).OK,
 			Tags:       names(p.Exhibits),
 			Meaning:    meaningOfPattern(p),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	for i, s := range TagShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/tag/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	// The reach shapes carry no tags and raise no question. They exist because
+	// the grammar has corners the rest of the corpus does not turn.
+	for i, s := range ReachShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/reach/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
 	}

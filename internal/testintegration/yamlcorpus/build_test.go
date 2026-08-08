@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
 )
@@ -23,40 +24,82 @@ import (
 func TestBothFamiliesReachTheCorpus(t *testing.T) {
 	cases := yamlcorpus.Cases()
 
-	var anchors, schemas int
+	counted := map[string]int{}
 
 	for _, c := range cases {
-		switch {
-		case strings.HasPrefix(c.Name, "shape/anchor/"):
-			anchors++
-		case strings.HasPrefix(c.Name, "shape/schema/"):
-			schemas++
-		default:
-			t.Errorf("%s is in neither family", c.Name)
+		family, _, ok := strings.Cut(strings.TrimPrefix(c.Name, "shape/"), "/")
+		if !ok {
+			t.Errorf("%s is in no family", c.Name)
+
+			continue
 		}
+
+		counted[family]++
 	}
 
-	if want := len(yamlcorpus.Patterns()); anchors != want {
-		t.Errorf("%d anchor cases, %d patterns", anchors, want)
-	}
-
-	if want := len(yamlcorpus.Resolutions()); schemas != want {
-		t.Errorf("%d schema cases, %d resolutions", schemas, want)
+	for family, want := range map[string]int{
+		"anchor": len(yamlcorpus.Patterns()),
+		"schema": len(yamlcorpus.Resolutions()),
+		"tag":    len(yamlcorpus.TagShapes()),
+		"reach":  len(yamlcorpus.ReachShapes()),
+	} {
+		if counted[family] != want {
+			t.Errorf("%d %s cases, expected %d", counted[family], family, want)
+		}
 	}
 }
 
 // TestTheVerdictIsStillTheGrammars checks the construction adds a label and does
 // not replace the oracle.
 //
-// Every one of these documents is one the grammar accepts, violations included,
-// and the recorded verdict has to say so. A case whose WellFormed was set by
-// whatever built it rather than by the recognizer would be a fixture asserting
-// its own premise.
+// Every case that names a rule is a document the grammar *accepts*, violations
+// included -- that is the whole point of the families, and a case whose
+// WellFormed was set by whatever built it rather than by the recognizer would be
+// a fixture asserting its own premise.
+//
+// The reach family is exempt and is the reason the exemption is written down.
+// Those documents name no rule; they exist to enter a production, and one of
+// them can only do so while being refused.
 func TestTheVerdictIsStillTheGrammars(t *testing.T) {
 	for _, c := range yamlcorpus.Cases() {
+		if strings.HasPrefix(c.Name, "shape/reach/") {
+			continue
+		}
+
 		if !c.WellFormed {
 			t.Errorf("%s: the grammar refuses it, so it is testing syntax and not the rule it names", c.Name)
 		}
+	}
+}
+
+// TestTheTagFamilyIsPlacedAndSettled holds the newest family to what the others
+// are held to.
+func TestTheTagFamilyIsPlacedAndSettled(t *testing.T) {
+	vocabulary := yamlcorpus.Vocabulary()
+	rules := yamlcorpus.TagRules()
+
+	for _, s := range yamlcorpus.TagShapes() {
+		for _, tag := range s.Intent {
+			if _, ok := vocabulary.Of(tag); !ok {
+				t.Errorf("%q exhibits %s, which no stage places", s.Name, tag)
+			}
+		}
+	}
+
+	// Exactly one tag question is settled, and it is the one a grammar cannot
+	// answer: whether a shorthand's handle was ever declared. Everything else
+	// about a tag is the application's business, and a corpus that settled any
+	// of it would be asserting what somebody else's tags mean.
+	var rejections int
+
+	for _, r := range rules {
+		if r.Then == stance.Reject {
+			rejections++
+		}
+	}
+
+	if rejections != 1 {
+		t.Errorf("%d tag rules reject, expected 1", rejections)
 	}
 }
 
