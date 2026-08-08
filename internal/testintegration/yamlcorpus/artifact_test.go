@@ -185,9 +185,10 @@ func TestTheCorpusReachesMostOfTheGrammar(t *testing.T) {
 	}
 
 	// What is left out is one coherent list rather than a scatter, which is
-	// what a work list should look like: the emitter writes no tags, no
-	// directives, no explicit keys, and the Style has no axis for the keep
-	// chomping indicator. Four gaps, not fifteen.
+	// what a work list should look like. Nine of the thirteen are tags, which
+	// the emitter does not write; one is a %YAML directive, which it does not
+	// write either; one is an explicit key; one is the keep chomping indicator,
+	// which Style has no axis for. Four gaps, not thirteen.
 	if missing := cover.Missing(reach); len(missing) > 0 {
 		t.Logf("never entered (%d):\n  %s", len(missing), strings.Join(missing, "\n  "))
 	}

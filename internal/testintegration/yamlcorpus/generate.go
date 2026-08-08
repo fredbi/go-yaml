@@ -11,20 +11,33 @@ import (
 
 // Generating documents for the corpus.
 //
-// # Why this is not yamlgen's generator
+// # Drawing from yamlgen, deterministically
 //
-// yamlgen already draws values and styles, and this reuses neither of its
-// generators. They are rapid's, drawn from a *rapid.T inside a property check,
-// and rapid owns the randomness -- which is right for a property test and fatal
-// for an artifact. A corpus claims a seed reproduces it byte for byte, and that
-// claim cannot be made about a stream somebody else controls. It is the same
-// objection that kept the fuzzer's corpus out of artifact construction.
+// The values and the styles are yamlgen's, drawn through rapid's Example, which
+// is documented to produce a value deterministically from a seed. That is what
+// an artifact needs and what a *rapid.T inside a property check could not give:
+// a corpus claims a seed reproduces it byte for byte, and rapid owning the
+// stream would make the claim unverifiable.
 //
-// What is reused is everything that matters: [yamlgen.Value], [yamlgen.Style]
-// and [yamlgen.Emit]. The emitter is the part that is hard to get right and
-// dangerous to get wrong -- a second one would write documents whose meaning we
-// had computed incorrectly, and then blame the library for the difference. Only
-// the drawing is written again, and drawing is cheap.
+// Example carries a caveat -- it is meant for examples rather than for property
+// tests -- and one more this file has to live with: nothing promises the values
+// are the same across rapid versions. That is survivable here because it is
+// *detected*. The stored corpus is regenerated and diffed on every run, so a
+// rapid upgrade that moved the documents fails loudly and gets a deliberate
+// regeneration and a Generator bump, rather than quietly producing a different
+// corpus for whoever built it last.
+//
+// # Why yamlgen's generator and not one written here
+//
+// The first version of this file drew its own values, from an alphabet chosen
+// for characters the grammar finds awkward. It was worse in the way that
+// matters: it produced no anchors at all. yamlgen's Values wraps its trees in
+// withAliases, so about a quarter of the documents carry an anchor and an alias
+// -- and its awkwardStrings covers everything that alphabet did and adds the
+// schema boundaries and the document markers besides.
+//
+// The mutations keep their own generator. Breaking a document is not something
+// yamlgen has a seeded form of, and a plain PCG is the whole of what it needs.
 
 // Entry is one generated document, with where it came from.
 type Entry struct {
@@ -47,11 +60,19 @@ type Entry struct {
 func Generate(seed uint64, documents, mutantsEach int) []Entry {
 	rng := rand.New(rand.NewPCG(seed, 0x59414d4c))
 
+	values := yamlgen.Values()
+	styles := yamlgen.Styles()
+
 	out := make([]Entry, 0, documents*(1+mutantsEach))
 
 	for i := range documents {
-		value := randomValue(rng, 0)
-		src := []byte(yamlgen.Emit(value, randomStyle(rng)))
+		// One stream of example seeds per corpus seed, so that two corpora
+		// built from different seeds share no documents rather than sharing a
+		// prefix.
+		at := int(seed)*1_000_003 + i
+
+		value := values.Example(at)
+		src := []byte(yamlgen.Emit(value, styles.Example(at)))
 
 		out = append(out, Entry{
 			Name:  "generated/" + digits(i),
@@ -87,119 +108,4 @@ func digits(n int) string {
 	}
 
 	return string(out)
-}
-
-// randomValue draws a value, narrowing as it descends so that a tree
-// terminates.
-//
-// Depth is bounded rather than left to chance because the corpus is regenerated
-// on every test run: an unlucky seed producing a document a megabyte deep would
-// not be a finding, it would just be slow forever.
-func randomValue(rng *rand.Rand, depth int) yamlgen.Value {
-	kinds := 7
-	if depth >= 3 {
-		// Past here, scalars only, so the recursion has an end.
-		kinds = 5
-	}
-
-	switch rng.IntN(kinds) {
-	case 0:
-		return yamlgen.Null{}
-	case 1:
-		return yamlgen.Bool{V: rng.IntN(2) == 0}
-	case 2:
-		return yamlgen.Int{V: rng.IntN(2001) - 1000}
-	case 3:
-		return yamlgen.Float{V: float64(rng.IntN(2001)-1000) / 8}
-	case 4:
-		return yamlgen.Str{V: randomString(rng)}
-	case 5:
-		items := make([]yamlgen.Value, 0, 3)
-		for range rng.IntN(4) {
-			items = append(items, randomValue(rng, depth+1))
-		}
-
-		return yamlgen.Seq{Items: items}
-	default:
-		pairs := make([]yamlgen.Pair, 0, 3)
-		seen := map[string]bool{}
-
-		for range rng.IntN(4) {
-			key := randomKey(rng)
-			if seen[key] {
-				continue
-			}
-
-			seen[key] = true
-			pairs = append(pairs, yamlgen.Pair{Key: key, Val: randomValue(rng, depth+1)})
-		}
-
-		return yamlgen.Map{Pairs: pairs}
-	}
-}
-
-// alphabet is what a generated string is drawn from.
-//
-// Every entry is here because it is awkward somewhere. A break decides between
-// a literal and a folded scalar; a leading space defeats indentation detection;
-// "#" opens a comment unless something precedes it; the indicators are the
-// characters the published grammar under-constrains. A generator drawing from
-// letters would produce documents that are all the same document.
-var alphabet = []rune{
-	'a', 'b', 'z', 'A', 'Z', '0', '9',
-	' ', '\t', '\n',
-	'#', ':', '-', '?', '&', '*', '!', '|', '>', '%', '@', '`',
-	'\'', '"', '\\', '[', ']', '{', '}', ',',
-	'é',          // a letter that is two bytes, so a byte mutation can split it
-	'中',          // three bytes
-	'\U0001f600', // four, and outside the basic plane
-	'',          // a next line, which YAML counts as a break and Go does not
-	' ',          // a non-breaking space, which is not s-white and looks like it
-}
-
-func randomString(rng *rand.Rand) string {
-	out := make([]rune, 0, 8)
-	for range rng.IntN(9) {
-		out = append(out, alphabet[rng.IntN(len(alphabet))])
-	}
-
-	return string(out)
-}
-
-// randomKey draws a mapping key, which is a string with no break in it.
-//
-// A key holding a line break is a different question -- it forces a quoted or
-// an explicit key -- and one this generator does not raise, because the emitter
-// declines to write those and a document it declines to write is not a
-// document.
-func randomKey(rng *rand.Rand) string {
-	out := make([]rune, 0, 6)
-
-	for range 1 + rng.IntN(5) {
-		r := alphabet[rng.IntN(len(alphabet))]
-		if r == '\n' || r == '' {
-			r = 'k'
-		}
-
-		out = append(out, r)
-	}
-
-	return string(out)
-}
-
-func randomStyle(rng *rand.Rand) yamlgen.Style {
-	nulls := []string{"null", "~", "", "Null", "NULL"}
-
-	return yamlgen.Style{
-		Flow:           rng.IntN(2) == 0,
-		Indent:         1 + rng.IntN(6),
-		Quoting:        yamlgen.Quoting(rng.IntN(3)),
-		Literal:        rng.IntN(2) == 0,
-		Folded:         rng.IntN(2) == 0,
-		BlockIndicator: rng.IntN(2) == 0,
-		Markers:        rng.IntN(2) == 0,
-		NullSpelling:   nulls[rng.IntN(len(nulls))],
-		BoolCase:       rng.IntN(3),
-		Comments:       yamlgen.Commenting(rng.IntN(4)),
-	}
 }
