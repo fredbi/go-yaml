@@ -47,6 +47,22 @@ var reachShapes = []stance.Shape{
 		Src:  []byte("|+\n a\n\n\n"),
 	},
 	{
+		// Reaches ns-flow-map-explicit-entry@flow-in, and the next one reaches
+		// it at flow-key.
+		//
+		// Both were entered by luck until the generator drew twice as many
+		// mutants and stopped drawing whichever document had been doing it.
+		// That is the argument for asserting the bucket count exactly rather
+		// than as a floor: a coverage loss with no other symptom, caused by a
+		// change that had nothing to do with it, reported the same day.
+		Name: "an explicit entry in a flow mapping",
+		Src:  []byte("{? a : b}\n"),
+	},
+	{
+		Name: "an explicit entry in a flow mapping used as a key",
+		Src:  []byte("{? a : b}: c\n"),
+	},
+	{
 		// Reaches b-break@flow-key, and does so while being refused.
 		//
 		// The only bucket of the 605 that no valid document enters, which is

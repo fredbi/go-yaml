@@ -38,29 +38,41 @@ type Build struct {
 
 // Smoke is the corpus that lives in the repository.
 //
-// PerSignature is 16, and it is measured rather than chosen. Replaying each
-// build against this library and counting the *distinct* complaints it makes --
-// fifty documents failing the same way are one finding -- gives 6 classes at
-// K=1, 9 at 4, 12 at 16, and 12 again at 32. It saturates at sixteen, so
-// anything above that is bytes for nothing.
+// Every number here is measured, and the measurement changed which knob to
+// turn. See TestMeasureK.
 //
-// The JSON corpus landed on sixteen too, from a different measurement on a
-// different grammar. Two data points are not a law, but it is worth noticing.
+// The quota saturates at sixteen: replaying each build and counting the
+// *distinct* complaints the library makes gives 6 at K=1, 9 at 4, 12 at 16, and
+// 12 again at 32. Raising it past sixteen is bytes for nothing.
+//
+// But drawing more documents beats raising the quota outright, and not
+// marginally. Keeping everything at 1500 documents finds 18 complaints in
+// 486KB; twice the mutants with the quota still at sixteen finds 19 in 360KB.
+// So the corpus minimizes hard and generates more, which is the opposite of
+// what the quota curve on its own suggests.
+//
+// The reason is in the shape of what is being looked for. Most complaints are
+// singletons -- one document in twenty thousand -- so whether a quota keeps one
+// is luck rather than policy, and no cleverness in the sampling helps. A
+// thinning sample that took every power-of-two member of a group was tried and
+// found exactly nothing extra. What finds more of them is more documents.
 func Smoke() Build {
-	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: 16}
+	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 24, PerSignature: 16}
 }
 
 // Full is the corpus that ships as a release artifact, where nothing is
 // discarded.
 //
-// Keeping everything is not belt and braces. The same measurement finds 18
-// distinct complaints with no minimizing at all, against 12 at any K that
-// saturates -- so a third of what the corpus can find is reachable only by
-// keeping documents a signature calls duplicates. Minimizing is lossy, the loss
-// is measured, and the two tiers exist so that it is paid once by the corpus
-// that has to be small and not by the one that does not.
+// Bigger on both axes than the smoke tier, because nothing here has to fit in a
+// repository: four times the documents and no minimizing at all, which finds 37
+// distinct complaints against the smoke tier's 19, in 2MB.
+//
+// That number is still climbing. The library can make around 55 distinct
+// complaints while reading a document, counted from its own source, so a corpus
+// finding 37 has found two thirds of them -- and the way to find the rest is
+// more documents rather than a different recipe.
 func Full() Build {
-	return Build{Tier: "full", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: 0}
+	return Build{Tier: "full", Seed: 1, Documents: 6000, MutantsEach: 12, PerSignature: 0}
 }
 
 func (b Build) minimizing() bool { return b.PerSignature > 0 }

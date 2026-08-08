@@ -39,6 +39,14 @@ var measureK = flag.Bool("yamlcorpus.k", false, "rebuild the corpus at several q
 // maximize duplicates. So the complaints are grouped by their text with the
 // position stripped, and what is counted is how many distinct ones survive.
 //
+// # The quota is not the interesting axis
+//
+// It saturates at sixteen and nothing above it helps. Drawing more documents
+// does: keeping everything at 1500 documents finds 18 complaints in 486KB,
+// where twice the mutants at a quota of sixteen finds 19 in 360KB. Most
+// complaints are singletons -- one document in twenty thousand -- so whether a
+// quota keeps one is luck, and more documents beats more of each.
+//
 // # And not all of those either
 //
 // Some complaints are the corpus's own fault, and they have to come out before
@@ -49,9 +57,23 @@ func TestMeasureK(t *testing.T) {
 		t.Skip("pass -yamlcorpus.k to measure the quota")
 	}
 
-	for _, k := range []int{1, 2, 4, 8, 16, 32, 0} {
+	// Both axes, because the quota turned out to be the less useful one. Read
+	// down the quota column and it saturates at sixteen; read across to the
+	// rows that draw more and the number keeps climbing, so the corpus is
+	// short of documents rather than short of quota.
+	for _, r := range []struct{ documents, mutants, quota int }{
+		{1500, 12, 1},
+		{1500, 12, 4},
+		{1500, 12, 16},
+		{1500, 12, 32},
+		{1500, 12, 0},
+		{1500, 24, 16},
+		{3000, 12, 16},
+		{6000, 12, 0},
+	} {
 		build := yamlcorpus.Build{
-			Tier: "measure", Seed: 1, Documents: 1500, MutantsEach: 12, PerSignature: k,
+			Tier: "measure", Seed: 1,
+			Documents: r.documents, MutantsEach: r.mutants, PerSignature: r.quota,
 		}
 
 		var buf bytes.Buffer
@@ -66,13 +88,13 @@ func TestMeasureK(t *testing.T) {
 
 		all, clean := complaints(cases)
 
-		label := "none"
-		if k > 0 {
-			label = strconv.Itoa(k)
+		quota := "none"
+		if r.quota > 0 {
+			quota = strconv.Itoa(r.quota)
 		}
 
-		t.Logf("K=%-4s %6d cases %7d bytes   %2d complaints, %2d of them the library's",
-			label, len(cases), buf.Len(), len(all), len(clean))
+		t.Logf("%5d docs x%-3d quota=%-5s %6d cases %8d bytes   %2d complaints, %2d of them the library's",
+			r.documents, r.mutants, quota, len(cases), buf.Len(), len(all), len(clean))
 	}
 }
 
