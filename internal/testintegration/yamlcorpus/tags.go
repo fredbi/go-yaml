@@ -89,20 +89,35 @@ func TagRules() stance.Rules {
 
 // TagVocabulary places the tag questions.
 //
-// The syntax of a tag is settled while parsing; whether a handle resolves is a
-// composing question, since it needs the directives of the document the
-// shorthand appears in; and what a resolved tag *means* is the application's,
-// which is construction.
+// The syntax of a tag is settled while parsing, and so is whether its handle was
+// ever declared -- a %TAG directive precedes the node that uses it. What a tag
+// *resolves to* is composing, and what the resolved tag *means* is the
+// application's, which is construction.
 func TagVocabulary() stance.Vocabulary {
 	return stance.Vocabulary{
-		TagYAMLDirective:    stance.Parse,
-		TagPercentEscape:    stance.Parse,
-		TagUndeclaredHandle: stance.Compose,
-		TagNamedHandle:      stance.Compose,
-		TagSecondary:        stance.Compose,
-		TagVerbatim:         stance.Compose,
-		TagNonSpecific:      stance.Compose,
-		TagLocal:            stance.Construct,
+		TagYAMLDirective: stance.Parse,
+		TagPercentEscape: stance.Parse,
+
+		// Whether a handle was declared is a parsing question, and placing it
+		// at composing was wrong.
+		//
+		// A %TAG directive precedes the node that uses its handle, so the
+		// answer is in hand before the node is finished, and this library
+		// refuses an undeclared handle while parsing. Placed at composing, a
+		// parse-stage table never enforced the rule and a parser refusing it
+		// early and correctly was scored as a false refusal -- found by the
+		// blind test, which is exactly the sort of thing a blind test is for.
+		//
+		// The vocabulary records the earliest stage a question *can* be asked,
+		// and a table's stage is a floor, so nothing that composes loses the
+		// check by this moving down.
+		TagUndeclaredHandle: stance.Parse,
+		TagNamedHandle:      stance.Parse,
+
+		TagSecondary:   stance.Compose,
+		TagVerbatim:    stance.Compose,
+		TagNonSpecific: stance.Compose,
+		TagLocal:       stance.Construct,
 	}
 }
 
