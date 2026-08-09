@@ -1,0 +1,109 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package yamlcorpus
+
+import "github.com/go-openapi/go-yaml/internal/testintegration/stance"
+
+// Merge keys: a construct no version of the specification we test against
+// defines.
+//
+// # Why this is a stance and cannot be anything else
+//
+// "<<" is a YAML 1.1 type, tag:yaml.org,2002:merge, and YAML 1.2 dropped it.
+// So a 1.2 parser reading "<<" as an ordinary key is not being lax and a parser
+// merging is not being lenient -- they are answering different questions
+// correctly. Measured rather than assumed: libfyaml gives {"<<": {...}} and
+// this library gives the merged mapping, and neither is wrong.
+//
+// There is therefore nothing here for a rule to settle, and a corpus that
+// settled it would be picking a version of the language and calling everyone
+// else defective. That is the failure this whole layer exists to avoid, and
+// merge keys are the cleanest example of it in YAML.
+//
+// # It changes verdicts, not only values
+//
+// The temptation is to file merge under "means something different" and move
+// on. It is more than that: a parser that merges has to *reject* documents a
+// parser that does not merge reads happily, because "<<: 1" asks it to merge a
+// scalar and there is no such operation. So the same bytes are a valid document
+// to one conforming consumer and an error to another, which is exactly what a
+// stance is for and exactly what a single stored verdict could not carry.
+const (
+	// TagMergeKey is a "<<" key whose value is an alias to a mapping -- the
+	// construct working as intended.
+	TagMergeKey stance.Tag = "merge/key"
+	// TagMergeSequence is "<<" given a sequence of mappings, which 1.1 merges
+	// in order with the earlier winning.
+	TagMergeSequence stance.Tag = "merge/sequence"
+	// TagMergeNonMapping is "<<" given something that is not a mapping.
+	//
+	// The shape that turns the stance into a verdict: an error to a merging
+	// parser, and an ordinary key with an ordinary value to everyone else.
+	TagMergeNonMapping stance.Tag = "merge/into-non-mapping"
+	// TagMergeQuoted is a quoted "<<", which suppresses the merge in every
+	// reading because quoting resolves it to a string.
+	//
+	// The control. A parser treating it as a merge has stopped distinguishing a
+	// key from its spelling, which is the same defect the unique-key family
+	// catches from the other direction.
+	TagMergeQuoted stance.Tag = "merge/quoted"
+)
+
+// MergeVocabulary places them, all at construction.
+//
+// Merging happens when a representation becomes a native value: the alias has
+// to be resolved and the mapping it names has to exist before anything can be
+// merged into anything. Nothing earlier has an opinion.
+func MergeVocabulary() stance.Vocabulary {
+	return stance.Vocabulary{
+		TagMergeKey:        stance.Construct,
+		TagMergeSequence:   stance.Construct,
+		TagMergeNonMapping: stance.Construct,
+		TagMergeQuoted:     stance.Construct,
+	}
+}
+
+// MergeShapes are the documents.
+func MergeShapes() []stance.Shape {
+	return []stance.Shape{
+		{
+			Name:   "a merge from an anchored mapping",
+			Src:    []byte("base: &b {a: 1}\nd:\n  <<: *b\n  c: 2\n"),
+			Intent: []stance.Tag{TagMergeKey},
+		},
+		{
+			Name:   "a local key overriding the merged one",
+			Src:    []byte("base: &b {a: 1}\nd:\n  <<: *b\n  a: 9\n"),
+			Intent: []stance.Tag{TagMergeKey},
+		},
+		{
+			Name:   "a sequence of merges, the earlier winning",
+			Src:    []byte("x: &x {a: 1}\ny: &y {b: 2}\nd:\n  <<: [*x, *y]\n"),
+			Intent: []stance.Tag{TagMergeSequence},
+		},
+		{
+			Name:   "a merge of something that is not a mapping",
+			Src:    []byte("s: &s text\nd:\n  <<: *s\n"),
+			Intent: []stance.Tag{TagMergeNonMapping},
+		},
+		{
+			Name:   "a merge key with no alias at all",
+			Src:    []byte("d:\n  <<: 1\n"),
+			Intent: []stance.Tag{TagMergeNonMapping},
+		},
+		{
+			// Two "<<" keys are a duplicate key whatever merge means, so this
+			// carries the unique-key rule as well and is refused by everyone --
+			// for two different reasons, which is the interesting part.
+			Name:   "two merge keys in one mapping",
+			Src:    []byte("x: &x {a: 1}\ny: &y {b: 2}\nd:\n  <<: *x\n  <<: *y\n"),
+			Intent: []stance.Tag{TagMergeKey, TagDuplicateKey},
+		},
+		{
+			Name:   "a quoted merge key, which is an ordinary key",
+			Src:    []byte("base: &b {a: 1}\nd:\n  \"<<\": *b\n"),
+			Intent: []stance.Tag{TagMergeQuoted},
+		},
+	}
+}

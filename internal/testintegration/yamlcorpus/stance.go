@@ -48,6 +48,20 @@ var GoYAML = stance.Table{
 		TagNamedHandle:   stance.Accepts,
 		TagPercentEscape: stance.Accepts,
 		TagYAMLDirective: stance.Accepts,
+
+		// Merge keys, measured: this library implements the YAML 1.1 merge in
+		// full. It merges, a local key wins over a merged one, a sequence
+		// merges in order, and quoting suppresses the whole thing.
+		//
+		// The refusal is the interesting entry. Merging obliges a parser to
+		// reject "<<: 1", because there is no operation that merges a scalar --
+		// so implementing an extension costs documents that a parser without it
+		// reads happily. libfyaml, which implements no merge, accepts them.
+		// Both are conformant and the corpus scores both.
+		TagMergeKey:        stance.Accepts,
+		TagMergeSequence:   stance.Accepts,
+		TagMergeNonMapping: stance.Refuses,
+		TagMergeQuoted:     stance.Accepts,
 	},
 }
 

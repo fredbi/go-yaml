@@ -149,6 +149,7 @@ func TestEveryDepartureNamesAShape(t *testing.T) {
 	// first two.
 	for _, group := range [][]stance.Shape{
 		yamlcorpus.KeyShapes(), yamlcorpus.TagShapes(), yamlcorpus.SchemaShapes(),
+		yamlcorpus.MergeShapes(),
 	} {
 		for _, s := range group {
 			names[s.Name] = true

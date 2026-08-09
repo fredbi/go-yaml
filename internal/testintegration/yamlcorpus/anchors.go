@@ -167,6 +167,10 @@ func Vocabulary() stance.Vocabulary {
 		out[tag] = at
 	}
 
+	for tag, at := range MergeVocabulary() {
+		out[tag] = at
+	}
+
 	return out
 }
 

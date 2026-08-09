@@ -249,7 +249,7 @@ const Reading = "yaml-1.2-core"
 // construction adds is the label the grammar could not produce.
 func Cases() []suite.Case {
 	out := make([]suite.Case, 0,
-		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(ReachShapes()))
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(MergeShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -284,6 +284,17 @@ func Cases() []suite.Case {
 	for i, s := range KeyShapes() {
 		out = append(out, suite.Case{
 			Name:       "shape/key/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	for i, s := range MergeShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/merge/" + s.Name,
 			Src:        s.Src,
 			WellFormed: rec.Stream(s.Src).OK,
 			VerdictAt:  stance.Construct.String(),
