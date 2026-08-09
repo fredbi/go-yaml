@@ -171,6 +171,10 @@ func Vocabulary() stance.Vocabulary {
 		out[tag] = at
 	}
 
+	for tag, at := range DirectiveVocabulary() {
+		out[tag] = at
+	}
+
 	return out
 }
 

@@ -62,6 +62,16 @@ var GoYAML = stance.Table{
 		TagMergeSequence:   stance.Accepts,
 		TagMergeNonMapping: stance.Refuses,
 		TagMergeQuoted:     stance.Accepts,
+
+		// Directives, measured, and one of them is a defect rather than a
+		// position. See Departures: this library reads a document with one
+		// directive and refuses a document with two, so a %YAML beside a %TAG
+		// -- the commonest prelude YAML has -- is a document it cannot read.
+		//
+		// The minor-version entry is a genuine position. The spec only *should*
+		// have a processor accept a version beyond its own, so refusing 1.9 is
+		// a choice, and libfyaml makes the same one.
+		TagYAMLMinorVersion: stance.Refuses,
 	},
 }
 
@@ -132,6 +142,14 @@ var Departures = []Departure{
 		// table across a stream by its own choice rather than the library's,
 		// which nothing available here can separate.
 		Corroborated: "contested: PyYAML 6.0.1 refuses, libfyaml 1.0.0a8 accepts",
+	},
+	{
+		Pattern:  "a version directive and a tag directive together",
+		Kind:     Verdict,
+		Observed: "a document carrying more than one directive is refused: unexpected directive value",
+		Because: "6.8: nothing limits a document to one directive, and a %YAML beside a %TAG is the ordinary " +
+			"prelude -- so this is not an exotic shape but the commonest one there is",
+		Corroborated: "libfyaml 1.0.0a8 reads it, and reads two %TAG handles together as well",
 	},
 	{
 		Pattern:  "two keys alike in text and different once resolved",
