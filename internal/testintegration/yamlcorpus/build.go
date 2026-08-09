@@ -161,7 +161,7 @@ func (b Build) cases() []suite.Case {
 			WellFormed: wellFormed,
 			VerdictAt:  verdictAt(e),
 			Opaque:     !utf8.Valid(e.Src),
-			Tags:       encodingTags(e.Src),
+			Tags:       append(encodingTags(e.Src), names(e.Tags)...),
 			Meaning:    meaning,
 			Origin: suite.Origin{
 				Document:  -1,
@@ -467,7 +467,10 @@ func SmokeSuite() (suite.Header, []suite.Case, error) {
 // for parsing and no further -- while its *refusal*, which is most of what a
 // mutant is worth, still counts at every stage.
 func verdictAt(e Entry) string {
-	if e.Mutation == "" {
+	// A document emitted whole is trustworthy all the way, and so is one broken
+	// on purpose: the break was made on the value, so what it violates is known
+	// and carried as a tag rather than left for a later stage to discover.
+	if e.Mutation == "" || len(e.Tags) > 0 {
 		return stance.Construct.String()
 	}
 
