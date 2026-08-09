@@ -163,6 +163,18 @@ func Vocabulary() stance.Vocabulary {
 		out[tag] = at
 	}
 
+	for tag, at := range KeyVocabulary() {
+		out[tag] = at
+	}
+
+	for tag, at := range MergeVocabulary() {
+		out[tag] = at
+	}
+
+	for tag, at := range DirectiveVocabulary() {
+		out[tag] = at
+	}
+
 	return out
 }
 

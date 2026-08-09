@@ -6,6 +6,7 @@ package yamlcorpus
 import (
 	"math/rand/v2"
 
+	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
@@ -50,6 +51,13 @@ type Entry struct {
 	Value yamlgen.Value
 	// Mutation names how it was broken, empty for a document emitted whole.
 	Mutation string
+	// Tags are the rules this document breaks, where it was broken on purpose
+	// and the break is therefore known.
+	//
+	// Only the value-level breaks carry them. A byte mutation cannot say what
+	// it broke, which is why its acceptance is claimed for parsing and no
+	// further -- see suite.Case.VerdictAt.
+	Tags []stance.Tag
 }
 
 // Generate draws documents from a seed and breaks each of them.
@@ -79,6 +87,18 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 			Src:   src,
 			Value: value,
 		})
+
+		// Broken on purpose, on the value, so the break is labeled rather
+		// than guessed at. These are the only generated documents that violate
+		// a rule the grammar cannot see.
+		for _, b := range breakRules(value) {
+			out = append(out, Entry{
+				Name:     "generated/" + digits(i) + "/" + b.How,
+				Src:      []byte(yamlgen.Emit(b.Value, styles.Example(at))),
+				Mutation: b.How,
+				Tags:     b.Tags,
+			})
+		}
 
 		for j := range mutantsEach {
 			broken, how := mutate(rng, src)

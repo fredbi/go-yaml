@@ -89,7 +89,7 @@ func (b Build) Write(w io.Writer) error {
 		Tier:      b.Tier,
 		Cases:     len(cases),
 		Vocabulary: suite.SpecsFor(
-			vocabularyOf(cases), Vocabulary(), append(AnchorRules(), TagRules()...)),
+			vocabularyOf(cases), Vocabulary(), allRules()),
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -161,7 +161,7 @@ func (b Build) cases() []suite.Case {
 			WellFormed: wellFormed,
 			VerdictAt:  verdictAt(e),
 			Opaque:     !utf8.Valid(e.Src),
-			Tags:       encodingTags(e.Src),
+			Tags:       append(encodingTags(e.Src), names(e.Tags)...),
 			Meaning:    meaning,
 			Origin: suite.Origin{
 				Document:  -1,
@@ -249,7 +249,7 @@ const Reading = "yaml-1.2-core"
 // construction adds is the label the grammar could not produce.
 func Cases() []suite.Case {
 	out := make([]suite.Case, 0,
-		len(Patterns())+len(Resolutions())+len(TagShapes())+len(ReachShapes()))
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(MergeShapes())+len(DirectiveShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -281,6 +281,39 @@ func Cases() []suite.Case {
 
 	// The reach shapes carry no tags and raise no question. They exist because
 	// the grammar has corners the rest of the corpus does not turn.
+	for i, s := range KeyShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/key/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	for i, s := range MergeShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/merge/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	for i, s := range DirectiveShapes() {
+		out = append(out, suite.Case{
+			Name:       "shape/directive/" + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
 	for i, s := range ReachShapes() {
 		out = append(out, suite.Case{
 			Name:       "shape/reach/" + s.Name,
@@ -434,9 +467,21 @@ func SmokeSuite() (suite.Header, []suite.Case, error) {
 // for parsing and no further -- while its *refusal*, which is most of what a
 // mutant is worth, still counts at every stage.
 func verdictAt(e Entry) string {
-	if e.Mutation == "" {
+	// A document emitted whole is trustworthy all the way, and so is one broken
+	// on purpose: the break was made on the value, so what it violates is known
+	// and carried as a tag rather than left for a later stage to discover.
+	if e.Mutation == "" || len(e.Tags) > 0 {
 		return stance.Construct.String()
 	}
 
 	return stance.Parse.String()
+}
+
+// allRules is everything the specification settles that this corpus can label.
+func allRules() stance.Rules {
+	out := AnchorRules()
+	out = append(out, TagRules()...)
+	out = append(out, KeyRules()...)
+
+	return append(out, DirectiveRules()...)
 }

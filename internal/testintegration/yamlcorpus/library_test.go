@@ -137,12 +137,23 @@ func TestTheValueDeparturesAreStillThere(t *testing.T) {
 	}
 }
 
-// TestEveryDepartureNamesAPattern keeps the ledger anchored to something that
-// can be run, rather than to prose about a document nobody has.
-func TestEveryDepartureNamesAPattern(t *testing.T) {
+// TestEveryDepartureNamesAShape keeps the ledger anchored to something that can
+// be run, rather than to prose about a document nobody has.
+func TestEveryDepartureNamesAShape(t *testing.T) {
 	names := map[string]bool{}
 	for _, p := range yamlcorpus.Patterns() {
 		names[p.Name] = true
+	}
+
+	// Any family may expose a departure, not only the anchors that exposed the
+	// first two.
+	for _, group := range [][]stance.Shape{
+		yamlcorpus.KeyShapes(), yamlcorpus.TagShapes(), yamlcorpus.SchemaShapes(),
+		yamlcorpus.MergeShapes(), yamlcorpus.DirectiveShapes(),
+	} {
+		for _, s := range group {
+			names[s.Name] = true
+		}
 	}
 
 	for _, d := range yamlcorpus.Departures {
