@@ -470,7 +470,13 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 				return nil, err
 			}
 			node.Values = append(node.Values, mapValue)
-			ctx.goNext()
+			if ctx.currentToken() == mapKeyTk {
+				// A plain scalar key is still the current token, so skip it. A
+				// key that is a property group -- the "&a" of "{&a}" -- was
+				// read by parseScalarValue, which already moved past it, and
+				// advancing again would step over the '}'.
+				ctx.goNext()
+			}
 		}
 		if headComment != nil && len(node.Values) > entered {
 			// The comment introduced this entry, so it belongs above it.
@@ -860,6 +866,12 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 		return newNullNode(ctx, ctx.insertNullToken(colonTk))
 	}
 
+	if ctx.isFlow && closesFlowEntry(tk) {
+		// "[a:]", "[:]" and "[a, :]" -- the punctuation belongs to the
+		// collection the pair is written in, so the pair's value is e-node.
+		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+	}
+
 	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && carriesProperty(tk) &&
 		next != nil && next.Column() <= keyCol && !p.isMapToken(next) &&
 		next.Type() != token.SequenceEntryType && next.Type() != token.DocumentHeaderType &&
@@ -1015,6 +1027,17 @@ func (p *parser) parseAnchor(ctx *context, g *TokenGroup) (*ast.AnchorNode, erro
 // endsValue reports whether a token closes what precedes it rather than
 // starting something new: the ':' of a mapping entry, or the ',' and brackets
 // that punctuate a flow collection.
+// closesFlowEntry reports whether a token ends the entry it follows inside a
+// flow collection, rather than standing for a node of its own.
+func closesFlowEntry(tk *Token) bool {
+	switch tk.Type() {
+	case token.CollectEntryType, token.MappingEndType, token.SequenceEndType:
+		return true
+	default:
+		return false
+	}
+}
+
 func endsValue(tk *Token) bool {
 	switch tk.Type() {
 	case token.MappingValueType, token.CollectEntryType, token.MappingEndType, token.SequenceEndType:

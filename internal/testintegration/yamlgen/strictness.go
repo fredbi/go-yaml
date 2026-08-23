@@ -12,10 +12,10 @@ package yamlgen
 // produces at all -- somebody met it while fixing something else, and without
 // this list the harness would go on not watching it.
 //
-// That is what every entry below has in common, and it is the reason to keep
-// them: both are an empty node standing where the generator only
-// ever puts a full one. Widening the generator to reach them wants Pair.Key to
-// become a Value, which is a larger change than pinning them here.
+// That is what every entry here had in common: an empty node standing where the
+// generator only ever puts a full one. Widening the generator to reach them
+// wants Pair.Key to become a Value, which is a larger change than pinning them
+// here.
 type Strictness struct {
 	// Name is short and stable, so a count can be reported against it.
 	Name string
@@ -39,26 +39,12 @@ type Strictness struct {
 
 // Strict records valid documents the library refuses.
 //
-// Deliberately no expected value. Nobody has ruled on what four of these should
-// decode to -- an empty key in a Go map is a question about this library's
-// mapping model, not about YAML -- and a guessed expectation pinned here would
-// be believed. Whoever fixes one should settle the value against another
-// parser and record it then.
-var Strict = []Strictness{
-	{
-		Name: "an-anchor-alone-in-a-flow-mapping",
-		Src:  "{&a}\n",
-		Rule: "ns-flow-map-implicit-entry via c-ns-flow-map-empty-key-entry: an " +
-			"entry may be a key with no value, and ns-flow-node admits " +
-			"c-ns-properties followed by e-scalar, so &a names the empty node",
-		Error: "[1:1] could not find flow mapping end token '}'",
-	},
-	{
-		Name: "a-pair-with-neither-side-in-a-flow-sequence",
-		Src:  "[:]\n",
-		Rule: "ns-flow-seq-entries admits ns-flow-pair, whose ns-flow-pair-entry " +
-			"reaches c-ns-flow-map-empty-key-entry: a single pair with an empty " +
-			"key and an empty value",
-		Error: "[1:3] could not find '[' character corresponding to ']'",
-	},
-}
+// It is empty. The six entries it held were all read by the time the empty node
+// was carried through the scanner, the token grouping and the flow parsers, and
+// each left a test in parser/ and scanner/ behind it.
+//
+// Deliberately no expected value on an entry. An empty key in a Go map is a
+// question about this library's mapping model rather than about YAML, and a
+// guessed expectation pinned here would be believed. Whoever adds an entry
+// should settle the value against another parser and record it then.
+var Strict = []Strictness{}
