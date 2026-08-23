@@ -12,22 +12,22 @@ import (
 
 func sample() (suite.Header, []suite.Case) {
 	return suite.Header{
-			Grammar:   "RFC 8259",
-			Digest:    "sha256:deadbeef",
-			Generator: "jsonspike/1",
-			Seed:      1,
-			Tier:      "smoke",
-			Cases:     3,
-			Vocabulary: []suite.TagSpec{
-				{Tag: "number/out-of-range", Stage: "construct"},
-				{Tag: "encoding/bom", Stage: "parse"},
-			},
-		}, []suite.Case{
-			{Name: "a", Src: []byte(`{"a":1}`), WellFormed: true, Origin: suite.Origin{Document: 0}},
-			{Name: "b", Src: []byte("\xff\xfe{}"), Opaque: true,
-				Tags: []string{"encoding/not-utf8", "encoding/utf16"}, Origin: suite.Origin{Document: 1}},
-			{Name: "c", Src: []byte(`{"a":}`), Origin: suite.Origin{Document: 2, Mutation: "delete a run", Signature: "xyz"}},
-		}
+		Grammar:   "RFC 8259",
+		Digest:    "sha256:deadbeef",
+		Generator: "jsonspike/1",
+		Seed:      1,
+		Tier:      "smoke",
+		Cases:     3,
+		Vocabulary: []suite.TagSpec{
+			{Tag: "number/out-of-range", Stage: "construct"},
+			{Tag: "encoding/bom", Stage: "parse"},
+		},
+	}, []suite.Case{
+		{Name: "a", Src: []byte(`{"a":1}`), WellFormed: true, Origin: suite.Origin{Document: 0}},
+		{Name: "b", Src: []byte("\xff\xfe{}"), Opaque: true,
+			Tags: []string{"encoding/not-utf8", "encoding/utf16"}, Origin: suite.Origin{Document: 1}},
+		{Name: "c", Src: []byte(`{"a":}`), Origin: suite.Origin{Document: 2, Mutation: "delete a run", Signature: "xyz"}},
+	}
 }
 
 func write(t *testing.T) []byte {

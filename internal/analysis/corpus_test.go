@@ -6,7 +6,7 @@ import (
 )
 
 // flatMap is a mapping of n sibling keys at ONE level: the shape that exposes the quadratic
-// behaviour in parser.parseMap, and the shape of a large OpenAPI "paths:" mapping.
+// behavior in parser.parseMap, and the shape of a large OpenAPI "paths:" mapping.
 func flatMap(n int) string {
 	var b strings.Builder
 	b.Grow(n * 24)

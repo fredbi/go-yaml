@@ -49,18 +49,10 @@ type marshalTest struct{}
 
 func (t *marshalTest) MarshalYAML() ([]byte, error) {
 	return yaml.Marshal(yaml.MapSlice{
-		{
-			"a", 1,
-		},
-		{
-			"b", "hello",
-		},
-		{
-			"c", true,
-		},
-		{
-			"d", map[string]string{"x": "y"},
-		},
+		{Key: "a", Value: 1},
+		{Key: "b", Value: "hello"},
+		{Key: "c", Value: true},
+		{Key: "d", Value: map[string]string{"x": "y"}},
 	})
 }
 
@@ -68,15 +60,9 @@ type marshalTest2 struct{}
 
 func (t *marshalTest2) MarshalYAML() (interface{}, error) {
 	return yaml.MapSlice{
-		{
-			"a", 2,
-		},
-		{
-			"b", "world",
-		},
-		{
-			"c", true,
-		},
+		{Key: "a", Value: 2},
+		{Key: "b", Value: "world"},
+		{Key: "c", Value: true},
 	}, nil
 }
 

@@ -16,7 +16,7 @@ import (
 // Unicode version of whatever toolchain compiled them: Go 1.25 ships Unicode
 // 15.0.0 and Go 1.27 ships 17.0.0, so the same seed and the same bitstream pick
 // a different character. On that upgrade 4,299 of the YAML corpus's 10,214 cases
-// moved, with no case added, removed or re-labelled.
+// moved, with no case added, removed or re-labeled.
 //
 // A corpus that claims a seed reproduces it byte for byte cannot draw from a
 // table the standard library revises. So the ranges below are written here, by
