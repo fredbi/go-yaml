@@ -1253,6 +1253,15 @@ func (p *parser) parseTagValue(ctx *context, tagRawTk *token.Token, tk *Token) (
 		}
 		return p.parseSequence(ctx)
 	}
+	if endsValue(tk) {
+		// A tag the core schema does not resolve -- the non-specific "!", or a
+		// local tag -- with punctuation after it that closes what the tag was
+		// written in. The tag stands on the empty node: "[!]", "[a, !]",
+		// "{a: !}". The case above says the same for the resolved tags, where
+		// the empty node takes the tag's own default rather than null.
+		return newTagDefaultScalarValueNode(ctx, tagRawTk)
+	}
+
 	return p.parseToken(ctx, tk)
 }
 

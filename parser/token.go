@@ -1053,10 +1053,20 @@ func isNotMapKeyType(tk *Token) bool {
 		typ == token.SequenceEndType
 }
 
+// isFlowType reports whether a token is punctuation a tag cannot be grouped
+// with, because the token belongs to the collection around the tag rather than
+// naming what the tag is on.
+//
+// The two closers and the ',' are here for the same reason as the openers: "[!]"
+// is the non-specific tag on the empty node followed by the closer, and grouping
+// the two swallowed the ']' -- the sequence then ran to the end of the stream
+// looking for it.
 func isFlowType(tk *Token) bool {
 	typ := tk.Type()
 	return typ == token.MappingStartType ||
 		typ == token.MappingEndType ||
 		typ == token.SequenceStartType ||
-		typ == token.SequenceEntryType
+		typ == token.SequenceEndType ||
+		typ == token.SequenceEntryType ||
+		typ == token.CollectEntryType
 }

@@ -990,10 +990,30 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			s.progressColumn(ctx, len([]rune(value))-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
-		case '{', '}':
+		case '}', ']':
+			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
+				// The closer ends the collection the tag stands in, so it ends
+				// the tag: "[!]" is the non-specific tag on the empty node and
+				// not a tag whose name is "]".
+				value := ctx.source(ctx.idx-1, ctx.idx+idx)
+				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				s.progressColumn(ctx, len([]rune(value))-1) // progress column before the closer so it is scanned on its own
+
+				ctx.clear()
+
+				return true, nil
+			}
+
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+
+			return false, ErrInvalidToken(invalidTk)
+		case '{':
+			ctx.addOriginBuf(c)
+			s.progressColumn(ctx, progress)
+			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+
 			return false, ErrInvalidToken(invalidTk)
 		default:
 			ctx.addOriginBuf(c)

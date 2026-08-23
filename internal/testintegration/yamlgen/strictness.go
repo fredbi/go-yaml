@@ -13,7 +13,7 @@ package yamlgen
 // this list the harness would go on not watching it.
 //
 // That is what every entry below has in common, and it is the reason to keep
-// them: all three are an empty node standing where the generator only
+// them: both are an empty node standing where the generator only
 // ever puts a full one. Widening the generator to reach them wants Pair.Key to
 // become a Value, which is a larger change than pinning them here.
 type Strictness struct {
@@ -60,12 +60,5 @@ var Strict = []Strictness{
 			"reaches c-ns-flow-map-empty-key-entry: a single pair with an empty " +
 			"key and an empty value",
 		Error: "[1:3] could not find '[' character corresponding to ']'",
-	},
-	{
-		Name: "a-non-specific-tag-on-nothing",
-		Src:  "[!]\n",
-		Rule: "ns-flow-node admits c-ns-properties followed by e-scalar, and " +
-			"c-ns-tag-property admits the bare \"!\" as the non-specific tag",
-		Error: "[1:1] sequence end token ']' not found",
 	},
 }
