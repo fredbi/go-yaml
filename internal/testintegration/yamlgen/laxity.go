@@ -76,21 +76,6 @@ func KnownlyAccepted(src string) *Laxity {
 // up and a person then confirmed, so absence from it means nothing.
 var Lax = []Laxity{
 	{
-		Name: "a-lone-question-mark-where-only-a-flow-node-fits",
-		Src:  "k: ?\n",
-		Rule: "ns-plain-first(c) admits '?' only when what follows it is " +
-			"ns-plain-safe(c), and a line break is not one. Where a block node " +
-			"may appear the '?' is read as c-l-block-map-explicit-key instead, " +
-			"which is why \"- ?\", \"?\" and \"k:\\n  ?\" are all documents. A " +
-			"value written on its key's line is an ns-flow-node and so is every " +
-			"node inside a flow collection, and neither leaves the '?' anything " +
-			"to be -- so \"[?]\" goes the same way. The distinction is the " +
-			"context the node sits in rather than the characters around it, " +
-			"which is why this is recorded rather than refused in the scanner",
-		Reads: map[string]any{"k": "?"},
-		Match: loneQuestionMark.MatchString,
-	},
-	{
 		Name: "a-value-level-with-an-empty-key",
 		Src:  ":\n1\n",
 		Rule: "s-l+block-node(n,c) puts the value of a block mapping entry at " +
@@ -108,9 +93,3 @@ var Lax = []Laxity{
 		Match: regexp.MustCompile("(?m)^:[ \t]*\n[^ \t\n]").MatchString,
 	},
 }
-
-// loneQuestionMark matches a '?' with nothing after it standing where only a
-// flow node fits: as a value on its key's line, or as an entry of a flow
-// collection. Written out rather than described because the two are the whole
-// of the class -- everywhere else the same '?' opens an explicit key.
-var loneQuestionMark = regexp.MustCompile(`(?m): \?[ \t]*$|[\[{,][ \t]*\?[ \t]*[,\]}]`)

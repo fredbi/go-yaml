@@ -13,7 +13,7 @@ package yamlgen
 // this list the harness would go on not watching it.
 //
 // That is what every entry below has in common, and it is the reason to keep
-// them: four of the five are an empty node standing where the generator only
+// them: all three are an empty node standing where the generator only
 // ever puts a full one. Widening the generator to reach them wants Pair.Key to
 // become a Value, which is a larger change than pinning them here.
 type Strictness struct {
@@ -52,21 +52,6 @@ var Strict = []Strictness{
 			"entry may be a key with no value, and ns-flow-node admits " +
 			"c-ns-properties followed by e-scalar, so &a names the empty node",
 		Error: "[1:1] could not find flow mapping end token '}'",
-	},
-	{
-		Name: "an-explicit-key-with-nothing-in-it",
-		Src:  "? \n",
-		Rule: "c-l-block-map-explicit-entry: the key is c-l-block-map-explicit-key " +
-			"followed by l-block-map-explicit-value or e-node, and the key itself " +
-			"is s-l+block-indented which admits e-node",
-		Error: "[1:1] undefined map key",
-	},
-	{
-		Name: "an-explicit-key-with-nothing-in-it-and-a-value",
-		Src:  "?\n: v\n",
-		Rule: "c-l-block-map-explicit-entry: the empty key is e-node and the value " +
-			"follows on its own line under l-block-map-explicit-value",
-		Error: "[2:1] value is not allowed in this context",
 	},
 	{
 		Name: "a-pair-with-neither-side-in-a-flow-sequence",

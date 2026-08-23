@@ -502,18 +502,22 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 			}
 			ret = append(ret, tk)
 		case token.MappingKeyType:
+			// A '?' with nothing after it opens an entry whose key is e-node,
+			// which is what "? \n" and "?\n: v\n" are. The group holds the
+			// indicator alone and the parser supplies the null.
 			end := explicitKeyEnd(tokens, i, flowDepth > 0)
-			if end == i+1 {
-				return nil, errors.ErrSyntax("undefined map key", tk.RawToken())
-			}
 			body, err := groupExplicitKeyBody(tokens[i+1 : end])
 			if err != nil {
 				return nil, err
 			}
+			group := []*Token{tk}
+			if len(body) == 0 {
+				group = append(group, implicitNullKeyToken(tk))
+			}
 			ret = append(ret, &Token{
 				Group: &TokenGroup{
 					Type:   TokenGroupMapKey,
-					Tokens: append([]*Token{tk}, body...),
+					Tokens: append(group, body...),
 				},
 			})
 			i = end - 1

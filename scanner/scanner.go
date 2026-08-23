@@ -1774,8 +1774,13 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 		return false
 	}
 
-	nc := ctx.nextChar()
-	if nc != ' ' && nc != '\t' {
+	// c-l-block-map-explicit-key is "?" followed by s-l+block-indented, and the
+	// separation that introduces it may be a line break rather than a space. So
+	// a '?' ending its line opens an entry whose key is the empty node, and a
+	// '?' ending the stream opens one too.
+	switch nc := ctx.nextChar(); nc {
+	case ' ', '\t', '\n', '\r', rune(0):
+	default:
 		return false
 	}
 
