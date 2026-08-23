@@ -1,0 +1,26 @@
+goos: linux
+goarch: amd64
+pkg: github.com/go-openapi/go-yaml/internal/analysis
+cpu: AMD Ryzen 7 5800X 8-Core Processor             
+BenchmarkWorkloadTokenize/azure_swagger-16         	      69	  21385624 ns/op	  25.44 MB/s	12688258 B/op	  164505 allocs/op
+BenchmarkWorkloadTokenize/canada_geometry-16       	      63	  19239471 ns/op	  20.70 MB/s	11984221 B/op	  180902 allocs/op
+BenchmarkWorkloadTokenize/citm_catalog-16          	      33	  33579172 ns/op	  17.52 MB/s	29180519 B/op	  431742 allocs/op
+BenchmarkWorkloadTokenize/golang_source-16         	       8	 125704252 ns/op	  30.15 MB/s	98987958 B/op	 1389944 allocs/op
+BenchmarkWorkloadTokenize/twitter_status-16        	      49	  24225948 ns/op	  20.93 MB/s	13744023 B/op	  193771 allocs/op
+BenchmarkWorkloadParse/azure_swagger-16            	      30	  43995482 ns/op	  12.37 MB/s	31033351 B/op	  415193 allocs/op
+BenchmarkWorkloadParse/canada_geometry-16          	      32	  36898428 ns/op	  10.79 MB/s	26057280 B/op	  441161 allocs/op
+BenchmarkWorkloadParse/citm_catalog-16             	      14	  80589191 ns/op	   7.30 MB/s	70005021 B/op	 1046103 allocs/op
+BenchmarkWorkloadParse/golang_source-16            	       4	 302807993 ns/op	  12.52 MB/s	229895622 B/op	 3328654 allocs/op
+BenchmarkWorkloadParse/twitter_status-16           	      25	  44073422 ns/op	  11.50 MB/s	30442617 B/op	  452748 allocs/op
+BenchmarkWorkloadParseWithComments/azure_swagger-16         	      25	  45079054 ns/op	  12.07 MB/s	29670433 B/op	  415170 allocs/op
+BenchmarkWorkloadParseWithComments/canada_geometry-16       	      34	  35685380 ns/op	  11.16 MB/s	24815515 B/op	  441143 allocs/op
+BenchmarkWorkloadParseWithComments/citm_catalog-16          	      14	  81009367 ns/op	   7.26 MB/s	65186662 B/op	 1046073 allocs/op
+BenchmarkWorkloadParseWithComments/golang_source-16         	       4	 281569294 ns/op	  13.46 MB/s	218428666 B/op	 3328629 allocs/op
+BenchmarkWorkloadParseWithComments/twitter_status-16        	      33	  44277777 ns/op	  11.45 MB/s	28806446 B/op	  452727 allocs/op
+BenchmarkWorkloadDecode/azure_swagger-16                    	      24	  50762166 ns/op	  10.72 MB/s	37915844 B/op	  510397 allocs/op
+BenchmarkWorkloadDecode/canada_geometry-16                  	      27	  41799852 ns/op	   9.53 MB/s	28791944 B/op	  529976 allocs/op
+BenchmarkWorkloadDecode/citm_catalog-16                     	      10	 103957359 ns/op	   5.66 MB/s	84506675 B/op	 1229651 allocs/op
+BenchmarkWorkloadDecode/golang_source-16                    	       4	 311349704 ns/op	  12.17 MB/s	253391038 B/op	 3791510 allocs/op
+BenchmarkWorkloadDecode/twitter_status-16                   	      28	  55923820 ns/op	   9.07 MB/s	34883342 B/op	  520423 allocs/op
+PASS
+ok  	github.com/go-openapi/go-yaml/internal/analysis	24.307s
