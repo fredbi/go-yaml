@@ -517,27 +517,56 @@ func foldedCases() []struct {
 // covered. Folded scalars were drawn zero times out of twenty thousand
 // documents before the style generator was taught the field, and every property
 // was green throughout.
+var blockScalarStyles = []string{"literal", "folded", "stated indent"}
+
 func TestEveryBlockScalarStyleIsActuallyReached(t *testing.T) {
 	seen := map[string]int{}
 
-	rapid.Check(t, func(rt *rapid.T) {
-		src := yamlgen.Emit(
-			yamlgen.Values().Draw(rt, "value"),
-			yamlgen.Styles().Draw(rt, "style"),
-		)
+	// Counted over its own documents rather than over -rapid.checks, because
+	// this asks about coverage and not about a property, and the answer does
+	// not get better with depth. The rarest of the three is a literal scalar,
+	// which needs a style that asks for one and a string that folding cannot
+	// express: about two documents in a hundred, so a default run of a hundred
+	// would draw none about one time in eight and report a live axis dead.
+	const (
+		perCheck = 25
+		enough   = 20
+	)
 
-		for name, marker := range map[string]*regexp.Regexp{
-			"literal":       regexp.MustCompile(`\|[0-9]?[-+]?\n`),
-			"folded":        regexp.MustCompile(`>[0-9]?[-+]?\n`),
-			"stated indent": regexp.MustCompile(`[|>][0-9][-+]?\n`),
-		} {
-			if marker.MatchString(src) {
-				seen[name]++
+	covered := func() bool {
+		for _, name := range blockScalarStyles {
+			if seen[name] < enough {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	rapid.Check(t, func(rt *rapid.T) {
+		if covered() {
+			return
+		}
+
+		for range perCheck {
+			src := yamlgen.Emit(
+				yamlgen.Values().Draw(rt, "value"),
+				yamlgen.Styles().Draw(rt, "style"),
+			)
+
+			for name, marker := range map[string]*regexp.Regexp{
+				"literal":       regexp.MustCompile(`\|[0-9]?[-+]?\n`),
+				"folded":        regexp.MustCompile(`>[0-9]?[-+]?\n`),
+				"stated indent": regexp.MustCompile(`[|>][0-9][-+]?\n`),
+			} {
+				if marker.MatchString(src) {
+					seen[name]++
+				}
 			}
 		}
 	})
 
-	for _, name := range []string{"literal", "folded", "stated indent"} {
+	for _, name := range blockScalarStyles {
 		assert.Positivef(t, seen[name], "no document used a %s block scalar", name)
 		t.Logf("%-13s reached %d times", name, seen[name])
 	}
