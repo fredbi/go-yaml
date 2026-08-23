@@ -6,12 +6,14 @@ package yamlcorpus_test
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
+	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
 )
 
@@ -28,24 +30,34 @@ var writeCorpus = flag.Bool("yamlcorpus.write", false, "rewrite the stored corpu
 // parser of defects it does not have, which a live oracle would have corrected
 // the day the bug was fixed.
 func TestTheStoredCorpusIsWhatTheOracleWouldSayNow(t *testing.T) {
-	want, err := os.ReadFile(stored)
+	stored, err := os.ReadFile(stored)
 	if err != nil {
 		t.Fatalf("no stored corpus: %v", err)
 	}
 
-	var got bytes.Buffer
-	if err := yamlcorpus.Smoke().Write(&got); err != nil {
+	var built bytes.Buffer
+	if err := yamlcorpus.Smoke().Write(&built); err != nil {
 		t.Fatal(err)
 	}
 
-	if bytes.Equal(want, got.Bytes()) {
+	want, err := suite.Content(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := suite.Content(built.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(want, got) {
 		return
 	}
 
-	t.Errorf("the stored corpus is not what the oracle says now (%d bytes stored, %d regenerated).\n"+
+	t.Errorf("the stored corpus is not what the oracle says now (%s).\n"+
 		"Either the grammar changed, the generator did, or a label did. Look at which before regenerating:\n"+
 		"    go test -run TestRegenerate ./internal/testintegration/yamlcorpus/ -args -yamlcorpus.write",
-		len(want), got.Len())
+		firstDifference(want, got))
 }
 
 // TestRegenerate rewrites the stored corpus, behind a flag so it cannot happen
@@ -201,4 +213,32 @@ func TestTheCorpusReachesMostOfTheGrammar(t *testing.T) {
 	if missing := cover.Missing(reach); len(missing) > 0 {
 		t.Logf("never entered (%d):\n  %s", len(missing), strings.Join(missing, "\n  "))
 	}
+}
+
+// firstDifference names the line two artifacts first disagree on, so that a
+// failure points at a case rather than at a byte count.
+func firstDifference(want, got []byte) string {
+	a := bytes.Split(want, []byte("\n"))
+	b := bytes.Split(got, []byte("\n"))
+
+	for i := range min(len(a), len(b)) {
+		if bytes.Equal(a[i], b[i]) {
+			continue
+		}
+
+		return fmt.Sprintf("line %d of %d differs:\n  stored: %s\n  now:    %s",
+			i+1, len(a), truncate(a[i]), truncate(b[i]))
+	}
+
+	return fmt.Sprintf("%d lines stored, %d regenerated", len(a), len(b))
+}
+
+// truncate keeps a differing line short enough to read.
+func truncate(line []byte) []byte {
+	const width = 240
+	if len(line) <= width {
+		return line
+	}
+
+	return append(line[:width:width], "..."...)
 }

@@ -172,3 +172,25 @@ func ReadAll(r io.Reader) (Header, []Case, error) {
 func FromBytes(gzipped []byte) (Header, []Case, error) {
 	return ReadAll(bytes.NewReader(gzipped))
 }
+
+// Content returns the JSONL an artifact holds, with the gzip container removed.
+//
+// This is what regenerate-and-diff compares. The compressed bytes are not the
+// artifact: gzip records how one compressor chose to encode the stream, and Go
+// 1.27 encodes it differently from Go 1.25, so comparing containers reports a
+// corpus that drifted whenever the toolchain moved. The header still carries no
+// modification time and no operating system byte, so an artifact regenerated on
+// one toolchain stays byte-identical to itself.
+func Content(gzipped []byte) ([]byte, error) {
+	gz, err := gzip.NewReader(bytes.NewReader(gzipped))
+	if err != nil {
+		return nil, fmt.Errorf("opening the artifact: %w", err)
+	}
+
+	plain, err := io.ReadAll(gz)
+	if err != nil {
+		return nil, fmt.Errorf("reading the artifact: %w", err)
+	}
+
+	return plain, gz.Close()
+}

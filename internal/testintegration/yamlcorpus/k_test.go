@@ -42,19 +42,21 @@ var measureK = flag.Bool("yamlcorpus.k", false, "rebuild the corpus at several q
 //
 // # The quota is not the interesting axis
 //
-// It saturates at sixteen and nothing above it helps. Drawing more documents
-// does: keeping everything at 1500 documents finds 20 complaints in 493KB,
-// where twice the mutants at a quota of sixteen finds 21 in 362KB. Most
-// complaints are singletons -- one document in twenty thousand -- so whether a
-// quota keeps one is luck, and more documents beats more of each.
+// It stops paying at sixteen: raising it to thirty-two buys one complaint for
+// 37KB. Drawing more documents does better -- keeping everything at 1500
+// documents finds 27 complaints in 535KB, where twice the mutants at a quota of
+// sixteen finds 29 in 395KB. Most complaints are singletons, one document in
+// twenty thousand, so whether a quota keeps one is luck, and more documents
+// beats more of each.
 //
 // # And not all of those either
 //
-// Some complaints used to be the corpus's own fault, and had to come out before
-// the number meant anything -- see [Mislabelled]. That is no longer true and the
-// separation is kept anyway, as the thing that would notice if it became true
-// again: the two columns have been equal since a case started saying how far its
-// verdict reaches.
+// Some complaints are the corpus's own fault and have to come out before the
+// number means anything -- see [Mislabelled]. The smoke tier's 29 include three
+// duplicate-key refusals, one per key spelling, where a byte mutation wrote a
+// key twice and the grammar cannot see it. The two columns were equal for a
+// while, so the separation is what notices when a change to the generator makes
+// them differ again.
 func TestMeasureK(t *testing.T) {
 	if !*measureK {
 		t.Skip("pass -yamlcorpus.k to measure the quota")

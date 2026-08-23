@@ -19,7 +19,7 @@ import (
 
 // Generator names what produced a corpus, so a change here is as visible in an
 // artifact's header as a change to the grammar.
-const Generator = "yamlcorpus/2"
+const Generator = "yamlcorpus/3"
 
 // Build is the recipe for a corpus: how much to draw, and how much to keep.
 type Build struct {
@@ -41,15 +41,15 @@ type Build struct {
 // Every number here is measured, and the measurement changed which knob to
 // turn. See TestMeasureK.
 //
-// The quota saturates at sixteen: replaying each build and counting the
-// *distinct* complaints the library makes gives 8 at K=1, 11 at 4, 14 at 16,
-// and 14 again at 32. Raising it past sixteen is bytes for nothing.
+// The quota stops paying at sixteen: replaying each build and counting the
+// *distinct* complaints the library makes gives 14 at K=1, 19 at 4, 22 at 16
+// and 23 at 32. The last doubling buys one complaint for 37KB.
 //
-// But drawing more documents beats raising the quota outright, and not
-// marginally. Keeping everything at 1500 documents finds 20 complaints in
-// 493KB; twice the mutants with the quota still at sixteen finds 21 in 362KB.
-// So the corpus minimizes hard and generates more, which is the opposite of
-// what the quota curve on its own suggests.
+// Drawing more documents beats raising the quota outright, and not marginally.
+// Keeping everything at 1500 documents finds 27 complaints in 535KB; twice the
+// mutants with the quota still at sixteen finds 29 in 395KB. So the corpus
+// minimizes hard and generates more, which is the opposite of what the quota
+// curve on its own suggests.
 //
 // The reason is in the shape of what is being looked for. Most complaints are
 // singletons -- one document in twenty thousand -- so whether a quota keeps one
@@ -64,12 +64,12 @@ func Smoke() Build {
 // discarded.
 //
 // Bigger on both axes than the smoke tier, because nothing here has to fit in a
-// repository: four times the documents and no minimizing at all, which finds 39
-// distinct complaints against the smoke tier's 21, in 2MB.
+// repository: four times the documents and no minimizing at all, which finds 50
+// distinct complaints against the smoke tier's 29, in 2.2MB.
 //
 // That number is still climbing. The library can make around 55 distinct
 // complaints while reading a document, counted from its own source, so a corpus
-// finding 37 has found two thirds of them -- and the way to find the rest is
+// finding 50 has found nine tenths of them -- and the way to find the rest is
 // more documents rather than a different recipe.
 func Full() Build {
 	return Build{Tier: "full", Seed: 1, Documents: 6000, MutantsEach: 12, PerSignature: 0}

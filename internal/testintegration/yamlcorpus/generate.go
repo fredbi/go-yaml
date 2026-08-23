@@ -28,6 +28,12 @@ import (
 // regeneration and a Generator bump, rather than quietly producing a different
 // corpus for whoever built it last.
 //
+// The toolchain used to be a second undetected axis. rapid.String draws from the
+// standard library's unicode tables, which carry a Unicode version, so Go 1.27
+// drew different characters from Go 1.25. yamlgen.Runes owns its ranges by
+// number now -- see yamlgen/runes.go -- and yamlgen's own digest test fails
+// before this one does.
+//
 // # Why yamlgen's generator and not one written here
 //
 // The first version of this file drew its own values, from an alphabet chosen
