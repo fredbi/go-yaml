@@ -20,6 +20,31 @@ go tool pprof -top -sample_index=alloc_space   -nodecount=15 mem.out
 go tool pprof -top -sample_index=alloc_objects -nodecount=15 mem.out
 ```
 
+## The workload corpus
+
+`workloads/` holds five real documents rewritten once as block-style YAML -- the JSON corpus
+every JSON parser is compared on, plus an Azure OpenAPI 2.0 specification. `workloads/SOURCE.md`
+records where they came from, how they were rewritten and how to rewrite them again;
+`workloads/gen` is the tool that did it.
+
+```sh
+# the parser on real documents, by stage, in MB/s
+go test -run XXX -bench BenchmarkWorkload -benchtime 1s ./
+
+# what a token costs, and how far the token grouping looks ahead
+go test -run 'TestTokenDensity|TestGroupSpans' -v ./
+
+# compare a change against the baseline
+go test -run XXX -bench BenchmarkWorkload -count 6 ./ > new.txt
+benchstat testdata/baseline-master.txt new.txt
+```
+
+`testdata/baseline-master.txt` records master at `1525ccf`, six runs of each: parsing goes at
+7.0 to 12.9 MiB/s, and a 544 KB OpenAPI specification costs 29.6 MiB over 415,200 allocations --
+57x the source, one allocation per 1.3 input bytes.
+
+## The synthetic shapes
+
 `TestFlatMapScaling` is the important one: it prints the growth factor per doubling of
 sibling-key count. **~2 is linear and correct; ~4 means the quadratic `parseMap` defect is
 still present.** It is a report, not an assertion, so it never fails the build — see

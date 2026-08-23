@@ -21,7 +21,15 @@ provenance: the `encoding/json/v2` reference corpus, BSD-licensed, Copyright The
 Go Authors.
 
 Only the YAML is stored here. Regenerating needs a checkout of `go-openapi/core`
-beside this one.
+beside this one:
+
+```sh
+cd internal/analysis/workloads
+go run ./gen -json ../../../../core/json/testdata/workloads -out testdata
+```
+
+`gen/main.go` is the rewriting described below, so the stored files and the tool
+that made them do not drift apart.
 
 ## How they were rewritten
 
@@ -50,4 +58,7 @@ five compare equal.
 ## The gzip container
 
 Written at level 9 with no modification time and the operating system byte set to
-255, so the stored bytes do not record the machine that produced them.
+255, so the stored bytes do not record the machine that produced them. Note the
+compressed bytes still depend on the compressor: Go's `compress/flate` and zlib
+encode the same stream differently. What is stable is the content, which is what
+`TestEveryWorkloadParsesAndSettles` reads.

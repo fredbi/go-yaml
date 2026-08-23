@@ -30,7 +30,7 @@ func span(tk *parser.Token) int {
 //
 // The counts are what turn the allocation profile into a per-token figure:
 // azure_swagger is 35,472 tokens, and lexer.Tokenize allocates 164,505 times
-// for it -- 4.6 allocations and 358 bytes per token, where a token.Token is 96
+// for it -- 4.6 allocations and 360 bytes per token, where a token.Token is 96
 // bytes and its token.Position another 40.
 func TestTokenDensity(t *testing.T) {
 	all, err := workloads.All()
