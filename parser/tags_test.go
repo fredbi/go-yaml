@@ -6,6 +6,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -125,6 +126,67 @@ func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
 			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}
+
+// TestParseTagOnTheEmptyNodeInAFlowCollection covers a tag standing against the
+// punctuation of the collection it is written in.
+//
+// ns-flow-node admits c-ns-properties followed by e-scalar, so "!" with a ']'
+// after it is the non-specific tag on the empty node. Two things stopped that
+// from being read. isFlowType, which keeps a tag from being grouped with the
+// token after it, listed the openers and '}' but not ']' or ',': "[!]" grouped
+// the tag with the ']', and the sequence then ran to the end of the stream
+// looking for a closer it had already passed. And scanTag treated '}' as a
+// character no tag may hold instead of ending the tag there, and swallowed ']'
+// into the tag's name.
+func TestParseTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+	}{
+		"the non-specific tag alone in a sequence": {source: "[!]\n", want: "[! null]\n"},
+		"before an entry":                          {source: "[!, a]\n", want: "[! null, a]\n"},
+		"after an entry":                           {source: "[a, !]\n", want: "[a, ! null]\n"},
+		"a local tag":                              {source: "[!str]\n", want: "[!str null]\n"},
+		"a resolved tag takes its own default":     {source: "[!!str]\n", want: "[!!str]\n"},
+		"as the value of a flow mapping entry":     {source: "{a: !}\n", want: "{a: ! null}\n"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}
+
+// TestDecodeTagOnTheEmptyNodeInAFlowCollection pins the values, which is where
+// the resolved and unresolved tags part company: "!" and a local tag leave the
+// empty node unresolved, which is null, and "!!str" makes it the empty string.
+func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   any
+	}{
+		"the non-specific tag": {source: "[!]\n", want: []any{nil}},
+		"a local tag":          {source: "[!str]\n", want: []any{nil}},
+		"the string tag":       {source: "[!!str]\n", want: []any{""}},
+		"the integer tag":      {source: "[!!int]\n", want: []any{0}},
+		"mixed with entries":   {source: "[a, !, b]\n", want: []any{"a", nil, "b"}},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(test.source), &got))
+			assert.Equal(t, test.want, got)
 		})
 	}
 }

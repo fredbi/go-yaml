@@ -79,6 +79,15 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			invalid: "quoted: \"a\nb\nc\"\n",
 			valid:   "quoted: \"a\n b\n c\"\n",
 		},
+		// The same rule where the key was never written. The ':' is where the
+		// entry begins, so a token level with it opens the next entry, and "1"
+		// opens nothing. This was the one shape of it that got through: the
+		// key written out, "k:\n1\n", and the empty key carrying a property,
+		// ": &a\n1\n", were both refused already.
+		"value level with an empty key": {
+			invalid: ":\n1\n",
+			valid:   ":\n  1\n",
+		},
 
 		// ns-anchor-name is one character or more, and it ends at a flow
 		// indicator. A collection opening straight onto it is a node with no

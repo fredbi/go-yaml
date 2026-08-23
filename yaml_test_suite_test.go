@@ -22,66 +22,124 @@ import (
 // Why a case of the YAML Test Suite does not decode to its expected JSON.
 //
 // This measures the decoder. The parser is measured separately, in the
-// conformance package, and the two lists overlap heavily -- a document the
-// parser will not accept cannot decode either. The interesting entries are the
-// ones that appear here and not there.
+// conformance package, which is at 100% on the same fixtures -- so nothing
+// below is a document the parser refuses, and the two lists no longer overlap
+// at all.
+//
+// Three of these are decoder defects. The other twenty-nine are cases this
+// harness cannot score, and they are worth separating because a count that
+// mixes them says the decoder is at 92% when the cases it can actually decide
+// put it at 99.2%.
 const (
-	// The document is valid, and the decoder refuses it. Almost all of these
-	// are the parser's complex-key and empty-key gaps seen from one layer up.
-	reasonNotDecoded = "valid document the decoder will not read"
-	// The document is invalid, and the decoder reads it anyway.
-	// The document decodes, to the wrong value.
+	// The fixture states its expectation as out.yaml -- a canonical YAML
+	// document -- and carries no in.json for this harness to compare against.
+	//
+	// Every one of the twenty is a document whose keys JSON cannot spell: a
+	// sequence key, a mapping key, or an empty key. That is why the suite
+	// records no in.json for them, and why no harness comparing JSON will ever
+	// score them. Scoring them needs a comparison against out.yaml, which means
+	// composing both sides and comparing node trees.
+	reasonStatedAsOutYAML = "expectation stated as out.yaml, which this harness does not read"
+	// The fixture carries in.yaml alone: no in.json, no out.yaml, no error
+	// marker. There is nothing to agree or disagree with.
+	//
+	// The parser harness excludes these by name, through
+	// yamltestsuite.HasExpectation. This one counts them, because two of the
+	// eight are documents the decoder refuses and dropping them silently would
+	// hide that.
+	reasonNoExpectation = "the fixture states no expectation"
+	// The document decodes, to a value other than the expected JSON.
 	reasonWrongValue = "decodes to a value other than the expected JSON"
-	// The fixture carries no expected JSON, so there is nothing to compare
-	// against. Not our defect, and not something a fix here would clear.
-	reasonNoExpectation = "the fixture has no expected JSON"
+	// The fixture records the scalar's text and the decoder resolves the tag on
+	// it, so the two sides describe different things rather than disagreeing.
+	reasonTagResolved = "the fixture records the text and the decoder resolves the tag"
 )
 
-// decodeLedger records every case that does not decode to its expected JSON.
+// The three decoder defects, reduced. Fixing them is not part of this branch;
+// this is the list for whoever picks them up.
 //
-// It replaces a flat list of names whose comments had drifted out of date: a
-// third of the entries were marked as having no expected JSON when they in fact
-// fail to decode, and one case had been passing for long enough that nobody
-// noticed it was still being skipped.
+//  1. An empty document between "---" and "..." is dropped.
 //
-// TestYAMLTestSuite ratchets the ledger in both directions, so neither can
-// happen again silently.
-var decodeLedger = map[string]string{
-	"aliases-in-flow-objects":                          reasonNotDecoded,
-	"anchors-on-empty-scalars":                         reasonNotDecoded,
-	"block-mapping-with-missing-keys":                  reasonNotDecoded,
-	"empty-implicit-key-in-single-pair-flow-sequences": reasonNotDecoded,
-	"empty-keys-in-block-and-flow-mapping":             reasonNotDecoded,
-	"empty-lines-at-end-of-document":                   reasonNotDecoded,
-	"flow-sequence-in-flow-mapping":                    reasonNotDecoded,
-	"implicit-flow-mapping-key-on-one-line":            reasonNotDecoded,
-	"mapping-key-and-flow-sequence-item-anchors":       reasonNotDecoded,
-	"nested-implicit-complex-keys":                     reasonNotDecoded,
-	"question-mark-edge-cases/00":                      reasonNotDecoded,
-	"question-mark-edge-cases/01":                      reasonNotDecoded,
-	"single-character-streams/01":                      reasonNotDecoded,
-	"single-pair-implicit-entries":                     reasonNotDecoded,
-	"spec-example-2-11-mapping-between-sequences":      reasonNotDecoded,
-	"spec-example-6-12-separation-spaces":              reasonNotDecoded,
-	"spec-example-7-3-completely-empty-flow-nodes":     reasonNotDecoded,
-	"spec-example-8-18-implicit-block-mapping-entries": reasonNotDecoded,
-	"spec-example-8-19-compact-block-mappings":         reasonNotDecoded,
-	"syntax-character-edge-cases/00":                   reasonNotDecoded,
-	"tags-on-empty-scalars":                            reasonNotDecoded,
-	"various-combinations-of-explicit-block-mappings":  reasonNotDecoded,
-	"various-trailing-comments":                        reasonNotDecoded,
-	"various-trailing-comments-1-3":                    reasonNotDecoded,
-	"zero-indented-sequences-in-explicit-mapping-keys": reasonNotDecoded,
+//     "Document\n---\n# Empty\n...\n%YAML 1.2\n---\nmatches %: 20\n" yields two
+//     values where the suite expects three: "Document", null, and the mapping.
+//     The parser builds four documents from it -- the string, an
+//     *ast.CommentGroupNode holding "# Empty", an *ast.DirectiveNode holding
+//     "%YAML 1.2" on its own, and the mapping -- so the empty document exists
+//     in the tree as a comment group with no body, and the directive is split
+//     off from the document it introduces. Decode skips both. Repairing this
+//     starts in the parser: an empty document needs a document node with an
+//     empty body, and a directive needs to attach to the document that follows
+//     it. spec-example-9-6-stream and spec-example-9-6-stream-1-3 are the same
+//     defect twice.
+//
+//  2. A block scalar whose last line ends the stream loses the break clip
+//     chomping adds.
+//
+//     "foo: |\n  x\n   " decodes to "x\n " where the suite expects "x\n \n".
+//     The same document with a final line break, "foo: |\n  x\n   \n",
+//     decodes correctly, so the content is right and only the break clipping
+//     should append is missing. trailing-line-of-spaces/01.
+//
+// The fourth scored case, construct-binary, is not a defect. "!!binary"
+// resolves to []byte, json.Marshal writes those bytes back as base64 without
+// the line breaks the literal block carried, and the fixture's in.json records
+// the scalar text with its line breaks intact. The decoder is right and the
+// comparison is the wrong one.
 
-	"construct-binary":            reasonWrongValue,
+// decodeLedger records every case that does not decode to its expected JSON,
+// with why.
+//
+// TestYAMLTestSuite ratchets it in both directions: a case that starts failing
+// fails because it is missing from here, and one that starts passing fails
+// because it is still listed.
+var decodeLedger = map[string]string{
+	// A key JSON cannot spell. The suite states what these should compose to
+	// in out.yaml and records no in.json at all.
+	"aliases-in-explicit-block-mapping":                reasonStatedAsOutYAML,
+	"aliases-in-flow-objects":                          reasonStatedAsOutYAML,
+	"anchors-on-empty-scalars":                         reasonStatedAsOutYAML,
+	"empty-implicit-key-in-single-pair-flow-sequences": reasonStatedAsOutYAML,
+	"flow-mapping-separate-values":                     reasonStatedAsOutYAML,
+	"flow-sequence-in-flow-mapping":                    reasonStatedAsOutYAML,
+	"implicit-flow-mapping-key-on-one-line":            reasonStatedAsOutYAML,
+	"mapping-key-and-flow-sequence-item-anchors":       reasonStatedAsOutYAML,
+	"nested-implicit-complex-keys":                     reasonStatedAsOutYAML,
+	"question-mark-edge-cases/00":                      reasonStatedAsOutYAML,
+	"question-mark-edge-cases/01":                      reasonStatedAsOutYAML,
+	"single-character-streams/01":                      reasonStatedAsOutYAML,
+	"single-pair-implicit-entries":                     reasonStatedAsOutYAML,
+	"spec-example-2-11-mapping-between-sequences":      reasonStatedAsOutYAML,
+	"spec-example-6-12-separation-spaces":              reasonStatedAsOutYAML,
+	"spec-example-7-16-flow-mapping-entries":           reasonStatedAsOutYAML,
+	"tags-on-empty-scalars":                            reasonStatedAsOutYAML,
+	"various-combinations-of-explicit-block-mappings":  reasonStatedAsOutYAML,
+	"various-trailing-comments":                        reasonStatedAsOutYAML,
+	"various-trailing-comments-1-3":                    reasonStatedAsOutYAML,
+
+	// in.yaml and nothing else. The decoder refuses the first and the last of
+	// these -- ": a\n: b\n" as a duplicate null key, and the zero-indented
+	// sequence with "[5:1] value is not allowed in this context" -- and reads
+	// the other six.
+	"block-mapping-with-missing-keys":                  reasonNoExpectation,
+	"empty-keys-in-block-and-flow-mapping":             reasonNoExpectation,
+	"empty-lines-at-end-of-document":                   reasonNoExpectation,
+	"spec-example-7-3-completely-empty-flow-nodes":     reasonNoExpectation,
+	"spec-example-8-18-implicit-block-mapping-entries": reasonNoExpectation,
+	"spec-example-8-19-compact-block-mappings":         reasonNoExpectation,
+	"syntax-character-edge-cases/00":                   reasonNoExpectation,
+	"zero-indented-sequences-in-explicit-mapping-keys": reasonNoExpectation,
+
+	// The defects. See the two numbered entries above.
 	"spec-example-9-6-stream":     reasonWrongValue,
 	"spec-example-9-6-stream-1-3": reasonWrongValue,
 	"trailing-line-of-spaces/01":  reasonWrongValue,
 
-	"aliases-in-explicit-block-mapping":      reasonNoExpectation,
-	"flow-mapping-separate-values":           reasonNoExpectation,
-	"spec-example-7-16-flow-mapping-entries": reasonNoExpectation,
+	"construct-binary": reasonTagResolved,
 }
+
+// scoredReasons are the reasons that mean the decoder got something wrong. The
+// rest mean the fixture and this harness cannot be compared.
+var scoredReasons = map[string]bool{reasonWrongValue: true}
 
 func TestYAMLTestSuite(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
@@ -167,9 +225,21 @@ func reportDecode(t *testing.T, total int, failed map[string]struct{}) {
 		total, passed, 100*float64(passed)/float64(total), len(failed))
 
 	byReason := make(map[string][]string)
+	var wrong int
 	for name := range failed {
-		byReason[decodeLedger[name]] = append(byReason[decodeLedger[name]], name)
+		reason := decodeLedger[name]
+		byReason[reason] = append(byReason[reason], name)
+		if scoredReasons[reason] {
+			wrong++
+		}
 	}
+
+	// The number that means something about the decoder. The cases this
+	// harness cannot compare are not failures, and counting them as such
+	// understates the decoder by seven points.
+	scored := total - (len(failed) - wrong)
+	t.Logf("  of the %d cases this harness can score, %d decode as expected (%.1f%%)",
+		scored, scored-wrong, 100*float64(scored-wrong)/float64(scored))
 
 	reasons := make([]string, 0, len(byReason))
 	for reason := range byReason {
@@ -178,6 +248,15 @@ func reportDecode(t *testing.T, total int, failed map[string]struct{}) {
 	sort.Slice(reasons, func(i, j int) bool { return len(byReason[reasons[i]]) > len(byReason[reasons[j]]) })
 
 	for _, reason := range reasons {
-		t.Logf("  %2d cases: %s", len(byReason[reason]), reason)
+		t.Logf("  %2d %s: %s", len(byReason[reason]), plural(len(byReason[reason]), "case"), reason)
 	}
+}
+
+// plural adds an "s" to word when n is not one.
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+
+	return word + "s"
 }

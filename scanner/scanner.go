@@ -68,9 +68,9 @@ type Scanner struct {
 // byteOrderMark is YAML 1.2's c-byte-order-mark.
 //
 // nb-char is c-printable less b-char and this, so a byte order mark is not a
-// character any node may hold: it marks a document prefix and nothing else. One
-// opening the stream is therefore dropped rather than read, which is what a
-// file saved by an editor that writes one needs.
+// character any node may hold: it marks a document prefix and nothing else.
+// validateByteOrderMarks refuses one anywhere a node may go, and Init drops the
+// rest, which is what a file saved by an editor that writes one needs.
 const byteOrderMark = '\ufeff'
 
 // validateStream checks that the source is text a YAML stream may hold.
@@ -115,7 +115,116 @@ func validateStream(text string) error {
 		column++
 	}
 
+	return validateByteOrderMarks(text)
+}
+
+// validateByteOrderMarks checks that every U+FEFF in the source stands where
+// YAML 1.2 allows one.
+//
+// nb-char excludes the mark, so it is not a character a node may hold. The one
+// place it may appear is l-document-prefix ::= c-byte-order-mark? l-comment*,
+// and l-yaml-stream admits a run of those prefixes at the start of the stream,
+// after a document suffix, and before an explicit document. So a mark is valid
+// when it opens a line and a document begins after it -- immediately, or past
+// the blank and comment lines a prefix may carry.
+//
+// Marks are dropped rather than read, which is what a file saved by an editor
+// that writes one needs. Init removes every one of them once this has passed.
+func validateByteOrderMarks(text string) error {
+	lines := strings.Split(text, "\n")
+	offset := 1
+
+	for i, raw := range lines {
+		line := strings.TrimSuffix(raw, "\r")
+		marks := leadingMarks(line)
+
+		if rest := line[marks*utf8.RuneLen(byteOrderMark):]; strings.ContainsRune(rest, byteOrderMark) {
+			column := marks + 1 + strings.IndexRune(rest, byteOrderMark)
+
+			return ErrInvalidToken(token.Invalid(
+				"found a byte order mark inside a line, where a node may not hold one",
+				string(byteOrderMark),
+				&token.Position{Line: i + 1, Column: column, Offset: offset + column - 1},
+			))
+		}
+
+		if marks > 0 && !opensADocument(lines, i, marks) {
+			return ErrInvalidToken(token.Invalid(
+				"found a byte order mark where no document begins",
+				string(byteOrderMark),
+				&token.Position{Line: i + 1, Column: 1, Offset: offset},
+			))
+		}
+
+		offset += len(raw) + 1
+	}
+
 	return nil
+}
+
+// leadingMarks counts the byte order marks a line opens with.
+func leadingMarks(line string) int {
+	n := 0
+	for strings.HasPrefix(line[n*utf8.RuneLen(byteOrderMark):], string(byteOrderMark)) {
+		n++
+	}
+
+	return n
+}
+
+// opensADocument reports whether the mark run at the head of lines[i] stands in
+// a document prefix.
+func opensADocument(lines []string, i, marks int) bool {
+	if i == 0 {
+		// The prefix opening the stream, which is where an editor writes one.
+		return true
+	}
+
+	rest := strings.TrimSuffix(lines[i], "\r")[marks*utf8.RuneLen(byteOrderMark):]
+	if isDocumentMarker(rest) {
+		return true
+	}
+
+	// A prefix may follow a document suffix, with blank and comment lines
+	// between the two.
+	for back := i - 1; back >= 0; back-- {
+		prev := strings.TrimSuffix(lines[back], "\r")
+		if strings.HasPrefix(prev, "...") {
+			return true
+		}
+		if !blankOrComment(prev) {
+			break
+		}
+	}
+
+	// Otherwise the prefix has to introduce an explicit document, which the
+	// comment lines it may carry stand before.
+	if !blankOrComment(rest) {
+		return false
+	}
+	for ahead := i + 1; ahead < len(lines); ahead++ {
+		next := strings.TrimSuffix(lines[ahead], "\r")
+		if strings.HasPrefix(next, "---") {
+			return true
+		}
+		if !blankOrComment(next) {
+			return false
+		}
+	}
+
+	return false
+}
+
+// isDocumentMarker reports whether a line opens with "---" or "...".
+func isDocumentMarker(line string) bool {
+	return strings.HasPrefix(line, "---") || strings.HasPrefix(line, "...")
+}
+
+// blankOrComment reports whether a line carries neither content nor a marker.
+func blankOrComment(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t")
+
+	return trimmed == "" || strings.HasPrefix(trimmed, "#")
 }
 
 // printable is YAML 1.2's c-printable.
@@ -881,10 +990,30 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			s.progressColumn(ctx, len([]rune(value))-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
-		case '{', '}':
+		case '}', ']':
+			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
+				// The closer ends the collection the tag stands in, so it ends
+				// the tag: "[!]" is the non-specific tag on the empty node and
+				// not a tag whose name is "]".
+				value := ctx.source(ctx.idx-1, ctx.idx+idx)
+				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				s.progressColumn(ctx, len([]rune(value))-1) // progress column before the closer so it is scanned on its own
+
+				ctx.clear()
+
+				return true, nil
+			}
+
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+
+			return false, ErrInvalidToken(invalidTk)
+		case '{':
+			ctx.addOriginBuf(c)
+			s.progressColumn(ctx, progress)
+			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+
 			return false, ErrInvalidToken(invalidTk)
 		default:
 			ctx.addOriginBuf(c)
@@ -1665,8 +1794,13 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 		return false
 	}
 
-	nc := ctx.nextChar()
-	if nc != ' ' && nc != '\t' {
+	// c-l-block-map-explicit-key is "?" followed by s-l+block-indented, and the
+	// separation that introduces it may be a line break rather than a space. So
+	// a '?' ending its line opens an entry whose key is the empty node, and a
+	// '?' ending the stream opens one too.
+	switch nc := ctx.nextChar(); nc {
+	case ' ', '\t', '\n', '\r', rune(0):
+	default:
 		return false
 	}
 
@@ -2110,7 +2244,7 @@ func (s *Scanner) scan(ctx *Context) error {
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
 	s.initErr = validateStream(text)
-	src := []rune(strings.TrimLeft(text, string(byteOrderMark)))
+	src := []rune(strings.ReplaceAll(text, string(byteOrderMark), ""))
 	s.source = src
 	s.sourcePos = 0
 	s.sourceSize = len(src)

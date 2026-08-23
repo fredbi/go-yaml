@@ -3,11 +3,6 @@
 
 package yamlgen
 
-import (
-	"regexp"
-	"strings"
-)
-
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
 //
 // This is the other direction from [Divergence], and it is recorded differently
@@ -75,81 +70,10 @@ func KnownlyAccepted(src string) *Laxity {
 //
 // The list is not a survey. It is what a few hundred thousand mutations turned
 // up and a person then confirmed, so absence from it means nothing.
-var Lax = []Laxity{
-	{
-		Name: "a-lone-question-mark-where-only-a-flow-node-fits",
-		Src:  "k: ?\n",
-		Rule: "ns-plain-first(c) admits '?' only when what follows it is " +
-			"ns-plain-safe(c), and a line break is not one. Where a block node " +
-			"may appear the '?' is read as c-l-block-map-explicit-key instead, " +
-			"which is why \"- ?\", \"?\" and \"k:\\n  ?\" are all documents. A " +
-			"value written on its key's line is an ns-flow-node and so is every " +
-			"node inside a flow collection, and neither leaves the '?' anything " +
-			"to be -- so \"[?]\" goes the same way. The distinction is the " +
-			"context the node sits in rather than the characters around it, " +
-			"which is why this is recorded rather than refused in the scanner",
-		Reads: map[string]any{"k": "?"},
-		Match: loneQuestionMark.MatchString,
-	},
-	{
-		Name: "a-byte-order-mark-standing-as-content",
-		Src:  "a: \ufeffb\n",
-		Rule: "nb-char ::= c-printable - b-char - c-byte-order-mark, so a mark is " +
-			"not a character any node may hold. It marks an l-document-prefix and " +
-			"nothing else -- which is why one opening the stream is dropped rather " +
-			"than refused, and why one anywhere a node may go is neither",
-		Reads: map[string]any{"a": "\ufeffb"},
-		// Anywhere past the prefix the stream may open with. A mark inside a
-		// double-quoted scalar is left out on purpose: nb-double-char reaches
-		// it through c-ns-esc-char and the recognizer accepts it, so it is a
-		// different question from this one.
-		Match: byteOrderMarkAsContent,
-	},
-	{
-		Name: "a-value-level-with-an-empty-key",
-		Src:  ":\n1\n",
-		Rule: "s-l+block-node(n,c) puts the value of a block mapping entry at " +
-			"s-indent(n+1), so a token level with the entry can only open the " +
-			"next one -- and \"1\" opens nothing. The same document with a key " +
-			"written out, \"k:\\n1\", is refused, and so is the same empty key " +
-			"carrying a property, \": &a\\n1\". What is left is the entry whose " +
-			"key is e-node and carries nothing: there is no key token to measure " +
-			"the column against, and the ':' has not been made to stand for one",
-		Reads: map[string]any{"null": uint64(1)},
-		// A line that is nothing but ':' followed by one starting hard against
-		// the left margin. Narrow on purpose: the indented spellings of the
-		// same shape are a separate question, and one of them may well be a
-		// document.
-		Match: regexp.MustCompile("(?m)^:[ \t]*\n[^ \t\n]").MatchString,
-	},
-}
-
-// byteOrderMarkAsContent reports whether src holds a byte order mark past the
-// prefix the stream may open with, outside a double-quoted scalar.
 //
-// The quotes are tracked rather than the lines carrying them: "\"\": \ufeff" is
-// a mark standing where a value goes and belongs here, where the same mark
-// written between the quotes does not.
-func byteOrderMarkAsContent(src string) bool {
-	const mark = '\ufeff'
-
-	var quoted bool
-	for _, r := range strings.TrimLeft(src, string(mark)) {
-		switch {
-		case r == '\n':
-			quoted = false
-		case r == '"':
-			quoted = !quoted
-		case r == mark && !quoted:
-			return true
-		}
-	}
-
-	return false
-}
-
-// loneQuestionMark matches a '?' with nothing after it standing where only a
-// flow node fits: as a value on its key's line, or as an entry of a flow
-// collection. Written out rather than described because the two are the whole
-// of the class -- everywhere else the same '?' opens an explicit key.
-var loneQuestionMark = regexp.MustCompile(`(?m): \?[ \t]*$|[\[{,][ \t]*\?[ \t]*[,\]}]`)
+// It is empty. The three entries it held were refused once the byte order mark
+// was held to the document prefixes it may open, the '?' was read as the
+// explicit key indicator wherever separation follows it, and an entry's value
+// was measured against the ':' of a key that was never written. Each left a
+// test in parser/ or scanner/ behind it.
+var Lax = []Laxity{}

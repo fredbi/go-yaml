@@ -11,7 +11,6 @@ linters:
     - unused
   settings:
     errcheck:
-      without_tests: true
     govet:
       disable:
         - tests

@@ -502,18 +502,22 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 			}
 			ret = append(ret, tk)
 		case token.MappingKeyType:
+			// A '?' with nothing after it opens an entry whose key is e-node,
+			// which is what "? \n" and "?\n: v\n" are. The group holds the
+			// indicator alone and the parser supplies the null.
 			end := explicitKeyEnd(tokens, i, flowDepth > 0)
-			if end == i+1 {
-				return nil, errors.ErrSyntax("undefined map key", tk.RawToken())
-			}
 			body, err := groupExplicitKeyBody(tokens[i+1 : end])
 			if err != nil {
 				return nil, err
 			}
+			group := []*Token{tk}
+			if len(body) == 0 {
+				group = append(group, implicitNullKeyToken(tk))
+			}
 			ret = append(ret, &Token{
 				Group: &TokenGroup{
 					Type:   TokenGroupMapKey,
-					Tokens: append([]*Token{tk}, body...),
+					Tokens: append(group, body...),
 				},
 			})
 			i = end - 1
@@ -1049,10 +1053,20 @@ func isNotMapKeyType(tk *Token) bool {
 		typ == token.SequenceEndType
 }
 
+// isFlowType reports whether a token is punctuation a tag cannot be grouped
+// with, because the token belongs to the collection around the tag rather than
+// naming what the tag is on.
+//
+// The two closers and the ',' are here for the same reason as the openers: "[!]"
+// is the non-specific tag on the empty node followed by the closer, and grouping
+// the two swallowed the ']' -- the sequence then ran to the end of the stream
+// looking for it.
 func isFlowType(tk *Token) bool {
 	typ := tk.Type()
 	return typ == token.MappingStartType ||
 		typ == token.MappingEndType ||
 		typ == token.SequenceStartType ||
-		typ == token.SequenceEntryType
+		typ == token.SequenceEndType ||
+		typ == token.SequenceEntryType ||
+		typ == token.CollectEntryType
 }

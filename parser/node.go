@@ -1,10 +1,7 @@
 package parser
 
 import (
-	"fmt"
-
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -229,7 +226,14 @@ func newTagDefaultScalarValueNode(ctx *context, tag *token.Token) (ast.ScalarNod
 		}
 		node = n
 	default:
-		return nil, errors.ErrSyntax(fmt.Sprintf("cannot assign default value for %q tag", tag.Value), tag)
+		// A tag the core schema does not resolve -- the non-specific "!", or a
+		// local tag -- leaves the empty node unresolved, which is null.
+		tk = &Token{Token: token.New("null", "null", &pos)}
+		n, err := newNullNode(ctx, tk)
+		if err != nil {
+			return nil, err
+		}
+		node = n
 	}
 	ctx.insertToken(tk)
 	ctx.goNext()

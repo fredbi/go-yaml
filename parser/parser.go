@@ -470,7 +470,13 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 				return nil, err
 			}
 			node.Values = append(node.Values, mapValue)
-			ctx.goNext()
+			if ctx.currentToken() == mapKeyTk {
+				// A plain scalar key is still the current token, so skip it. A
+				// key that is a property group -- the "&a" of "{&a}" -- was
+				// read by parseScalarValue, which already moved past it, and
+				// advancing again would step over the '}'.
+				ctx.goNext()
+			}
 		}
 		if headComment != nil && len(node.Values) > entered {
 			// The comment introduced this entry, so it belongs above it.
@@ -765,9 +771,16 @@ func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, c
 
 // isScalarKeyToken reports whether tk is a scalar written where a key goes,
 // quoted or not.
+// isScalarKeyToken reports whether a key's token sits where the entry begins,
+// so that the column of what follows can be measured against it.
+//
+// A plain or quoted key does. So does the implicit null standing for a key that
+// was never written: implicitNullKeyToken copies the ':' position, and the ':'
+// is where the entry begins. Without it ":\n1\n" read as {null: 1}, where the
+// same document with the key written out, "k:\n1\n", is refused.
 func isScalarKeyToken(tk *token.Token) bool {
 	switch tk.Type {
-	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
+	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType, token.ImplicitNullType:
 		return true
 	default:
 		return false
@@ -857,6 +870,12 @@ func (p *parser) parseMapValue(ctx *context, key ast.MapKeyNode, colonTk *Token)
 		// ----
 		// key: <value does not defined>
 		// next
+		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+	}
+
+	if ctx.isFlow && closesFlowEntry(tk) {
+		// "[a:]", "[:]" and "[a, :]" -- the punctuation belongs to the
+		// collection the pair is written in, so the pair's value is e-node.
 		return newNullNode(ctx, ctx.insertNullToken(colonTk))
 	}
 
@@ -1015,6 +1034,17 @@ func (p *parser) parseAnchor(ctx *context, g *TokenGroup) (*ast.AnchorNode, erro
 // endsValue reports whether a token closes what precedes it rather than
 // starting something new: the ':' of a mapping entry, or the ',' and brackets
 // that punctuate a flow collection.
+// closesFlowEntry reports whether a token ends the entry it follows inside a
+// flow collection, rather than standing for a node of its own.
+func closesFlowEntry(tk *Token) bool {
+	switch tk.Type() {
+	case token.CollectEntryType, token.MappingEndType, token.SequenceEndType:
+		return true
+	default:
+		return false
+	}
+}
+
 func endsValue(tk *Token) bool {
 	switch tk.Type() {
 	case token.MappingValueType, token.CollectEntryType, token.MappingEndType, token.SequenceEndType:
@@ -1253,6 +1283,15 @@ func (p *parser) parseTagValue(ctx *context, tagRawTk *token.Token, tk *Token) (
 		}
 		return p.parseSequence(ctx)
 	}
+	if endsValue(tk) {
+		// A tag the core schema does not resolve -- the non-specific "!", or a
+		// local tag -- with punctuation after it that closes what the tag was
+		// written in. The tag stands on the empty node: "[!]", "[a, !]",
+		// "{a: !}". The case above says the same for the resolved tags, where
+		// the empty node takes the tag's own default rather than null.
+		return newTagDefaultScalarValueNode(ctx, tagRawTk)
+	}
+
 	return p.parseToken(ctx, tk)
 }
 

@@ -6,6 +6,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -192,6 +193,82 @@ func TestParseFlowComments(t *testing.T) {
 			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
+		})
+	}
+}
+
+// TestParseEmptyNodeInAFlowCollection covers the entries a flow collection may
+// hold that carry no scalar of their own.
+//
+// Two productions: c-ns-flow-map-empty-key-entry, an entry whose key is e-node,
+// and ns-flow-pair, which a flow sequence admits as an entry and whose value may
+// be e-node as well. Both were refused -- "{&a}" as "could not find flow mapping
+// end token '}'" and "[:]" as "could not find '[' character corresponding to
+// ']'".
+//
+// Each rendered form below is one the recognizer compiled from
+// yaml-spec-1.2.json accepts, and each reads back to the same text.
+func TestParseEmptyNodeInAFlowCollection(t *testing.T) {
+	tests := map[string]struct {
+		source string
+		want   string
+		value  any
+	}{
+		"an anchor alone in a flow mapping": {
+			source: "{&a}\n",
+			want:   "{&a :}\n",
+			value:  map[string]any{"null": nil},
+		},
+		"an anchor alone before another entry": {
+			source: "{&a, b: 1}\n",
+			want:   "{&a :, b: 1}\n",
+			value:  map[string]any{"null": nil, "b": uint64(1)},
+		},
+		"an anchor alone after another entry": {
+			source: "{b: 1, &a}\n",
+			want:   "{b: 1, &a :}\n",
+			value:  map[string]any{"null": nil, "b": uint64(1)},
+		},
+		"a pair with neither side": {
+			source: "[:]\n",
+			want:   "[:]\n",
+			value:  []any{map[string]any{"null": nil}},
+		},
+		"a pair with neither side, before an entry": {
+			source: "[:, a]\n",
+			want:   "[:, a]\n",
+			value:  []any{map[string]any{"null": nil}, "a"},
+		},
+		"a pair with neither side, after an entry": {
+			source: "[a, :]\n",
+			want:   "[a, :]\n",
+			value:  []any{"a", map[string]any{"null": nil}},
+		},
+		"a pair with no value": {
+			source: "[a:]\n",
+			want:   "[a:]\n",
+			value:  []any{map[string]any{"a": nil}},
+		},
+		"an explicit key with no value": {
+			source: "[? a]\n",
+			want:   "[? a :]\n",
+			value:  []any{map[string]any{"a": nil}},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, file.String())
+
+			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			require.NoErrorf(t, err, "cannot read back %q", test.want)
+			assert.Equal(t, test.want, reread.String())
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(test.source), &got))
+			assert.Equal(t, test.value, got)
 		})
 	}
 }
