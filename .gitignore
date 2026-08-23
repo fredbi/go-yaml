@@ -1,7 +1,7 @@
-bin/
-.idea/
 *.out
 *.pprof
-go.work.sum
-.worktrees
+.idea/
 .mcp.json
+.worktrees
+bin/
+go.work.sum
