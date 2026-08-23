@@ -5,6 +5,7 @@ package jsonspike_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,24 +30,34 @@ const stored = "testdata/json-smoke.jsonl.gz"
 // difference means either the grammar moved or the generator did, and both are
 // things to look at rather than to absorb.
 func TestTheStoredCorpusIsWhatTheOracleWouldSayNow(t *testing.T) {
-	want, err := os.ReadFile(stored)
+	stored, err := os.ReadFile(stored)
 	if err != nil {
 		t.Fatalf("no stored corpus: %v", err)
 	}
 
-	var got bytes.Buffer
-	if err := jsonspike.Smoke().Write(&got); err != nil {
+	var built bytes.Buffer
+	if err := jsonspike.Smoke().Write(&built); err != nil {
 		t.Fatal(err)
 	}
 
-	if bytes.Equal(want, got.Bytes()) {
+	want, err := suite.Content(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := suite.Content(built.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(want, got) {
 		return
 	}
 
-	t.Errorf("the stored corpus is not what the oracle says now (%d bytes stored, %d regenerated).\n"+
+	t.Errorf("the stored corpus is not what the oracle says now (%s).\n"+
 		"Either the grammar changed, or the generator did. Look at which before regenerating:\n"+
 		"    go test -run TestRegenerate ./internal/testintegration/jsonspike/ -args -jsonspike.write",
-		len(want), got.Len())
+		firstDifference(want, got))
 }
 
 // TestRegenerate rewrites the stored corpus, behind a flag so it cannot happen
@@ -203,3 +214,31 @@ func tagsOf(c suite.Case) []stance.Tag {
 // ignorance would report the lexer as incomplete for not having an opinion
 // about numbers it never converts.
 func known() []string { return jsonspike.Vocabulary().Tags() }
+
+// firstDifference names the line two artifacts first disagree on, so that a
+// failure points at a case rather than at a byte count.
+func firstDifference(want, got []byte) string {
+	a := bytes.Split(want, []byte("\n"))
+	b := bytes.Split(got, []byte("\n"))
+
+	for i := range min(len(a), len(b)) {
+		if bytes.Equal(a[i], b[i]) {
+			continue
+		}
+
+		return fmt.Sprintf("line %d of %d differs:\n  stored: %s\n  now:    %s",
+			i+1, len(a), truncate(a[i]), truncate(b[i]))
+	}
+
+	return fmt.Sprintf("%d lines stored, %d regenerated", len(a), len(b))
+}
+
+// truncate keeps a differing line short enough to read.
+func truncate(line []byte) []byte {
+	const width = 240
+	if len(line) <= width {
+		return line
+	}
+
+	return append(line[:width:width], "..."...)
+}
