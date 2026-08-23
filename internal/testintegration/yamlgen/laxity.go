@@ -5,7 +5,6 @@ package yamlgen
 
 import (
 	"regexp"
-	"strings"
 )
 
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
@@ -92,20 +91,6 @@ var Lax = []Laxity{
 		Match: loneQuestionMark.MatchString,
 	},
 	{
-		Name: "a-byte-order-mark-standing-as-content",
-		Src:  "a: \ufeffb\n",
-		Rule: "nb-char ::= c-printable - b-char - c-byte-order-mark, so a mark is " +
-			"not a character any node may hold. It marks an l-document-prefix and " +
-			"nothing else -- which is why one opening the stream is dropped rather " +
-			"than refused, and why one anywhere a node may go is neither",
-		Reads: map[string]any{"a": "\ufeffb"},
-		// Anywhere past the prefix the stream may open with. A mark inside a
-		// double-quoted scalar is left out on purpose: nb-double-char reaches
-		// it through c-ns-esc-char and the recognizer accepts it, so it is a
-		// different question from this one.
-		Match: byteOrderMarkAsContent,
-	},
-	{
 		Name: "a-value-level-with-an-empty-key",
 		Src:  ":\n1\n",
 		Rule: "s-l+block-node(n,c) puts the value of a block mapping entry at " +
@@ -122,30 +107,6 @@ var Lax = []Laxity{
 		// document.
 		Match: regexp.MustCompile("(?m)^:[ \t]*\n[^ \t\n]").MatchString,
 	},
-}
-
-// byteOrderMarkAsContent reports whether src holds a byte order mark past the
-// prefix the stream may open with, outside a double-quoted scalar.
-//
-// The quotes are tracked rather than the lines carrying them: "\"\": \ufeff" is
-// a mark standing where a value goes and belongs here, where the same mark
-// written between the quotes does not.
-func byteOrderMarkAsContent(src string) bool {
-	const mark = '\ufeff'
-
-	var quoted bool
-	for _, r := range strings.TrimLeft(src, string(mark)) {
-		switch {
-		case r == '\n':
-			quoted = false
-		case r == '"':
-			quoted = !quoted
-		case r == mark && !quoted:
-			return true
-		}
-	}
-
-	return false
 }
 
 // loneQuestionMark matches a '?' with nothing after it standing where only a
