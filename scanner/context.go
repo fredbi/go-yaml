@@ -126,7 +126,7 @@ func firstLineIndentColumnByOpt(opt string) int {
 	opt = strings.TrimPrefix(opt, "+")
 	opt = strings.TrimSuffix(opt, "-")
 	opt = strings.TrimSuffix(opt, "+")
-	i, _ := strconv.ParseInt(opt, 10, 64)
+	i, _ := strconv.ParseInt(opt, 10, 0)
 	return int(i)
 }
 

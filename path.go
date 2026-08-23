@@ -192,7 +192,7 @@ func parsePathIndex(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []run
 		if numOrAll == "*" {
 			return b.IndexAll(), buf, cursor + 1, nil
 		}
-		num, err := strconv.ParseInt(numOrAll, 10, 64)
+		num, err := strconv.ParseUint(numOrAll, 10, 0)
 		if err != nil {
 			return nil, nil, 0, err
 		}
