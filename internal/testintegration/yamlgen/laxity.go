@@ -3,10 +3,6 @@
 
 package yamlgen
 
-import (
-	"regexp"
-)
-
 // Laxity is a document YAML 1.2 refuses that this library reads anyway.
 //
 // This is the other direction from [Divergence], and it is recorded differently
@@ -74,22 +70,10 @@ func KnownlyAccepted(src string) *Laxity {
 //
 // The list is not a survey. It is what a few hundred thousand mutations turned
 // up and a person then confirmed, so absence from it means nothing.
-var Lax = []Laxity{
-	{
-		Name: "a-value-level-with-an-empty-key",
-		Src:  ":\n1\n",
-		Rule: "s-l+block-node(n,c) puts the value of a block mapping entry at " +
-			"s-indent(n+1), so a token level with the entry can only open the " +
-			"next one -- and \"1\" opens nothing. The same document with a key " +
-			"written out, \"k:\\n1\", is refused, and so is the same empty key " +
-			"carrying a property, \": &a\\n1\". What is left is the entry whose " +
-			"key is e-node and carries nothing: there is no key token to measure " +
-			"the column against, and the ':' has not been made to stand for one",
-		Reads: map[string]any{"null": uint64(1)},
-		// A line that is nothing but ':' followed by one starting hard against
-		// the left margin. Narrow on purpose: the indented spellings of the
-		// same shape are a separate question, and one of them may well be a
-		// document.
-		Match: regexp.MustCompile("(?m)^:[ \t]*\n[^ \t\n]").MatchString,
-	},
-}
+//
+// It is empty. The three entries it held were refused once the byte order mark
+// was held to the document prefixes it may open, the '?' was read as the
+// explicit key indicator wherever separation follows it, and an entry's value
+// was measured against the ':' of a key that was never written. Each left a
+// test in parser/ or scanner/ behind it.
+var Lax = []Laxity{}

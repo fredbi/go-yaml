@@ -771,9 +771,16 @@ func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, c
 
 // isScalarKeyToken reports whether tk is a scalar written where a key goes,
 // quoted or not.
+// isScalarKeyToken reports whether a key's token sits where the entry begins,
+// so that the column of what follows can be measured against it.
+//
+// A plain or quoted key does. So does the implicit null standing for a key that
+// was never written: implicitNullKeyToken copies the ':' position, and the ':'
+// is where the entry begins. Without it ":\n1\n" read as {null: 1}, where the
+// same document with the key written out, "k:\n1\n", is refused.
 func isScalarKeyToken(tk *token.Token) bool {
 	switch tk.Type {
-	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
+	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType, token.ImplicitNullType:
 		return true
 	default:
 		return false
