@@ -1,22 +1,32 @@
 // Package fuzzseeds supplies the shared seed corpus for the fuzz targets.
 //
-// It lives under testdata so that it is not part of the published module: it is
-// test support, and it reaches into the vendored YAML Test Suite.
+// It sits under internal/ so that nothing outside this module can import it: it
+// is test support, and it reaches into the vendored YAML Test Suite and into
+// the generated corpus the conformance module holds.
 //
 // Seeds matter more than they look. A fuzzer starting from an empty corpus
 // spends its budget rediscovering that YAML has anchors; starting from the test
-// suite, it spends it on the combinations nobody thought to write down.
+// suite and the corpus, it spends it on the combinations nobody thought to
+// write down.
 package fuzzseeds
 
 import (
+	"bufio"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
 )
 
-// All returns every seed document: the whole YAML Test Suite, valid and invalid
-// alike, followed by the inputs reduced from reports we track.
+// All returns every seed document, deduplicated and in a fixed order: the whole
+// YAML Test Suite, valid and invalid alike, then the inputs reduced from
+// reports we track, then the generated YAML corpus where it is present.
 func All() ([]string, error) {
 	tests, err := yamltestsuite.TestSuites()
 	if err != nil {
@@ -26,12 +36,38 @@ func All() ([]string, error) {
 		return nil, errors.New("the vendored YAML Test Suite is empty")
 	}
 
-	seeds := make([]string, 0, len(tests)+len(reducedReports))
+	corpus, err := corpusSeeds()
+	if err != nil {
+		return nil, err
+	}
+
+	seeds := make([]string, 0, len(tests)+len(reducedReports)+len(corpus))
 	for _, test := range tests {
 		seeds = append(seeds, string(test.InYAML))
 	}
+	seeds = append(seeds, reducedReports...)
+	seeds = append(seeds, corpus...)
 
-	return append(seeds, reducedReports...), nil
+	// The corpus draws its own documents and repeats the shapes the suite
+	// already carries, so the three sources overlap. Seeding the same document
+	// twice costs a parse on every go test run and buys nothing.
+	return unique(seeds), nil
+}
+
+// unique keeps the first occurrence of each seed, so the order stays fixed.
+func unique(seeds []string) []string {
+	seen := make(map[string]struct{}, len(seeds))
+	kept := seeds[:0]
+
+	for _, seed := range seeds {
+		if _, dup := seen[seed]; dup {
+			continue
+		}
+		seen[seed] = struct{}{}
+		kept = append(kept, seed)
+	}
+
+	return kept
 }
 
 // reducedReports collects inputs reduced from issue reports and from suite cases
@@ -69,3 +105,75 @@ var reducedReports = []string{
 	"...\n",
 	"",
 }
+
+// corpusPath is the generated YAML corpus, held beside the generator that
+// writes it.
+//
+// Read by path rather than imported: internal/testintegration is its own
+// module and it depends on this one, so the import can only go the other way.
+// A nested go.mod also keeps that directory out of a published copy of this
+// module, so the file is often absent -- All then returns the suite seeds
+// alone rather than failing.
+const corpusPath = "../testintegration/yamlcorpus/testdata/yaml-smoke.jsonl.gz"
+
+// corpusCase is the one field of a suite.Case a seed needs.
+//
+// Declared here rather than imported for the same reason as corpusPath. The
+// artifact's first line is a header object with no "src", which decodes to the
+// zero value and is skipped.
+type corpusCase struct {
+	Src []byte `json:"src"`
+}
+
+// corpusSeeds returns the documents of the stored YAML corpus, or nothing when
+// the artifact is not there.
+//
+// 10,413 documents over 605 of the grammar's 605 reachable buckets, where the
+// YAML Test Suite reaches 561. Two thirds are well-formed and the rest were
+// broken on purpose, which is the mix a fuzzer wants: it starts from the shapes
+// a parser has to get right and the shapes it has to refuse, instead of
+// rediscovering both.
+func corpusSeeds() ([]string, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, errors.New("cannot locate the fuzzseeds package")
+	}
+
+	f, err := os.Open(filepath.Join(filepath.Dir(file), corpusPath))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("opening the YAML corpus: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("reading the YAML corpus: %w", err)
+	}
+	defer func() { _ = gz.Close() }()
+
+	var seeds []string
+	lines := bufio.NewScanner(gz)
+	lines.Buffer(make([]byte, 0, 64*1024), maxCorpusLine)
+
+	for lines.Scan() {
+		var c corpusCase
+		if err := json.Unmarshal(lines.Bytes(), &c); err != nil {
+			return nil, fmt.Errorf("decoding a case of the YAML corpus: %w", err)
+		}
+		if len(c.Src) > 0 {
+			seeds = append(seeds, string(c.Src))
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return nil, fmt.Errorf("reading the YAML corpus: %w", err)
+	}
+
+	return seeds, nil
+}
+
+// maxCorpusLine bounds one line of the artifact. A case is a small document in
+// base64, and the longest in the stored corpus is well under this.
+const maxCorpusLine = 1 << 20

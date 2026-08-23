@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
 )
 
 func FuzzUnmarshalToMap(f *testing.F) {
@@ -45,6 +46,17 @@ verified: true
 		f.Add([]byte(s + validYAML))
 		f.Add([]byte(s + validYAML + s))
 		f.Add([]byte(strings.Repeat(s, 3)))
+	}
+
+	// The shared corpus as well: the YAML Test Suite and the generated
+	// documents reach shapes this list does not, and the decoder is where the
+	// suite still disagrees with us.
+	seeds, err := fuzzseeds.All()
+	if err != nil {
+		f.Fatal(err)
+	}
+	for _, seed := range seeds {
+		f.Add([]byte(seed))
 	}
 
 	f.Fuzz(func(t *testing.T, src []byte) {
