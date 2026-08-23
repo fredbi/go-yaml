@@ -210,7 +210,7 @@ func hexEscape(s string, i int) (rune, bool) {
 		return 0, false
 	}
 
-	n, err := strconv.ParseUint(s[i+2:i+6], 16, 32)
+	n, err := strconv.ParseUint(s[i+2:i+6], 16, 16)
 	if err != nil {
 		return 0, false
 	}

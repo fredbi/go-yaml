@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strconv"
+	"unicode"
 )
 
 // Mutate breaks a document, and claims nothing about the result.
@@ -192,7 +193,7 @@ func hexPoint(s string) (rune, bool) {
 	}
 
 	n, err := strconv.ParseUint(s[1:], 16, 32)
-	if err != nil {
+	if err != nil || n > unicode.MaxRune {
 		return 0, false
 	}
 
