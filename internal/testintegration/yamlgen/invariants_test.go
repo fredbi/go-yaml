@@ -54,6 +54,8 @@ func requireInvariantMode(t *testing.T) {
 // comes from the generator, so shrinking the document would change what it is
 // supposed to say. rapid shrinks the value and the style instead.
 func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
+	requireInvariantMode(t)
+
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -81,6 +83,8 @@ func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
 // This is the one the library's reason for existing rests on. A tool that
 // rewrites a file to change one field must not quietly change another.
 func TestInvariantRenderingPreservesTheValue(t *testing.T) {
+	requireInvariantMode(t)
+
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
@@ -103,6 +107,8 @@ func TestInvariantRenderingPreservesTheValue(t *testing.T) {
 // time it is used, so every save produces a diff whether or not anything
 // changed.
 func TestInvariantRenderingSettles(t *testing.T) {
+	requireInvariantMode(t)
+
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
