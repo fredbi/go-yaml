@@ -132,25 +132,6 @@ func TestInvariantsAreStillOutstanding(t *testing.T) {
 		src       string
 		fails     func([]byte) bool
 	}{
-		{
-			invariant: "reading any presentation gives the value",
-			src:       "k: |2+\n  one\n\n",
-			fails: func(b []byte) bool {
-				var got any
-
-				return yaml.Unmarshal(b, &got) != nil
-			},
-		},
-		{
-			invariant: "rendering preserves the value",
-			src:       "k: >+\n  trail\n\n",
-			fails:     renderChangesValue,
-		},
-		{
-			invariant: "rendering preserves the value",
-			src:       "|2\n a\n",
-			fails:     renderChangesValue,
-		},
 		// Empty. The last entry to leave was "k: >+\n  trail\n\n" against
 		// "rendering preserves the value"; it is pinned the other way round now,
 		// in TestFixedKeepChompingKeepsItsBlankLinesWhenFolded.
