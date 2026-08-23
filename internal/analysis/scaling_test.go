@@ -101,10 +101,6 @@ func TestWideDocumentCost(t *testing.T) {
 //
 // Before parseMap parsed sibling entries in a loop, a 4x larger document took ~10x longer and
 // this failed outright.
-//
-// It guards the fix in this branch: parseMap parses sibling entries in
-// a loop rather than recursing once per entry. Before that change this test failed outright
-// (a 4x larger document took ~10x longer); it now passes with room to spare.
 func TestParseScalesLinearly(t *testing.T) {
 	const small, large = 4000, 16000 // a 4x increase in size
 
