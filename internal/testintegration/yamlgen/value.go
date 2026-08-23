@@ -283,7 +283,7 @@ func Strings() *rapid.Generator[string] {
 		rapid.SampledFrom(awkwardStrings),
 		rapid.SampledFrom(awkwardStrings),
 		rapid.StringMatching(`[a-zA-Z0-9 _.:#-]{0,12}`),
-		rapid.String(),
+		rapid.StringOf(Runes()),
 	)
 }
 
