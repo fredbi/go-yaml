@@ -26,6 +26,12 @@ import (
 
 // Decoder reads and decodes YAML values from an input stream.
 type Decoder struct {
+	// entryAnchor records, for a node being decoded, the token of the entry
+	// that writes it: the ':' of a mapping entry or the '-' of a sequence one.
+	// A validation error about a field the document left out is reported there,
+	// because there is nothing inside the node to point at. Filled only while a
+	// validator is set.
+	entryAnchor          map[ast.Node]*token.Token
 	reader               io.Reader
 	referenceReaders     []io.Reader
 	anchorNodeMap        map[string]ast.Node
@@ -1342,6 +1348,17 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			return err
 		}
 	}
+	// A validation error is reported at the entry that writes the field, which
+	// is the ':' rather than anything inside the value. Read the entries only
+	// where a validator will ask for them.
+	var entries map[string]ast.Node
+	if d.validator != nil {
+		entries, err = d.keyToNodeMap(ctx, src, ignoreMergeKey,
+			func(it *ast.MapNodeIter) ast.Node { return it.KeyValue() })
+		if err != nil {
+			return err
+		}
+	}
 
 	aliasName := d.getMergeAliasName(src)
 	var foundErr error
@@ -1374,6 +1391,11 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				// set nil value to pointer
 				fieldValue.Set(reflect.Zero(fieldValue.Type()))
 				continue
+			}
+			for k, v := range keyToNodeMap {
+				if entry, ok := entries[k]; ok {
+					d.anchorEntry(v, entry.GetToken())
+				}
 			}
 			mapNode := ast.Mapping(nil, false)
 			for k, v := range keyToNodeMap {
@@ -1421,6 +1443,9 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			// set nil value to pointer
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
 			continue
+		}
+		if entry, ok := entries[structField.RenderName]; ok {
+			d.anchorEntry(v, entry.GetToken())
 		}
 		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, v)
 		if err != nil {
@@ -1474,17 +1499,16 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 					if !exists {
 						continue
 					}
-					node, exists := keyToNodeMap[structField.RenderName]
-					if exists {
+					if node, exists := keyToNodeMap[structField.RenderName]; exists {
 						// TODO: to make FieldError message cutomizable
 						return errors.ErrSyntax(
 							fmt.Sprintf("%s", err),
-							d.getParentMapTokenIfExistsForValidationError(node.Type(), node.GetToken()),
+							validationErrorToken(node, entries[structField.RenderName]),
 						)
-					} else if t := src.GetToken(); t != nil && t.Prev != nil && t.Prev.Prev != nil {
-						// A missing required field will not be in the keyToNodeMap
-						// the error needs to be associated with the parent of the source node
-						return errors.ErrSyntax(fmt.Sprintf("%s", err), t.Prev.Prev)
+					} else if t := d.missingFieldToken(src); t != nil {
+						// A missing field has no entry of its own, so the error
+						// goes to the mapping that should have held it.
+						return errors.ErrSyntax(fmt.Sprintf("%s", err), t)
 					}
 				}
 			}
@@ -1496,33 +1520,59 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 
 // getParentMapTokenIfExists if the NodeType is a container type such as MappingType or SequenceType,
 // it is necessary to return the parent MapNode's colon token to represent the entire container.
-func (d *Decoder) getParentMapTokenIfExistsForValidationError(typ ast.NodeType, tk *token.Token) *token.Token {
-	if tk == nil {
+// validationErrorToken returns where to report a field that failed validation.
+//
+// A scalar is reported at itself: the message names the field, and what a
+// reader wants pointed at is the value that failed. A mapping or a sequence has
+// no one token to point at -- the first of them stands inside the value rather
+// than naming it -- so those are reported at the ':' of the entry that writes
+// them, which is what entry carries.
+func validationErrorToken(value, entry ast.Node) *token.Token {
+	if value.Type() == ast.MappingType || value.Type() == ast.SequenceType {
+		if entry != nil {
+			return entry.GetToken()
+		}
+	}
+
+	return value.GetToken()
+}
+
+// missingFieldToken returns where to report a field the document left out.
+//
+// There is no entry to point at, so the error goes to the first key of the
+// mapping that should have held one.
+func (d *Decoder) missingFieldToken(src ast.Node) *token.Token {
+	if tk, ok := d.entryAnchor[src]; ok {
+		return tk
+	}
+	if m, ok := src.(*ast.MappingNode); ok && len(m.Values) > 0 {
+		return m.Values[0].Key.GetToken()
+	}
+
+	return src.GetToken()
+}
+
+// sequenceEntryToken returns the '-' that writes entry idx of node, where the
+// sequence kept it.
+func sequenceEntryToken(node ast.ArrayNode, idx int) *token.Token {
+	seq, ok := node.(*ast.SequenceNode)
+	if !ok || idx < 0 || idx >= len(seq.Entries) {
 		return nil
 	}
-	if typ == ast.MappingType {
-		// map:
-		//   key: value
-		//      ^ current token ( colon )
-		if tk.Prev == nil {
-			return tk
-		}
-		key := tk.Prev
-		if key.Prev == nil {
-			return tk
-		}
-		return key.Prev
+
+	return seq.Entries[idx].Start
+}
+
+// anchorEntry records that value is written by entry, so a validation error
+// about something value leaves out can be reported at the entry.
+func (d *Decoder) anchorEntry(value ast.Node, entry *token.Token) {
+	if d.validator == nil || value == nil || entry == nil {
+		return
 	}
-	if typ == ast.SequenceType {
-		// map:
-		//   - value
-		//   ^ current token ( sequence entry )
-		if tk.Prev == nil {
-			return tk
-		}
-		return tk.Prev
+	if d.entryAnchor == nil {
+		d.entryAnchor = make(map[ast.Node]*token.Token)
 	}
-	return tk
+	d.entryAnchor[value] = entry
 }
 
 func (d *Decoder) decodeArray(ctx context.Context, dst reflect.Value, src ast.Node) error {
@@ -1589,14 +1639,20 @@ func (d *Decoder) decodeSlice(ctx context.Context, dst reflect.Value, src ast.No
 	sliceValue := reflect.MakeSlice(sliceType, 0, iter.Len())
 	elemType := sliceType.Elem()
 
-	var foundErr error
+	var (
+		foundErr error
+		idx      int
+	)
 	for iter.Next() {
 		v := iter.Value()
+		entryIdx := idx
+		idx++
 		if elemType.Kind() == reflect.Pointer && v.Type() == ast.NullType {
 			// set nil value to pointer
 			sliceValue = reflect.Append(sliceValue, reflect.Zero(elemType))
 			continue
 		}
+		d.anchorEntry(v, sequenceEntryToken(arrayNode, entryIdx))
 		dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
 		if err != nil {
 			if foundErr == nil {
