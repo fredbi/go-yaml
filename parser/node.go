@@ -6,13 +6,13 @@ import (
 )
 
 func newMappingNode(ctx context, tk *Token, isFlow bool, values ...*ast.MappingValueNode) (*ast.MappingNode, error) {
-	node := ast.Mapping(tk.RawToken(), isFlow, values...)
+	node := ctx.arena.Mapping(tk.RawToken(), isFlow, values...)
 	node.SetPathNode(ctx.path)
 	return node, nil
 }
 
 func newMappingValueNode(ctx context, colonTk, entryTk *Token, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
-	node := ast.MappingValue(colonTk.RawToken(), key, value)
+	node := ctx.arena.MappingValue(colonTk.RawToken(), key, value)
 	node.SetPathNode(ctx.path)
 	node.CollectEntry = entryTk.RawToken()
 	// entryTk is the ',' that comes *before* this entry, so a comment hanging on
@@ -84,7 +84,7 @@ func newMergeKeyNode(ctx context, tk *Token) (*ast.MergeKeyNode, error) {
 }
 
 func newNullNode(ctx context, tk *Token) (*ast.NullNode, error) {
-	node := ast.Null(tk.RawToken())
+	node := ctx.arena.Null(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func newNullNode(ctx context, tk *Token) (*ast.NullNode, error) {
 }
 
 func newBoolNode(ctx context, tk *Token) (*ast.BoolNode, error) {
-	node := ast.Bool(tk.RawToken())
+	node := ctx.arena.Bool(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func newBoolNode(ctx context, tk *Token) (*ast.BoolNode, error) {
 }
 
 func newIntegerNode(ctx context, tk *Token) (*ast.IntegerNode, error) {
-	node := ast.Integer(tk.RawToken())
+	node := ctx.arena.Integer(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func newIntegerNode(ctx context, tk *Token) (*ast.IntegerNode, error) {
 }
 
 func newFloatNode(ctx context, tk *Token) (*ast.FloatNode, error) {
-	node := ast.Float(tk.RawToken())
+	node := ctx.arena.Float(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
 		return nil, err
@@ -138,7 +138,7 @@ func newNanNode(ctx context, tk *Token) (*ast.NanNode, error) {
 }
 
 func newStringNode(ctx context, tk *Token) (*ast.StringNode, error) {
-	node := ast.String(tk.RawToken())
+	node := ctx.arena.String(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
 		return nil, err
@@ -165,7 +165,7 @@ func newTagNode(ctx context, tk *Token) (*ast.TagNode, error) {
 }
 
 func newSequenceNode(ctx context, tk *Token, isFlow bool) (*ast.SequenceNode, error) {
-	node := ast.Sequence(tk.RawToken(), isFlow)
+	node := ctx.arena.Sequence(tk.RawToken(), isFlow)
 	node.SetPathNode(ctx.path)
 	if isFlow {
 		// tk is the '[' that opens the collection, so a comment on it was

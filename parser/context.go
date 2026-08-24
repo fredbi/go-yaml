@@ -21,6 +21,9 @@ type context struct {
 	// inside a flow sequence is an implicit key, which a flow mapping's key is
 	// not, and the two are held to different rules.
 	inFlowSequence bool
+	// arena hands out the nodes the descent builds. It is shared by every
+	// context of one parse, so a copy carries the same one.
+	arena *ast.Arena
 	// keyBase is where the keys of the mapping being parsed start in the
 	// parser's key stack. parseMap and parseFlowMap set it; every entry of
 	// that mapping is parsed under it, and a nested mapping raises it.
@@ -130,13 +133,16 @@ func (c context) withFlowSequence() context {
 }
 
 func (p *parser) newContext() context {
+	ctx := context{arena: ast.NewArena(len(p.tokens))}
+
 	root := p.newPathNode()
 	if root == nil {
-		return context{}
+		return ctx
 	}
 	root.Literal("$")
+	ctx.path = root
 
-	return context{path: root}
+	return ctx
 }
 
 func (c context) goNext() {

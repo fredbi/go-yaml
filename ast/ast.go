@@ -418,28 +418,40 @@ func Bool(tk *token.Token) *BoolNode {
 
 // Integer create node for integer value
 func Integer(tk *token.Token) *IntegerNode {
-	var v any
-	if num := token.ToNumber(tk.Value); num != nil {
-		v = num.Value
-	}
 	return &IntegerNode{
 		Token: tk,
-		Value: v,
+		Value: integerValue(tk),
 	}
 }
 
 // Float create node for float value
-func Float(tk *token.Token) *FloatNode {
-	var v float64
-	if num := token.ToNumber(tk.Value); num != nil && num.Type == token.NumberTypeFloat {
-		value, ok := num.Value.(float64)
-		if ok {
-			v = value
-		}
+// integerValue reads tk as an integer, or nil where it is not one.
+func integerValue(tk *token.Token) any {
+	if num := token.ToNumber(tk.Value); num != nil {
+		return num.Value
 	}
+
+	return nil
+}
+
+// floatValue reads tk as a float, or 0 where it is not one.
+func floatValue(tk *token.Token) float64 {
+	num := token.ToNumber(tk.Value)
+	if num == nil || num.Type != token.NumberTypeFloat {
+		return 0
+	}
+	v, ok := num.Value.(float64)
+	if !ok {
+		return 0
+	}
+
+	return v
+}
+
+func Float(tk *token.Token) *FloatNode {
 	return &FloatNode{
 		Token: tk,
-		Value: v,
+		Value: floatValue(tk),
 	}
 }
 
