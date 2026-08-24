@@ -114,7 +114,7 @@ func (p *Printer) PrintTokens(tokens token.Tokens) string {
 		}
 	}
 	texts := []string{}
-	lineNumber := tokens[0].Position.Line
+	lineNumber := int(tokens[0].Position.Line)
 	for i, tk := range tokens {
 		lines := strings.Split(tk.Origin, "\n")
 		prop := p.property(tokens, i)
@@ -292,7 +292,7 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 		lines = lines[:n-1]
 	}
 
-	errLine := tk.Position.Line
+	errLine := int(tk.Position.Line)
 	lastLine := errLine + p.newLineCount(p.removeLeftSideNewLineChar(tk.Origin))
 	if p.isNewLineLastChar(tk.Origin) {
 		lastLine--
@@ -326,7 +326,7 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 		// token spanning lines is read to its end before anything is wrong with
 		// it, and what is wrong is usually what should have come next.
 		if num == lastLine {
-			out.WriteString(strings.Repeat(" ", prefixLen+tk.Position.Column-1))
+			out.WriteString(strings.Repeat(" ", prefixLen+int(tk.Position.Column)-1))
 			out.WriteString("^\n")
 		}
 	}

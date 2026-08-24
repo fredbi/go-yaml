@@ -104,7 +104,7 @@ func validateStream(text string) error {
 			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
 				return ErrInvalidToken(token.Invalid(
 					"found a byte that is part of no character",
-					text[i:i+1], token.Position{Line: line, Column: column, Offset: offset},
+					text[i:i+1], token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)},
 				))
 			}
 		}
@@ -112,7 +112,7 @@ func validateStream(text string) error {
 		if !printable(r) {
 			return ErrInvalidToken(token.Invalid(
 				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
-				string(r), token.Position{Line: line, Column: column, Offset: offset},
+				string(r), token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)},
 			))
 		}
 
@@ -155,7 +155,7 @@ func validateByteOrderMarks(text string) error {
 			return ErrInvalidToken(token.Invalid(
 				"found a byte order mark inside a line, where a node may not hold one",
 				string(byteOrderMark),
-				token.Position{Line: i + 1, Column: column, Offset: offset + column - 1},
+				token.Position{Line: int32((i + 1)), Column: int32((column)), Offset: int32(offset + column - 1)},
 			))
 		}
 
@@ -163,7 +163,7 @@ func validateByteOrderMarks(text string) error {
 			return ErrInvalidToken(token.Invalid(
 				"found a byte order mark where no document begins",
 				string(byteOrderMark),
-				token.Position{Line: i + 1, Column: 1, Offset: offset},
+				token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)},
 			))
 		}
 
@@ -261,10 +261,10 @@ func (s *Scanner) pos() token.Position {
 	s.lastIndentLevel = s.indentLevel
 
 	return token.Position{
-		Line:      s.line,
-		Column:    s.column,
-		Offset:    s.offset,
-		IndentNum: s.indentNum,
+		Line:      int32((s.line)),
+		Column:    int32((s.column)),
+		Offset:    int32((s.offset)),
+		IndentNum: int32((s.indentNum)),
 	}
 }
 
@@ -297,10 +297,10 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 	s.lastIndentLevel = level
 
 	return ctx.bufferedToken(token.Position{
-		Line:      line,
-		Column:    column,
-		Offset:    s.offset - len(ctx.buf),
-		IndentNum: s.indentNum,
+		Line:      int32((line)),
+		Column:    int32((column)),
+		Offset:    int32((s.offset - len(ctx.buf))),
+		IndentNum: int32((s.indentNum)),
 	})
 }
 
@@ -1195,8 +1195,8 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	if len(ctx.buf) > 0 && !s.hasSavedPos {
 		buffered := ctx.bufferedSrc()
 		s.savedPos = s.pos()
-		s.savedPos.Column -= utf8.RuneCount(buffered)
-		s.savedPos.Offset -= len(buffered)
+		s.savedPos.Column -= int32(utf8.RuneCount(buffered))
+		s.savedPos.Offset -= int32(len(buffered))
 		s.hasSavedPos = true
 	}
 
@@ -1498,7 +1498,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	// mapping value
 	tk := s.bufferedToken(ctx)
 	if tk != nil {
-		s.lastDelimColumn = tk.Position.Column
+		s.lastDelimColumn = int(tk.Position.Column)
 		ctx.addToken(tk)
 	} else if col := keyStartColumn(ctx.tokens); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens:
@@ -1506,7 +1506,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		// a tag. What the following lines are measured against is where the key
 		// begins, so for "&a :" that is the '&' and not the name after it.
 		s.lastDelimColumn = col
-	} else if last := lastContentToken(ctx.tokens); last == nil || last.Position.Line != s.line {
+	} else if last := lastContentToken(ctx.tokens); last == nil || int(last.Position.Line) != s.line {
 		// Nothing precedes this ':' on its line, so the key was written above
 		// it after a '?'. The ':' is then where the entry sits, and the level
 		// its value is measured against. Left at the level of whatever the key
@@ -1589,7 +1589,7 @@ func keyStartColumn(tokens token.Tokens) int {
 	if !found {
 		return 0
 	}
-	return column
+	return int(column)
 }
 
 // isPropertyToken reports whether tk introduces a node property: an anchor, an
@@ -1692,7 +1692,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('-')
 	tk := token.SequenceEntry(string(ctx.obuf), s.pos())
-	s.lastDelimColumn = tk.Position.Column
+	s.lastDelimColumn = int(tk.Position.Column)
 	ctx.addToken(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -1847,8 +1847,8 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// past the whole line, header included, so a bump here is counted
 		// twice.
 		pos := s.pos()
-		pos.Offset += len(headerBuf)
-		pos.Column += utf8.RuneCountInString(headerBuf)
+		pos.Offset += int32(len(headerBuf))
+		pos.Column += int32(utf8.RuneCountInString(headerBuf))
 		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep
@@ -1873,7 +1873,7 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 	}
 
 	tk := token.MappingKey(s.pos())
-	s.lastDelimColumn = tk.Position.Column
+	s.lastDelimColumn = int(tk.Position.Column)
 	ctx.addToken(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()

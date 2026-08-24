@@ -250,11 +250,11 @@ func (d *Decoder) addHeadOrLineCommentToMap(node ast.Node) {
 		return
 	}
 	texts := []string{}
-	targetLine := node.GetToken().Position.Line
+	targetLine := int(node.GetToken().Position.Line)
 	minCommentLine := math.MaxInt
 	for _, comment := range commentGroup.Comments {
-		if minCommentLine > comment.Token.Position.Line {
-			minCommentLine = comment.Token.Position.Line
+		if line := int(comment.Token.Position.Line); minCommentLine > line {
+			minCommentLine = line
 		}
 		texts = append(texts, comment.Token.Value)
 	}

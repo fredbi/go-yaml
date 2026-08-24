@@ -805,8 +805,8 @@ func (n *StringNode) String() string {
 		// This block assumes that the line breaks in this inside scalar content and the Outside scalar content are the same.
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
 		header := token.LiteralBlockHeader(n.Value)
-		space := strings.Repeat(" ", n.Token.Position.Column-1)
-		indent := strings.Repeat(" ", n.Token.Position.IndentNum)
+		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
+		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
 		values := []string{}
 		for _, v := range strings.Split(n.Value, lbc) {
 			values = append(values, fmt.Sprintf("%s%s%s", space, indent, v))
@@ -833,8 +833,8 @@ func (n *StringNode) stringWithoutComment() string {
 		// This block assumes that the line breaks in this inside scalar content and the Outside scalar content are the same.
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
 		header := token.LiteralBlockHeader(n.Value)
-		space := strings.Repeat(" ", n.Token.Position.Column-1)
-		indent := strings.Repeat(" ", n.Token.Position.IndentNum)
+		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
+		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
 		values := []string{}
 		for _, v := range strings.Split(n.Value, lbc) {
 			values = append(values, fmt.Sprintf("%s%s%s", space, indent, v))
@@ -1170,7 +1170,7 @@ func (n *MappingNode) Merge(target *MappingNode) {
 		keyToMapValueMap[key] = value
 	}
 	column := n.startPos().Column - target.startPos().Column
-	target.AddColumn(column)
+	target.AddColumn(int(column))
 	for _, value := range target.Values {
 		mapValue, exists := keyToMapValueMap[value.Key.String()]
 		if exists {
@@ -1308,7 +1308,7 @@ type MappingValueNode struct {
 // Replace replace value node.
 func (n *MappingValueNode) Replace(value Node) error {
 	column := n.Value.GetToken().Position.Column - value.GetToken().Position.Column
-	value.AddColumn(column)
+	value.AddColumn(int(column))
 	n.Value = value
 	return nil
 }
@@ -1418,7 +1418,7 @@ func (n *SequenceNode) Replace(idx int, value Node) error {
 		)
 	}
 	column := n.Values[idx].GetToken().Position.Column - value.GetToken().Position.Column
-	value.AddColumn(column)
+	value.AddColumn(int(column))
 	n.Values[idx] = value
 	return nil
 }
@@ -1426,7 +1426,7 @@ func (n *SequenceNode) Replace(idx int, value Node) error {
 // Merge merge sequence value.
 func (n *SequenceNode) Merge(target *SequenceNode) {
 	column := n.Start.Position.Column - target.Start.Position.Column
-	target.AddColumn(column)
+	target.AddColumn(int(column))
 	n.Values = append(n.Values, target.Values...)
 	if len(target.ValueHeadComments) == 0 {
 		n.ValueHeadComments = append(n.ValueHeadComments, make([]*CommentGroupNode, len(target.Values))...)

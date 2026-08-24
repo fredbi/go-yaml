@@ -100,7 +100,7 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 				continue
 			}
 			total++
-			if !strings.HasPrefix(at(src, tk.Position.Offset), want) {
+			if !strings.HasPrefix(at(src, int(tk.Position.Offset)), want) {
 				missed[tk.Type.String()]++
 			}
 		}

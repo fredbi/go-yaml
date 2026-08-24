@@ -56,7 +56,7 @@ func blankLineAbove(t *Token, before Tokens) bool {
 		lbc := "\n"
 		prevIdx := len(before) - 1
 		prev := before[prevIdx]
-		var adjustment int
+		var adjustment int32
 		// A sequence entry's '-' says nothing about a gap: the gap the author
 		// left is above the '-', so the comparison steps back past it. The
 		// lines between the '-' and t are then the entry's own layout --
@@ -78,7 +78,7 @@ func blankLineAbove(t *Token, before Tokens) bool {
 				// block one whose content is several, and the blank lines a
 				// "|+" keeps. Those lines are the scalar's own, and none of
 				// them is a gap the author left above t.
-				adjustment += linesSpannedBy(prev, before[:prevIdx], lbc)
+				adjustment += int32(linesSpannedBy(prev, before[:prevIdx], lbc))
 			}
 			// Due to the way that comment parsing works its assumed that when a null value does not have new line in origin
 			// it was squashed therefore difference is ignored.

@@ -78,10 +78,10 @@ func TestPositionLedger(t *testing.T) {
 			if pos.Column < 1 {
 				defects.zeroColumns++
 			}
-			if pos.Line < prevLine || (pos.Line == prevLine && pos.Column < prevCol) {
+			if line, col := int(pos.Line), int(pos.Column); line < prevLine || (line == prevLine && col < prevCol) {
 				defects.backwards++
 			}
-			prevLine, prevCol = pos.Line, pos.Column
+			prevLine, prevCol = int(pos.Line), int(pos.Column)
 		}
 
 		if !defects.empty() {

@@ -2289,8 +2289,8 @@ func TestSingleLineToken_ValueLineColumnPosition(t *testing.T) {
 func tokenMatches(t *token.Token, e testToken) bool {
 	return t != nil && true &&
 		t.Value == e.value &&
-		t.Position.Line == e.line &&
-		t.Position.Column == e.column
+		int(t.Position.Line) == e.line &&
+		int(t.Position.Column) == e.column
 }
 
 func TestMultiLineToken_ValueLineColumnPosition(t *testing.T) {

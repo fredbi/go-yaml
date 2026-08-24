@@ -52,8 +52,11 @@ const (
 	LineBreakCharacter Character = '\n'
 )
 
-// Type type identifier for token
-type Type int
+// Type identifies what a token is.
+//
+// There are 34 of them, so one byte holds any, and a token spends one byte on
+// saying what it is.
+type Type uint8
 
 const (
 	// UnknownType reserve for invalid type
@@ -799,11 +802,15 @@ func New(value string, org string, pos Position) *Token {
 // measures indentation in. Offset counts from 0 and counts bytes, so
 // src[Offset:] is the token: it addresses the source a caller handed in, and a
 // caret drawn from it lands on the right character.
+//
+// The four are int32. A document large enough to overflow one does not fit in
+// memory to begin with, and a token holds this by value rather than pointing at
+// it, so its width is the token's width.
 type Position struct {
-	Line      int
-	Column    int
-	Offset    int
-	IndentNum int
+	Line      int32
+	Column    int32
+	Offset    int32
+	IndentNum int32
 }
 
 // String position to text
@@ -812,26 +819,31 @@ func (p *Position) String() string {
 }
 
 // Token type for token
+// Token is one lexical token of a YAML document.
+//
+// The fields are ordered widest first so that the three narrow ones share a
+// single word rather than padding out to one each. Read order would take 80
+// bytes where this takes 72.
 type Token struct {
-	// Type is a token type.
-	Type Type
 	// Value is a string extracted with only meaningful characters, with spaces and such removed.
 	Value string
 	// Origin is a string that stores the original text as-is.
 	Origin string
 	// Error keeps error message for InvalidToken.
 	Error string
-	// BlankLineAbove records that the author left an empty line above this
-	// token. The renderer writes one back where it finds one, which is how a
-	// document keeps the spacing it was written with.
-	BlankLineAbove bool
+	// Position is where the token stands in the source.
+	Position Position
 	// CommentBreaksAbove counts the line breaks taken up by the comments
 	// written immediately above this token. A document rendered without those
 	// comments still has to leave the lines they stood on, or what was written
 	// under them runs into what was written before.
 	CommentBreaksAbove int32
-	// Position is a token position.
-	Position Position
+	// Type is a token type.
+	Type Type
+	// BlankLineAbove records that the author left an empty line above this
+	// token. The renderer writes one back where it finds one, which is how a
+	// document keeps the spacing it was written with.
+	BlankLineAbove bool
 }
 
 // AddColumn append column number to current position of column
@@ -839,7 +851,7 @@ func (t *Token) AddColumn(col int) {
 	if t == nil {
 		return
 	}
-	t.Position.Column += col
+	t.Position.Column += int32(col)
 }
 
 // Clone copy token ( preserve Prev/Next reference )

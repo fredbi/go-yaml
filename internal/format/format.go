@@ -198,7 +198,7 @@ func indentOf(n, entry ast.Node) int {
 	if tk == nil {
 		return 0
 	}
-	own := tk.Position.Column - 1
+	own := int(tk.Position.Column) - 1
 
 	// A collection starts at its own first token -- a key, or the '-' of its
 	// first entry -- and that is the column its lines are written from,
@@ -215,12 +215,12 @@ func indentOf(n, entry ast.Node) int {
 	case *ast.MappingValueNode:
 		if e.Key != nil {
 			if key := e.Key.GetToken(); key != nil {
-				return key.Position.Column - 1
+				return int(key.Position.Column) - 1
 			}
 		}
 	case *ast.SequenceEntryNode:
 		if e.Start != nil {
-			return e.Start.Position.Column - 1
+			return int(e.Start.Position.Column) - 1
 		}
 	}
 
@@ -390,7 +390,7 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 			if strings.Contains(formatted, "\n") {
 				// If the first character is not a newline, the first line should be output without indentation.
 				isIgnoredFirstLine := !strings.HasPrefix(formatted, "\n")
-				formatted = f.addIndentSpace(n.GetToken().Position.IndentNum, formatted, isIgnoredFirstLine)
+				formatted = f.addIndentSpace(int(n.GetToken().Position.IndentNum), formatted, isIgnoredFirstLine)
 			}
 			return formatted
 		}

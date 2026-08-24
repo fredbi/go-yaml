@@ -100,7 +100,7 @@ func (t *Token) Line() int {
 		return 0
 	}
 	if t.Token != nil {
-		return t.Token.Position.Line
+		return int(t.Token.Position.Line)
 	}
 	return t.Group.Line()
 }
@@ -110,7 +110,7 @@ func (t *Token) Column() int {
 		return 0
 	}
 	if t.Token != nil {
-		return t.Token.Position.Column
+		return int(t.Token.Position.Column)
 	}
 	return t.Group.Column()
 }

@@ -850,7 +850,7 @@ func (p *parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		// "{foo\n: bar}" is as legal as "{foo: bar}".
 		if ctx.inFlowSequence && isScalarKeyToken(tk) {
 			origin = p.removeRightWhiteSpace(origin)
-			if tk.Position.Line+p.newLineCharacterNum(origin) != colonTk.Line() {
+			if int(tk.Position.Line)+p.newLineCharacterNum(origin) != colonTk.Line() {
 				return errors.ErrSyntax("map key definition includes an implicit line break", tk)
 			}
 		}
@@ -962,8 +962,8 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 	if ctx.isComment() {
 		tk = ctx.nextNotCommentToken()
 	}
-	keyCol := key.GetToken().Position.Column
-	keyLine := key.GetToken().Position.Line
+	keyCol := int(key.GetToken().Position.Column)
+	keyLine := int(key.GetToken().Position.Line)
 
 	if tk.Column() != keyCol && tk.Line() == keyLine && (tk.GroupType() == TokenGroupMapKey || tk.GroupType() == TokenGroupMapKeyValue) {
 		// a: b:
@@ -1114,7 +1114,7 @@ func (p *parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
 		return nil
 	}
 
-	if tagTk.Position.Column <= col {
+	if int(tagTk.Position.Column) <= col {
 		// key: &anchor
 		// !!tag
 		//
