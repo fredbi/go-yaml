@@ -387,12 +387,10 @@ func (t Type) CharacterType() CharacterType {
 
 func reservedKeywordToken(typ Type, value, org string, pos *Position) *Token {
 	return &Token{
-		Type:          typ,
-		CharacterType: CharacterTypeMiscellaneous,
-		Indicator:     NotIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     typ,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
@@ -464,122 +462,98 @@ var (
 	ReservedTagKeywordMap = map[ReservedTagKeyword]func(string, string, *Position) *Token{
 		IntegerTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		FloatTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		NullTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		SequenceTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		MappingTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		StringTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		BinaryTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		OrderedMapTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		SetTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		TimestampTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		BooleanTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 		MergeTag: func(value, org string, pos *Position) *Token {
 			return &Token{
-				Type:          TagType,
-				CharacterType: CharacterTypeIndicator,
-				Indicator:     NodePropertyIndicator,
-				Value:         value,
-				Origin:        org,
-				Position:      pos,
+				Type:     TagType,
+				Value:    value,
+				Origin:   org,
+				Position: pos,
 			}
 		},
 	}
@@ -798,12 +772,10 @@ func New(value string, org string, pos *Position) *Token {
 	}
 	if num := ToNumber(value); num != nil {
 		tk := &Token{
-			Type:          IntegerType,
-			CharacterType: CharacterTypeMiscellaneous,
-			Indicator:     NotIndicator,
-			Value:         value,
-			Origin:        org,
-			Position:      pos,
+			Type:     IntegerType,
+			Value:    value,
+			Origin:   org,
+			Position: pos,
 		}
 		switch num.Type {
 		case NumberTypeFloat:
@@ -844,10 +816,6 @@ func (p *Position) String() string {
 type Token struct {
 	// Type is a token type.
 	Type Type
-	// CharacterType is a character type.
-	CharacterType CharacterType
-	// Indicator is a indicator type.
-	Indicator Indicator
 	// Value is a string extracted with only meaningful characters, with spaces and such removed.
 	Value string
 	// Origin is a string that stores the original text as-is.
@@ -903,7 +871,7 @@ func (t *Token) Clone() *Token {
 func (t *Token) Dump() {
 	fmt.Printf(
 		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [ORG]:%q [POS(line:column:level:offset)]: %d:%d:%d:%d\n",
-		t.Type, t.CharacterType, t.Indicator, t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.IndentLevel, t.Position.Offset,
+		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.IndentLevel, t.Position.Offset,
 	)
 }
 
@@ -950,144 +918,120 @@ func (t Tokens) Dump() {
 // String create token for String
 func String(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          StringType,
-		CharacterType: CharacterTypeMiscellaneous,
-		Indicator:     NotIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     StringType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // SequenceEntry create token for SequenceEntry
 func SequenceEntry(org string, pos *Position) *Token {
 	return &Token{
-		Type:          SequenceEntryType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     BlockStructureIndicator,
-		Value:         string(SequenceEntryCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     SequenceEntryType,
+		Value:    string(SequenceEntryCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // MappingKey create token for MappingKey
 func MappingKey(pos *Position) *Token {
 	return &Token{
-		Type:          MappingKeyType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     BlockStructureIndicator,
-		Value:         string(MappingKeyCharacter),
-		Origin:        string(MappingKeyCharacter),
-		Position:      pos,
+		Type:     MappingKeyType,
+		Value:    string(MappingKeyCharacter),
+		Origin:   string(MappingKeyCharacter),
+		Position: pos,
 	}
 }
 
 // MappingValue create token for MappingValue
 func MappingValue(pos *Position) *Token {
 	return &Token{
-		Type:          MappingValueType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     BlockStructureIndicator,
-		Value:         string(MappingValueCharacter),
-		Origin:        string(MappingValueCharacter),
-		Position:      pos,
+		Type:     MappingValueType,
+		Value:    string(MappingValueCharacter),
+		Origin:   string(MappingValueCharacter),
+		Position: pos,
 	}
 }
 
 // CollectEntry create token for CollectEntry
 func CollectEntry(org string, pos *Position) *Token {
 	return &Token{
-		Type:          CollectEntryType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     FlowCollectionIndicator,
-		Value:         string(CollectEntryCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     CollectEntryType,
+		Value:    string(CollectEntryCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // SequenceStart create token for SequenceStart
 func SequenceStart(org string, pos *Position) *Token {
 	return &Token{
-		Type:          SequenceStartType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     FlowCollectionIndicator,
-		Value:         string(SequenceStartCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     SequenceStartType,
+		Value:    string(SequenceStartCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // SequenceEnd create token for SequenceEnd
 func SequenceEnd(org string, pos *Position) *Token {
 	return &Token{
-		Type:          SequenceEndType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     FlowCollectionIndicator,
-		Value:         string(SequenceEndCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     SequenceEndType,
+		Value:    string(SequenceEndCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // MappingStart create token for MappingStart
 func MappingStart(org string, pos *Position) *Token {
 	return &Token{
-		Type:          MappingStartType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     FlowCollectionIndicator,
-		Value:         string(MappingStartCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     MappingStartType,
+		Value:    string(MappingStartCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // MappingEnd create token for MappingEnd
 func MappingEnd(org string, pos *Position) *Token {
 	return &Token{
-		Type:          MappingEndType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     FlowCollectionIndicator,
-		Value:         string(MappingEndCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     MappingEndType,
+		Value:    string(MappingEndCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Comment create token for Comment
 func Comment(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          CommentType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     CommentIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     CommentType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Anchor create token for Anchor
 func Anchor(org string, pos *Position) *Token {
 	return &Token{
-		Type:          AnchorType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     NodePropertyIndicator,
-		Value:         string(AnchorCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     AnchorType,
+		Value:    string(AnchorCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Alias create token for Alias
 func Alias(org string, pos *Position) *Token {
 	return &Token{
-		Type:          AliasType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     NodePropertyIndicator,
-		Value:         string(AliasCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     AliasType,
+		Value:    string(AliasCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
@@ -1098,132 +1042,110 @@ func Tag(value string, org string, pos *Position) *Token {
 		return fn(value, org, pos)
 	}
 	return &Token{
-		Type:          TagType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     NodePropertyIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     TagType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Literal create token for Literal
 func Literal(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          LiteralType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     BlockScalarIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     LiteralType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Folded create token for Folded
 func Folded(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          FoldedType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     BlockScalarIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     FoldedType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // SingleQuote create token for SingleQuote
 func SingleQuote(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          SingleQuoteType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     QuotedScalarIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     SingleQuoteType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // DoubleQuote create token for DoubleQuote
 func DoubleQuote(value string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          DoubleQuoteType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     QuotedScalarIndicator,
-		Value:         value,
-		Origin:        org,
-		Position:      pos,
+		Type:     DoubleQuoteType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Directive create token for Directive
 func Directive(org string, pos *Position) *Token {
 	return &Token{
-		Type:          DirectiveType,
-		CharacterType: CharacterTypeIndicator,
-		Indicator:     DirectiveIndicator,
-		Value:         string(DirectiveCharacter),
-		Origin:        org,
-		Position:      pos,
+		Type:     DirectiveType,
+		Value:    string(DirectiveCharacter),
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // Space create token for Space
 func Space(pos *Position) *Token {
 	return &Token{
-		Type:          SpaceType,
-		CharacterType: CharacterTypeWhiteSpace,
-		Indicator:     NotIndicator,
-		Value:         string(SpaceCharacter),
-		Origin:        string(SpaceCharacter),
-		Position:      pos,
+		Type:     SpaceType,
+		Value:    string(SpaceCharacter),
+		Origin:   string(SpaceCharacter),
+		Position: pos,
 	}
 }
 
 // MergeKey create token for MergeKey
 func MergeKey(org string, pos *Position) *Token {
 	return &Token{
-		Type:          MergeKeyType,
-		CharacterType: CharacterTypeMiscellaneous,
-		Indicator:     NotIndicator,
-		Value:         "<<",
-		Origin:        org,
-		Position:      pos,
+		Type:     MergeKeyType,
+		Value:    "<<",
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // DocumentHeader create token for DocumentHeader
 func DocumentHeader(org string, pos *Position) *Token {
 	return &Token{
-		Type:          DocumentHeaderType,
-		CharacterType: CharacterTypeMiscellaneous,
-		Indicator:     NotIndicator,
-		Value:         "---",
-		Origin:        org,
-		Position:      pos,
+		Type:     DocumentHeaderType,
+		Value:    "---",
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 // DocumentEnd create token for DocumentEnd
 func DocumentEnd(org string, pos *Position) *Token {
 	return &Token{
-		Type:          DocumentEndType,
-		CharacterType: CharacterTypeMiscellaneous,
-		Indicator:     NotIndicator,
-		Value:         "...",
-		Origin:        org,
-		Position:      pos,
+		Type:     DocumentEndType,
+		Value:    "...",
+		Origin:   org,
+		Position: pos,
 	}
 }
 
 func Invalid(err string, org string, pos *Position) *Token {
 	return &Token{
-		Type:          InvalidType,
-		CharacterType: CharacterTypeInvalid,
-		Indicator:     NotIndicator,
-		Value:         org,
-		Origin:        org,
-		Error:         err,
-		Position:      pos,
+		Type:     InvalidType,
+		Value:    org,
+		Origin:   org,
+		Error:    err,
+		Position: pos,
 	}
 }
 

@@ -1547,7 +1547,7 @@ func followsJSONLikeKey(ctx *Context) bool {
 	if tk == nil {
 		return false
 	}
-	if tk.Indicator == token.QuotedScalarIndicator {
+	if tk.Type.Indicator() == token.QuotedScalarIndicator {
 		return true
 	}
 
@@ -1588,7 +1588,7 @@ func keyStartColumn(tokens token.Tokens) int {
 
 	line := tokens[last].Position.Line
 	column := tokens[last].Position.Column
-	found := tokens[last].Indicator == token.QuotedScalarIndicator || isPropertyToken(tokens[last])
+	found := tokens[last].Type.Indicator() == token.QuotedScalarIndicator || isPropertyToken(tokens[last])
 
 	for i := last - 1; i >= 0 && tokens[i].Position.Line == line; i-- {
 		if !isPropertyToken(tokens[i]) {
