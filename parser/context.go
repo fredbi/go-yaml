@@ -16,6 +16,10 @@ type context struct {
 	// inside a flow sequence is an implicit key, which a flow mapping's key is
 	// not, and the two are held to different rules.
 	inFlowSequence bool
+	// keyBase is where the keys of the mapping being parsed start in the
+	// parser's key stack. parseMap and parseFlowMap set it; every entry of
+	// that mapping is parsed under it, and a nested mapping raises it.
+	keyBase int
 }
 
 type tokenRef struct {
@@ -95,6 +99,16 @@ func (c *context) withPath(path string) *context {
 func (c *context) withIndex(idx uint) *context {
 	ctx := *c
 	ctx.path = c.path + "[" + strconv.FormatUint(uint64(idx), 10) + "]"
+	return &ctx
+}
+
+// withMapping returns a context whose recorded keys start at base. The keys of
+// the mapping opened there are compared against each other and against no
+// others.
+func (c *context) withMapping(base int) *context {
+	ctx := *c
+	ctx.keyBase = base
+
 	return &ctx
 }
 

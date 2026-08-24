@@ -75,11 +75,50 @@ var yamlVersionMap = map[string]YAMLVersion{
 
 type parser struct {
 	tokens                []*Token
-	pathMap               map[string]ast.Node
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
 	secondaryTagDirective *ast.DirectiveNode
 	tagHandles            map[string]struct{}
+
+	// keyStack holds the keys of every mapping open at this point in the
+	// descent, innermost last, and keyIndex addresses them. Both are reused
+	// for the whole parse: a mapping pushes its keys on the way in and drops
+	// them on the way out, so the two grow once to the deepest, widest point
+	// of the document and allocate nothing after that.
+	keyStack []mapKeyRef
+	keyIndex map[mapKeyRef]ast.MapKeyNode
+}
+
+// mapKeyRef addresses one key of one mapping: base is where that mapping's
+// keys start in keyStack, and text is the key as mapKeyText reads it.
+type mapKeyRef struct {
+	base int
+	text string
+}
+
+// recordMapKey records key under text among the keys of the mapping that
+// starts at base, and returns the key already recorded there, or nil when the
+// mapping has not used text yet.
+func (p *parser) recordMapKey(base int, text string, key ast.MapKeyNode) ast.MapKeyNode {
+	ref := mapKeyRef{base: base, text: text}
+	if prev, exists := p.keyIndex[ref]; exists {
+		return prev
+	}
+	p.keyIndex[ref] = key
+	p.keyStack = append(p.keyStack, ref)
+
+	return nil
+}
+
+// closeMapping drops the keys of the mapping that started at base.
+//
+// Mappings close in the order they open, so the keys of the one closing are
+// always those above its base.
+func (p *parser) closeMapping(base int) {
+	for _, ref := range p.keyStack[base:] {
+		delete(p.keyIndex, ref)
+	}
+	p.keyStack = p.keyStack[:base]
 }
 
 func newParser(tokens token.Tokens, mode Mode, opts []Option) (*parser, error) {
@@ -101,8 +140,8 @@ func newParser(tokens token.Tokens, mode Mode, opts []Option) (*parser, error) {
 		return nil, err
 	}
 	p := &parser{
-		tokens:  tks,
-		pathMap: make(map[string]ast.Node),
+		tokens:   tks,
+		keyIndex: make(map[mapKeyRef]ast.MapKeyNode),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -126,8 +165,6 @@ func (p *parser) parseDocument(ctx *context, docGroup *TokenGroup) (*ast.Documen
 	if len(docGroup.Tokens) == 0 {
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
-
-	p.pathMap = make(map[string]ast.Node)
 
 	var (
 		tokens = docGroup.Tokens
@@ -359,6 +396,10 @@ func attachTrailingComment(ctx *context, entryTk *Token, values []ast.Node) erro
 }
 
 func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
+	base := len(p.keyStack)
+	defer p.closeMapping(base)
+	ctx = ctx.withMapping(base)
+
 	node, err := newMappingNode(ctx, ctx.currentToken(), true)
 	if err != nil {
 		return nil, err
@@ -545,6 +586,10 @@ func (p *parser) parseMapEntry(ctx *context, keyTk *Token) (*ast.MappingValueNod
 }
 
 func (p *parser) parseMap(ctx *context) (*ast.MappingNode, error) {
+	base := len(p.keyStack)
+	defer p.closeMapping(base)
+	ctx = ctx.withMapping(base)
+
 	keyTk := ctx.currentToken()
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
@@ -704,12 +749,11 @@ func (p *parser) parseMapKey(ctx *context, g *TokenGroup) (ast.MapKeyNode, error
 			return key, nil
 		}
 		keyText := p.mapKeyText(scalar)
-		keyPath := ctx.withChild(keyText).path
-		key.SetPath(keyPath)
-		if err := p.validateMapKey(ctx, key.GetToken(), keyPath, g.Last()); err != nil {
+		key.SetPath(ctx.withChild(keyText).path)
+		if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
 			return nil, err
 		}
-		p.pathMap[keyPath] = key
+
 		return key, nil
 	}
 	if g.Last().Type() != token.MappingValueType {
@@ -725,18 +769,24 @@ func (p *parser) parseMapKey(ctx *context, g *TokenGroup) (ast.MapKeyNode, error
 		return nil, errors.ErrSyntax("cannot take map-key node", scalar.GetToken())
 	}
 	keyText := p.mapKeyText(key)
-	keyPath := ctx.withChild(keyText).path
-	key.SetPath(keyPath)
-	if err := p.validateMapKey(ctx, key.GetToken(), keyPath, g.Last()); err != nil {
+	key.SetPath(ctx.withChild(keyText).path)
+	if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
 		return nil, err
 	}
-	p.pathMap[keyPath] = key
+
 	return key, nil
 }
 
-func (p *parser) validateMapKey(ctx *context, tk *token.Token, keyPath string, colonTk *Token) error {
+// validateMapKey checks key against the rules a mapping key is held to, and
+// records it among the keys of the mapping being parsed.
+//
+// keyText is the key as mapKeyText reads it. Two entries of one mapping repeat
+// a key when their texts are equal, so the check needs the text and not the
+// path built from it.
+func (p *parser) validateMapKey(ctx *context, key ast.MapKeyNode, keyText string, colonTk *Token) error {
+	tk := key.GetToken()
 	if !p.allowDuplicateMapKey {
-		if n, exists := p.pathMap[keyPath]; exists {
+		if n := p.recordMapKey(ctx.keyBase, keyText, key); n != nil {
 			pos := n.GetToken().Position
 			return errors.ErrSyntax(
 				fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
