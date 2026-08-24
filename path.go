@@ -25,7 +25,7 @@ import (
 // enclose them in single quotation as follows ( $.foo.'bar.baz-*'.hoge ).
 // If you want to use a single quote with reserved characters, escape it with `\` ( $.foo.'bar.baz\'s value'.hoge ).
 func PathString(s string) (*Path, error) {
-	buf := []rune(s)
+	buf := s
 	length := len(buf)
 	cursor := 0
 	builder := &PathBuilder{}
@@ -58,7 +58,7 @@ func PathString(s string) (*Path, error) {
 	return builder.Build(), nil
 }
 
-func parsePathRecursive(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []rune, int, error) {
+func parsePathRecursive(b *PathBuilder, buf string, cursor int) (*PathBuilder, string, int, error) {
 	length := len(buf)
 	cursor += 2 // skip .. characters
 	start := cursor
@@ -66,31 +66,31 @@ func parsePathRecursive(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, [
 		c := buf[cursor]
 		switch c {
 		case '$':
-			return nil, nil, 0, fmt.Errorf("specified '$' after '..' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '$' after '..' character: %w", ErrInvalidPathString)
 		case '*':
-			return nil, nil, 0, fmt.Errorf("specified '*' after '..' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '*' after '..' character: %w", ErrInvalidPathString)
 		case '.', '[':
 			goto end
 		case ']':
-			return nil, nil, 0, fmt.Errorf("specified ']' after '..' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified ']' after '..' character: %w", ErrInvalidPathString)
 		}
 	}
 end:
 	if start == cursor {
-		return nil, nil, 0, fmt.Errorf("not found recursive selector: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("not found recursive selector: %w", ErrInvalidPathString)
 	}
-	return b.Recursive(string(buf[start:cursor])), buf, cursor, nil
+	return b.Recursive(buf[start:cursor]), buf, cursor, nil
 }
 
-func parsePathDot(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []rune, int, error) {
+func parsePathDot(b *PathBuilder, buf string, cursor int) (*PathBuilder, string, int, error) {
 	if b.root == nil || b.node == nil {
-		return nil, nil, 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
 	}
 	length := len(buf)
 	if cursor+1 < length && buf[cursor+1] == '.' {
 		b, buf, c, err := parsePathRecursive(b, buf, cursor)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, "", 0, err
 		}
 		return b, buf, c, nil
 	}
@@ -105,25 +105,25 @@ func parsePathDot(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []rune,
 		c := buf[cursor]
 		switch c {
 		case '$':
-			return nil, nil, 0, fmt.Errorf("specified '$' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '$' after '.' character: %w", ErrInvalidPathString)
 		case '*':
-			return nil, nil, 0, fmt.Errorf("specified '*' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '*' after '.' character: %w", ErrInvalidPathString)
 		case '.', '[':
 			goto end
 		case ']':
-			return nil, nil, 0, fmt.Errorf("specified ']' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified ']' after '.' character: %w", ErrInvalidPathString)
 		}
 	}
 end:
 	if start == cursor {
-		return nil, nil, 0, fmt.Errorf("could not find by empty key: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("could not find by empty key: %w", ErrInvalidPathString)
 	}
-	return b.child(string(buf[start:cursor])), buf, cursor, nil
+	return b.child(buf[start:cursor]), buf, cursor, nil
 }
 
-func parseQuotedKey(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []rune, int, error) {
+func parseQuotedKey(b *PathBuilder, buf string, cursor int) (*PathBuilder, string, int, error) {
 	if b.root == nil || b.node == nil {
-		return nil, nil, 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
 	}
 
 	cursor++ // skip single quote
@@ -133,7 +133,7 @@ func parseQuotedKey(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []run
 	for ; cursor < length; cursor++ {
 		switch buf[cursor] {
 		case '\\':
-			buf = append(append([]rune{}, buf[:cursor]...), buf[cursor+1:]...)
+			buf = buf[:cursor] + buf[cursor+1:]
 			length = len(buf)
 		case '\'':
 			foundEndDelim = true
@@ -142,35 +142,35 @@ func parseQuotedKey(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []run
 	}
 end:
 	if !foundEndDelim {
-		return nil, nil, 0, fmt.Errorf("could not find end delimiter for key: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("could not find end delimiter for key: %w", ErrInvalidPathString)
 	}
 	if start == cursor {
-		return nil, nil, 0, fmt.Errorf("could not find by empty key: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("could not find by empty key: %w", ErrInvalidPathString)
 	}
 	selector := buf[start:cursor]
 	cursor++
 	if cursor < length {
 		switch buf[cursor] {
 		case '$':
-			return nil, nil, 0, fmt.Errorf("specified '$' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '$' after '.' character: %w", ErrInvalidPathString)
 		case '*':
-			return nil, nil, 0, fmt.Errorf("specified '*' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified '*' after '.' character: %w", ErrInvalidPathString)
 		case ']':
-			return nil, nil, 0, fmt.Errorf("specified ']' after '.' character: %w", ErrInvalidPathString)
+			return nil, "", 0, fmt.Errorf("specified ']' after '.' character: %w", ErrInvalidPathString)
 		}
 	}
-	return b.child(string(selector)), buf, cursor, nil
+	return b.child(selector), buf, cursor, nil
 }
 
-func parsePathIndex(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []rune, int, error) {
+func parsePathIndex(b *PathBuilder, buf string, cursor int) (*PathBuilder, string, int, error) {
 	if b.root == nil || b.node == nil {
-		return nil, nil, 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("required '$' character at first: %w", ErrInvalidPathString)
 	}
 
 	length := len(buf)
 	cursor++ // skip '[' character
 	if length <= cursor {
-		return nil, nil, 0, fmt.Errorf("unexpected end of YAML Path: %w", ErrInvalidPathString)
+		return nil, "", 0, fmt.Errorf("unexpected end of YAML Path: %w", ErrInvalidPathString)
 	}
 	c := buf[cursor]
 	switch c {
@@ -185,20 +185,23 @@ func parsePathIndex(b *PathBuilder, buf []rune, cursor int) (*PathBuilder, []run
 			}
 			break
 		}
-		if buf[cursor] != ']' {
-			return nil, nil, 0, fmt.Errorf("invalid character %s at %d: %w", string(buf[cursor]), cursor, ErrInvalidPathString)
+		if cursor >= length {
+			return nil, "", 0, fmt.Errorf("unexpected end of YAML Path: %w", ErrInvalidPathString)
 		}
-		numOrAll := string(buf[start:cursor])
+		if buf[cursor] != ']' {
+			return nil, "", 0, fmt.Errorf("invalid character %q at %d: %w", buf[cursor:cursor+1], cursor, ErrInvalidPathString)
+		}
+		numOrAll := buf[start:cursor]
 		if numOrAll == "*" {
 			return b.IndexAll(), buf, cursor + 1, nil
 		}
 		num, err := strconv.ParseUint(numOrAll, 10, 0)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, "", 0, err
 		}
 		return b.Index(uint(num)), buf, cursor + 1, nil
 	}
-	return nil, nil, 0, fmt.Errorf("invalid character %q at %d: %w", c, cursor, ErrInvalidPathString)
+	return nil, "", 0, fmt.Errorf("invalid character %q at %d: %w", c, cursor, ErrInvalidPathString)
 }
 
 // Path represent YAMLPath ( like a JSONPath ).
