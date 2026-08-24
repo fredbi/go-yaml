@@ -800,16 +800,15 @@ func New(value string, org string, pos *Position) *Token {
 // src[Offset:] is the token: it addresses the source a caller handed in, and a
 // caret drawn from it lands on the right character.
 type Position struct {
-	Line        int
-	Column      int
-	Offset      int
-	IndentNum   int
-	IndentLevel int
+	Line      int
+	Column    int
+	Offset    int
+	IndentNum int
 }
 
 // String position to text
 func (p *Position) String() string {
-	return fmt.Sprintf("[level:%d,line:%d,column:%d,offset:%d]", p.IndentLevel, p.Line, p.Column, p.Offset)
+	return fmt.Sprintf("[line:%d,column:%d,offset:%d]", p.Line, p.Column, p.Offset)
 }
 
 // Token type for token
@@ -879,8 +878,8 @@ func (t *Token) Clone() *Token {
 // Dump outputs token information to stdout for debugging.
 func (t *Token) Dump() {
 	fmt.Printf(
-		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [ORG]:%q [POS(line:column:level:offset)]: %d:%d:%d:%d\n",
-		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.IndentLevel, t.Position.Offset,
+		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [ORG]:%q [POS(line:column:offset)]: %d:%d:%d\n",
+		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.Offset,
 	)
 }
 

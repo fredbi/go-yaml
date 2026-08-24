@@ -63,6 +63,10 @@ type Scanner struct {
 	flowIndent  int
 	indentState IndentState
 	savedPos    *token.Position
+	// lastIndentLevel is the indent level the last token was given. A block
+	// scalar's content sits one level below whatever opened it, and that is the
+	// only thing that asks.
+	lastIndentLevel int
 	// posSlab hands out the position every token carries. posBlock is how many
 	// one allocation covers, sized from the source.
 	posSlab  []token.Position
@@ -276,7 +280,7 @@ func (s *Scanner) pos() *token.Position {
 	pos.Column = s.column
 	pos.Offset = s.offset
 	pos.IndentNum = s.indentNum
-	pos.IndentLevel = s.indentLevel
+	s.lastIndentLevel = s.indentLevel
 
 	return pos
 }
@@ -302,17 +306,17 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 		}
 		// Since we are in a literal, folded or raw folded
 		// we can use the indent level from the last token.
-		last := ctx.lastToken()
-		if last != nil { // The last token should never be nil here.
-			level = last.Position.IndentLevel + 1
+		if ctx.lastToken() != nil { // The last token should never be nil here.
+			level = s.lastIndentLevel + 1
 		}
 	}
+	s.lastIndentLevel = level
+
 	return ctx.bufferedToken(&token.Position{
-		Line:        line,
-		Column:      column,
-		Offset:      s.offset - len(ctx.buf),
-		IndentNum:   s.indentNum,
-		IndentLevel: level,
+		Line:      line,
+		Column:    column,
+		Offset:    s.offset - len(ctx.buf),
+		IndentNum: s.indentNum,
 	})
 }
 

@@ -48,7 +48,6 @@ type Encoder struct {
 	column         int
 	offset         int
 	indentNum      int
-	indentLevel    int
 	indentSequence bool
 }
 
@@ -523,11 +522,10 @@ func (e *Encoder) encodePtrAnchor(v reflect.Value, column int) ast.Node {
 
 func (e *Encoder) pos(column int) *token.Position {
 	return &token.Position{
-		Line:        e.line,
-		Column:      column,
-		Offset:      e.offset,
-		IndentNum:   e.indentNum,
-		IndentLevel: e.indentLevel,
+		Line:      e.line,
+		Column:    column,
+		Offset:    e.offset,
+		IndentNum: e.indentNum,
 	}
 }
 
