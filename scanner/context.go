@@ -20,8 +20,12 @@ type Context struct {
 	src                string
 	buf                []byte
 	obuf               []byte
-	tokens             token.Tokens
-	mstate             *MultiLineState
+	// originStart is where in src the origin buffer began. Where the buffer is
+	// a verbatim copy of the source from there, the token's text is a slice of
+	// src rather than a copy of the buffer.
+	originStart int
+	tokens      token.Tokens
+	mstate      *MultiLineState
 }
 
 type MultiLineState struct {
@@ -73,6 +77,7 @@ func (c *Context) clear() {
 
 func (c *Context) reset(src string) {
 	c.idx = 0
+	c.originStart = 0
 	c.size = len(src)
 	c.src = src
 	c.tokens = c.tokens[:0]
@@ -85,6 +90,24 @@ func (c *Context) resetBuffer() {
 	c.obuf = c.obuf[:0]
 	c.notSpaceCharPos = 0
 	c.notSpaceOrgCharPos = 0
+	c.originStart = c.idx
+}
+
+// text returns buf as a string.
+//
+// A Go substring shares the bytes it is taken from, so where buf is a verbatim
+// copy of the source between start and the cursor, the string costs nothing:
+// the token points into the document rather than carrying its own copy of it.
+// Scanning rewrites the text often enough -- escapes, folding, chomping -- that
+// the two are compared rather than assumed equal.
+func (c *Context) text(buf []byte, start int) string {
+	if start >= 0 && start <= c.idx && c.idx <= len(c.src) {
+		if span := c.src[start:c.idx]; len(span) == len(buf) && span == string(buf) {
+			return span
+		}
+	}
+
+	return string(buf)
 }
 
 func (c *Context) breakMultiLine() {
@@ -465,11 +488,14 @@ func (c *Context) bufferedToken(pos *token.Position) *token.Token {
 		c.buf = c.buf[:0] // clear value's buffer only.
 		return nil
 	}
+	origin := c.text(c.obuf, c.originStart)
+	value := c.text(source, c.idx-len(source))
+
 	var tk *token.Token
 	if c.isMultiLine() {
-		tk = token.String(string(source), string(c.obuf), pos)
+		tk = token.String(value, origin, pos)
 	} else {
-		tk = token.New(string(source), string(c.obuf), pos)
+		tk = token.New(value, origin, pos)
 	}
 	c.setTokenTypeByPrevTag(tk)
 	c.resetBuffer()
