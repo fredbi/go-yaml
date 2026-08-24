@@ -1126,6 +1126,9 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		}
 		c = '\n'
 	}
+	if s.isNewLineChar(c) {
+		state.sawLineBreak = true
+	}
 	if ctx.isEOS() {
 		if s.isFirstCharAtLine && c == ' ' {
 			state.addIndent(ctx, s.column)
@@ -1764,6 +1767,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		progress  int
 		chars     int
 		crlf      bool
+		endOfLine bool
 	)
 	for idx, c := range ctx.src[ctx.idx:] {
 		bytesRead, progress = idx, chars
@@ -1775,8 +1779,17 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 				crlf = true
 				continue // process \n in the next iteration
 			}
+			endOfLine = true
+
 			break
 		}
+	}
+	if !endOfLine {
+		// The header ends the source rather than the line, so every character
+		// read belongs to it. Stopping at the last one instead dropped it: a
+		// header ending "1#" was read as "1", which lost the '#' that makes it
+		// malformed and made the comment out of what came before it.
+		bytesRead, progress = len(ctx.src)-ctx.idx, chars
 	}
 	endPos := ctx.idx + bytesRead
 	if crlf {
@@ -1819,9 +1832,12 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		s.lastDelimColumn = 0
 	}
 
+	// commentValueIndex indexes value, commentIndex indexes the origin buffer,
+	// which also holds the indentation before the header. Both are needed, and
+	// the comment is emitted only where value has one to emit.
 	commentIndex := strings.Index(string(ctx.obuf), "#")
 	headerBuf := string(ctx.obuf)
-	if commentIndex > 0 {
+	if commentValueIndex > 0 && commentIndex > 0 {
 		headerBuf = headerBuf[:commentIndex]
 	}
 	switch header {
@@ -1832,7 +1848,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		ctx.addToken(token.Folded(">"+opt, headerBuf, s.pos()))
 		ctx.setFolded(s.lastDelimColumn, opt)
 	}
-	if commentIndex > 0 {
+	// The break that ended the header line is content of the scalar, and the
+	// only one there is when nothing follows the header.
+	ctx.getMultiLineState().sawLineBreak = endOfLine
+	if commentValueIndex > 0 && commentIndex > 0 {
 		comment := value[commentValueIndex+1:]
 		// The comment stands after the header, on the same line. Position it
 		// there rather than moving the scanner: progressColumn below advances

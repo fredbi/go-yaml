@@ -618,7 +618,14 @@ func (r *Renderer) literalAt(n *LiteralNode, atDocumentRoot bool) string {
 		// An empty block scalar is its header. Writing the line break that
 		// would introduce content leaves a blank line the parser reads as
 		// content indented differently from what the header announced.
-		return header
+		//
+		// '+' comes off: it keeps every trailing break, and the break that ends
+		// the header line is one. A document written with a final line break --
+		// every document is -- would read "|+" back as "\n" rather than as the
+		// empty value written here. Clipping an empty value leaves it empty, so
+		// dropping the indicator keeps the value and gains a document that
+		// survives being read back.
+		return withoutKeepChomping(header)
 	}
 
 	indent := r.indent
@@ -640,6 +647,12 @@ func (r *Renderer) literalAt(n *LiteralNode, atDocumentRoot bool) string {
 	body := blockScalarBody(value, indent, lbc)
 
 	return header + lbc + strings.TrimSuffix(body, lbc)
+}
+
+// withoutKeepChomping returns header with its '+' removed, leaving any width
+// indicator where it stands.
+func withoutKeepChomping(header string) string {
+	return strings.ReplaceAll(header, "+", "")
 }
 
 func isFolded(tk *token.Token) bool {

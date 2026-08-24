@@ -32,9 +32,13 @@ type MultiLineState struct {
 	lastNotSpaceOnlyLineIndentColumn int
 	spaceOnlyIndentColumn            int
 	foldedNewLine                    bool
-	isRawFolded                      bool
-	isLiteral                        bool
-	isFolded                         bool
+	// sawLineBreak records that a line break was read as part of this block
+	// scalar's content. Under '+' an empty buffer then still keeps one break;
+	// where the header ended the source there was never a break to keep.
+	sawLineBreak bool
+	isRawFolded  bool
+	isLiteral    bool
+	isFolded     bool
 }
 
 var (
@@ -442,7 +446,10 @@ func (c *Context) bufferedSrc() []byte {
 			// so it is treated as an empty string.
 			src = nil
 		}
-		if mstate.hasKeepAllEndNewlineOpt() && len(src) == 0 {
+		if mstate.hasKeepAllEndNewlineOpt() && len(src) == 0 && mstate.sawLineBreak {
+			// '+' keeps every trailing break, including the one the rule above
+			// just dropped. Only where the content had a break to begin with:
+			// "--- |1+" ends the source at the header and reads as "".
 			src = []byte{'\n'}
 		}
 	}
