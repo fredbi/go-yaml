@@ -252,6 +252,44 @@ memory ceiling on document size.
 Note it is **not a speed problem**: the conversion is ~1% of runtime. Fix it for memory and
 correctness, not throughput.
 
+### Two offset defects the rewrite has to fix, and one it has to preserve
+
+**`Offset` does not address its token.** It points at the start of `Origin`, and `Origin` holds
+the whitespace written before the token as well as the token itself, so an indented token is
+reported at the start of its indentation. Measured over the YAML Test Suite by
+`scanner.TestTokenOffsetsAddressTheSource`: **1,030 of 3,489 tokens** carry an offset that does
+not address their own text — `String` 402, `MappingValue` 148, `SequenceEntry` 84, `Comment` 69.
+The suite is almost entirely ASCII, so this is separate from `Offset` being a rune index.
+`offsetMissLedger` holds each token type to its count and ratchets both ways.
+
+**A byte order mark shifts every offset after it.** `Init` does
+`strings.ReplaceAll(text, byteOrderMark, "")` and scans the rewrite, so positions count a source
+the caller never handed in. The scan should skip a mark and count its bytes instead. The drift is
+one rune per mark today, three bytes once offsets are bytes.
+
+**A byte order mark is rejected where a node may go, and that must survive the rewrite.**
+YAML 1.2 excludes U+FEFF from `nb-char` (`nb-char ::= c-printable - b-char - c-byte-order-mark`),
+so a mark cannot stand inside a scalar; `l-document-prefix ::= c-byte-order-mark? l-comment*`
+allows one only at the start of the stream or of a document. `validateByteOrderMarks` enforces
+both, and `TestByteOrderMarkStandsOnlyInADocumentPrefix` pins 19 cases against the grammar
+recognizer.
+
+⚠️ **Open: the check has never been measured for completeness.** It is a line-based pass over the
+raw text, run before the scan and independent of it, and the YAML Test Suite carries **no case
+with a byte order mark at all** (402 cases, 0 marks) — so nothing in the suite exercises it.
+Shapes worth settling, in the scanner or in the check that replaces it:
+
+- a mark inside a literal or folded block scalar, indented as content;
+- a mark at column 1 that ends a block scalar by being less indented than it;
+- a mark inside a single- or double-quoted scalar that spans lines;
+- a mark in a source using CR LF line endings, which the check trims per line;
+- a mark as the last character, with no line break after it;
+- a mark between a directive and its `---`.
+
+Whoever moves this check into the scan should generate these against
+`internal/testintegration/grammar` as an independent oracle, the way the 19 existing cases were,
+and extend `offsetMissLedger`'s sibling ledger rather than asserting one shape at a time.
+
 ### What blocks streaming
 
 `CreateGroupedTokens` runs **nine sequential passes over the complete token slice** before
@@ -401,6 +439,7 @@ Ordering is driven by dependency, not by value:
 | **S** | Reader-fed byte scanner; grouping as an iterator pipeline; per-document parse. | The streaming goal. Needs P to be worth anything. |
 | **Y** | Consumer-side: the JSON-projecting lexer becomes a streaming projection. | Needs S. |
 | **B** | The defect series: block spans, BOM, the 12 conformance items. | Independent, upstreamable individually. |
+| **O** | Offsets: address the token rather than its leading whitespace; count bytes; stop rewriting the source to drop a byte order mark; settle whether the mark check is complete (§6). | Rides with S — the scan loop is where all four live. |
 | **M** | Allocation and memory churn (§4): zero-copy tokens, positions by value. | After S — it is where the residual 2× lives. |
 | **(SWAR)** | Byte-class scanning kernels. | Only if the profile still points there. Far off; see §8b. |
 
