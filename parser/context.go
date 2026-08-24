@@ -7,7 +7,14 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// context context at parsing
+// context is the parser's state at one point in the descent.
+//
+// It is passed and returned by value: the struct is five words, and copying it
+// costs less than the heap allocation and collection a pointer would need. The
+// withX methods each return a copy with one field changed, so a context handed
+// to a child cannot be seen by its parent. tokenRef is the exception -- it is a
+// pointer, so goNext and insertToken advance the position every context in the
+// descent shares.
 type context struct {
 	tokenRef *tokenRef
 	path     string
@@ -39,25 +46,25 @@ func normalizePath(path string) string {
 	return path
 }
 
-func (c *context) currentToken() *Token {
+func (c context) currentToken() *Token {
 	if c.tokenRef.idx >= c.tokenRef.size {
 		return nil
 	}
 	return c.tokenRef.tokens[c.tokenRef.idx]
 }
 
-func (c *context) isComment() bool {
+func (c context) isComment() bool {
 	return c.currentToken().Type() == token.CommentType
 }
 
-func (c *context) nextToken() *Token {
+func (c context) nextToken() *Token {
 	if c.tokenRef.idx+1 >= c.tokenRef.size {
 		return nil
 	}
 	return c.tokenRef.tokens[c.tokenRef.idx+1]
 }
 
-func (c *context) nextNotCommentToken() *Token {
+func (c context) nextNotCommentToken() *Token {
 	for i := c.tokenRef.idx + 1; i < c.tokenRef.size; i++ {
 		tk := c.tokenRef.tokens[i]
 		if tk.Type() == token.CommentType {
@@ -68,71 +75,68 @@ func (c *context) nextNotCommentToken() *Token {
 	return nil
 }
 
-func (c *context) isTokenNotFound() bool {
+func (c context) isTokenNotFound() bool {
 	return c.currentToken() == nil
 }
 
-func (c *context) withGroup(g *TokenGroup) *context {
-	ctx := *c
-	ctx.tokenRef = &tokenRef{
+func (c context) withGroup(g *TokenGroup) context {
+	c.tokenRef = &tokenRef{
 		tokens: g.Tokens,
 		size:   len(g.Tokens),
 	}
-	return &ctx
+
+	return c
 }
 
-func (c *context) withChild(path string) *context {
-	ctx := *c
-	ctx.path = c.path + "." + normalizePath(path)
-	return &ctx
+func (c context) withChild(path string) context {
+	c.path = c.path + "." + normalizePath(path)
+
+	return c
 }
 
 // withPath returns a context at path, which the caller has already built.
 // parseMapKey stores a key's path on the key node; the entry's value hangs
 // under the same path, so reusing it saves building the same string twice.
-func (c *context) withPath(path string) *context {
-	ctx := *c
-	ctx.path = path
-	return &ctx
+func (c context) withPath(path string) context {
+	c.path = path
+
+	return c
 }
 
-func (c *context) withIndex(idx uint) *context {
-	ctx := *c
-	ctx.path = c.path + "[" + strconv.FormatUint(uint64(idx), 10) + "]"
-	return &ctx
+func (c context) withIndex(idx uint) context {
+	c.path = c.path + "[" + strconv.FormatUint(uint64(idx), 10) + "]"
+
+	return c
 }
 
 // withMapping returns a context whose recorded keys start at base. The keys of
 // the mapping opened there are compared against each other and against no
 // others.
-func (c *context) withMapping(base int) *context {
-	ctx := *c
-	ctx.keyBase = base
+func (c context) withMapping(base int) context {
+	c.keyBase = base
 
-	return &ctx
+	return c
 }
 
-func (c *context) withFlow(isFlow bool) *context {
-	ctx := *c
-	ctx.isFlow = isFlow
-	ctx.inFlowSequence = false
-	return &ctx
+func (c context) withFlow(isFlow bool) context {
+	c.isFlow = isFlow
+	c.inFlowSequence = false
+
+	return c
 }
 
-func (c *context) withFlowSequence() *context {
-	ctx := *c
-	ctx.isFlow = true
-	ctx.inFlowSequence = true
-	return &ctx
+func (c context) withFlowSequence() context {
+	c.isFlow = true
+	c.inFlowSequence = true
+
+	return c
 }
 
-func newContext() *context {
-	return &context{
-		path: "$",
-	}
+func newContext() context {
+	return context{path: "$"}
 }
 
-func (c *context) goNext() {
+func (c context) goNext() {
 	ref := c.tokenRef
 	if ref.size <= ref.idx+1 {
 		ref.idx = ref.size
@@ -141,11 +145,11 @@ func (c *context) goNext() {
 	}
 }
 
-func (c *context) next() bool {
+func (c context) next() bool {
 	return c.tokenRef.idx < c.tokenRef.size
 }
 
-func (c *context) insertNullToken(tk *Token) *Token {
+func (c context) insertNullToken(tk *Token) *Token {
 	nullToken := c.createImplicitNullToken(tk)
 	c.insertToken(nullToken)
 	c.goNext()
@@ -153,7 +157,7 @@ func (c *context) insertNullToken(tk *Token) *Token {
 	return nullToken
 }
 
-func (c *context) addNullValueToken(tk *Token) *Token {
+func (c context) addNullValueToken(tk *Token) *Token {
 	nullToken := c.createImplicitNullToken(tk)
 	rawTk := nullToken.RawToken()
 
@@ -166,7 +170,7 @@ func (c *context) addNullValueToken(tk *Token) *Token {
 	return nullToken
 }
 
-func (c *context) createImplicitNullToken(base *Token) *Token {
+func (c context) createImplicitNullToken(base *Token) *Token {
 	pos := *(base.RawToken().Position)
 	pos.Column++
 	tk := token.New("null", " null", &pos)
@@ -174,7 +178,7 @@ func (c *context) createImplicitNullToken(base *Token) *Token {
 	return &Token{Token: tk}
 }
 
-func (c *context) insertToken(tk *Token) {
+func (c context) insertToken(tk *Token) {
 	ref := c.tokenRef
 	idx := ref.idx
 	if ref.size < idx {
@@ -199,7 +203,7 @@ func (c *context) insertToken(tk *Token) {
 	ref.size = len(ref.tokens)
 }
 
-func (c *context) addToken(tk *Token) {
+func (c context) addToken(tk *Token) {
 	ref := c.tokenRef
 	lastTk := ref.tokens[ref.size-1]
 	if lastTk.Group != nil {
