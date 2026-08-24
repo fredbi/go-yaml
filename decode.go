@@ -26,12 +26,14 @@ import (
 
 // Decoder reads and decodes YAML values from an input stream.
 type Decoder struct {
-	// entryAnchor records, for a node being decoded, the token of the entry
-	// that writes it: the ':' of a mapping entry or the '-' of a sequence one.
-	// A validation error about a field the document left out is reported there,
-	// because there is nothing inside the node to point at. Filled only while a
-	// validator is set.
-	entryAnchor          map[ast.Node]*token.Token
+	// entry is the node that writes the one being decoded: the "key:" of a
+	// mapping entry, or the "-" of a sequence one. Decoding is depth first, so
+	// each step saves it and puts it back, and the field behaves as a stack.
+	//
+	// It says where to report a validation error about a field the document
+	// left out, there being nothing inside the node to point at, and what
+	// indentation to strip when a node is handed to a custom unmarshaler.
+	entry                ast.Node
 	reader               io.Reader
 	referenceReaders     []io.Reader
 	anchorNodeMap        map[string]ast.Node
@@ -699,12 +701,12 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 }
 
 func (d *Decoder) unmarshalableDocument(node ast.Node) ([]byte, error) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, d.entry)
 	return []byte(doc), nil
 }
 
 func (d *Decoder) unmarshalableText(node ast.Node) ([]byte, bool) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, d.entry)
 	var v string
 	if err := Unmarshal([]byte(doc), &v); err != nil {
 		return nil, false
@@ -1392,11 +1394,6 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				fieldValue.Set(reflect.Zero(fieldValue.Type()))
 				continue
 			}
-			for k, v := range keyToNodeMap {
-				if entry, ok := entries[k]; ok {
-					d.anchorEntry(v, entry.GetToken())
-				}
-			}
 			mapNode := ast.Mapping(nil, false)
 			for k, v := range keyToNodeMap {
 				key := &ast.StringNode{Value: k}
@@ -1444,10 +1441,9 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
 			continue
 		}
-		if entry, ok := entries[structField.RenderName]; ok {
-			d.anchorEntry(v, entry.GetToken())
-		}
+		prevEntry := d.enterEntry(entries[structField.RenderName])
 		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, v)
+		d.entry = prevEntry
 		if err != nil {
 			if foundErr != nil {
 				continue
@@ -1542,8 +1538,8 @@ func validationErrorToken(value, entry ast.Node) *token.Token {
 // There is no entry to point at, so the error goes to the first key of the
 // mapping that should have held one.
 func (d *Decoder) missingFieldToken(src ast.Node) *token.Token {
-	if tk, ok := d.entryAnchor[src]; ok {
-		return tk
+	if d.entry != nil {
+		return d.entry.GetToken()
 	}
 	if m, ok := src.(*ast.MappingNode); ok && len(m.Values) > 0 {
 		return m.Values[0].Key.GetToken()
@@ -1554,25 +1550,22 @@ func (d *Decoder) missingFieldToken(src ast.Node) *token.Token {
 
 // sequenceEntryToken returns the '-' that writes entry idx of node, where the
 // sequence kept it.
-func sequenceEntryToken(node ast.ArrayNode, idx int) *token.Token {
+func sequenceEntryNode(node ast.ArrayNode, idx int) ast.Node {
 	seq, ok := node.(*ast.SequenceNode)
 	if !ok || idx < 0 || idx >= len(seq.Entries) {
 		return nil
 	}
 
-	return seq.Entries[idx].Start
+	return seq.Entries[idx]
 }
 
-// anchorEntry records that value is written by entry, so a validation error
-// about something value leaves out can be reported at the entry.
-func (d *Decoder) anchorEntry(value ast.Node, entry *token.Token) {
-	if d.validator == nil || value == nil || entry == nil {
-		return
-	}
-	if d.entryAnchor == nil {
-		d.entryAnchor = make(map[ast.Node]*token.Token)
-	}
-	d.entryAnchor[value] = entry
+// enterEntry records the node that writes the one about to be decoded, and
+// returns the one it replaces for the caller to put back.
+func (d *Decoder) enterEntry(entry ast.Node) ast.Node {
+	prev := d.entry
+	d.entry = entry
+
+	return prev
 }
 
 func (d *Decoder) decodeArray(ctx context.Context, dst reflect.Value, src ast.Node) error {
@@ -1652,8 +1645,9 @@ func (d *Decoder) decodeSlice(ctx context.Context, dst reflect.Value, src ast.No
 			sliceValue = reflect.Append(sliceValue, reflect.Zero(elemType))
 			continue
 		}
-		d.anchorEntry(v, sequenceEntryToken(arrayNode, entryIdx))
+		prevEntry := d.enterEntry(sequenceEntryNode(arrayNode, entryIdx))
 		dstValue, err := d.createDecodedNewValue(ctx, elemType, reflect.Value{}, v)
+		d.entry = prevEntry
 		if err != nil {
 			if foundErr == nil {
 				foundErr = err
@@ -1823,7 +1817,9 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			mapValue.SetMapIndex(k, reflect.Zero(valueType))
 			continue
 		}
+		prevEntry := d.enterEntry(mapIter.KeyValue())
 		dstValue, err := d.createDecodedNewValue(ctx, valueType, reflect.Value{}, value)
+		d.entry = prevEntry
 		if err != nil {
 			if foundErr == nil {
 				foundErr = err

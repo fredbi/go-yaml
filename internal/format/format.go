@@ -7,33 +7,28 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node) string {
-	tk := getFirstToken(n)
-	if tk == nil {
-		return ""
-	}
-	formatter := newFormatter(tk, hasComment(n))
+// FormatNodeWithResolvedAlias writes n as it was written in the source, with
+// aliases replaced by what they name.
+//
+// entry is the node that writes n -- the "key:" of a mapping entry or the "-"
+// of a sequence one -- and says what indentation to strip. Pass nil where n
+// stands on its own.
+func FormatNodeWithResolvedAlias(n ast.Node, anchorNodeMap map[string]ast.Node, entry ast.Node) string {
+	formatter := newFormatter(hasComment(n))
 	formatter.anchorNodeMap = anchorNodeMap
+	formatter.entry = entry
 	return formatter.format(n)
 }
 
 func FormatNode(n ast.Node) string {
-	tk := getFirstToken(n)
-	if tk == nil {
-		return ""
-	}
-	return newFormatter(tk, hasComment(n)).format(n)
+	return newFormatter(hasComment(n)).format(n)
 }
 
 func FormatFile(file *ast.File) string {
 	if len(file.Docs) == 0 {
 		return ""
 	}
-	tk := getFirstToken(file.Docs[0])
-	if tk == nil {
-		return ""
-	}
-	return newFormatter(tk, hasCommentFile(file)).formatFile(file)
+	return newFormatter(hasCommentFile(file)).formatFile(file)
 }
 
 func hasCommentFile(f *ast.File) bool {
@@ -184,89 +179,58 @@ func getFirstToken(n ast.Node) *token.Token {
 }
 
 type Formatter struct {
-	existsComment    bool
-	tokenToOriginMap map[*token.Token]string
-	anchorNodeMap    map[string]ast.Node
+	existsComment bool
+	entry         ast.Node
+	anchorNodeMap map[string]ast.Node
 }
 
-func newFormatter(tk *token.Token, existsComment bool) *Formatter {
-	tokenToOriginMap := make(map[*token.Token]string)
-	for tk.Prev != nil {
-		tk = tk.Prev
-	}
-	tokenToOriginMap[tk] = tk.Origin
-
-	var origin string
-	for tk.Next != nil {
-		tk = tk.Next
-		if tk.Type == token.CommentType {
-			origin += strings.Repeat("\n", strings.Count(normalizeNewLineChars(tk.Origin), "\n"))
-			continue
-		}
-		origin += tk.Origin
-		tokenToOriginMap[tk] = origin
-		origin = ""
-	}
-	return &Formatter{
-		existsComment:    existsComment,
-		tokenToOriginMap: tokenToOriginMap,
-	}
+func newFormatter(existsComment bool) *Formatter {
+	return &Formatter{existsComment: existsComment}
 }
 
-func getIndentNumByFirstLineToken(tk *token.Token) int {
-	defaultIndent := tk.Position.Column - 1
+// indentOf returns the indentation n is written at.
+//
+// A node written as the value of an entry is indented to the entry's own
+// column: the key it hangs under, or the '-' that introduces it. A node that
+// stands on its own is indented to where it starts.
+func indentOf(n, entry ast.Node) int {
+	tk := getFirstToken(n)
+	if tk == nil {
+		return 0
+	}
+	own := tk.Position.Column - 1
 
-	// key: value
-	//    ^
-	//   next
-	if tk.Type == token.SequenceEntryType {
-		// If the current token is the sequence entry.
-		// the indent is calculated from the column value of the current token.
-		return defaultIndent
+	// A collection starts at its own first token -- a key, or the '-' of its
+	// first entry -- and that is the column its lines are written from,
+	// wherever the entry that holds it stands.
+	switch n.Type() {
+	case ast.MappingType, ast.MappingValueType, ast.SequenceType:
+		return own
+	default:
 	}
 
-	// key: value
-	//    ^
-	//   next
-	if tk.Next != nil && tk.Next.Type == token.MappingValueType {
-		// If the current token is the key in the mapping-value,
-		// the indent is calculated from the column value of the current token.
-		return defaultIndent
-	}
-
-	if tk.Prev == nil {
-		return defaultIndent
-	}
-	prev := tk.Prev
-
-	// key: value
-	//    ^
-	//   prev
-	if prev.Type == token.MappingValueType {
-		// If the current token is the value in the mapping-value,
-		// the indent is calculated from the column value of the key two steps back.
-		if prev.Prev == nil {
-			return defaultIndent
+	// A scalar is written after the entry that names it, so its own column says
+	// nothing about the indentation of the lines it spans.
+	switch e := entry.(type) {
+	case *ast.MappingValueNode:
+		if e.Key != nil {
+			if key := e.Key.GetToken(); key != nil {
+				return key.Position.Column - 1
+			}
 		}
-		return prev.Prev.Position.Column - 1
+	case *ast.SequenceEntryNode:
+		if e.Start != nil {
+			return e.Start.Position.Column - 1
+		}
 	}
 
-	// - value
-	// ^
-	// prev
-	if prev.Type == token.SequenceEntryType {
-		// If the value is not a mapping-value and the previous token was a sequence entry,
-		// the indent is calculated using the column value of the sequence entry token.
-		return prev.Position.Column - 1
-	}
-
-	return defaultIndent
+	return own
 }
 
 func (f *Formatter) format(n ast.Node) string {
 	return f.trimSpacePrefix(
 		f.trimIndentSpace(
-			getIndentNumByFirstLineToken(getFirstToken(n)),
+			indentOf(n, f.entry),
 			f.trimNewLineCharPrefix(f.formatNode(n)),
 		),
 	)
@@ -285,14 +249,20 @@ func (f *Formatter) formatFile(file *ast.File) string {
 	return ret
 }
 
+// origin returns the text tk was written as.
+//
+// Where the node carries no comments, the comment tokens above tk are not
+// written either, so the line breaks they took up are written in their place.
+// Without them the line after a comment runs into the line before it.
 func (f *Formatter) origin(tk *token.Token) string {
 	if tk == nil {
 		return ""
 	}
-	if f.existsComment {
+	if f.existsComment || tk.CommentBreaksAbove == 0 {
 		return tk.Origin
 	}
-	return f.tokenToOriginMap[tk]
+
+	return strings.Repeat("\n", int(tk.CommentBreaksAbove)) + tk.Origin
 }
 
 func (f *Formatter) formatDocument(n *ast.DocumentNode) string {

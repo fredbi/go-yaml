@@ -826,6 +826,11 @@ type Token struct {
 	// token. The renderer writes one back where it finds one, which is how a
 	// document keeps the spacing it was written with.
 	BlankLineAbove bool
+	// CommentBreaksAbove counts the line breaks taken up by the comments
+	// written immediately above this token. A document rendered without those
+	// comments still has to leave the lines they stood on, or what was written
+	// under them runs into what was written before.
+	CommentBreaksAbove int32
 	// Position is a token position.
 	Position *Position
 	// Next is a next token reference.
@@ -900,6 +905,7 @@ func (t *Tokens) add(tk *Token) {
 		last.Next = tk
 		tk.Prev = last
 		tk.BlankLineAbove = blankLineAbove(tk, tokens)
+		tk.CommentBreaksAbove = commentBreaksAbove(tk, tokens)
 		tokens = append(tokens, tk)
 	}
 	*t = tokens

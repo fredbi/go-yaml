@@ -101,3 +101,30 @@ func blankLineAbove(t *Token, before Tokens) bool {
 	}
 	return false
 }
+
+// commentBreaksAbove counts the line breaks the comments written immediately
+// above tk take up, where before holds the tokens already read.
+//
+// A comment token carries its own line break in its origin. Where the comments
+// are dropped -- a node rendered without them -- those breaks have to be
+// written back, or the line after a comment runs into the line before it.
+func commentBreaksAbove(tk *Token, before Tokens) int32 {
+	if tk.Type == CommentType {
+		return 0
+	}
+
+	var breaks int32
+	for i := len(before) - 1; i >= 0; i-- {
+		if before[i].Type != CommentType {
+			break
+		}
+		breaks += int32(strings.Count(normalizeNewLineChars(before[i].Origin), "\n"))
+	}
+
+	return breaks
+}
+
+// normalizeNewLineChars reads CR LF and CR as one line break each.
+func normalizeNewLineChars(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
