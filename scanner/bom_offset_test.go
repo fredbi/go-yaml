@@ -9,8 +9,6 @@ import (
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
-
-	"github.com/go-openapi/go-yaml/lexer"
 )
 
 // TestOffsetsCountAByteOrderMark checks that a mark the scanner steps over is
@@ -41,7 +39,7 @@ func TestOffsetsCountAByteOrderMark(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			seen := make(map[string]bool)
-			for _, tk := range lexer.Tokenize(test.src) {
+			for _, tk := range tokenize(t, test.src) {
 				want, ok := test.want[tk.Value]
 				if !ok {
 					continue

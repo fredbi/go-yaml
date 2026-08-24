@@ -50,7 +50,12 @@ func TestBlockScalarHeaderEndingTheSource(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := lexer.Tokenize(test.src)
+			got, err := lexer.Tokenize(test.src)
+			if test.types[0] == token.InvalidType {
+				require.Error(t, err, "the scanner should refuse this")
+			} else {
+				require.NoError(t, err)
+			}
 			require.Len(t, got, len(test.types))
 			for i, want := range test.types {
 				assert.Equalf(t, want, got[i].Type, "token %d", i)
@@ -60,7 +65,7 @@ func TestBlockScalarHeaderEndingTheSource(t *testing.T) {
 			}
 
 			// The same document, written with the line break it was missing.
-			withBreak := lexer.Tokenize(test.withBreak)
+			withBreak, _ := lexer.Tokenize(test.withBreak)
 			require.NotEmpty(t, withBreak)
 			assert.Equal(t, got[0].Type, withBreak[0].Type, "the trailing break should not change what the header is")
 		})

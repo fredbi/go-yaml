@@ -27,7 +27,7 @@ anchor: &x 1
 alias: *x
 `
 	t.Run("print starting from tokens[3]", func(t *testing.T) {
-		tokens := lexer.Tokenize(yml)
+		tokens := tokenize(t, yml)
 		var p printer.Printer
 		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[3], false)
 		expect := `
@@ -42,7 +42,7 @@ alias: *x
 		}
 	})
 	t.Run("print starting from tokens[4]", func(t *testing.T) {
-		tokens := lexer.Tokenize(yml)
+		tokens := tokenize(t, yml)
 		var p printer.Printer
 		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[4], false)
 		expect := `
@@ -58,7 +58,7 @@ alias: *x
 		}
 	})
 	t.Run("print starting from tokens[6]", func(t *testing.T) {
-		tokens := lexer.Tokenize(yml)
+		tokens := tokenize(t, yml)
 		var p printer.Printer
 		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[6], false)
 		expect := `
@@ -78,7 +78,7 @@ alias: *x
 		}
 	})
 	t.Run("print error token with document header", func(t *testing.T) {
-		tokens := lexer.Tokenize(`---
+		tokens, _ := lexer.Tokenize(`---
 a:
  b:
   c:
@@ -105,17 +105,17 @@ a:
 	})
 	t.Run("output with color", func(t *testing.T) {
 		t.Run("token6", func(t *testing.T) {
-			tokens := lexer.Tokenize(yml)
+			tokens := tokenize(t, yml)
 			var p printer.Printer
 			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[6], true))
 		})
 		t.Run("token9", func(t *testing.T) {
-			tokens := lexer.Tokenize(yml)
+			tokens := tokenize(t, yml)
 			var p printer.Printer
 			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[9], true))
 		})
 		t.Run("token12", func(t *testing.T) {
-			tokens := lexer.Tokenize(yml)
+			tokens := tokenize(t, yml)
 			var p printer.Printer
 			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[12], true))
 		})
@@ -135,7 +135,7 @@ func TestPrinter_Anchor(t *testing.T) {
 	expected := `
 anchor: &x 1
 alias: *x`
-	tokens := lexer.Tokenize(expected)
+	tokens := tokenize(t, expected)
 	var p printer.Printer
 	got := p.PrintTokens(tokens)
 	if expected != got {
@@ -203,7 +203,7 @@ text3: hello
 	for _, tt := range tc {
 		name := fmt.Sprintf("print starting from tokens[%d]", tt.token)
 		t.Run(name, func(t *testing.T) {
-			tokens := lexer.Tokenize(yml)
+			tokens := tokenize(t, yml)
 			var p printer.Printer
 			got := "\n" + p.PrintErrorSource(yml, 1, tokens[tt.token], false)
 			want := tt.want

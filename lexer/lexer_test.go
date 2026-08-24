@@ -2012,7 +2012,7 @@ s: >-3
 	}
 	for _, test := range tests {
 		t.Run(test.YAML, func(t *testing.T) {
-			tokens := lexer.Tokenize(test.YAML)
+			tokens := tokenize(t, test.YAML)
 			if len(tokens) != len(test.Tokens) {
 				t.Fatalf("Tokenize(%q) token count mismatch, expected: %d got: %d", test.YAML, len(test.Tokens), len(tokens))
 			}
@@ -2258,7 +2258,7 @@ func TestSingleLineToken_ValueLineColumnPosition(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := lexer.Tokenize(tc.src)
+			got := tokenize(t, tc.src)
 			sort.Slice(got, func(i, j int) bool {
 				return got[i].Position.Column < got[j].Position.Column
 			})
@@ -2559,7 +2559,7 @@ b: 1`,
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := lexer.Tokenize(tc.src)
+			got := tokenize(t, tc.src)
 			sort.Slice(got, func(i, j int) bool {
 				// sort by line, then column
 				if got[i].Position.Line < got[j].Position.Line {
@@ -2661,7 +2661,10 @@ a: |
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := lexer.Tokenize(test.src)
+			got, err := lexer.Tokenize(test.src)
+			if err == nil {
+				t.Fatal("expected the scanner to refuse this")
+			}
 			if got.InvalidToken() == nil {
 				t.Fatal("expected contains invalid token")
 			}
@@ -2677,7 +2680,7 @@ a: |
 func TestTokenOffset(t *testing.T) {
 	t.Run("crlf", func(t *testing.T) {
 		content := "project:\r\n  version: 1.2.3\r\n"
-		tokens := lexer.Tokenize(content)
+		tokens := tokenize(t, content)
 		if len(tokens) != 5 {
 			t.Fatalf("invalid token num. got %d", len(tokens))
 		}
@@ -2690,7 +2693,7 @@ func TestTokenOffset(t *testing.T) {
 	})
 	t.Run("lf", func(t *testing.T) {
 		content := "project:\n  version: 1.2.3\n"
-		tokens := lexer.Tokenize(content)
+		tokens := tokenize(t, content)
 		if len(tokens) != 5 {
 			t.Fatalf("invalid token num. got %d", len(tokens))
 		}

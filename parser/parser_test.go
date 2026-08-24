@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -164,7 +163,7 @@ v:
 	}
 	for idx, src := range sources {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
-			f, err := parser.Parse(lexer.Tokenize(src), 0)
+			f, err := parser.Parse(tokenize(t, src), 0)
 			if err != nil {
 				t.Fatalf("parse error: source [%s]: %+v", src, err)
 			}
@@ -774,7 +773,7 @@ d: e
 
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			tokens := lexer.Tokenize(test.source)
+			tokens := tokenize(t, test.source)
 			f, err := parser.Parse(tokens, 0)
 			if err != nil {
 				t.Fatalf("%+v", err)

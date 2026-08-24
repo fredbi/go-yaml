@@ -39,7 +39,7 @@ func TestTokenDensity(t *testing.T) {
 	}
 
 	for _, w := range all {
-		tokens := lexer.Tokenize(string(w.Data))
+		tokens := tokenize(t, string(w.Data))
 		t.Logf("%-18s %8d bytes %8d tokens %5.1f bytes/token",
 			w.Name, len(w.Data), len(tokens), float64(len(w.Data))/float64(len(tokens)))
 	}
@@ -109,9 +109,15 @@ func TestGroupSpans(t *testing.T) {
 	}
 
 	for _, src := range sources {
-		grouped, err := parser.CreateGroupedTokens(lexer.Tokenize(src))
+		// The suite carries documents the scanner and the parser refuse on
+		// purpose; neither has groups to measure.
+		tokens, err := lexer.Tokenize(src)
 		if err != nil {
-			continue // the suite carries documents the parser refuses on purpose
+			continue
+		}
+		grouped, err := parser.CreateGroupedTokens(tokens)
+		if err != nil {
+			continue
 		}
 		for _, tk := range grouped {
 			walk(tk)

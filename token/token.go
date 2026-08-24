@@ -829,8 +829,6 @@ type Token struct {
 	Value string
 	// Origin is a string that stores the original text as-is.
 	Origin string
-	// Error keeps error message for InvalidToken.
-	Error string
 	// Position is where the token stands in the source.
 	Position Position
 	// CommentBreaksAbove counts the line breaks taken up by the comments
@@ -1135,12 +1133,15 @@ func DocumentEnd(org string, pos Position) *Token {
 	}
 }
 
-func Invalid(err string, org string, pos Position) *Token {
+// Invalid returns the token a scanner stopped on.
+//
+// What is wrong with it belongs to the error the scanner reports, not to the
+// token: a message on every token costs every token the room for one.
+func Invalid(org string, pos Position) *Token {
 	return &Token{
 		Type:     InvalidType,
 		Value:    org,
 		Origin:   org,
-		Error:    err,
 		Position: pos,
 	}
 }

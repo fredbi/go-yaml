@@ -1,6 +1,7 @@
 package parser
 
 import (
+	stderrors "errors"
 	"fmt"
 	"os"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/lexer"
+	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -20,7 +22,11 @@ const (
 // ParseBytes parse from byte slice, and returns ast.File
 func ParseBytes(bytes []byte, mode Mode, opts ...Option) (*ast.File, error) {
 	src := string(bytes)
-	tokens := lexer.Tokenize(src)
+	tokens, err := lexer.Tokenize(src)
+	if err != nil {
+		return nil, errors.WithSource(asSyntaxError(err), errors.Source{Text: src, FirstLine: 1})
+	}
+
 	f, err := Parse(tokens, mode, opts...)
 	if err != nil {
 		// An error drawn under the document needs the document. Parse takes a
@@ -31,10 +37,24 @@ func ParseBytes(bytes []byte, mode Mode, opts ...Option) (*ast.File, error) {
 	return f, nil
 }
 
+// asSyntaxError reports a scanning failure the way a parsing one is reported,
+// so a caller sees one kind of error whichever stage refused the document.
+func asSyntaxError(err error) error {
+	var invalid *scanner.InvalidTokenError
+	if stderrors.As(err, &invalid) {
+		return errors.ErrSyntax(invalid.Message, invalid.Token)
+	}
+
+	return err
+}
+
 // Parse parse from token instances, and returns ast.File
 func Parse(tokens token.Tokens, mode Mode, opts ...Option) (*ast.File, error) {
 	if tk := tokens.InvalidToken(); tk != nil {
-		return nil, errors.ErrSyntax(tk.Error, tk)
+		// A stream handed in rather than scanned here carries no reason: the
+		// scanner reports one, and Tokenize returns it. Use ParseBytes to have
+		// both.
+		return nil, errors.ErrSyntax("found an invalid token", tk)
 	}
 	p, err := newParser(tokens, mode, opts)
 	if err != nil {

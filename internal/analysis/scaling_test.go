@@ -9,7 +9,6 @@ import (
 
 	v3 "go.yaml.in/yaml/v3"
 
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -53,9 +52,9 @@ func TestStageAttribution(t *testing.T) {
 
 	for _, n := range []int{1000, 2000, 4000, 8000, 16000} {
 		src := flatMap(n)
-		toks := lexer.Tokenize(src)
+		toks := tokenize(t, src)
 
-		tt := timeIt(t, func() { lexer.Tokenize(src) })
+		tt := timeIt(t, func() { tokenize(t, src) })
 		tg := timeIt(t, func() {
 			if _, err := parser.CreateGroupedTokens(toks); err != nil {
 				t.Fatal(err)

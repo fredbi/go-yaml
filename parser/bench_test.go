@@ -6,7 +6,6 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/corpus"
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -48,7 +47,7 @@ func BenchmarkParseBytesWithComments(b *testing.B) {
 // one is not read as a change to the other.
 func BenchmarkParseTokens(b *testing.B) {
 	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
-		tokens := lexer.Tokenize(string(src))
+		tokens := mustTokens(b, string(src))
 		b.ResetTimer()
 
 		for b.Loop() {

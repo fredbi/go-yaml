@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -28,7 +27,7 @@ func BenchmarkWorkloadTokenize(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		text := string(src)
 		for b.Loop() {
-			_ = lexer.Tokenize(text)
+			_ = tokenize(b, text)
 		}
 	})
 }

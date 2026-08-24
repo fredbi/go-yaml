@@ -102,18 +102,12 @@ func validateStream(text string) error {
 			// Either a byte that is not text, or a U+FFFD the author wrote:
 			// only the width tells them apart.
 			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
-				return ErrInvalidToken(token.Invalid(
-					"found a byte that is part of no character",
-					text[i:i+1], token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)},
-				))
+				return ErrInvalidToken("found a byte that is part of no character", token.Invalid(text[i:i+1], token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)}))
 			}
 		}
 
 		if !printable(r) {
-			return ErrInvalidToken(token.Invalid(
-				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
-				string(r), token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)},
-			))
+			return ErrInvalidToken(fmt.Sprintf("found character %q that a YAML stream may not hold", r), token.Invalid(string(r), token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)}))
 		}
 
 		offset++
@@ -152,19 +146,17 @@ func validateByteOrderMarks(text string) error {
 		if rest := line[marks*utf8.RuneLen(byteOrderMark):]; strings.ContainsRune(rest, byteOrderMark) {
 			column := marks + 1 + strings.IndexRune(rest, byteOrderMark)
 
-			return ErrInvalidToken(token.Invalid(
+			return ErrInvalidToken(
 				"found a byte order mark inside a line, where a node may not hold one",
-				string(byteOrderMark),
-				token.Position{Line: int32((i + 1)), Column: int32((column)), Offset: int32(offset + column - 1)},
-			))
+				token.Invalid(
+					string(byteOrderMark),
+					token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(offset + column - 1)},
+				),
+			)
 		}
 
 		if marks > 0 && !opensADocument(lines, i, marks) {
-			return ErrInvalidToken(token.Invalid(
-				"found a byte order mark where no document begins",
-				string(byteOrderMark),
-				token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)},
-			))
+			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)}))
 		}
 
 		offset += len(raw) + 1
@@ -483,12 +475,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		} else if isFirstLineChar && c == '\t' {
 			if s.lastDelimColumn >= s.column {
-				return nil, ErrInvalidToken(
-					token.Invalid(
-						"tab character cannot be used for indentation in single-quoted text",
-						string(ctx.obuf), s.pos(),
-					),
-				)
+				return nil, ErrInvalidToken("tab character cannot be used for indentation in single-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
 			}
 
 			continue
@@ -510,12 +497,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 		return token.SingleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
-	return nil, ErrInvalidToken(
-		token.Invalid(
-			"could not find end character of single-quoted text",
-			string(ctx.obuf), srcpos,
-		),
-	)
+	return nil, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.obuf), srcpos))
 }
 
 // hexToInt returns the value of one hexadecimal digit, and whether the rune is
@@ -606,12 +588,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		} else if isFirstLineChar && c == '\t' {
 			if s.lastDelimColumn >= s.column {
-				return nil, ErrInvalidToken(
-					token.Invalid(
-						"tab character cannot be used for indentation in double-quoted text",
-						string(ctx.obuf), s.pos(),
-					),
-				)
+				return nil, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
 			}
 			continue
 		} else if c == '\\' {
@@ -695,43 +672,23 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			case 'x':
 				// \x00 style must have 3 characters at least.
 				if idx+3 >= size {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"not enough length for escaped 8-bit character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("not enough length for escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 3
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+progress+1])
 				if !isHex {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"found a character that is not a hexadecimal digit in escaped 8-bit character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"not enough length for escaped UTF-16 character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("not enough length for escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 5
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+6])
 				if !isHex {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"found a character that is not a hexadecimal digit in escaped UTF-16 character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 
 				// handle surrogate pairs.
@@ -740,39 +697,19 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 
 					// \u0000\u0000 style must have 11 characters at least.
 					if idx+11 >= size {
-						return nil, ErrInvalidToken(
-							token.Invalid(
-								"not enough length for escaped UTF-16 surrogate pair",
-								string(ctx.obuf), s.pos(),
-							),
-						)
+						return nil, ErrInvalidToken("not enough length for escaped UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 
 					if src[idx+6] != '\\' || src[idx+7] != 'u' {
-						return nil, ErrInvalidToken(
-							token.Invalid(
-								"found unexpected character after high surrogate for UTF-16 surrogate pair",
-								string(ctx.obuf), s.pos(),
-							),
-						)
+						return nil, ErrInvalidToken("found unexpected character after high surrogate for UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 
 					low, isHex := hexDigitsToInt(src[idx+8 : idx+12])
 					if !isHex {
-						return nil, ErrInvalidToken(
-							token.Invalid(
-								"found a character that is not a hexadecimal digit in the low surrogate",
-								string(ctx.obuf), s.pos(),
-							),
-						)
+						return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in the low surrogate", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					if low < 0xDC00 || low > 0xDFFF {
-						return nil, ErrInvalidToken(
-							token.Invalid(
-								"found unexpected low surrogate after high surrogate",
-								string(ctx.obuf), s.pos(),
-							),
-						)
+						return nil, ErrInvalidToken("found unexpected low surrogate after high surrogate", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					codeNum = ((high - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000
 					progress += 6
@@ -781,22 +718,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			case 'U':
 				// \U00000000 style must have 9 characters at least.
 				if idx+9 >= size {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"not enough length for escaped UTF-32 character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("not enough length for escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 9
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+10])
 				if !isHex {
-					return nil, ErrInvalidToken(
-						token.Invalid(
-							"found a character that is not a hexadecimal digit in escaped UTF-32 character",
-							string(ctx.obuf), s.pos(),
-						),
-					)
+					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case '\n':
@@ -824,12 +751,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				value = utf8.AppendRune(value, nextChar)
 			default:
 				s.progressColumn(ctx, 1)
-				return nil, ErrInvalidToken(
-					token.Invalid(
-						fmt.Sprintf("found unknown escape character %q", nextChar),
-						string(ctx.obuf), s.pos(),
-					),
-				)
+				return nil, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(string(ctx.obuf), s.pos()))
 			}
 			idx += progress
 			s.progressColumn(ctx, progress)
@@ -868,19 +790,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 		return token.DoubleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
-	return nil, ErrInvalidToken(
-		token.Invalid(
-			"could not find end character of double-quoted text",
-			string(ctx.obuf), srcpos,
-		),
-	)
+	return nil, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(string(ctx.obuf), srcpos))
 }
 
 func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) error {
 	if s.foundDocumentSeparatorMarker(src) {
-		return ErrInvalidToken(
-			token.Invalid("found unexpected document separator", string(ctx.obuf), s.pos()),
-		)
+		return ErrInvalidToken("found unexpected document separator", token.Invalid(string(ctx.obuf), s.pos()))
 	}
 	return nil
 }
@@ -1017,9 +932,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 
-			return false, ErrInvalidToken(
-				token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos()),
-			)
+			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(string(ctx.obuf), s.pos()))
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
@@ -1043,15 +956,17 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
-			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 
-			return false, ErrInvalidToken(invalidTk)
+			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		case '{':
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
-			invalidTk := token.Invalid(fmt.Sprintf("found invalid tag character %q", c), string(ctx.obuf), s.pos())
+			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 
-			return false, ErrInvalidToken(invalidTk)
+			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		default:
 			ctx.addOriginBuf(c)
 		}
@@ -1131,10 +1046,11 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 			// its trailing blank lines.
 			state.updateIndentColumn(s.column)
 			if err := state.validateIndentColumn(); err != nil {
-				invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
+				invalidMsg := err.Error()
+				invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 				s.progressColumn(ctx, 1)
 
-				return ErrInvalidToken(invalidTk)
+				return ErrInvalidToken(invalidMsg, invalidTk)
 			}
 		}
 		value := ctx.bufferedSrc()
@@ -1158,12 +1074,7 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		state.addIndent(ctx, s.column)
 		s.progressColumn(ctx, 1)
 	} else if s.isFirstCharAtLine && c == '\t' && state.isIndentColumn(s.column) {
-		err := ErrInvalidToken(
-			token.Invalid(
-				"found a tab character where an indentation space is expected",
-				string(ctx.obuf), s.pos(),
-			),
-		)
+		err := ErrInvalidToken("found a tab character where an indentation space is expected", token.Invalid(string(ctx.obuf), s.pos()))
 		s.progressColumn(ctx, 1)
 		return err
 	} else if c == '\t' && !state.isIndentColumn(s.column) {
@@ -1171,15 +1082,17 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		s.progressColumn(ctx, 1)
 	} else {
 		if err := state.validateIndentAfterSpaceOnly(s.column); err != nil {
-			invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
+			invalidMsg := err.Error()
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, 1)
-			return ErrInvalidToken(invalidTk)
+			return ErrInvalidToken(invalidMsg, invalidTk)
 		}
 		state.updateIndentColumn(s.column)
 		if err := state.validateIndentColumn(); err != nil {
-			invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
+			invalidMsg := err.Error()
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, 1)
-			return ErrInvalidToken(invalidTk)
+			return ErrInvalidToken(invalidMsg, invalidTk)
 		}
 		if col := state.lastDelimColumn(); col > 0 {
 			s.lastDelimColumn = col
@@ -1256,10 +1169,8 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 	ctx.addBuf('-')
 	ctx.addOriginBuf('-')
 	err := ErrInvalidToken(
-		token.Invalid(
-			"'-' is not a scalar, and a flow collection has no sequence entries",
-			string(ctx.obuf), s.pos(),
-		),
+		"'-' is not a scalar, and a flow collection has no sequence entries",
+		token.Invalid(string(ctx.obuf), s.pos()),
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -1299,12 +1210,7 @@ func (s *Scanner) checkFlowIndent(ctx *Context) error {
 
 	s.progressLine(ctx)
 
-	return ErrInvalidToken(
-		token.Invalid(
-			"a flow collection continues on a line that is not indented past the one it started on",
-			string(ctx.obuf), s.pos(),
-		),
-	)
+	return ErrInvalidToken("a flow collection continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.obuf), s.pos()))
 }
 
 // contentIndent is the indentation a further line of the construct now being
@@ -1335,12 +1241,7 @@ func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int) e
 		return nil
 	}
 
-	return ErrInvalidToken(
-		token.Invalid(
-			"a scalar continues on a line that is not indented past the one it started on",
-			string(ctx.obuf), s.pos(),
-		),
-	)
+	return ErrInvalidToken("a scalar continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.obuf), s.pos()))
 }
 
 // lineIndent returns how many spaces begin the line, and whether the line holds
@@ -1471,9 +1372,10 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	}
 
 	if strings.HasPrefix(strings.TrimPrefix(string(ctx.obuf), " "), "\t") && !strings.HasPrefix(string(ctx.buf), "\t") {
-		invalidTk := token.Invalid("tab character cannot use as a map key directly", string(ctx.obuf), s.pos())
+		invalidMsg := "tab character cannot use as a map key directly"
+		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)
-		return false, ErrInvalidToken(invalidTk)
+		return false, ErrInvalidToken(invalidMsg, invalidTk)
 	}
 
 	if s.indentHasTab && !s.isFlowMode() {
@@ -1486,13 +1388,11 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		//
 		// The check above reads the origin buffer, which a quoted key resets:
 		// "\tfoo: 1" was refused there and "\t\"\": 1" was not.
-		invalidTk := token.Invalid(
-			"tab character cannot stand for the indentation a mapping entry needs",
-			string(ctx.obuf), s.pos(),
-		)
+		invalidMsg := "tab character cannot stand for the indentation a mapping entry needs"
+		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)
 
-		return false, ErrInvalidToken(invalidTk)
+		return false, ErrInvalidToken(invalidMsg, invalidTk)
 	}
 
 	// mapping value
@@ -1684,9 +1584,10 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	}
 
 	if strings.HasPrefix(strings.TrimPrefix(string(ctx.obuf), " "), "\t") {
-		invalidTk := token.Invalid("tab character cannot use as a sequence delimiter", string(ctx.obuf), s.pos())
+		invalidMsg := "tab character cannot use as a sequence delimiter"
+		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)
-		return false, ErrInvalidToken(invalidTk)
+		return false, ErrInvalidToken(invalidMsg, invalidTk)
 	}
 
 	s.addBufferedTokenIfExists(ctx)
@@ -1793,13 +1694,11 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// a '#' pressed up against the indicators starts no comment and is just
 		// a character the header may not hold.
 		if prev := value[commentValueIndex-1]; prev != ' ' && prev != '\t' {
-			invalidTk := token.Invalid(
-				"comment must be separated from the block scalar header by a space",
-				string(ctx.obuf), s.pos(),
-			)
+			invalidMsg := "comment must be separated from the block scalar header by a space"
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, progress)
 
-			return ErrInvalidToken(invalidTk)
+			return ErrInvalidToken(invalidMsg, invalidTk)
 		}
 
 		opt = value[:commentValueIndex]
@@ -1809,9 +1708,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	})
 	if len(opt) != 0 {
 		if err := s.validateMultiLineHeaderOption(opt); err != nil {
-			invalidTk := token.Invalid(err.Error(), string(ctx.obuf), s.pos())
+			invalidMsg := err.Error()
+			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 			s.progressColumn(ctx, progress)
-			return ErrInvalidToken(invalidTk)
+			return ErrInvalidToken(invalidMsg, invalidTk)
 		}
 	}
 	if s.column == 1 {
@@ -1956,16 +1856,9 @@ func (s *Scanner) validateAnchorName(ctx *Context, what string) error {
 
 	switch {
 	case end == start:
-		return ErrInvalidToken(
-			token.Invalid(what+" must be followed by a name", string(ctx.obuf), s.pos()),
-		)
+		return ErrInvalidToken(what+" must be followed by a name", token.Invalid(string(ctx.obuf), s.pos()))
 	case end < len(ctx.src) && (ctx.src[end] == '[' || ctx.src[end] == '{'):
-		return ErrInvalidToken(
-			token.Invalid(
-				what+" must be separated from the node that follows it",
-				string(ctx.obuf), s.pos(),
-			),
-		)
+		return ErrInvalidToken(what+" must be separated from the node that follows it", token.Invalid(string(ctx.obuf), s.pos()))
 	default:
 		return nil
 	}
@@ -2017,12 +1910,7 @@ func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken(
-		token.Invalid(
-			fmt.Sprintf("a plain scalar cannot begin with %q", c),
-			string(ctx.obuf), s.pos(),
-		),
-	)
+	err := ErrInvalidToken(fmt.Sprintf("a plain scalar cannot begin with %q", c), token.Invalid(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 
 	return err
@@ -2042,10 +1930,8 @@ func (s *Scanner) scanCommentIndicator(ctx *Context) error {
 	ctx.addBuf('#')
 	ctx.addOriginBuf('#')
 	err := ErrInvalidToken(
-		token.Invalid(
-			"a comment must be preceded by a space, and a scalar cannot begin with '#'",
-			string(ctx.obuf), s.pos(),
-		),
+		"a comment must be preceded by a space, and a scalar cannot begin with '#'",
+		token.Invalid(string(ctx.obuf), s.pos()),
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -2060,12 +1946,7 @@ func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken(
-		token.Invalid(
-			fmt.Sprintf("%q is a reserved character", c),
-			string(ctx.obuf), s.pos(),
-		),
-	)
+	err := ErrInvalidToken(fmt.Sprintf("%q is a reserved character", c), token.Invalid(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return err
@@ -2095,11 +1976,7 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken(
-		token.Invalid("found character '\t' that cannot start any token",
-			string(ctx.obuf), s.pos(),
-		),
-	)
+	err := ErrInvalidToken("found character '\t' that cannot start any token", token.Invalid(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 
@@ -2136,12 +2013,7 @@ func (s *Scanner) scan(ctx *Context) error {
 					// Therefore, add an empty string token.
 					// But if literal/folded token column is 1, it is invalid at down state.
 					if tk.Position.Column == 1 {
-						return ErrInvalidToken(
-							token.Invalid(
-								"could not find multi-line content",
-								string(ctx.obuf), s.pos(),
-							),
-						)
+						return ErrInvalidToken("could not find multi-line content", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					if tk.Type != token.StringType {
 						ctx.addToken(token.String("", "", s.pos()))
