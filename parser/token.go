@@ -201,51 +201,163 @@ func (g *TokenGroup) TokenType() token.Type {
 	return g.Tokens[0].Type()
 }
 
+// grouper runs the passes that turn a flat token stream into grouped tokens.
+//
+// It hands out the [Token], [TokenGroup] and []*Token that grouping needs from
+// blocks rather than one allocation each. A stream of N tokens groups into
+// roughly N wrappers, groups and slices, and those three were the largest
+// allocation sites of a parse by count.
+type grouper struct {
+	tokens []Token
+	groups []TokenGroup
+	lists  []*Token
+	// block is how many of each one allocation covers.
+	block int
+}
+
+const (
+	minGroupBlock = 16
+	maxGroupBlock = 256
+)
+
+// newGrouper returns a grouper for a stream of n tokens.
+//
+// Grouping turns roughly one token in four into a group, so that is where the
+// block size starts. It is capped both ways: a long document allocates more
+// blocks rather than one huge one, and a short document does not pay for a
+// block it will use a tenth of.
+func newGrouper(n int) grouper {
+	block := n / 4
+	if block < minGroupBlock {
+		block = minGroupBlock
+	}
+	if block > maxGroupBlock {
+		block = maxGroupBlock
+	}
+
+	return grouper{block: block}
+}
+
+func (g *grouper) token() *Token {
+	if len(g.tokens) == 0 {
+		g.tokens = make([]Token, g.block)
+	}
+	tk := &g.tokens[0]
+	g.tokens = g.tokens[1:]
+
+	return tk
+}
+
+// list returns a slice of n token pointers whose capacity is n, so that a
+// caller that appends to it copies rather than writing over the next slice.
+func (g *grouper) list(n int) []*Token {
+	if len(g.lists) < n {
+		size := g.block
+		if n > size {
+			size = n
+		}
+		g.lists = make([]*Token, size)
+	}
+	tks := g.lists[:n:n]
+	g.lists = g.lists[n:]
+
+	return tks
+}
+
+// newGroup returns a group of typ over tks.
+func (g *grouper) newGroup(typ TokenGroupType, tks []*Token) *TokenGroup {
+	if len(g.groups) == 0 {
+		g.groups = make([]TokenGroup, g.block)
+	}
+	grp := &g.groups[0]
+	g.groups = g.groups[1:]
+	grp.Type, grp.Tokens = typ, tks
+
+	return grp
+}
+
+// group returns a token holding a group of typ over tks.
+func (g *grouper) group(typ TokenGroupType, tks []*Token) *Token {
+	tk := g.token()
+	tk.Group = g.newGroup(typ, tks)
+
+	return tk
+}
+
+// group1 and group2 are group over one and two tokens, which is most of them.
+func (g *grouper) group1(typ TokenGroupType, a *Token) *Token {
+	tks := g.list(1)
+	tks[0] = a
+
+	return g.group(typ, tks)
+}
+
+func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
+	return g.group(typ, g.list2(a, b))
+}
+
+// list2 is list over two tokens, which is most of them.
+func (g *grouper) list2(a, b *Token) []*Token {
+	tks := g.list(2)
+	tks[0], tks[1] = a, b
+
+	return tks
+}
+
 func CreateGroupedTokens(tokens token.Tokens) ([]*Token, error) {
 	var err error
+	g := newGrouper(len(tokens))
 	tks := newTokens(tokens)
-	tks = createLineCommentTokenGroups(tks)
-	tks, err = createLiteralAndFoldedTokenGroups(tks)
+	tks = g.createLineCommentTokenGroups(tks)
+	tks, err = g.createLiteralAndFoldedTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks, err = createAnchorAndAliasTokenGroups(tks)
+	tks, err = g.createAnchorAndAliasTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks, err = createScalarTagTokenGroups(tks)
+	tks, err = g.createScalarTagTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks, err = createAnchorWithScalarTagTokenGroups(tks)
+	tks, err = g.createAnchorWithScalarTagTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks, err = createMapKeyTokenGroups(tks)
+	tks, err = g.createMapKeyTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks = createMapKeyValueTokenGroups(tks)
-	tks, err = createDirectiveTokenGroups(tks)
+	tks = g.createMapKeyValueTokenGroups(tks)
+	tks, err = g.createDirectiveTokenGroups(tks)
 	if err != nil {
 		return nil, err
 	}
-	tks, err = createDocumentTokens(tks)
+	tks, err = g.createDocumentTokens(tks)
 	if err != nil {
 		return nil, err
 	}
 	return tks, nil
 }
 
+// newTokens wraps every raw token in the [Token] the grouping passes work on.
+//
+// The wrappers come from one block rather than one allocation each: a stream of
+// N tokens then costs two allocations instead of N+1. They are addressed by
+// pointer either way, and the block lives exactly as long as any token in it.
 func newTokens(tks token.Tokens) []*Token {
 	ret := make([]*Token, 0, len(tks))
-	for _, tk := range tks {
-		ret = append(ret, &Token{Token: tk})
+	block := make([]Token, len(tks))
+	for i, tk := range tks {
+		block[i].Token = tk
+		ret = append(ret, &block[i])
 	}
+
 	return ret
 }
 
-func createLineCommentTokenGroups(tokens []*Token) []*Token {
+func (g *grouper) createLineCommentTokenGroups(tokens []*Token) []*Token {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -263,34 +375,26 @@ func createLineCommentTokenGroups(tokens []*Token) []*Token {
 	return ret
 }
 
-func createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
 		case token.LiteralType:
-			tks := []*Token{tk}
+			tks := g.list(1)
+			tks[0] = tk
 			if i+1 < len(tokens) {
-				tks = append(tks, tokens[i+1])
+				tks = g.list2(tk, tokens[i+1])
 			}
-			ret = append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupLiteral,
-					Tokens: tks,
-				},
-			})
+			ret = append(ret, g.group(TokenGroupLiteral, tks))
 			i++
 		case token.FoldedType:
-			tks := []*Token{tk}
+			tks := g.list(1)
+			tks[0] = tk
 			if i+1 < len(tokens) {
-				tks = append(tks, tokens[i+1])
+				tks = g.list2(tk, tokens[i+1])
 			}
-			ret = append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupFolded,
-					Tokens: tks,
-				},
-			})
+			ret = append(ret, g.group(TokenGroupFolded, tks))
 			i++
 		default:
 			ret = append(ret, tk)
@@ -299,7 +403,7 @@ func createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -308,12 +412,7 @@ func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 			if i+1 >= len(tokens) {
 				return nil, errors.ErrSyntax("undefined anchor name", tk.RawToken())
 			}
-			anchorName := &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupAnchorName,
-					Tokens: []*Token{tk, tokens[i+1]},
-				},
-			}
+			anchorName := g.group2(TokenGroupAnchorName, tk, tokens[i+1])
 			if i+2 >= len(tokens) {
 				// An anchor with nothing after it names the empty node. The
 				// parser supplies that null; there is nothing to group here.
@@ -327,12 +426,7 @@ func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 				return nil, errors.ErrSyntax("sequence entries are not allowed after anchor on the same line", valueTk.RawToken())
 			}
 			if tk.Line() == valueTk.Line() && isScalarType(valueTk) {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupAnchor,
-						Tokens: []*Token{anchorName, valueTk},
-					},
-				})
+				ret = append(ret, g.group2(TokenGroupAnchor, anchorName, valueTk))
 				i++
 			} else {
 				ret = append(ret, anchorName)
@@ -342,12 +436,7 @@ func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 			if i+1 == len(tokens) {
 				return nil, errors.ErrSyntax("undefined alias name", tk.RawToken())
 			}
-			ret = append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupAlias,
-					Tokens: []*Token{tk, tokens[i+1]},
-				},
-			})
+			ret = append(ret, g.group2(TokenGroupAlias, tk, tokens[i+1]))
 			i++
 		default:
 			ret = append(ret, tk)
@@ -356,7 +445,7 @@ func createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -382,12 +471,7 @@ func createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 					continue
 				}
 				if isScalarType(tokens[i+1]) {
-					ret = append(ret, &Token{
-						Group: &TokenGroup{
-							Type:   TokenGroupScalarTag,
-							Tokens: []*Token{tk, tokens[i+1]},
-						},
-					})
+					ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
 					i++
 				} else {
 					ret = append(ret, tk)
@@ -408,12 +492,7 @@ func createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 				if tokens[i+1].Type() != token.MergeKeyType {
 					return nil, errors.ErrSyntax("could not find merge key", tokens[i+1].RawToken())
 				}
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupScalarTag,
-						Tokens: []*Token{tk, tokens[i+1]},
-					},
-				})
+				ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
 				i++
 			default:
 				ret = append(ret, tk)
@@ -435,19 +514,14 @@ func createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 				ret = append(ret, tk)
 				continue
 			}
-			ret = append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupScalarTag,
-					Tokens: []*Token{tk, tokens[i+1]},
-				},
-			})
+			ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
 			i++
 		}
 	}
 	return ret, nil
 }
 
-func createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -462,12 +536,7 @@ func createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 			}
 			valueTk := tokens[i+1]
 			if tk.Line() == valueTk.Line() && valueTk.GroupType() == TokenGroupScalarTag {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupAnchor,
-						Tokens: []*Token{tk, tokens[i+1]},
-					},
-				})
+				ret = append(ret, g.group2(TokenGroupAnchor, tk, tokens[i+1]))
 				i++
 			} else {
 				ret = append(ret, tk)
@@ -479,15 +548,15 @@ func createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
-	tks, err := createMapKeyByMappingKey(tokens)
+func (g *grouper) createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
+	tks, err := g.createMapKeyByMappingKey(tokens)
 	if err != nil {
 		return nil, err
 	}
-	return createMapKeyByMappingValue(tks)
+	return g.createMapKeyByMappingValue(tks)
 }
 
-func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	var flowDepth int
 	for i := 0; i < len(tokens); i++ {
@@ -506,20 +575,15 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 			// which is what "? \n" and "?\n: v\n" are. The group holds the
 			// indicator alone and the parser supplies the null.
 			end := explicitKeyEnd(tokens, i, flowDepth > 0)
-			body, err := groupExplicitKeyBody(tokens[i+1 : end])
+			body, err := g.groupExplicitKeyBody(tokens[i+1 : end])
 			if err != nil {
 				return nil, err
 			}
 			group := []*Token{tk}
 			if len(body) == 0 {
-				group = append(group, implicitNullKeyToken(tk))
+				group = append(group, g.implicitNullKeyToken(tk))
 			}
-			ret = append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupMapKey,
-					Tokens: append(group, body...),
-				},
-			})
+			ret = append(ret, g.group(TokenGroupMapKey, append(group, body...)))
 			i = end - 1
 		default:
 			ret = append(ret, tk)
@@ -528,7 +592,7 @@ func createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 
 	// One entry per flow collection still open, innermost last, recording
@@ -556,12 +620,7 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 				// The key is absent: ": value", "- :", "{ : }", "{a: 1, : 2}".
 				// YAML 1.2 allows it, and an absent key is the null node -- so
 				// there is nothing to reject here, only a node to supply.
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupMapKey,
-						Tokens: []*Token{implicitNullKeyToken(tk), tk},
-					},
-				})
+				ret = append(ret, g.group2(TokenGroupMapKey, g.implicitNullKeyToken(tk), tk))
 
 				continue
 			}
@@ -587,21 +646,17 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
 				}
 				keyTokens := append(append([]*Token{}, ret[start:]...), tk)
-				ret = append(ret[:start], &Token{
-					Group: &TokenGroup{Type: TokenGroupMapKey, Tokens: keyTokens},
-				})
+				ret = append(ret[:start], g.group(TokenGroupMapKey, keyTokens))
 
 				continue
 			}
 			if isNotMapKeyType(mapKeyTk) {
 				return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
 			}
-			newTk := &Token{Token: mapKeyTk.Token, Group: mapKeyTk.Group}
+			newTk := g.token()
+			newTk.Token, newTk.Group = mapKeyTk.Token, mapKeyTk.Group
 			mapKeyTk.Token = nil
-			mapKeyTk.Group = &TokenGroup{
-				Type:   TokenGroupMapKey,
-				Tokens: []*Token{newTk, tk},
-			}
+			mapKeyTk.Group = g.newGroup(TokenGroupMapKey, g.list2(newTk, tk))
 		default:
 			ret = append(ret, tk)
 		}
@@ -609,7 +664,7 @@ func createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createMapKeyValueTokenGroups(tokens []*Token) []*Token {
+func (g *grouper) createMapKeyValueTokenGroups(tokens []*Token) []*Token {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -634,12 +689,7 @@ func createMapKeyValueTokenGroups(tokens []*Token) []*Token {
 			}
 
 			if isScalarType(valueTk) || valueTk.Type() == token.TagType {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupMapKeyValue,
-						Tokens: []*Token{tk, valueTk},
-					},
-				})
+				ret = append(ret, g.group2(TokenGroupMapKeyValue, tk, valueTk))
 				i++
 			} else {
 				ret = append(ret, tk)
@@ -652,7 +702,7 @@ func createMapKeyValueTokenGroups(tokens []*Token) []*Token {
 	return ret
 }
 
-func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 	ret := make([]*Token, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -661,12 +711,7 @@ func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 			if i+1 >= len(tokens) {
 				return nil, errors.ErrSyntax("undefined directive value", tk.RawToken())
 			}
-			directiveName := &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupDirectiveName,
-					Tokens: []*Token{tk, tokens[i+1]},
-				},
-			}
+			directiveName := g.group2(TokenGroupDirectiveName, tk, tokens[i+1])
 			i++
 			var valueTks []*Token
 			for j := i + 1; j < len(tokens); j++ {
@@ -690,12 +735,7 @@ func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 				return nil, errors.ErrSyntax("unexpected directive value. document not started", tk.RawToken())
 			}
 			if len(valueTks) != 0 {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupDirective,
-						Tokens: append([]*Token{directiveName}, valueTks...),
-					},
-				})
+				ret = append(ret, g.group(TokenGroupDirective, append([]*Token{directiveName}, valueTks...)))
 			} else {
 				ret = append(ret, directiveName)
 			}
@@ -707,42 +747,30 @@ func createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func createDocumentTokens(tokens []*Token) ([]*Token, error) {
+func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 	var ret []*Token
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
 		case token.DocumentHeaderType:
 			if i != 0 {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{Tokens: tokens[:i]},
-				})
+				ret = append(ret, g.group(TokenGroupNone, tokens[:i]))
 			}
 			if i+1 == len(tokens) {
 				// if current token is last token, add DocumentHeader only tokens to ret.
-				return append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupDocument,
-						Tokens: []*Token{tk},
-					},
-				}), nil
+				return append(ret, g.group1(TokenGroupDocument, tk)), nil
 			}
 			if tokens[i+1].Type() == token.DocumentHeaderType {
 				// One "---" straight after another: this document holds
 				// nothing. It is a document all the same, and so is everything
 				// after it -- stopping here returned the empty one and dropped
 				// the rest of the stream without a word.
-				rest, err := createDocumentTokens(tokens[i+1:])
+				rest, err := g.createDocumentTokens(tokens[i+1:])
 				if err != nil {
 					return nil, err
 				}
 
-				empty := &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupDocument,
-						Tokens: []*Token{tk},
-					},
-				}
+				empty := g.group1(TokenGroupDocument, tk)
 
 				return append(append(ret, empty), rest...), nil
 			}
@@ -756,7 +784,7 @@ func createDocumentTokens(tokens []*Token) ([]*Token, error) {
 					return nil, errors.ErrSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
 				}
 			}
-			tks, err := createDocumentTokens(tokens[i+1:])
+			tks, err := g.createDocumentTokens(tokens[i+1:])
 			if err != nil {
 				return nil, err
 			}
@@ -765,20 +793,10 @@ func createDocumentTokens(tokens []*Token) ([]*Token, error) {
 				tks[0].Group.Tokens = append([]*Token{tk}, tks[0].Group.Tokens...)
 				return append(ret, tks...), nil
 			}
-			return append(ret, &Token{
-				Group: &TokenGroup{
-					Type:   TokenGroupDocument,
-					Tokens: []*Token{tk},
-				},
-			}), nil
+			return append(ret, g.group1(TokenGroupDocument, tk)), nil
 		case token.DocumentEndType:
 			if i != 0 {
-				ret = append(ret, &Token{
-					Group: &TokenGroup{
-						Type:   TokenGroupDocument,
-						Tokens: tokens[0 : i+1],
-					},
-				})
+				ret = append(ret, g.group(TokenGroupDocument, tokens[0:i+1]))
 			}
 			if i+1 == len(tokens) {
 				return ret, nil
@@ -791,19 +809,14 @@ func createDocumentTokens(tokens []*Token) ([]*Token, error) {
 				return nil, errors.ErrSyntax("unexpected end content", tokens[i+1].RawToken())
 			}
 
-			tks, err := createDocumentTokens(tokens[i+1:])
+			tks, err := g.createDocumentTokens(tokens[i+1:])
 			if err != nil {
 				return nil, err
 			}
 			return append(ret, tks...), nil
 		}
 	}
-	return append(ret, &Token{
-		Group: &TokenGroup{
-			Type:   TokenGroupDocument,
-			Tokens: tokens,
-		},
-	}), nil
+	return append(ret, g.group(TokenGroupDocument, tokens)), nil
 }
 
 func isScalarType(tk *Token) bool {
@@ -839,13 +852,13 @@ func isScalarType(tk *Token) bool {
 // for its key, whose own ':' has to be paired here or it is silently dropped.
 // The passes before this one -- literals, anchors, tags -- have already run over
 // these tokens, so only the mapping ones are needed.
-func groupExplicitKeyBody(body []*Token) ([]*Token, error) {
-	grouped, err := createMapKeyByMappingValue(body)
+func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
+	grouped, err := g.createMapKeyByMappingValue(body)
 	if err != nil {
 		return nil, err
 	}
 
-	return createMapKeyValueTokenGroups(grouped), nil
+	return g.createMapKeyValueTokenGroups(grouped), nil
 }
 
 // explicitKeyEnd returns the index just past the body of the explicit key
@@ -1031,12 +1044,15 @@ func keyCandidateIndex(tokens []*Token, i int) int {
 
 // implicitNullKeyToken builds the null node standing in for an absent mapping
 // key, positioned where the key would have been -- immediately before its ':'.
-func implicitNullKeyToken(colon *Token) *Token {
+func (g *grouper) implicitNullKeyToken(colon *Token) *Token {
 	pos := *(colon.RawToken().Position)
 	tk := token.New("null", "null", &pos)
 	tk.Type = token.ImplicitNullType
 
-	return &Token{Token: tk}
+	wrapped := g.token()
+	wrapped.Token = tk
+
+	return wrapped
 }
 
 func isNotMapKeyType(tk *Token) bool {
