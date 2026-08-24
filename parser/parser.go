@@ -77,6 +77,7 @@ type parser struct {
 	tokens                []*Token
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
+	omitNodePaths         bool
 	secondaryTagDirective *ast.DirectiveNode
 	tagHandles            map[string]struct{}
 
@@ -97,8 +98,12 @@ type parser struct {
 // keys then costs N/pathSlabSize allocations rather than N.
 const pathSlabSize = 512
 
-// newPathNode returns the next unused step of the path trie.
+// newPathNode returns the next unused step of the path trie, or nil when
+// [OmitNodePaths] has turned path recording off.
 func (p *parser) newPathNode() *ast.PathNode {
+	if p.omitNodePaths {
+		return nil
+	}
 	if len(p.pathSlab) == 0 {
 		p.pathSlab = make([]ast.PathNode, pathSlabSize)
 	}

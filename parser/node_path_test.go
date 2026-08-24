@@ -14,10 +14,10 @@ import (
 )
 
 // paths returns every node's path, in walk order.
-func paths(t *testing.T, src string) []string {
+func paths(t *testing.T, src string, opts ...parser.Option) []string {
 	t.Helper()
 
-	f, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+	f, err := parser.ParseBytes([]byte(src), parser.ParseComments, opts...)
 	require.NoError(t, err)
 
 	var got []string
@@ -87,6 +87,27 @@ func TestNodePathRendersIndexesPastOneDigit(t *testing.T) {
 	assert.Contains(t, got, "$.foo[9]")
 	assert.Contains(t, got, "$.foo[10]")
 	assert.Contains(t, got, "$.foo[11]")
+}
+
+// TestOmitNodePathsSilencesGetPath checks that the option stops the recording
+// and that nothing else about the parse changes.
+func TestOmitNodePathsSilencesGetPath(t *testing.T) {
+	const src = "foo:\n  bar: 1\n  baz:\n    - a\n    - b\n"
+
+	with, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+	require.NoError(t, err)
+	without, err := parser.ParseBytes([]byte(src), parser.ParseComments, parser.OmitNodePaths())
+	require.NoError(t, err)
+
+	assert.Equal(t, with.String(), without.String(), "the document should render the same either way")
+
+	// every node but the *ast.DocumentNode, which carries no path either way
+	for _, p := range paths(t, src)[1:] {
+		assert.NotEmpty(t, p)
+	}
+	for _, p := range paths(t, src, parser.OmitNodePaths()) {
+		assert.Empty(t, p)
+	}
 }
 
 // TestSetPathOverridesTheRecordedPath checks that a path handed in by a caller

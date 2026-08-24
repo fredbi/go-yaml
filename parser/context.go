@@ -77,6 +77,9 @@ func (c context) withGroup(g *TokenGroup) context {
 
 func (c context) withChild(p *parser, key string) context {
 	n := p.newPathNode()
+	if n == nil {
+		return c
+	}
 	n.Key(c.path, key)
 	c.path = n
 
@@ -94,6 +97,9 @@ func (c context) withPath(path *ast.PathNode) context {
 
 func (c context) withIndex(p *parser, idx uint) context {
 	n := p.newPathNode()
+	if n == nil {
+		return c
+	}
 	n.Index(c.path, idx)
 	c.path = n
 
@@ -125,6 +131,9 @@ func (c context) withFlowSequence() context {
 
 func (p *parser) newContext() context {
 	root := p.newPathNode()
+	if root == nil {
+		return context{}
+	}
 	root.Literal("$")
 
 	return context{path: root}
