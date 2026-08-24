@@ -341,6 +341,50 @@ var (
 	reservedEncKeywordMap = map[string]func(string, string, *Position) *Token{}
 )
 
+// Indicator returns the indicator a token of type t is, or NotIndicator where
+// it is not one.
+//
+// A token's indicator follows from its type and is not recorded on the token:
+// there is one answer for each type, and TestIndicatorFollowsFromType holds
+// this to the answer every token used to carry.
+func (t Type) Indicator() Indicator {
+	switch t {
+	case SequenceEntryType, MappingKeyType, MappingValueType:
+		return BlockStructureIndicator
+	case CollectEntryType, SequenceStartType, SequenceEndType, MappingStartType, MappingEndType:
+		return FlowCollectionIndicator
+	case CommentType:
+		return CommentIndicator
+	case AnchorType, AliasType, TagType:
+		return NodePropertyIndicator
+	case LiteralType, FoldedType:
+		return BlockScalarIndicator
+	case SingleQuoteType, DoubleQuoteType:
+		return QuotedScalarIndicator
+	case DirectiveType:
+		return DirectiveIndicator
+	default:
+		return NotIndicator
+	}
+}
+
+// CharacterType returns the class of character a token of type t is written
+// with. It follows from the type, as [Type.Indicator] does.
+func (t Type) CharacterType() CharacterType {
+	switch t {
+	case SpaceType:
+		return CharacterTypeWhiteSpace
+	case InvalidType:
+		return CharacterTypeInvalid
+	default:
+		if t.Indicator() != NotIndicator {
+			return CharacterTypeIndicator
+		}
+
+		return CharacterTypeMiscellaneous
+	}
+}
+
 func reservedKeywordToken(typ Type, value, org string, pos *Position) *Token {
 	return &Token{
 		Type:          typ,
