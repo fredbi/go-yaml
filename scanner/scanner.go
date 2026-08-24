@@ -1013,14 +1013,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
 			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
-			s.progressColumn(ctx, len([]rune(value)))
+			s.progressColumn(ctx, utf8.RuneCountInString(value))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
 				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
-				s.progressColumn(ctx, len([]rune(value))-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
+				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
 			}
@@ -1036,7 +1036,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
 			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
-			s.progressColumn(ctx, len([]rune(value))-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
+			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
 		case '}', ']':
@@ -1046,7 +1046,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				// not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
 				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
-				s.progressColumn(ctx, len([]rune(value))-1) // progress column before the closer so it is scanned on its own
+				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
 
@@ -1098,7 +1098,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 			continue
 		}
 		value := ctx.source(ctx.idx, ctx.idx+idx)
-		progress := len([]rune(value))
+		progress := utf8.RuneCountInString(value)
 		ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
@@ -1108,7 +1108,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	// document ends with comment.
 	value := ctx.src[ctx.idx:]
 	ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
-	progress := len([]rune(value))
+	progress := utf8.RuneCountInString(value)
 	s.progressColumn(ctx, progress)
 	s.progressLine(ctx)
 	ctx.clear()

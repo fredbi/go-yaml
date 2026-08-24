@@ -217,15 +217,16 @@ func (p *Printer) removeRightSideWhiteSpaceChar(src string) string {
 	return p.removeRightSideNewLineChar(strings.TrimRight(src, " "))
 }
 
+// newLineCount counts the line breaks in s, taking CR LF for one.
+//
+// It walks bytes: a line break is ASCII, and no byte of a multi-byte character
+// can be mistaken for one.
 func (p *Printer) newLineCount(s string) int {
-	src := []rune(s)
-	size := len(src)
 	cnt := 0
-	for i := 0; i < size; i++ {
-		c := src[i]
-		switch c {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
 		case '\r':
-			if i+1 < size && src[i+1] == '\n' {
+			if i+1 < len(s) && s[i+1] == '\n' {
 				i++
 			}
 			cnt++
@@ -233,6 +234,7 @@ func (p *Printer) newLineCount(s string) int {
 			cnt++
 		}
 	}
+
 	return cnt
 }
 
