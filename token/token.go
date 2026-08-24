@@ -822,6 +822,10 @@ type Token struct {
 	Origin string
 	// Error keeps error message for InvalidToken.
 	Error string
+	// BlankLineAbove records that the author left an empty line above this
+	// token. The renderer writes one back where it finds one, which is how a
+	// document keeps the spacing it was written with.
+	BlankLineAbove bool
 	// Position is a token position.
 	Position *Position
 	// Next is a next token reference.
@@ -895,6 +899,7 @@ func (t *Tokens) add(tk *Token) {
 		last := tokens[len(tokens)-1]
 		last.Next = tk
 		tk.Prev = last
+		tk.BlankLineAbove = blankLineAbove(tk, tokens)
 		tokens = append(tokens, tk)
 	}
 	*t = tokens

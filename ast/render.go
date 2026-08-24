@@ -906,7 +906,7 @@ func blankLineBefore(n Node) string {
 	if n == nil {
 		return ""
 	}
-	if tk := n.GetToken(); tk != nil && checkLineBreak(tk) {
+	if tk := n.GetToken(); tk != nil && tk.BlankLineAbove {
 		return "\n"
 	}
 
