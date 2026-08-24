@@ -22,18 +22,17 @@ func sourceText(origin string) string {
 
 // at returns the source from offset onwards.
 //
-// Token.Position.Offset is a 1-based rune index into the source with every byte
-// order mark removed. It is due to become a 0-based byte index into the source
-// as it was handed in; this is the one place the test has to change for that,
-// and offsetMissLedger is what will record the difference.
+// Token.Position.Offset is a 0-based byte index. It still addresses the source
+// with every byte order mark removed rather than the source as handed in, which
+// is the remaining half of the defect: Init rewrites the text before scanning
+// it. This is the one place the test encodes what an Offset means.
 func at(src string, offset int) string {
-	runes := []rune(strings.ReplaceAll(src, bom, ""))
-	i := offset - 1
-	if i < 0 || i > len(runes) {
+	stripped := strings.ReplaceAll(src, bom, "")
+	if offset < 0 || offset > len(stripped) {
 		return ""
 	}
 
-	return string(runes[i:])
+	return stripped[offset:]
 }
 
 // offsetMissLedger records how many tokens of each type carry an Offset that
@@ -42,18 +41,21 @@ func at(src string, offset int) string {
 // Offset points at the start of Origin, and Origin holds the whitespace written
 // before the token as well as the token, so an indented token is reported at
 // the start of its indentation. A consumer drawing a caret under an error puts
-// it in the wrong column. 1,030 of 3,489 tokens are affected -- and the suite
-// is almost entirely ASCII, so this is not the rune-against-byte question. It
-// is a second defect that the same rewrite has to fix.
+// it in the wrong column. 1,031 of 3,489 tokens are affected.
+//
+// Offset counting bytes rather than runes was the other half of the defect and
+// is fixed; this half is not. The counts barely moved when the unit changed,
+// which is the point: the suite is almost entirely ASCII, so the two defects
+// were always independent.
 //
 // The ledger is a ratchet in both directions. A type that starts missing more
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"String":         402,
+	"String":         404,
 	"MappingValue":   148,
 	"SequenceEntry":  84,
-	"Comment":        69,
+	"Comment":        68,
 	"Tag":            59,
 	"Integer":        41,
 	"DocumentHeader": 31,

@@ -777,6 +777,12 @@ func New(value string, org string, pos *Position) *Token {
 }
 
 // Position type for position in YAML document
+// Position is where a token stands in the source.
+//
+// Line and Column count from 1 and count characters, which is what YAML
+// measures indentation in. Offset counts from 0 and counts bytes, so
+// src[Offset:] is the token: it addresses the source a caller handed in, and a
+// caret drawn from it lands on the right character.
 type Position struct {
 	Line        int
 	Column      int

@@ -1,10 +1,12 @@
 package scanner
 
 import (
+	"bytes"
 	"errors"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -15,9 +17,9 @@ type Context struct {
 	size               int
 	notSpaceCharPos    int
 	notSpaceOrgCharPos int
-	src                []rune
-	buf                []rune
-	obuf               []rune
+	src                string
+	buf                []byte
+	obuf               []byte
 	tokens             token.Tokens
 	mstate             *MultiLineState
 }
@@ -50,7 +52,7 @@ func createContext() *Context {
 	}
 }
 
-func newContext(src []rune) *Context {
+func newContext(src string) *Context {
 	ctx, _ := ctxPool.Get().(*Context)
 	ctx.reset(src)
 	return ctx
@@ -65,7 +67,7 @@ func (c *Context) clear() {
 	c.mstate = nil
 }
 
-func (c *Context) reset(src []rune) {
+func (c *Context) reset(src string) {
 	c.idx = 0
 	c.size = len(src)
 	c.src = src
@@ -221,8 +223,8 @@ func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int) {
 		return
 	}
 	var (
-		lastChar     rune
-		prevLastChar rune
+		lastChar     byte
+		prevLastChar byte
 	)
 	if len(ctx.buf) != 0 {
 		lastChar = ctx.buf[len(ctx.buf)-1]
@@ -273,7 +275,7 @@ func (c *Context) addBuf(r rune) {
 	if len(c.buf) == 0 && (r == ' ' || r == '\t') {
 		return
 	}
-	c.buf = append(c.buf, r)
+	c.buf = utf8.AppendRune(c.buf, r)
 	if r != ' ' && r != '\t' {
 		c.notSpaceCharPos = len(c.buf)
 	}
@@ -283,14 +285,14 @@ func (c *Context) addBufWithTab(r rune) {
 	if len(c.buf) == 0 && r == ' ' {
 		return
 	}
-	c.buf = append(c.buf, r)
+	c.buf = utf8.AppendRune(c.buf, r)
 	if r != ' ' {
 		c.notSpaceCharPos = len(c.buf)
 	}
 }
 
 func (c *Context) addOriginBuf(r rune) {
-	c.obuf = append(c.obuf, r)
+	c.obuf = utf8.AppendRune(c.obuf, r)
 	if r != ' ' && r != '\t' {
 		c.notSpaceOrgCharPos = len(c.obuf)
 	}
@@ -306,57 +308,98 @@ func (c *Context) removeRightSpaceFromBuf() {
 	}
 }
 
-func (c *Context) isEOS() bool {
-	return len(c.src)-1 <= c.idx
+// The cursor addresses c.src by byte, and decodes UTF-8 to read a character.
+// c.idx and c.size are byte counts; every method below that speaks of a
+// character decodes one rather than indexing for it.
+
+// width is how many bytes the character at the cursor takes, or 0 at the end.
+func (c *Context) width() int {
+	if c.idx >= c.size {
+		return 0
+	}
+	_, w := utf8.DecodeRuneInString(c.src[c.idx:])
+
+	return w
 }
 
+// isEOS reports that no character follows the one at the cursor.
+func (c *Context) isEOS() bool {
+	return c.idx+c.width() >= c.size
+}
+
+// isNextEOS reports the same thing. Both spellings are in use.
 func (c *Context) isNextEOS() bool {
-	return len(c.src) <= c.idx+1
+	return c.idx+c.width() >= c.size
 }
 
 func (c *Context) next() bool {
 	return c.idx < c.size
 }
 
+// source returns the bytes between two byte offsets of c.src.
 func (c *Context) source(s, e int) string {
-	return string(c.src[s:e])
+	return c.src[s:e]
 }
 
 func (c *Context) previousChar() rune {
 	if c.idx > 0 {
-		return c.src[c.idx-1]
+		r, _ := utf8.DecodeLastRuneInString(c.src[:c.idx])
+
+		return r
 	}
+
 	return rune(0)
 }
 
 func (c *Context) currentChar() rune {
-	if c.size > c.idx {
-		return c.src[c.idx]
+	if c.idx < c.size {
+		r, _ := utf8.DecodeRuneInString(c.src[c.idx:])
+
+		return r
 	}
+
 	return rune(0)
 }
 
 func (c *Context) nextChar() rune {
-	if c.size > c.idx+1 {
-		return c.src[c.idx+1]
+	if w := c.width(); c.idx+w < c.size {
+		r, _ := utf8.DecodeRuneInString(c.src[c.idx+w:])
+
+		return r
 	}
+
 	return rune(0)
 }
 
+// repeatNum counts how many times r stands at the cursor, in a row.
 func (c *Context) repeatNum(r rune) int {
 	cnt := 0
-	for i := c.idx; i < c.size; i++ {
-		if c.src[i] == r {
-			cnt++
-		} else {
+	for i := c.idx; i < c.size; {
+		cur, w := utf8.DecodeRuneInString(c.src[i:])
+		if cur != r {
 			break
 		}
+		cnt++
+		i += w
 	}
+
 	return cnt
 }
 
-func (c *Context) progress(num int) {
-	c.idx += num
+// progress advances the cursor by num characters and returns the bytes it
+// crossed. Callers count columns in characters and offsets in bytes, which is
+// why it reports both.
+func (c *Context) progress(num int) int {
+	start := c.idx
+	for range num {
+		if c.idx >= c.size {
+			break
+		}
+		_, w := utf8.DecodeRuneInString(c.src[c.idx:])
+		c.idx += w
+	}
+
+	return c.idx - start
 }
 
 func (c *Context) existsBuffer() bool {
@@ -367,7 +410,7 @@ func (c *Context) isMultiLine() bool {
 	return c.mstate != nil
 }
 
-func (c *Context) bufferedSrc() []rune {
+func (c *Context) bufferedSrc() []byte {
 	src := c.buf[:c.notSpaceCharPos]
 	if c.isMultiLine() {
 		mstate := c.getMultiLineState()
@@ -375,7 +418,7 @@ func (c *Context) bufferedSrc() []rune {
 		// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
 		if mstate.hasTrimAllEndNewlineOpt() {
 			// If the '-' flag is specified, all trailing newline characters will be removed.
-			src = []rune(strings.TrimRight(string(src), "\n"))
+			src = bytes.TrimRight(src, "\n")
 		} else if !mstate.hasKeepAllEndNewlineOpt() {
 			// Normally, all but one of the trailing newline characters are removed.
 			var newLineCharCount int
@@ -388,7 +431,7 @@ func (c *Context) bufferedSrc() []rune {
 			}
 			removedNewLineCharCount := newLineCharCount - 1
 			for removedNewLineCharCount > 0 {
-				src = []rune(strings.TrimSuffix(string(src), "\n"))
+				src = bytes.TrimSuffix(src, []byte("\n"))
 				removedNewLineCharCount--
 			}
 		}
@@ -397,10 +440,10 @@ func (c *Context) bufferedSrc() []rune {
 			// If the content consists only of a newline,
 			// it can be considered as the document ending without any specified value,
 			// so it is treated as an empty string.
-			src = []rune{}
+			src = nil
 		}
 		if mstate.hasKeepAllEndNewlineOpt() && len(src) == 0 {
-			src = []rune{'\n'}
+			src = []byte{'\n'}
 		}
 	}
 	return src

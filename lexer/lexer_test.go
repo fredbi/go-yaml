@@ -2,6 +2,7 @@ package lexer_test
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/lexer"
@@ -3260,6 +3261,11 @@ a: |
 	}
 }
 
+// TestTokenOffset checks that Offset addresses the token in the source.
+//
+// Offset is a 0-based byte index, so content[Offset:] begins with the token.
+// "1.2.3" stands at byte 21 of the CR LF text and at byte 20 of the LF one,
+// the two differing by the extra CR on the first line.
 func TestTokenOffset(t *testing.T) {
 	t.Run("crlf", func(t *testing.T) {
 		content := "project:\r\n  version: 1.2.3\r\n"
@@ -3270,7 +3276,7 @@ func TestTokenOffset(t *testing.T) {
 		if tokens[4].Value != "1.2.3" {
 			t.Fatalf("unexpected value. got %q", tokens[4].Value)
 		}
-		if tokens[4].Position.Offset != 22 {
+		if tokens[4].Position.Offset != 21 {
 			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset)
 		}
 	})
@@ -3283,8 +3289,11 @@ func TestTokenOffset(t *testing.T) {
 		if tokens[4].Value != "1.2.3" {
 			t.Fatalf("unexpected value. got %q", tokens[4].Value)
 		}
-		if tokens[4].Position.Offset != 21 {
+		if tokens[4].Position.Offset != 20 {
 			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset)
+		}
+		if !strings.HasPrefix(content[tokens[4].Position.Offset:], "1.2.3") {
+			t.Fatalf("offset %d does not address the token", tokens[4].Position.Offset)
 		}
 	})
 }
