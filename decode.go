@@ -1377,7 +1377,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			}
 			mapNode := ast.Mapping(nil, false)
 			for k, v := range keyToNodeMap {
-				key := &ast.StringNode{BaseNode: &ast.BaseNode{}, Value: k}
+				key := &ast.StringNode{Value: k}
 				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
 			}
 			newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, mapNode)

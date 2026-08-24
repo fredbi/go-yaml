@@ -403,8 +403,7 @@ func checkLineBreak(t *token.Token) bool {
 // Null create node for null value
 func Null(tk *token.Token) *NullNode {
 	return &NullNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
+		Token: tk,
 	}
 }
 
@@ -412,9 +411,8 @@ func Null(tk *token.Token) *NullNode {
 func Bool(tk *token.Token) *BoolNode {
 	b, _ := strconv.ParseBool(tk.Value)
 	return &BoolNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
-		Value:    b,
+		Token: tk,
+		Value: b,
 	}
 }
 
@@ -425,9 +423,8 @@ func Integer(tk *token.Token) *IntegerNode {
 		v = num.Value
 	}
 	return &IntegerNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
-		Value:    v,
+		Token: tk,
+		Value: v,
 	}
 }
 
@@ -441,17 +438,15 @@ func Float(tk *token.Token) *FloatNode {
 		}
 	}
 	return &FloatNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
-		Value:    v,
+		Token: tk,
+		Value: v,
 	}
 }
 
 // Infinity create node for .inf or -.inf value
 func Infinity(tk *token.Token) *InfinityNode {
 	node := &InfinityNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
+		Token: tk,
 	}
 	switch tk.Value {
 	case ".inf", ".Inf", ".INF":
@@ -465,25 +460,22 @@ func Infinity(tk *token.Token) *InfinityNode {
 // Nan create node for .nan value
 func Nan(tk *token.Token) *NanNode {
 	return &NanNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
+		Token: tk,
 	}
 }
 
 // String create node for string value
 func String(tk *token.Token) *StringNode {
 	return &StringNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
-		Value:    tk.Value,
+		Token: tk,
+		Value: tk.Value,
 	}
 }
 
 // Comment create node for comment
 func Comment(tk *token.Token) *CommentNode {
 	return &CommentNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
+		Token: tk,
 	}
 }
 
@@ -493,7 +485,6 @@ func CommentGroup(comments []*token.Token) *CommentGroupNode {
 		nodes = append(nodes, Comment(comment))
 	}
 	return &CommentGroupNode{
-		BaseNode: &BaseNode{},
 		Comments: nodes,
 	}
 }
@@ -501,15 +492,13 @@ func CommentGroup(comments []*token.Token) *CommentGroupNode {
 // MergeKey create node for merge key ( << )
 func MergeKey(tk *token.Token) *MergeKeyNode {
 	return &MergeKeyNode{
-		BaseNode: &BaseNode{},
-		Token:    tk,
+		Token: tk,
 	}
 }
 
 // Mapping create node for map
 func Mapping(tk *token.Token, isFlowStyle bool, values ...*MappingValueNode) *MappingNode {
 	node := &MappingNode{
-		BaseNode:    &BaseNode{},
 		Start:       tk,
 		IsFlowStyle: isFlowStyle,
 		Values:      []*MappingValueNode{},
@@ -521,25 +510,22 @@ func Mapping(tk *token.Token, isFlowStyle bool, values ...*MappingValueNode) *Ma
 // MappingValue create node for mapping value
 func MappingValue(tk *token.Token, key MapKeyNode, value Node) *MappingValueNode {
 	return &MappingValueNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
-		Key:      key,
-		Value:    value,
+		Start: tk,
+		Key:   key,
+		Value: value,
 	}
 }
 
 // MappingKey create node for map key ( '?' ).
 func MappingKey(tk *token.Token) *MappingKeyNode {
 	return &MappingKeyNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
 // Sequence create node for sequence
 func Sequence(tk *token.Token, isFlowStyle bool) *SequenceNode {
 	return &SequenceNode{
-		BaseNode:    &BaseNode{},
 		Start:       tk,
 		IsFlowStyle: isFlowStyle,
 		Values:      []Node{},
@@ -548,44 +534,38 @@ func Sequence(tk *token.Token, isFlowStyle bool) *SequenceNode {
 
 func Anchor(tk *token.Token) *AnchorNode {
 	return &AnchorNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
 func Alias(tk *token.Token) *AliasNode {
 	return &AliasNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
 func Document(tk *token.Token, body Node) *DocumentNode {
 	return &DocumentNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
-		Body:     body,
+		Start: tk,
+		Body:  body,
 	}
 }
 
 func Directive(tk *token.Token) *DirectiveNode {
 	return &DirectiveNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
 func Literal(tk *token.Token) *LiteralNode {
 	return &LiteralNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
 func Tag(tk *token.Token) *TagNode {
 	return &TagNode{
-		BaseNode: &BaseNode{},
-		Start:    tk,
+		Start: tk,
 	}
 }
 
@@ -614,7 +594,7 @@ func (f *File) String() string {
 
 // DocumentNode type of Document
 type DocumentNode struct {
-	*BaseNode
+	BaseNode
 	Start *token.Token // position of DocumentHeader ( `---` )
 	End   *token.Token // position of DocumentEnd ( `...` )
 	Body  Node
@@ -658,7 +638,7 @@ func (d *DocumentNode) MarshalYAML() ([]byte, error) {
 
 // NullNode type of null node
 type NullNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 }
 
@@ -721,7 +701,7 @@ func (n *NullNode) IsMergeKey() bool {
 
 // IntegerNode type of integer node
 type IntegerNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 	Value interface{} // int64 or uint64 value
 }
@@ -773,7 +753,7 @@ func (n *IntegerNode) IsMergeKey() bool {
 
 // FloatNode type of float node
 type FloatNode struct {
-	*BaseNode
+	BaseNode
 	Token     *token.Token
 	Precision int
 	Value     float64
@@ -826,7 +806,7 @@ func (n *FloatNode) IsMergeKey() bool {
 
 // StringNode type of string node
 type StringNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 	Value string
 }
@@ -955,7 +935,7 @@ func (n *StringNode) MarshalYAML() ([]byte, error) {
 
 // LiteralNode type of literal node
 type LiteralNode struct {
-	*BaseNode
+	BaseNode
 	Start *token.Token
 	Value *StringNode
 }
@@ -1007,7 +987,7 @@ func (n *LiteralNode) IsMergeKey() bool {
 
 // MergeKeyNode type of merge key node
 type MergeKeyNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 }
 
@@ -1055,7 +1035,7 @@ func (n *MergeKeyNode) IsMergeKey() bool {
 
 // BoolNode type of boolean node
 type BoolNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 	Value bool
 }
@@ -1107,7 +1087,7 @@ func (n *BoolNode) IsMergeKey() bool {
 
 // InfinityNode type of infinity node
 type InfinityNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 	Value float64
 }
@@ -1159,7 +1139,7 @@ func (n *InfinityNode) IsMergeKey() bool {
 
 // NanNode type of nan node
 type NanNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 }
 
@@ -1248,7 +1228,7 @@ func (m *MapNodeIter) KeyValue() *MappingValueNode {
 
 // MappingNode type of mapping node
 type MappingNode struct {
-	*BaseNode
+	BaseNode
 	Start       *token.Token
 	End         *token.Token
 	IsFlowStyle bool
@@ -1343,7 +1323,7 @@ func (n *MappingNode) MarshalYAML() ([]byte, error) {
 
 // MappingKeyNode type of tag node
 type MappingKeyNode struct {
-	*BaseNode
+	BaseNode
 	Start *token.Token
 	Value Node
 }
@@ -1397,7 +1377,7 @@ func (n *MappingKeyNode) IsMergeKey() bool {
 
 // MappingValueNode type of mapping value
 type MappingValueNode struct {
-	*BaseNode
+	BaseNode
 	Start        *token.Token // delimiter token ':'.
 	CollectEntry *token.Token // collect entry token ','.
 	Key          MapKeyNode
@@ -1500,7 +1480,7 @@ func (m *ArrayNodeIter) Len() int {
 
 // SequenceNode type of sequence node
 type SequenceNode struct {
-	*BaseNode
+	BaseNode
 	Start             *token.Token
 	End               *token.Token
 	IsFlowStyle       bool
@@ -1604,7 +1584,7 @@ func (n *SequenceNode) MarshalYAML() ([]byte, error) {
 
 // SequenceEntryNode is the sequence entry.
 type SequenceEntryNode struct {
-	*BaseNode
+	BaseNode
 	HeadComment *CommentGroupNode // head comment.
 	LineComment *CommentGroupNode // line comment e.g.) - # comment.
 	Start       *token.Token      // entry token.
@@ -1654,7 +1634,6 @@ func (n *SequenceEntryNode) Read(p []byte) (int, error) {
 // SequenceEntry creates SequenceEntryNode instance.
 func SequenceEntry(start *token.Token, value Node, headComment *CommentGroupNode) *SequenceEntryNode {
 	return &SequenceEntryNode{
-		BaseNode:    &BaseNode{},
 		HeadComment: headComment,
 		Start:       start,
 		Value:       value,
@@ -1685,7 +1664,7 @@ func (n *SequenceMergeValueNode) MapRange() *MapNodeIter {
 
 // AnchorNode type of anchor node
 type AnchorNode struct {
-	*BaseNode
+	BaseNode
 	Start *token.Token
 	Name  Node
 	Value Node
@@ -1759,7 +1738,7 @@ func (n *AnchorNode) IsMergeKey() bool {
 
 // AliasNode type of alias node
 type AliasNode struct {
-	*BaseNode
+	BaseNode
 	Start *token.Token
 	Value Node
 }
@@ -1824,7 +1803,7 @@ func (n *AliasNode) IsMergeKey() bool {
 
 // DirectiveNode type of directive node
 type DirectiveNode struct {
-	*BaseNode
+	BaseNode
 	// Start is '%' token.
 	Start *token.Token
 	// Name is directive name e.g.) "YAML" or "TAG".
@@ -1872,7 +1851,7 @@ func (n *DirectiveNode) MarshalYAML() ([]byte, error) {
 
 // TagNode type of tag node
 type TagNode struct {
-	*BaseNode
+	BaseNode
 	Directive *DirectiveNode
 	Start     *token.Token
 	Value     Node
@@ -1943,7 +1922,7 @@ func (n *TagNode) ArrayRange() *ArrayNodeIter {
 
 // CommentNode type of comment node
 type CommentNode struct {
-	*BaseNode
+	BaseNode
 	Token *token.Token
 }
 
@@ -1978,7 +1957,7 @@ func (n *CommentNode) MarshalYAML() ([]byte, error) {
 
 // CommentGroupNode type of comment node
 type CommentGroupNode struct {
-	*BaseNode
+	BaseNode
 	Comments []*CommentNode
 }
 
@@ -2051,59 +2030,59 @@ func Walk(v Visitor, node Node) {
 	switch n := node.(type) {
 	case *CommentNode:
 	case *NullNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *IntegerNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *FloatNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *StringNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *MergeKeyNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *BoolNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *InfinityNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *NanNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 	case *LiteralNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Value)
 	case *DirectiveNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Name)
 		for _, value := range n.Values {
 			Walk(v, value)
 		}
 	case *TagNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Value)
 	case *DocumentNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Body)
 	case *MappingNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		for _, value := range n.Values {
 			Walk(v, value)
 		}
 	case *MappingKeyNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Value)
 	case *MappingValueNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Key)
 		Walk(v, n.Value)
 	case *SequenceNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		for _, value := range n.Values {
 			Walk(v, value)
 		}
 	case *AnchorNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Name)
 		Walk(v, n.Value)
 	case *AliasNode:
-		walkComment(v, n.BaseNode)
+		walkComment(v, &n.BaseNode)
 		Walk(v, n.Value)
 	}
 }

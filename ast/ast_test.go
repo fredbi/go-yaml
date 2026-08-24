@@ -17,7 +17,7 @@ func TestDocumentNodeGetTokenWithoutBody(t *testing.T) {
 	// A document with no content has no token to point at. Reported by fuzzing
 	// the AST walk: an empty source is enough to reach this, and the walk is
 	// what a consumer looking for positions does.
-	doc := &DocumentNode{BaseNode: &BaseNode{}}
+	doc := &DocumentNode{BaseNode: BaseNode{}}
 
 	require.NotPanics(t, func() {
 		assert.Nil(t, doc.GetToken())
@@ -28,7 +28,7 @@ func TestReadNode(t *testing.T) {
 	t.Run("utf-8", func(t *testing.T) {
 		const value = "éɛทᛞ⠻チ▓🦄"
 		node := &StringNode{
-			BaseNode: &BaseNode{},
+			BaseNode: BaseNode{},
 			Token:    &token.Token{},
 			Value:    value,
 		}

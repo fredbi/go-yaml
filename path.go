@@ -767,7 +767,7 @@ func (n *recursiveNode) String() string {
 }
 
 func (n *recursiveNode) filterNode(node ast.Node) (*ast.SequenceNode, error) {
-	sequence := &ast.SequenceNode{BaseNode: &ast.BaseNode{}}
+	sequence := &ast.SequenceNode{BaseNode: ast.BaseNode{}}
 	switch typedNode := node.(type) {
 	case *ast.MappingNode:
 		for _, value := range typedNode.Values {
