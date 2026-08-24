@@ -154,7 +154,7 @@ func (e *Encoder) setCommentByCommentMap(node ast.Node) error {
 		for _, comment := range comments {
 			commentTokens := []*token.Token{}
 			for _, text := range comment.Texts {
-				commentTokens = append(commentTokens, token.New(text, text, nil))
+				commentTokens = append(commentTokens, token.New(text, text, token.Position{}))
 			}
 			commentGroup := ast.CommentGroup(commentTokens)
 			switch comment.Position {
@@ -520,8 +520,8 @@ func (e *Encoder) encodePtrAnchor(v reflect.Value, column int) ast.Node {
 	return alias
 }
 
-func (e *Encoder) pos(column int) *token.Position {
-	return &token.Position{
+func (e *Encoder) pos(column int) token.Position {
+	return token.Position{
 		Line:      e.line,
 		Column:    column,
 		Offset:    e.offset,

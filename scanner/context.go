@@ -485,7 +485,7 @@ func (c *Context) bufferedSrc() []byte {
 	return src
 }
 
-func (c *Context) bufferedToken(pos *token.Position) *token.Token {
+func (c *Context) bufferedToken(pos token.Position) *token.Token {
 	if c.idx == 0 {
 		return nil
 	}

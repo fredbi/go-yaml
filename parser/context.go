@@ -177,9 +177,9 @@ func (c context) addNullValueToken(tk *Token) *Token {
 }
 
 func (c context) createImplicitNullToken(base *Token) *Token {
-	pos := *(base.RawToken().Position)
+	pos := base.RawToken().Position
 	pos.Column++
-	tk := token.New("null", " null", &pos)
+	tk := token.New("null", " null", pos)
 	tk.Type = token.ImplicitNullType
 	return &Token{Token: tk}
 }

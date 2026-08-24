@@ -9,7 +9,7 @@ import (
 )
 
 func TestToken(t *testing.T) {
-	pos := &token.Position{}
+	pos := token.Position{}
 	tokens := token.Tokens{
 		token.SequenceEntry("-", pos),
 		token.MappingKey(pos),

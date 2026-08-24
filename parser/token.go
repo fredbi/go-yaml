@@ -1045,8 +1045,8 @@ func keyCandidateIndex(tokens []*Token, i int) int {
 // implicitNullKeyToken builds the null node standing in for an absent mapping
 // key, positioned where the key would have been -- immediately before its ':'.
 func (g *grouper) implicitNullKeyToken(colon *Token) *Token {
-	pos := *(colon.RawToken().Position)
-	tk := token.New("null", "null", &pos)
+	pos := colon.RawToken().Position
+	tk := token.New("null", "null", pos)
 	tk.Type = token.ImplicitNullType
 
 	wrapped := g.token()

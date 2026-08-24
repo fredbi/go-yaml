@@ -95,7 +95,6 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 	for _, test := range tests {
 		src := string(test.InYAML)
 		for _, tk := range scanAll(t, src) {
-			require.NotNil(t, tk.Position)
 			want := sourceText(tk.Origin)
 			if want == "" {
 				continue

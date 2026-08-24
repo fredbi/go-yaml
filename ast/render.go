@@ -332,7 +332,10 @@ func (r *Renderer) hoistBlockComment(key, n Node, value string) (string, string)
 // attached by a caller was attached to that entry, not to a line of its own.
 func sameLine(a, b Node) bool {
 	ta, tb := a.GetToken(), b.GetToken()
-	if ta == nil || tb == nil || ta.Position == nil || tb.Position == nil {
+	// Line counts from 1, so a zero line is a token the encoder built rather
+	// than one read from a document. Nothing is known about where it stands, so
+	// it is taken to stand where the other one does.
+	if ta == nil || tb == nil || ta.Position.Line == 0 || tb.Position.Line == 0 {
 		return true
 	}
 
@@ -876,7 +879,7 @@ func (r *Renderer) directive(n *DirectiveNode) string {
 	}
 
 	comment := r.String(n.Comment)
-	if commentTk := n.Comment.GetToken(); commentTk != nil && commentTk.Position != nil &&
+	if commentTk := n.Comment.GetToken(); commentTk != nil && commentTk.Position.Line != 0 &&
 		n.Start != nil && commentTk.Position.Line < n.Start.Position.Line {
 		// Written above the directive rather than below it.
 		return comment + "\n" + n.String()

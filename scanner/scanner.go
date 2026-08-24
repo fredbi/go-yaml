@@ -62,15 +62,15 @@ type Scanner struct {
 	// indented past it.
 	flowIndent  int
 	indentState IndentState
-	savedPos    *token.Position
+	// savedPos holds the position a token was started at, where the scanner
+	// noticed the start only after passing it. hasSavedPos says whether there
+	// is one.
+	savedPos    token.Position
+	hasSavedPos bool
 	// lastIndentLevel is the indent level the last token was given. A block
 	// scalar's content sits one level below whatever opened it, and that is the
 	// only thing that asks.
 	lastIndentLevel int
-	// posSlab hands out the position every token carries. posBlock is how many
-	// one allocation covers, sized from the source.
-	posSlab  []token.Position
-	posBlock int
 	// initErr holds what is wrong with the source itself, found before any
 	// token was read and reported by the first Scan.
 	initErr error
@@ -104,7 +104,7 @@ func validateStream(text string) error {
 			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
 				return ErrInvalidToken(token.Invalid(
 					"found a byte that is part of no character",
-					text[i:i+1], &token.Position{Line: line, Column: column, Offset: offset},
+					text[i:i+1], token.Position{Line: line, Column: column, Offset: offset},
 				))
 			}
 		}
@@ -112,7 +112,7 @@ func validateStream(text string) error {
 		if !printable(r) {
 			return ErrInvalidToken(token.Invalid(
 				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
-				string(r), &token.Position{Line: line, Column: column, Offset: offset},
+				string(r), token.Position{Line: line, Column: column, Offset: offset},
 			))
 		}
 
@@ -155,7 +155,7 @@ func validateByteOrderMarks(text string) error {
 			return ErrInvalidToken(token.Invalid(
 				"found a byte order mark inside a line, where a node may not hold one",
 				string(byteOrderMark),
-				&token.Position{Line: i + 1, Column: column, Offset: offset + column - 1},
+				token.Position{Line: i + 1, Column: column, Offset: offset + column - 1},
 			))
 		}
 
@@ -163,7 +163,7 @@ func validateByteOrderMarks(text string) error {
 			return ErrInvalidToken(token.Invalid(
 				"found a byte order mark where no document begins",
 				string(byteOrderMark),
-				&token.Position{Line: i + 1, Column: 1, Offset: offset},
+				token.Position{Line: i + 1, Column: 1, Offset: offset},
 			))
 		}
 
@@ -256,39 +256,23 @@ func printable(r rune) bool {
 	}
 }
 
-// posBlock is how many positions one allocation covers, and the bounds the
-// count taken from the source is held to.
-const (
-	minPosBlock = 16
-	maxPosBlock = 512
-)
-
 // pos returns the position of the cursor.
-//
-// Every token carries one, and they come from blocks rather than one allocation
-// each: a document of N tokens costs N/posBlock allocations. A block is never
-// reused -- Init starts a fresh one -- so positions handed to a caller stay
-// valid however often the scanner is reinitialised.
-func (s *Scanner) pos() *token.Position {
-	if len(s.posSlab) == 0 {
-		s.posSlab = make([]token.Position, s.posBlock)
-	}
-	pos := &s.posSlab[0]
-	s.posSlab = s.posSlab[1:]
-
-	pos.Line = s.line
-	pos.Column = s.column
-	pos.Offset = s.offset
-	pos.IndentNum = s.indentNum
+func (s *Scanner) pos() token.Position {
 	s.lastIndentLevel = s.indentLevel
 
-	return pos
+	return token.Position{
+		Line:      s.line,
+		Column:    s.column,
+		Offset:    s.offset,
+		IndentNum: s.indentNum,
+	}
 }
 
 func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
-	if s.savedPos != nil {
+	if s.hasSavedPos {
 		tk := ctx.bufferedToken(s.savedPos)
-		s.savedPos = nil
+		s.hasSavedPos = false
+
 		return tk
 	}
 	line := s.line
@@ -312,7 +296,7 @@ func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
 	}
 	s.lastIndentLevel = level
 
-	return ctx.bufferedToken(&token.Position{
+	return ctx.bufferedToken(token.Position{
 		Line:      line,
 		Column:    column,
 		Offset:    s.offset - len(ctx.buf),
@@ -1208,11 +1192,12 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 }
 
 func (s *Scanner) scanNewLine(ctx *Context, c rune) {
-	if len(ctx.buf) > 0 && s.savedPos == nil {
+	if len(ctx.buf) > 0 && !s.hasSavedPos {
 		buffered := ctx.bufferedSrc()
 		s.savedPos = s.pos()
 		s.savedPos.Column -= utf8.RuneCount(buffered)
 		s.savedPos.Offset -= len(buffered)
+		s.hasSavedPos = true
 	}
 
 	// if the following case, origin buffer has unnecessary two spaces.
@@ -2351,11 +2336,6 @@ func (s *Scanner) Init(text string) {
 	s.line = 1
 	s.column = 1
 	s.offset = 0
-	// A token takes a dozen bytes of source on average, and carries one
-	// position. Start a fresh block: the one in hand may still be reachable
-	// through tokens an earlier Init produced.
-	s.posSlab = nil
-	s.posBlock = min(max(len(src)/12, minPosBlock), maxPosBlock)
 	s.isFirstCharAtLine = true
 	s.clearState()
 }

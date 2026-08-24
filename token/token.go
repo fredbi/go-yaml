@@ -333,12 +333,12 @@ var (
 		".NaN",
 		".NAN",
 	}
-	reservedKeywordMap = map[string]func(string, string, *Position) *Token{}
+	reservedKeywordMap = map[string]func(string, string, Position) *Token{}
 	// reservedEncKeywordMap contains is the keyword map used at encoding time.
 	// This is supposed to be a superset of reservedKeywordMap,
 	// and used to quote legacy keywords present in YAML 1.1 or lesser for compatibility reasons,
 	// even though this library is supposed to be YAML 1.2-compliant.
-	reservedEncKeywordMap = map[string]func(string, string, *Position) *Token{}
+	reservedEncKeywordMap = map[string]func(string, string, Position) *Token{}
 )
 
 // Indicator returns the indicator a token of type t is, or NotIndicator where
@@ -385,7 +385,7 @@ func (t Type) CharacterType() CharacterType {
 	}
 }
 
-func reservedKeywordToken(typ Type, value, org string, pos *Position) *Token {
+func reservedKeywordToken(typ Type, value, org string, pos Position) *Token {
 	return &Token{
 		Type:     typ,
 		Value:    value,
@@ -396,7 +396,7 @@ func reservedKeywordToken(typ Type, value, org string, pos *Position) *Token {
 
 func init() {
 	for _, keyword := range reservedNullKeywords {
-		f := func(value, org string, pos *Position) *Token {
+		f := func(value, org string, pos Position) *Token {
 			return reservedKeywordToken(NullType, value, org, pos)
 		}
 
@@ -404,24 +404,24 @@ func init() {
 		reservedEncKeywordMap[keyword] = f
 	}
 	for _, keyword := range reservedBoolKeywords {
-		f := func(value, org string, pos *Position) *Token {
+		f := func(value, org string, pos Position) *Token {
 			return reservedKeywordToken(BoolType, value, org, pos)
 		}
 		reservedKeywordMap[keyword] = f
 		reservedEncKeywordMap[keyword] = f
 	}
 	for _, keyword := range reservedLegacyBoolKeywords {
-		reservedEncKeywordMap[keyword] = func(value, org string, pos *Position) *Token {
+		reservedEncKeywordMap[keyword] = func(value, org string, pos Position) *Token {
 			return reservedKeywordToken(BoolType, value, org, pos)
 		}
 	}
 	for _, keyword := range reservedInfKeywords {
-		reservedKeywordMap[keyword] = func(value, org string, pos *Position) *Token {
+		reservedKeywordMap[keyword] = func(value, org string, pos Position) *Token {
 			return reservedKeywordToken(InfinityType, value, org, pos)
 		}
 	}
 	for _, keyword := range reservedNanKeywords {
-		reservedKeywordMap[keyword] = func(value, org string, pos *Position) *Token {
+		reservedKeywordMap[keyword] = func(value, org string, pos Position) *Token {
 			return reservedKeywordToken(NanType, value, org, pos)
 		}
 	}
@@ -459,8 +459,8 @@ const (
 
 var (
 	// ReservedTagKeywordMap map for reserved tag keywords
-	ReservedTagKeywordMap = map[ReservedTagKeyword]func(string, string, *Position) *Token{
-		IntegerTag: func(value, org string, pos *Position) *Token {
+	ReservedTagKeywordMap = map[ReservedTagKeyword]func(string, string, Position) *Token{
+		IntegerTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -468,7 +468,7 @@ var (
 				Position: pos,
 			}
 		},
-		FloatTag: func(value, org string, pos *Position) *Token {
+		FloatTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -476,7 +476,7 @@ var (
 				Position: pos,
 			}
 		},
-		NullTag: func(value, org string, pos *Position) *Token {
+		NullTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -484,7 +484,7 @@ var (
 				Position: pos,
 			}
 		},
-		SequenceTag: func(value, org string, pos *Position) *Token {
+		SequenceTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -492,7 +492,7 @@ var (
 				Position: pos,
 			}
 		},
-		MappingTag: func(value, org string, pos *Position) *Token {
+		MappingTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -500,7 +500,7 @@ var (
 				Position: pos,
 			}
 		},
-		StringTag: func(value, org string, pos *Position) *Token {
+		StringTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -508,7 +508,7 @@ var (
 				Position: pos,
 			}
 		},
-		BinaryTag: func(value, org string, pos *Position) *Token {
+		BinaryTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -516,7 +516,7 @@ var (
 				Position: pos,
 			}
 		},
-		OrderedMapTag: func(value, org string, pos *Position) *Token {
+		OrderedMapTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -524,7 +524,7 @@ var (
 				Position: pos,
 			}
 		},
-		SetTag: func(value, org string, pos *Position) *Token {
+		SetTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -532,7 +532,7 @@ var (
 				Position: pos,
 			}
 		},
-		TimestampTag: func(value, org string, pos *Position) *Token {
+		TimestampTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -540,7 +540,7 @@ var (
 				Position: pos,
 			}
 		},
-		BooleanTag: func(value, org string, pos *Position) *Token {
+		BooleanTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -548,7 +548,7 @@ var (
 				Position: pos,
 			}
 		},
-		MergeTag: func(value, org string, pos *Position) *Token {
+		MergeTag: func(value, org string, pos Position) *Token {
 			return &Token{
 				Type:     TagType,
 				Value:    value,
@@ -765,7 +765,7 @@ func LiteralBlockHeader(value string) string {
 }
 
 // New create reserved keyword token or number token and other string token.
-func New(value string, org string, pos *Position) *Token {
+func New(value string, org string, pos Position) *Token {
 	fn := reservedKeywordMap[value]
 	if fn != nil {
 		return fn(value, org, pos)
@@ -831,7 +831,7 @@ type Token struct {
 	// under them runs into what was written before.
 	CommentBreaksAbove int32
 	// Position is a token position.
-	Position *Position
+	Position Position
 	// Next is a next token reference.
 	Next *Token
 	// Prev is a previous token reference.
@@ -868,10 +868,7 @@ func (t *Token) Clone() *Token {
 		return nil
 	}
 	copied := *t
-	if t.Position != nil {
-		pos := *(t.Position)
-		copied.Position = &pos
-	}
+
 	return &copied
 }
 
@@ -926,7 +923,7 @@ func (t Tokens) Dump() {
 }
 
 // String create token for String
-func String(value string, org string, pos *Position) *Token {
+func String(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     StringType,
 		Value:    value,
@@ -936,7 +933,7 @@ func String(value string, org string, pos *Position) *Token {
 }
 
 // SequenceEntry create token for SequenceEntry
-func SequenceEntry(org string, pos *Position) *Token {
+func SequenceEntry(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceEntryType,
 		Value:    string(SequenceEntryCharacter),
@@ -946,7 +943,7 @@ func SequenceEntry(org string, pos *Position) *Token {
 }
 
 // MappingKey create token for MappingKey
-func MappingKey(pos *Position) *Token {
+func MappingKey(pos Position) *Token {
 	return &Token{
 		Type:     MappingKeyType,
 		Value:    string(MappingKeyCharacter),
@@ -956,7 +953,7 @@ func MappingKey(pos *Position) *Token {
 }
 
 // MappingValue create token for MappingValue
-func MappingValue(pos *Position) *Token {
+func MappingValue(pos Position) *Token {
 	return &Token{
 		Type:     MappingValueType,
 		Value:    string(MappingValueCharacter),
@@ -966,7 +963,7 @@ func MappingValue(pos *Position) *Token {
 }
 
 // CollectEntry create token for CollectEntry
-func CollectEntry(org string, pos *Position) *Token {
+func CollectEntry(org string, pos Position) *Token {
 	return &Token{
 		Type:     CollectEntryType,
 		Value:    string(CollectEntryCharacter),
@@ -976,7 +973,7 @@ func CollectEntry(org string, pos *Position) *Token {
 }
 
 // SequenceStart create token for SequenceStart
-func SequenceStart(org string, pos *Position) *Token {
+func SequenceStart(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceStartType,
 		Value:    string(SequenceStartCharacter),
@@ -986,7 +983,7 @@ func SequenceStart(org string, pos *Position) *Token {
 }
 
 // SequenceEnd create token for SequenceEnd
-func SequenceEnd(org string, pos *Position) *Token {
+func SequenceEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceEndType,
 		Value:    string(SequenceEndCharacter),
@@ -996,7 +993,7 @@ func SequenceEnd(org string, pos *Position) *Token {
 }
 
 // MappingStart create token for MappingStart
-func MappingStart(org string, pos *Position) *Token {
+func MappingStart(org string, pos Position) *Token {
 	return &Token{
 		Type:     MappingStartType,
 		Value:    string(MappingStartCharacter),
@@ -1006,7 +1003,7 @@ func MappingStart(org string, pos *Position) *Token {
 }
 
 // MappingEnd create token for MappingEnd
-func MappingEnd(org string, pos *Position) *Token {
+func MappingEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     MappingEndType,
 		Value:    string(MappingEndCharacter),
@@ -1016,7 +1013,7 @@ func MappingEnd(org string, pos *Position) *Token {
 }
 
 // Comment create token for Comment
-func Comment(value string, org string, pos *Position) *Token {
+func Comment(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     CommentType,
 		Value:    value,
@@ -1026,7 +1023,7 @@ func Comment(value string, org string, pos *Position) *Token {
 }
 
 // Anchor create token for Anchor
-func Anchor(org string, pos *Position) *Token {
+func Anchor(org string, pos Position) *Token {
 	return &Token{
 		Type:     AnchorType,
 		Value:    string(AnchorCharacter),
@@ -1036,7 +1033,7 @@ func Anchor(org string, pos *Position) *Token {
 }
 
 // Alias create token for Alias
-func Alias(org string, pos *Position) *Token {
+func Alias(org string, pos Position) *Token {
 	return &Token{
 		Type:     AliasType,
 		Value:    string(AliasCharacter),
@@ -1046,7 +1043,7 @@ func Alias(org string, pos *Position) *Token {
 }
 
 // Tag create token for Tag
-func Tag(value string, org string, pos *Position) *Token {
+func Tag(value string, org string, pos Position) *Token {
 	fn := ReservedTagKeywordMap[ReservedTagKeyword(value)]
 	if fn != nil {
 		return fn(value, org, pos)
@@ -1060,7 +1057,7 @@ func Tag(value string, org string, pos *Position) *Token {
 }
 
 // Literal create token for Literal
-func Literal(value string, org string, pos *Position) *Token {
+func Literal(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     LiteralType,
 		Value:    value,
@@ -1070,7 +1067,7 @@ func Literal(value string, org string, pos *Position) *Token {
 }
 
 // Folded create token for Folded
-func Folded(value string, org string, pos *Position) *Token {
+func Folded(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     FoldedType,
 		Value:    value,
@@ -1080,7 +1077,7 @@ func Folded(value string, org string, pos *Position) *Token {
 }
 
 // SingleQuote create token for SingleQuote
-func SingleQuote(value string, org string, pos *Position) *Token {
+func SingleQuote(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     SingleQuoteType,
 		Value:    value,
@@ -1090,7 +1087,7 @@ func SingleQuote(value string, org string, pos *Position) *Token {
 }
 
 // DoubleQuote create token for DoubleQuote
-func DoubleQuote(value string, org string, pos *Position) *Token {
+func DoubleQuote(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     DoubleQuoteType,
 		Value:    value,
@@ -1100,7 +1097,7 @@ func DoubleQuote(value string, org string, pos *Position) *Token {
 }
 
 // Directive create token for Directive
-func Directive(org string, pos *Position) *Token {
+func Directive(org string, pos Position) *Token {
 	return &Token{
 		Type:     DirectiveType,
 		Value:    string(DirectiveCharacter),
@@ -1110,7 +1107,7 @@ func Directive(org string, pos *Position) *Token {
 }
 
 // Space create token for Space
-func Space(pos *Position) *Token {
+func Space(pos Position) *Token {
 	return &Token{
 		Type:     SpaceType,
 		Value:    string(SpaceCharacter),
@@ -1120,7 +1117,7 @@ func Space(pos *Position) *Token {
 }
 
 // MergeKey create token for MergeKey
-func MergeKey(org string, pos *Position) *Token {
+func MergeKey(org string, pos Position) *Token {
 	return &Token{
 		Type:     MergeKeyType,
 		Value:    "<<",
@@ -1130,7 +1127,7 @@ func MergeKey(org string, pos *Position) *Token {
 }
 
 // DocumentHeader create token for DocumentHeader
-func DocumentHeader(org string, pos *Position) *Token {
+func DocumentHeader(org string, pos Position) *Token {
 	return &Token{
 		Type:     DocumentHeaderType,
 		Value:    "---",
@@ -1140,7 +1137,7 @@ func DocumentHeader(org string, pos *Position) *Token {
 }
 
 // DocumentEnd create token for DocumentEnd
-func DocumentEnd(org string, pos *Position) *Token {
+func DocumentEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     DocumentEndType,
 		Value:    "...",
@@ -1149,7 +1146,7 @@ func DocumentEnd(org string, pos *Position) *Token {
 	}
 }
 
-func Invalid(err string, org string, pos *Position) *Token {
+func Invalid(err string, org string, pos Position) *Token {
 	return &Token{
 		Type:     InvalidType,
 		Value:    org,

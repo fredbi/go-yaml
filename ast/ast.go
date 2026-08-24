@@ -1155,7 +1155,7 @@ type MappingNode struct {
 	FootComment *CommentGroupNode
 }
 
-func (n *MappingNode) startPos() *token.Position {
+func (n *MappingNode) startPos() token.Position {
 	if len(n.Values) == 0 {
 		return n.Start.Position
 	}
