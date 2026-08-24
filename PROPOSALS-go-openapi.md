@@ -174,6 +174,13 @@ tokens — those are correct today and consumers depend on them.
 
 Separate from §1, and the reason we stopped using `Offset` entirely.
 
+> **Done in this fork.** `Offset` is now a 0-based byte index and carries a doc comment saying so;
+> the scanner holds the source as a string rather than `[]rune`. What is written below describes
+> the defect as upstream still has it, and is the change we would send. Two offset defects remain
+> here as well -- `Offset` addresses the start of `Origin` rather than the token, and `Init` drops
+> a byte order mark by rewriting the source -- both recorded in `ANALYSIS-go-openapi.md` §6 and
+> held by `scanner.offsetMissLedger`.
+
 `token.Position.Offset` carries no doc comment, and the name reads as a byte
 offset — the thing you would use to slice the source. It is not one. The scanner
 holds `source []rune` and advances `s.offset` once per rune (`scanner.go:97-110`,

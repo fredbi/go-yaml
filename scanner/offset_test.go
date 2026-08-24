@@ -48,6 +48,14 @@ func at(src string, offset int) string {
 // which is the point: the suite is almost entirely ASCII, so the two defects
 // were always independent.
 //
+// Two things have to change to empty this ledger, both in the scan loop and
+// both recorded in ANALYSIS-go-openapi.md §6 as roadmap phase O:
+//
+//   - a token's position has to be taken where its own text starts rather than
+//     where Origin does;
+//   - Init has to skip a byte order mark and count its bytes rather than
+//     rewriting the source to drop it, which shifts every offset after one.
+//
 // The ledger is a ratchet in both directions. A type that starts missing more
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.

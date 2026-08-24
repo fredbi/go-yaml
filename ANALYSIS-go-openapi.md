@@ -22,7 +22,7 @@ performance and the streaming.
 | **A** | ~~`parser.parseMap` is **super-linear in sibling-key count**~~ — **fixed**, see §3. Was: 1.4 MB file → 3.85 s. Now 151 ms. | ~~critical~~ |
 | **B** | GC dominates CPU (45%) — millions of small pointer-rich allocations. | high |
 | **C** | AST retains **32× the source**; nothing can be emitted before the whole document is parsed. | high |
-| **D** | The scanner indexes `[]rune`, so `Position.Offset` is a rune index (and 4× memory). | medium |
+| **D** | ~~The scanner indexes `[]rune`, so `Position.Offset` is a rune index (and 4× memory).~~ — **fixed**, see §6. `Offset` is a 0-based byte index and the source is held as a string. What remains is where `Offset` points, not what it counts. | ~~medium~~ |
 | **E** | Streaming is feasible: `Scan()` is already incremental; `CreateGroupedTokens` is the barrier. | — |
 | **F** | 12 conformance divergences against the YAML Test Suite. | medium |
 | **G** | `scanner/` has **zero test files**; the only fuzz target is at `Unmarshal` level. | high |
@@ -252,22 +252,45 @@ memory ceiling on document size.
 Note it is **not a speed problem**: the conversion is ~1% of runtime. Fix it for memory and
 correctness, not throughput.
 
-### Two offset defects the rewrite has to fix, and one it has to preserve
+### Offsets: what the byte rewrite fixed
 
-**`Offset` does not address its token.** It points at the start of `Origin`, and `Origin` holds
-the whitespace written before the token as well as the token itself, so an indented token is
-reported at the start of its indentation. Measured over the YAML Test Suite by
-`scanner.TestTokenOffsetsAddressTheSource`: **1,030 of 3,489 tokens** carry an offset that does
-not address their own text — `String` 402, `MappingValue` 148, `SequenceEntry` 84, `Comment` 69.
-The suite is almost entirely ASCII, so this is separate from `Offset` being a rune index.
-`offsetMissLedger` holds each token type to its count and ratchets both ways.
+The scanner holds the source as a string and decodes UTF-8 at the cursor.
+`token.Position.Offset` is a **0-based byte index**, so `src[Offset:]` is the token. `Line` and
+`Column` still count from 1 and still count characters: YAML measures indentation in characters,
+and a byte column would move where block structure is read. `Context.progress` advances a number
+of characters and returns the bytes it crossed, which is what keeps the two apart.
+
+Three places had been mixing the units, and each was a defect rather than a translation:
+
+- `scanMultiLineHeaderOption` used one variable both to slice the block scalar header out of the
+  source and to advance the column;
+- the header's comment moved `s.offset` and `s.column` forward over a header that
+  `progressColumn` then advanced over again, so the offset double-counted and could run past the
+  end of the source;
+- `bufferedToken` derived a column from `strings.Index`, a byte index into the origin buffer.
+
+Token columns are unchanged: they were compared token for token against the previous scanner on
+ASCII and on multibyte block scalars.
+
+### ⏳ Offsets: what is still wrong
+
+**`Offset` addresses the start of `Origin`, not the token.** `Origin` holds the whitespace written
+before the token as well as the token itself, so an indented token is reported at the start of its
+indentation, and a caret drawn under an error lands in the wrong column. Measured by
+`scanner.TestTokenOffsetsAddressTheSource`: **1,031 of 3,489 tokens** over the YAML Test Suite --
+`String` 404, `MappingValue` 148, `SequenceEntry` 84, `Comment` 68. `offsetMissLedger` holds each
+type to its count and ratchets both ways, so the fix is recorded by lowering the numbers.
+
+The count barely moved when offsets changed from runes to bytes (1,030 to 1,031), which is the
+evidence that the two defects were always independent. The suite is almost entirely ASCII.
 
 **A byte order mark shifts every offset after it.** `Init` does
-`strings.ReplaceAll(text, byteOrderMark, "")` and scans the rewrite, so positions count a source
-the caller never handed in. The scan should skip a mark and count its bytes instead. The drift is
-one rune per mark today, three bytes once offsets are bytes.
+`strings.ReplaceAll(text, byteOrderMark, "")` and scans the rewrite, so positions address a source
+the caller never handed in: three bytes short per mark that stands before them. The scan should
+skip a mark and count its bytes instead of deleting it. Nothing in the YAML Test Suite exercises
+this -- 402 cases, 0 marks -- so a fix needs its own cases.
 
-**A byte order mark is rejected where a node may go, and that must survive the rewrite.**
+**A byte order mark is rejected where a node may go, and that must survive any further change.**
 YAML 1.2 excludes U+FEFF from `nb-char` (`nb-char ::= c-printable - b-char - c-byte-order-mark`),
 so a mark cannot stand inside a scalar; `l-document-prefix ::= c-byte-order-mark? l-comment*`
 allows one only at the start of the stream or of a document. `validateByteOrderMarks` enforces
@@ -439,7 +462,7 @@ Ordering is driven by dependency, not by value:
 | **S** | Reader-fed byte scanner; grouping as an iterator pipeline; per-document parse. | The streaming goal. Needs P to be worth anything. |
 | **Y** | Consumer-side: the JSON-projecting lexer becomes a streaming projection. | Needs S. |
 | **B** | The defect series: block spans, BOM, the 12 conformance items. | Independent, upstreamable individually. |
-| **O** | Offsets: address the token rather than its leading whitespace; count bytes; stop rewriting the source to drop a byte order mark; settle whether the mark check is complete (§6). | Rides with S — the scan loop is where all four live. |
+| **O** | Offsets (§6). ~~Count bytes~~ **done**. Remaining: address the token rather than its leading whitespace (1,031 of 3,489 tokens, `offsetMissLedger`); skip a byte order mark instead of rewriting the source to drop it; settle whether the mark check is complete. | Rides with S — the scan loop is where all three live. |
 | **M** | Allocation and memory churn (§4): zero-copy tokens, positions by value. | After S — it is where the residual 2× lives. |
 | **(SWAR)** | Byte-class scanning kernels. | Only if the profile still points there. Far off; see §8b. |
 
