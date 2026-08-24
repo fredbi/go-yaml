@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/token"
@@ -24,22 +24,13 @@ type tokenRef struct {
 	idx    int
 }
 
-var pathSpecialChars = []string{
-	"$", "*", ".", "[", "]",
-}
-
-func containsPathSpecialChar(path string) bool {
-	for _, char := range pathSpecialChars {
-		if strings.Contains(path, char) {
-			return true
-		}
-	}
-	return false
-}
+// pathSpecialChars are the characters a YAMLPath reads as syntax. A key
+// containing one of them is quoted so the path still addresses that one key.
+const pathSpecialChars = "$*.[]"
 
 func normalizePath(path string) string {
-	if containsPathSpecialChar(path) {
-		return fmt.Sprintf("'%s'", path)
+	if strings.ContainsAny(path, pathSpecialChars) {
+		return "'" + path + "'"
 	}
 	return path
 }
@@ -92,9 +83,18 @@ func (c *context) withChild(path string) *context {
 	return &ctx
 }
 
+// withPath returns a context at path, which the caller has already built.
+// parseMapKey stores a key's path on the key node; the entry's value hangs
+// under the same path, so reusing it saves building the same string twice.
+func (c *context) withPath(path string) *context {
+	ctx := *c
+	ctx.path = path
+	return &ctx
+}
+
 func (c *context) withIndex(idx uint) *context {
 	ctx := *c
-	ctx.path = c.path + "[" + fmt.Sprint(idx) + "]"
+	ctx.path = c.path + "[" + strconv.FormatUint(uint64(idx), 10) + "]"
 	return &ctx
 }
 

@@ -421,7 +421,7 @@ func (p *parser) parseFlowMap(ctx *context) (*ast.MappingNode, error) {
 			if err != nil {
 				return nil, err
 			}
-			ctx := ctx.withChild(p.mapKeyText(key))
+			ctx := p.valueContext(ctx, key)
 			colonTk := mapKeyTk.Group.Last()
 			if p.isFlowMapDelim(ctx.nextToken()) {
 				value, err := newNullNode(ctx, ctx.insertNullToken(colonTk))
@@ -535,7 +535,7 @@ func (p *parser) parseMapEntry(ctx *context, keyTk *Token) (*ast.MappingValueNod
 	if keyTk.Line() == valueTk.Line() && valueTk.Type() == token.SequenceEntryType {
 		return nil, errors.ErrSyntax("block sequence entries are not allowed in this context", valueTk.RawToken())
 	}
-	childCtx := ctx.withChild(p.mapKeyText(key))
+	childCtx := p.valueContext(ctx, key)
 	value, err := p.parseMapValue(childCtx, key, keyTk.Group.Last())
 	if err != nil {
 		return nil, err
@@ -649,7 +649,7 @@ func (p *parser) parseMapKeyValue(ctx *context, g *TokenGroup, entryTk *Token) (
 		return nil, err
 	}
 
-	c := ctx.withChild(p.mapKeyText(key))
+	c := p.valueContext(ctx, key)
 	value, err := p.parseToken(c, g.Last())
 	if err != nil {
 		return nil, err
@@ -825,6 +825,19 @@ func (p *parser) newLineCharacterNum(src string) int {
 		}
 	}
 	return num
+}
+
+// valueContext returns the context for the value of key.
+//
+// parseMapKey has already built the key's path and stored it on the key node,
+// so read it back rather than build the same string a second time. A flow
+// collection used as a key is the one case with no path: it is given one here,
+// the same way it was before.
+func (p *parser) valueContext(ctx *context, key ast.MapKeyNode) *context {
+	if path := key.GetPath(); path != "" {
+		return ctx.withPath(path)
+	}
+	return ctx.withChild(p.mapKeyText(key))
 }
 
 func (p *parser) mapKeyText(n ast.Node) string {
