@@ -69,11 +69,8 @@ func (c context) isTokenNotFound() bool {
 	return c.currentToken() == nil
 }
 
-func (c context) withGroup(g *TokenGroup) context {
-	c.tokenRef = &tokenRef{
-		tokens: g.Tokens,
-		size:   len(g.Tokens),
-	}
+func (c context) withGroup(p *parser, g *TokenGroup) context {
+	c.tokenRef = p.newTokenRef(g.Tokens)
 
 	return c
 }

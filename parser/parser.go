@@ -92,6 +92,24 @@ type parser struct {
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
 	pathSlab []ast.PathNode
+	// refSlab hands out the tokenRef every step into a token group needs.
+	refSlab []tokenRef
+}
+
+// refBlockSize is how many token references one allocation covers.
+const refBlockSize = 128
+
+// newTokenRef returns a reference positioned at the start of tokens.
+func (p *parser) newTokenRef(tokens []*Token) *tokenRef {
+	if len(p.refSlab) == 0 {
+		p.refSlab = make([]tokenRef, refBlockSize)
+	}
+	ref := &p.refSlab[0]
+	p.refSlab = p.refSlab[1:]
+
+	ref.tokens, ref.size, ref.idx = tokens, len(tokens), 0
+
+	return ref
 }
 
 // pathSlabSize is how many trie steps one allocation covers. A document of N
@@ -212,7 +230,7 @@ func (p *parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.Document
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
 
-	body, err := p.parseDocumentBody(ctx.withGroup(&TokenGroup{
+	body, err := p.parseDocumentBody(ctx.withGroup(p, &TokenGroup{
 		Type:   TokenGroupDocumentBody,
 		Tokens: tokens,
 	}))
@@ -256,28 +274,28 @@ func (p *parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 	case TokenGroupMapKey, TokenGroupMapKeyValue:
 		return p.parseMap(ctx)
 	case TokenGroupDirective:
-		node, err := p.parseDirective(ctx.withGroup(tk.Group), tk.Group)
+		node, err := p.parseDirective(ctx.withGroup(p, tk.Group), tk.Group)
 		if err != nil {
 			return nil, err
 		}
 		ctx.goNext()
 		return node, nil
 	case TokenGroupDirectiveName:
-		node, err := p.parseDirectiveName(ctx.withGroup(tk.Group))
+		node, err := p.parseDirectiveName(ctx.withGroup(p, tk.Group))
 		if err != nil {
 			return nil, err
 		}
 		ctx.goNext()
 		return node, nil
 	case TokenGroupAnchor:
-		node, err := p.parseAnchor(ctx.withGroup(tk.Group), tk.Group)
+		node, err := p.parseAnchor(ctx.withGroup(p, tk.Group), tk.Group)
 		if err != nil {
 			return nil, err
 		}
 		ctx.goNext()
 		return node, nil
 	case TokenGroupAnchorName:
-		anchor, err := p.parseAnchorName(ctx.withGroup(tk.Group))
+		anchor, err := p.parseAnchorName(ctx.withGroup(p, tk.Group))
 		if err != nil {
 			return nil, err
 		}
@@ -289,21 +307,21 @@ func (p *parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 		anchor.Value = value
 		return anchor, nil
 	case TokenGroupAlias:
-		node, err := p.parseAlias(ctx.withGroup(tk.Group))
+		node, err := p.parseAlias(ctx.withGroup(p, tk.Group))
 		if err != nil {
 			return nil, err
 		}
 		ctx.goNext()
 		return node, nil
 	case TokenGroupLiteral, TokenGroupFolded:
-		node, err := p.parseLiteral(ctx.withGroup(tk.Group))
+		node, err := p.parseLiteral(ctx.withGroup(p, tk.Group))
 		if err != nil {
 			return nil, err
 		}
 		ctx.goNext()
 		return node, nil
 	case TokenGroupScalarTag:
-		node, err := p.parseTag(ctx.withGroup(tk.Group))
+		node, err := p.parseTag(ctx.withGroup(p, tk.Group))
 		if err != nil {
 			return nil, err
 		}
@@ -344,9 +362,9 @@ func (p *parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 	if tk.Group != nil {
 		switch tk.GroupType() {
 		case TokenGroupAnchor:
-			return p.parseAnchor(ctx.withGroup(tk.Group), tk.Group)
+			return p.parseAnchor(ctx.withGroup(p, tk.Group), tk.Group)
 		case TokenGroupAnchorName:
-			anchor, err := p.parseAnchorName(ctx.withGroup(tk.Group))
+			anchor, err := p.parseAnchorName(ctx.withGroup(p, tk.Group))
 			if err != nil {
 				return nil, err
 			}
@@ -358,11 +376,11 @@ func (p *parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 			anchor.Value = value
 			return anchor, nil
 		case TokenGroupAlias:
-			return p.parseAlias(ctx.withGroup(tk.Group))
+			return p.parseAlias(ctx.withGroup(p, tk.Group))
 		case TokenGroupLiteral, TokenGroupFolded:
-			return p.parseLiteral(ctx.withGroup(tk.Group))
+			return p.parseLiteral(ctx.withGroup(p, tk.Group))
 		case TokenGroupScalarTag:
-			return p.parseTag(ctx.withGroup(tk.Group))
+			return p.parseTag(ctx.withGroup(p, tk.Group))
 		default:
 			return nil, errors.ErrSyntax("unexpected scalar value", tk.RawToken())
 		}
@@ -475,14 +493,14 @@ func (p *parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 		entered := len(node.Values)
 		switch mapKeyTk.GroupType() {
 		case TokenGroupMapKeyValue:
-			value, err := p.parseMapKeyValue(ctx.withGroup(mapKeyTk.Group), mapKeyTk.Group, entryTk)
+			value, err := p.parseMapKeyValue(ctx.withGroup(p, mapKeyTk.Group), mapKeyTk.Group, entryTk)
 			if err != nil {
 				return nil, err
 			}
 			node.Values = append(node.Values, value)
 			ctx.goNext()
 		case TokenGroupMapKey:
-			key, err := p.parseMapKey(ctx.withGroup(mapKeyTk.Group), mapKeyTk.Group)
+			key, err := p.parseMapKey(ctx.withGroup(p, mapKeyTk.Group), mapKeyTk.Group)
 			if err != nil {
 				return nil, err
 			}
@@ -578,7 +596,7 @@ func (p *parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 		return nil, errors.ErrSyntax("unexpected map key", keyTk.RawToken())
 	}
 	if keyTk.GroupType() == TokenGroupMapKeyValue {
-		node, err := p.parseMapKeyValue(ctx.withGroup(keyTk.Group), keyTk.Group, nil)
+		node, err := p.parseMapKeyValue(ctx.withGroup(p, keyTk.Group), keyTk.Group, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -590,7 +608,7 @@ func (p *parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 		return node, nil
 	}
 
-	key, err := p.parseMapKey(ctx.withGroup(keyTk.Group), keyTk.Group)
+	key, err := p.parseMapKey(ctx.withGroup(p, keyTk.Group), keyTk.Group)
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +731,7 @@ func (p *parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 		return nil, errors.ErrSyntax("unexpected map key", g.RawToken())
 	}
 	keyGroup := g.First().Group
-	key, err := p.parseMapKey(ctx.withGroup(keyGroup), keyGroup)
+	key, err := p.parseMapKey(ctx.withGroup(p, keyGroup), keyGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +764,7 @@ func (p *parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 	if g.First().Type() == token.MappingKeyType {
 		mapKeyTk := g.First()
 		if mapKeyTk.Group != nil {
-			ctx = ctx.withGroup(mapKeyTk.Group)
+			ctx = ctx.withGroup(p, mapKeyTk.Group)
 		}
 		key, err := newMappingKeyNode(ctx, mapKeyTk)
 		if err != nil {
@@ -997,7 +1015,7 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
 		}
-		anchor, err := p.parseAnchor(ctx.withGroup(group), group)
+		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
 		}
@@ -1054,7 +1072,7 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
 		}
-		anchor, err := p.parseAnchor(ctx.withGroup(group), group)
+		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
 		}
@@ -1105,7 +1123,7 @@ func (p *parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
 
 func (p *parser) parseAnchor(ctx context, g *TokenGroup) (*ast.AnchorNode, error) {
 	anchorNameGroup := g.First().Group
-	anchor, err := p.parseAnchorName(ctx.withGroup(anchorNameGroup))
+	anchor, err := p.parseAnchorName(ctx.withGroup(p, anchorNameGroup))
 	if err != nil {
 		return nil, err
 	}
@@ -1350,7 +1368,7 @@ func (p *parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (a
 		return p.parseMap(ctx)
 	case token.IntegerTag, token.FloatTag, token.StringTag, token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
 		if tk.GroupType() == TokenGroupLiteral || tk.GroupType() == TokenGroupFolded {
-			return p.parseLiteral(ctx.withGroup(tk.Group))
+			return p.parseLiteral(ctx.withGroup(p, tk.Group))
 		}
 		if endsValue(tk) || startsEntry(tk) {
 			// Nothing here is the tag's value: either punctuation closes what
@@ -1550,7 +1568,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
 		}
-		anchor, err := p.parseAnchor(ctx.withGroup(group), group)
+		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
 		}
@@ -1587,7 +1605,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 			Type:   TokenGroupAnchor,
 			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
 		}
-		anchor, err := p.parseAnchor(ctx.withGroup(group), group)
+		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
 		}
@@ -1607,7 +1625,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 
 func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode, error) {
 	directiveNameGroup := g.First().Group
-	directive, err := p.parseDirectiveName(ctx.withGroup(directiveNameGroup))
+	directive, err := p.parseDirectiveName(ctx.withGroup(p, directiveNameGroup))
 	if err != nil {
 		return nil, err
 	}
