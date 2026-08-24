@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 var (
@@ -16,7 +17,6 @@ var (
 	ErrInvalidCommentMapValue     = errors.New("invalid comment map value. it must be not nil value")
 	ErrDecodeRequiredPointerType  = errors.New("required pointer type value")
 	ErrExceededMaxDepth           = errors.New("exceeded max depth")
-	FormatErrorWithToken          = errors.FormatError
 )
 
 type (
@@ -74,4 +74,20 @@ func IsInvalidAnchorNameError(err error) bool {
 // IsInvalidAliasNameError whether err is ast.ErrInvalidAliasName or not.
 func IsInvalidAliasNameError(err error) bool {
 	return errors.Is(err, ast.ErrInvalidAliasName)
+}
+
+// FormatErrorWithToken renders msg as an error reported at tk, drawing the
+// lines of source around it.
+//
+// source is the document tk was read from. Drawing a document requires being
+// given one: an error renders its own context from the text it was found in,
+// and this helper needs the same. Pass nil to print the position and the
+// message alone.
+func FormatErrorWithToken(msg string, tk *token.Token, source []byte, colored, inclSource bool) string {
+	var src errors.Source
+	if len(source) > 0 {
+		src = errors.Source{Text: string(source), FirstLine: 1}
+	}
+
+	return errors.FormatError(msg, tk, src, colored, inclSource)
 }

@@ -65,11 +65,11 @@ func TestToken(t *testing.T) {
 	tokens.Dump()
 	tokens.Add(token.New("hoge", "hoge", pos))
 
-	last := tokens[len(tokens)-1]
-	assert.Equalf(t, token.TagType, last.PreviousType(), "the token added last follows a tag")
-	assert.Equalf(t, token.UnknownType, last.NextType(), "nothing follows the token added last")
-	assert.Equalf(t, token.UnknownType, tokens[0].PreviousType(), "nothing precedes the first token")
-	assert.Equalf(t, token.StringType, tokens[len(tokens)-2].NextType(), "the token added last is a string")
+	// What a token follows is read off the stream by position: a token does not
+	// point at the tokens around it.
+	last := len(tokens) - 1
+	assert.Equalf(t, token.TagType, tokens[last-1].Type, "the token added last follows a tag")
+	assert.Equalf(t, token.StringType, tokens[last].Type, "the token added last is a string")
 }
 
 func TestIsNeedQuoted(t *testing.T) {

@@ -1959,9 +1959,6 @@ func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
 
 type Visitor struct{}
 
-func (v *Visitor) Visit(node ast.Node) ast.Visitor {
-	tk := node.GetToken()
-	tk.Prev = nil
-	tk.Next = nil
+func (v *Visitor) Visit(_ ast.Node) ast.Visitor {
 	return v
 }

@@ -384,7 +384,8 @@ func (p *Path) AnnotateSource(source []byte, colored bool) ([]byte, error) {
 		return nil, err
 	}
 	var pp printer.Printer
-	return []byte(pp.PrintErrorToken(node.GetToken(), colored)), nil
+
+	return []byte(pp.PrintErrorSource(string(source), 1, node.GetToken(), colored)), nil
 }
 
 // PathBuilder represent builder for YAMLPath.

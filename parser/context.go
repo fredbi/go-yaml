@@ -191,18 +191,10 @@ func (c context) insertToken(tk *Token) {
 		return
 	}
 	if ref.size == idx {
-		curToken := ref.tokens[ref.size-1]
-		tk.RawToken().Next = curToken.RawToken()
-		curToken.RawToken().Prev = tk.RawToken()
-
 		ref.tokens = append(ref.tokens, tk)
 		ref.size = len(ref.tokens)
 		return
 	}
-
-	curToken := ref.tokens[idx]
-	tk.RawToken().Next = curToken.RawToken()
-	curToken.RawToken().Prev = tk.RawToken()
 
 	ref.tokens = append(ref.tokens[:idx+1], ref.tokens[idx:]...)
 	ref.tokens[idx] = tk
@@ -211,13 +203,6 @@ func (c context) insertToken(tk *Token) {
 
 func (c context) addToken(tk *Token) {
 	ref := c.tokenRef
-	lastTk := ref.tokens[ref.size-1]
-	if lastTk.Group != nil {
-		lastTk = lastTk.Group.Last()
-	}
-	lastTk.RawToken().Next = tk.RawToken()
-	tk.RawToken().Prev = lastTk.RawToken()
-
 	ref.tokens = append(ref.tokens, tk)
 	ref.size = len(ref.tokens)
 }

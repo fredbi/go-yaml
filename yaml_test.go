@@ -258,7 +258,7 @@ foo: 2
 >  7 | foo: 2
        ^
 `
-		got := "\n" + yaml.FormatErrorWithToken("custom message", yamlErr.GetToken(), false, true)
+		got := "\n" + yaml.FormatErrorWithToken("custom message", yamlErr.GetToken(), []byte(data), false, true)
 		if expected != got {
 			t.Fatalf("unexpected error message:\nexpected:\n%s\nbut got:\n%s", expected, got)
 		}

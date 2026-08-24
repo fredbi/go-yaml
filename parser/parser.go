@@ -19,11 +19,15 @@ const (
 
 // ParseBytes parse from byte slice, and returns ast.File
 func ParseBytes(bytes []byte, mode Mode, opts ...Option) (*ast.File, error) {
-	tokens := lexer.Tokenize(string(bytes))
+	src := string(bytes)
+	tokens := lexer.Tokenize(src)
 	f, err := Parse(tokens, mode, opts...)
 	if err != nil {
-		return nil, err
+		// An error drawn under the document needs the document. Parse takes a
+		// token stream and has none, so it is told here, where the text is.
+		return nil, errors.WithSource(err, errors.Source{Text: src, FirstLine: 1})
 	}
+
 	return f, nil
 }
 

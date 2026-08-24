@@ -832,26 +832,6 @@ type Token struct {
 	CommentBreaksAbove int32
 	// Position is a token position.
 	Position Position
-	// Next is a next token reference.
-	Next *Token
-	// Prev is a previous token reference.
-	Prev *Token
-}
-
-// PreviousType previous token type
-func (t *Token) PreviousType() Type {
-	if t.Prev != nil {
-		return t.Prev.Type
-	}
-	return UnknownType
-}
-
-// NextType next token type
-func (t *Token) NextType() Type {
-	if t.Next != nil {
-		return t.Next.Type
-	}
-	return UnknownType
 }
 
 // AddColumn append column number to current position of column
@@ -897,9 +877,6 @@ func (t *Tokens) add(tk *Token) {
 	if len(tokens) == 0 {
 		tokens = append(tokens, tk)
 	} else {
-		last := tokens[len(tokens)-1]
-		last.Next = tk
-		tk.Prev = last
 		tk.BlankLineAbove = blankLineAbove(tk, tokens)
 		tk.CommentBreaksAbove = commentBreaksAbove(tk, tokens)
 		tokens = append(tokens, tk)

@@ -37,12 +37,50 @@ var (
 	_ Error = new(UnexpectedNodeTypeError)
 )
 
+// Source is the text an error was found in, and the number of its first line.
+//
+// A parse holds the whole document, so the text costs nothing to keep: a Go
+// string shares the bytes it is taken from. A scanner fed from a reader would
+// keep a window around the failure instead, and FirstLine says which line that
+// window starts at.
+type Source struct {
+	Text      string
+	FirstLine int
+}
+
+// source is embedded in every error that prints the document around itself.
+type source struct {
+	src Source
+}
+
+func (s *source) setSource(src Source) { s.src = src }
+
+// sourced is an error that can be told the text it was found in.
+type sourced interface {
+	setSource(Source)
+}
+
+// WithSource tells err, and every error wrapped inside it, the text it was
+// found in. An error that never learns keeps its position and prints no
+// document around it.
+func WithSource(err error, src Source) error {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if s, ok := e.(sourced); ok {
+			s.setSource(src)
+		}
+	}
+
+	return err
+}
+
 type SyntaxError struct {
+	source
 	Message string
 	Token   *token.Token
 }
 
 type TypeError struct {
+	source
 	DstType         reflect.Type
 	SrcType         reflect.Type
 	StructFieldName *string
@@ -50,22 +88,26 @@ type TypeError struct {
 }
 
 type OverflowError struct {
+	source
 	DstType reflect.Type
 	SrcNum  string
 	Token   *token.Token
 }
 
 type DuplicateKeyError struct {
+	source
 	Message string
 	Token   *token.Token
 }
 
 type UnknownFieldError struct {
+	source
 	Message string
 	Token   *token.Token
 }
 
 type UnexpectedNodeTypeError struct {
+	source
 	Actual   ast.NodeType
 	Expected ast.NodeType
 	Token    *token.Token
@@ -134,7 +176,7 @@ func (e *SyntaxError) Error() string {
 }
 
 func (e *SyntaxError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.Message, e.Token, colored, inclSource)
+	return FormatError(e.Message, e.Token, e.src, colored, inclSource)
 }
 
 func (e *OverflowError) GetMessage() string {
@@ -150,7 +192,7 @@ func (e *OverflowError) Error() string {
 }
 
 func (e *OverflowError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.msg(), e.Token, colored, inclSource)
+	return FormatError(e.msg(), e.Token, e.src, colored, inclSource)
 }
 
 func (e *OverflowError) msg() string {
@@ -177,7 +219,7 @@ func (e *TypeError) Error() string {
 }
 
 func (e *TypeError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.msg(), e.Token, colored, inclSource)
+	return FormatError(e.msg(), e.Token, e.src, colored, inclSource)
 }
 
 func (e *DuplicateKeyError) GetMessage() string {
@@ -193,7 +235,7 @@ func (e *DuplicateKeyError) Error() string {
 }
 
 func (e *DuplicateKeyError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.Message, e.Token, colored, inclSource)
+	return FormatError(e.Message, e.Token, e.src, colored, inclSource)
 }
 
 func (e *UnknownFieldError) GetMessage() string {
@@ -209,7 +251,7 @@ func (e *UnknownFieldError) Error() string {
 }
 
 func (e *UnknownFieldError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.Message, e.Token, colored, inclSource)
+	return FormatError(e.Message, e.Token, e.src, colored, inclSource)
 }
 
 func (e *UnexpectedNodeTypeError) GetMessage() string {
@@ -225,22 +267,23 @@ func (e *UnexpectedNodeTypeError) Error() string {
 }
 
 func (e *UnexpectedNodeTypeError) FormatError(colored, inclSource bool) string {
-	return FormatError(e.msg(), e.Token, colored, inclSource)
+	return FormatError(e.msg(), e.Token, e.src, colored, inclSource)
 }
 
 func (e *UnexpectedNodeTypeError) msg() string {
 	return fmt.Sprintf("%s was used where %s is expected", e.Actual.YAMLName(), e.Expected.YAMLName())
 }
 
-func FormatError(errMsg string, token *token.Token, colored, inclSource bool) string {
+func FormatError(errMsg string, token *token.Token, src Source, colored, inclSource bool) string {
 	var pp printer.Printer
 	if token == nil {
 		return pp.PrintErrorMessage(errMsg, colored)
 	}
 	pos := fmt.Sprintf("[%d:%d] ", token.Position.Line, token.Position.Column)
 	msg := pp.PrintErrorMessage(fmt.Sprintf("%s%s", pos, errMsg), colored)
-	if inclSource {
-		msg += "\n" + pp.PrintErrorToken(token, colored)
+	if inclSource && src.Text != "" {
+		msg += "\n" + pp.PrintErrorSource(src.Text, src.FirstLine, token, colored)
 	}
+
 	return msg
 }

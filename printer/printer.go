@@ -2,7 +2,6 @@ package printer
 
 import (
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -35,9 +34,21 @@ func defaultLineNumberFormat(num int) string {
 	return fmt.Sprintf("%2d | ", num)
 }
 
-func (p *Printer) property(tk *token.Token) *Property {
+// property returns how to color tokens[i]. What a token follows and what
+// follows it both matter -- an anchor's name, a mapping key -- and the stream
+// says so by position.
+func (p *Printer) property(tokens token.Tokens, i int) *Property {
+	tk := tokens[i]
+	prev, next := token.UnknownType, token.UnknownType
+	if i > 0 {
+		prev = tokens[i-1].Type
+	}
+	if i+1 < len(tokens) {
+		next = tokens[i+1].Type
+	}
+
 	prop := &Property{}
-	switch tk.PreviousType() {
+	switch prev {
 	case token.AnchorType:
 		if p.Anchor != nil {
 			return p.Anchor()
@@ -49,7 +60,7 @@ func (p *Printer) property(tk *token.Token) *Property {
 		}
 		return prop
 	}
-	switch tk.NextType() {
+	switch next {
 	case token.MappingValueType:
 		if p.MapKey != nil {
 			return p.MapKey()
@@ -104,9 +115,9 @@ func (p *Printer) PrintTokens(tokens token.Tokens) string {
 	}
 	texts := []string{}
 	lineNumber := tokens[0].Position.Line
-	for _, tk := range tokens {
+	for i, tk := range tokens {
 		lines := strings.Split(tk.Origin, "\n")
-		prop := p.property(tk)
+		prop := p.property(tokens, i)
 		header := ""
 		if p.LineNumber {
 			header = p.LineNumberFormat(lineNumber)
@@ -209,14 +220,6 @@ func (p *Printer) removeLeftSideNewLineChar(src string) string {
 	return strings.TrimLeft(strings.TrimLeft(strings.TrimLeft(src, "\r"), "\n"), "\r\n")
 }
 
-func (p *Printer) removeRightSideNewLineChar(src string) string {
-	return strings.TrimRight(strings.TrimRight(strings.TrimRight(src, "\r"), "\n"), "\r\n")
-}
-
-func (p *Printer) removeRightSideWhiteSpaceChar(src string) string {
-	return p.removeRightSideNewLineChar(strings.TrimRight(src, " "))
-}
-
 // newLineCount counts the line breaks in s, taking CR LF for one.
 //
 // It walks bytes: a line break is ASCII, and no byte of a multi-byte character
@@ -252,70 +255,12 @@ func (p *Printer) isNewLineLastChar(s string) bool {
 	return false
 }
 
-func (p *Printer) printBeforeTokens(tk *token.Token, minLine, extLine int) token.Tokens {
-	for tk.Prev != nil {
-		if tk.Prev.Position.Line < minLine {
-			break
-		}
-		tk = tk.Prev
-	}
-	minTk := tk.Clone()
-	if minTk.Prev != nil {
-		// add white spaces to minTk by prev token
-		prev := minTk.Prev
-		whiteSpaceLen := len(prev.Origin) - len(strings.TrimRight(prev.Origin, " "))
-		minTk.Origin = strings.Repeat(" ", whiteSpaceLen) + minTk.Origin
-	}
-	minTk.Origin = p.removeLeftSideNewLineChar(minTk.Origin)
-	tokens := token.Tokens{minTk}
-	tk = minTk.Next
-	for tk != nil && tk.Position.Line <= extLine {
-		clonedTk := tk.Clone()
-		tokens.Add(clonedTk)
-		tk = clonedTk.Next
-	}
-	lastTk := tokens[len(tokens)-1]
-	trimmedOrigin := p.removeRightSideWhiteSpaceChar(lastTk.Origin)
-	suffix := lastTk.Origin[len(trimmedOrigin):]
-	lastTk.Origin = trimmedOrigin
-
-	if lastTk.Next != nil && len(suffix) > 1 {
-		next := lastTk.Next.Clone()
-		// add suffix to header of next token
-		if suffix[0] == '\n' || suffix[0] == '\r' {
-			suffix = suffix[1:]
-		}
-		next.Origin = suffix + next.Origin
-		lastTk.Next = next
-	}
-	return tokens
-}
-
-func (p *Printer) printAfterTokens(tk *token.Token, maxLine int) token.Tokens {
-	tokens := token.Tokens{}
-	if tk == nil {
-		return tokens
-	}
-	if tk.Position.Line > maxLine {
-		return tokens
-	}
-	minTk := tk.Clone()
-	minTk.Origin = p.removeLeftSideNewLineChar(minTk.Origin)
-	tokens.Add(minTk)
-	tk = minTk.Next
-	for tk != nil && tk.Position.Line <= maxLine {
-		clonedTk := tk.Clone()
-		tokens.Add(clonedTk)
-		tk = clonedTk.Next
-	}
-	return tokens
-}
-
 func (p *Printer) setupErrorTokenFormat(annotateLine int, isColored bool) {
 	prefix := func(annotateLine, num int) string {
 		if annotateLine == num {
 			return fmt.Sprintf("> %2d | ", num)
 		}
+
 		return fmt.Sprintf("  %2d | ", num)
 	}
 	p.LineNumber = true
@@ -323,6 +268,7 @@ func (p *Printer) setupErrorTokenFormat(annotateLine int, isColored bool) {
 		if isColored {
 			return colorize(prefix(annotateLine, num), ColorBold, ColorFgHiWhite)
 		}
+
 		return prefix(annotateLine, num)
 	}
 	if isColored {
@@ -330,26 +276,66 @@ func (p *Printer) setupErrorTokenFormat(annotateLine int, isColored bool) {
 	}
 }
 
-func (p *Printer) PrintErrorToken(tk *token.Token, isColored bool) string {
-	errToken := tk
-	curLine := tk.Position.Line
-	curExtLine := curLine + p.newLineCount(p.removeLeftSideNewLineChar(tk.Origin))
-	if p.isNewLineLastChar(tk.Origin) {
-		// if last character ( exclude white space ) is new line character, ignore it.
-		curExtLine--
+// PrintErrorSource draws the lines of src around tk, with tk's line marked and
+// a caret under its column.
+//
+// src is the document the token was read from, or a window of it; firstLine is
+// the line number src starts at. The lines come from the document itself rather
+// than from the tokens read out of it, so what a reader sees under an error is
+// what they wrote.
+func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, isColored bool) string {
+	const context = 3
+
+	lines := strings.Split(src, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		// A document ending in a line break has no line after it.
+		lines = lines[:n-1]
 	}
 
-	minLine := int(math.Max(float64(curLine-3), 1))
-	maxLine := curExtLine + 3
-	p.setupErrorTokenFormat(curLine, isColored)
+	errLine := tk.Position.Line
+	lastLine := errLine + p.newLineCount(p.removeLeftSideNewLineChar(tk.Origin))
+	if p.isNewLineLastChar(tk.Origin) {
+		lastLine--
+	}
 
-	beforeTokens := p.printBeforeTokens(tk, minLine, curExtLine)
-	lastTk := beforeTokens[len(beforeTokens)-1]
-	afterTokens := p.printAfterTokens(lastTk.Next, maxLine)
+	from := max(errLine-context, firstLine)
+	to := min(lastLine+context, firstLine+len(lines)-1)
+	if from > to {
+		return ""
+	}
+	// A window opening on blank lines shows nothing of the document. Start it
+	// where the text does.
+	for from < errLine && strings.TrimSpace(lines[from-firstLine]) == "" {
+		from++
+	}
+	p.setupErrorTokenFormat(errLine, isColored)
 
-	beforeSource := p.PrintTokens(beforeTokens)
-	prefixSpaceNum := len(fmt.Sprintf("  %2d | ", curLine))
-	annotateLine := strings.Repeat(" ", prefixSpaceNum+errToken.Position.Column-1) + "^"
-	afterSource := p.PrintTokens(afterTokens)
-	return fmt.Sprintf("%s\n%s\n%s", beforeSource, annotateLine, afterSource)
+	var out strings.Builder
+	prefixLen := len(fmt.Sprintf("  %2d | ", errLine))
+	for num := from; num <= to; num++ {
+		line := strings.TrimSuffix(lines[num-firstLine], "\r")
+		if num == to {
+			// Trailing space on the last line of the window draws nothing and
+			// leaves the caret hanging past the text.
+			line = strings.TrimRight(line, " \t")
+		}
+		out.WriteString(p.LineNumberFormat(num))
+		out.WriteString(line)
+		out.WriteString("\n")
+		// The caret follows the last line the token covers, not the first: a
+		// token spanning lines is read to its end before anything is wrong with
+		// it, and what is wrong is usually what should have come next.
+		if num == lastLine {
+			out.WriteString(strings.Repeat(" ", prefixLen+tk.Position.Column-1))
+			out.WriteString("^\n")
+		}
+	}
+
+	// The line break after the caret is kept where the caret ends the window:
+	// it separates the mark from whatever the caller writes next.
+	if lastLine >= to {
+		return out.String()
+	}
+
+	return strings.TrimSuffix(out.String(), "\n")
 }

@@ -29,17 +29,14 @@ alias: *x
 	t.Run("print starting from tokens[3]", func(t *testing.T) {
 		tokens := lexer.Tokenize(yml)
 		var p printer.Printer
-		actual := "\n" + p.PrintErrorToken(tokens[3], false)
+		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[3], false)
 		expect := `
    1 | ---
 >  2 | text: aaaa
              ^
    3 | text2: aaaa
    4 |  bbbb
-   5 |  cccc
-   6 |  dddd
-   7 |  eeee
-   8 | `
+   5 |  cccc`
 		if actual != expect {
 			t.Fatalf("unexpected output: expect:[%s]\n actual:[%s]", expect, actual)
 		}
@@ -47,17 +44,15 @@ alias: *x
 	t.Run("print starting from tokens[4]", func(t *testing.T) {
 		tokens := lexer.Tokenize(yml)
 		var p printer.Printer
-		actual := "\n" + p.PrintErrorToken(tokens[4], false)
+		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[4], false)
 		expect := `
    1 | ---
    2 | text: aaaa
 >  3 | text2: aaaa
+       ^
    4 |  bbbb
    5 |  cccc
-   6 |  dddd
-   7 |  eeee
-       ^
-`
+   6 |  dddd`
 		if actual != expect {
 			t.Fatalf("unexpected output: expect:[%s]\n actual:[%s]", expect, actual)
 		}
@@ -65,7 +60,7 @@ alias: *x
 	t.Run("print starting from tokens[6]", func(t *testing.T) {
 		tokens := lexer.Tokenize(yml)
 		var p printer.Printer
-		actual := "\n" + p.PrintErrorToken(tokens[6], false)
+		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[6], false)
 		expect := `
    1 | ---
    2 | text: aaaa
@@ -77,10 +72,7 @@ alias: *x
               ^
    8 | text3: ffff
    9 |  gggg
-  10 |  hhhh
-  11 |  iiii
-  12 |  jjjj
-  13 | `
+  10 |  hhhh`
 		if actual != expect {
 			t.Fatalf("unexpected output: expect:[%s]\n actual:[%s]", expect, actual)
 		}
@@ -97,16 +89,16 @@ a:
 ---
 `)
 		expect := `
-   3 |  b:
-   4 |   c:
-   5 |    d: e
->  6 |    f: g
+   3 | text2: aaaa
+   4 |  bbbb
+   5 |  cccc
+>  6 |  dddd
              ^
-   7 |    h: i
-   8 | 
-   9 | ---`
+   7 |  eeee
+   8 | text3: ffff
+   9 |  gggg`
 		var p printer.Printer
-		actual := "\n" + p.PrintErrorToken(tokens[12], false)
+		actual := "\n" + p.PrintErrorSource(yml, 1, tokens[12], false)
 		if actual != expect {
 			t.Fatalf("unexpected output: expect:[%s]\n actual:[%s]", expect, actual)
 		}
@@ -115,17 +107,17 @@ a:
 		t.Run("token6", func(t *testing.T) {
 			tokens := lexer.Tokenize(yml)
 			var p printer.Printer
-			t.Logf("\n%s", p.PrintErrorToken(tokens[6], true))
+			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[6], true))
 		})
 		t.Run("token9", func(t *testing.T) {
 			tokens := lexer.Tokenize(yml)
 			var p printer.Printer
-			t.Logf("\n%s", p.PrintErrorToken(tokens[9], true))
+			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[9], true))
 		})
 		t.Run("token12", func(t *testing.T) {
 			tokens := lexer.Tokenize(yml)
 			var p printer.Printer
-			t.Logf("\n%s", p.PrintErrorToken(tokens[12], true))
+			t.Logf("\n%s", p.PrintErrorSource(yml, 1, tokens[12], true))
 		})
 	})
 	t.Run("print error message", func(t *testing.T) {
@@ -182,9 +174,9 @@ text3: hello
    3 |  bbbb
    4 |  cccc'
 >  5 | text2: "ffff
+       ^
    6 |  gggg
    7 |  hhhh"
-       ^
    8 | text3: hello`,
 		},
 		{token: 5,
@@ -213,10 +205,10 @@ text3: hello
 		t.Run(name, func(t *testing.T) {
 			tokens := lexer.Tokenize(yml)
 			var p printer.Printer
-			got := "\n" + p.PrintErrorToken(tokens[tt.token], false)
+			got := "\n" + p.PrintErrorSource(yml, 1, tokens[tt.token], false)
 			want := tt.want
 			if got != want {
-				t.Fatalf("PrintErrorToken() got: %s\n want:%s\n", want, got)
+				t.Fatalf("PrintErrorSource() got: %s\n want: %s\n", got, want)
 			}
 		})
 	}

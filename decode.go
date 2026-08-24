@@ -26,6 +26,9 @@ import (
 
 // Decoder reads and decodes YAML values from an input stream.
 type Decoder struct {
+	// source is the document being decoded, so an error found in it can draw
+	// the lines around itself.
+	source errors.Source
 	// entry is the node that writes the one being decoded: the "key:" of a
 	// mapping entry, or the "-" of a sequence one. Decoding is depth first, so
 	// each step saves it and puts it back, and the field behaves as a stack.
@@ -1992,6 +1995,9 @@ func (d *Decoder) decodeInit(ctx context.Context) error {
 	if _, err := io.Copy(&buf, d.reader); err != nil {
 		return err
 	}
+	// Keep the document: an error found while decoding draws the lines around
+	// itself, and only the text can say what those are.
+	d.source = errors.Source{Text: buf.String(), FirstLine: 1}
 	file, err := d.parse(ctx, buf.Bytes())
 	if err != nil {
 		return err
@@ -2045,15 +2051,16 @@ func (d *Decoder) DecodeContext(ctx context.Context, v interface{}) error {
 	}
 	if d.isInitialized() {
 		if err := d.decode(ctx, rv); err != nil {
-			return err
+			return errors.WithSource(err, d.source)
 		}
+
 		return nil
 	}
 	if err := d.decodeInit(ctx); err != nil {
-		return err
+		return errors.WithSource(err, d.source)
 	}
 	if err := d.decode(ctx, rv); err != nil {
-		return err
+		return errors.WithSource(err, d.source)
 	}
 	return nil
 }

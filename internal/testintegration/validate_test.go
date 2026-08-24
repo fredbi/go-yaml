@@ -130,8 +130,7 @@ roles:
              ^
    5 |   permissions:
    6 |     - hello
-   7 |     - how
-   8 |     `,
+   7 |     - how`,
 			Instance: &struct {
 				Name  string `yaml:"name"`
 				Roles []struct {
