@@ -36,7 +36,7 @@ func Parse(tokens token.Tokens, mode Mode, opts ...Option) (*ast.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := p.parse(newContext())
+	f, err := p.parse(p.newContext())
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +87,25 @@ type parser struct {
 	// of the document and allocate nothing after that.
 	keyStack []mapKeyRef
 	keyIndex map[mapKeyRef]ast.MapKeyNode
+
+	// pathSlab hands out path trie nodes in blocks, so a document of N keys
+	// costs N/pathSlabSize allocations rather than N.
+	pathSlab []ast.PathNode
+}
+
+// pathSlabSize is how many trie steps one allocation covers. A document of N
+// keys then costs N/pathSlabSize allocations rather than N.
+const pathSlabSize = 512
+
+// newPathNode returns the next unused step of the path trie.
+func (p *parser) newPathNode() *ast.PathNode {
+	if len(p.pathSlab) == 0 {
+		p.pathSlab = make([]ast.PathNode, pathSlabSize)
+	}
+	n := &p.pathSlab[0]
+	p.pathSlab = p.pathSlab[1:]
+
+	return n
 }
 
 // mapKeyRef addresses one key of one mapping: base is where that mapping's
@@ -390,7 +409,7 @@ func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error
 		return nil
 	}
 	comment := ast.CommentGroup([]*token.Token{entryTk.LineComment})
-	comment.SetPath(ctx.path)
+	comment.SetPathNode(ctx.path)
 
 	return target.SetComment(comment)
 }
@@ -649,7 +668,7 @@ func (p *parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			// to be made explicitly to keep the attribution identical.
 			last := mapNode.Values[len(mapNode.Values)-1]
 			last.FootComment = p.parseFootComment(ctx, keyTk.Column())
-			last.FootComment.SetPath(last.Key.GetPath())
+			last.FootComment.SetPathNode(last.Key.GetPathNode())
 		}
 	}
 	return mapNode, nil
@@ -749,7 +768,7 @@ func (p *parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 			return key, nil
 		}
 		keyText := p.mapKeyText(scalar)
-		key.SetPath(ctx.withChild(keyText).path)
+		key.SetPathNode(ctx.withChild(p, keyText).path)
 		if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
 			return nil, err
 		}
@@ -769,7 +788,7 @@ func (p *parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 		return nil, errors.ErrSyntax("cannot take map-key node", scalar.GetToken())
 	}
 	keyText := p.mapKeyText(key)
-	key.SetPath(ctx.withChild(keyText).path)
+	key.SetPathNode(ctx.withChild(p, keyText).path)
 	if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
 		return nil, err
 	}
@@ -884,10 +903,10 @@ func (p *parser) newLineCharacterNum(src string) int {
 // collection used as a key is the one case with no path: it is given one here,
 // the same way it was before.
 func (p *parser) valueContext(ctx context, key ast.MapKeyNode) context {
-	if path := key.GetPath(); path != "" {
+	if path := key.GetPathNode(); path != nil {
 		return ctx.withPath(path)
 	}
-	return ctx.withChild(p.mapKeyText(key))
+	return ctx.withChild(p, p.mapKeyText(key))
 }
 
 func (p *parser) mapKeyText(n ast.Node) string {
@@ -1410,7 +1429,7 @@ func (p *parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			break
 		}
 
-		ctx := ctx.withIndex(uint(len(node.Values)))
+		ctx := ctx.withIndex(p, uint(len(node.Values)))
 		value, err := p.parseToken(ctx, ctx.currentToken())
 		if err != nil {
 			return nil, err
@@ -1424,7 +1443,7 @@ func (p *parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
 			return nil, err
 		}
-		seqEntry.SetPath(ctx.path)
+		seqEntry.SetPathNode(ctx.path)
 		node.Entries = append(node.Entries, seqEntry)
 
 		isFirst = false
@@ -1454,7 +1473,7 @@ func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		headComment := p.parseHeadComment(ctx)
 		ctx.goNext() // skip sequence entry token
 
-		ctx := ctx.withIndex(uint(len(seqNode.Values)))
+		ctx := ctx.withIndex(p, uint(len(seqNode.Values)))
 		value, err := p.parseSequenceValue(ctx, seqTk)
 		if err != nil {
 			return nil, err
@@ -1463,7 +1482,7 @@ func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err := setLineComment(ctx, seqEntry, seqTk); err != nil {
 			return nil, err
 		}
-		seqEntry.SetPath(ctx.path)
+		seqEntry.SetPathNode(ctx.path)
 		seqNode.ValueHeadComments = append(seqNode.ValueHeadComments, headComment)
 		seqNode.Values = append(seqNode.Values, value)
 		seqNode.Entries = append(seqNode.Entries, seqEntry)
@@ -1480,7 +1499,7 @@ func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			// treat it as a footer comment for the last element.
 			seqNode.FootComment = p.parseFootComment(ctx, seqTk.Column())
 			if len(seqNode.Values) != 0 {
-				seqNode.FootComment.SetPath(seqNode.Values[len(seqNode.Values)-1].GetPath())
+				seqNode.FootComment.SetPathNode(seqNode.Values[len(seqNode.Values)-1].GetPathNode())
 			}
 		}
 	}

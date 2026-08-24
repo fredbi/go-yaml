@@ -1,9 +1,7 @@
 package parser
 
 import (
-	"strconv"
-	"strings"
-
+	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -17,7 +15,7 @@ import (
 // descent shares.
 type context struct {
 	tokenRef *tokenRef
-	path     string
+	path     *ast.PathNode
 	isFlow   bool
 	// inFlowSequence distinguishes "[a: b]" from "{a: b}". A pair written
 	// inside a flow sequence is an implicit key, which a flow mapping's key is
@@ -33,17 +31,6 @@ type tokenRef struct {
 	tokens []*Token
 	size   int
 	idx    int
-}
-
-// pathSpecialChars are the characters a YAMLPath reads as syntax. A key
-// containing one of them is quoted so the path still addresses that one key.
-const pathSpecialChars = "$*.[]"
-
-func normalizePath(path string) string {
-	if strings.ContainsAny(path, pathSpecialChars) {
-		return "'" + path + "'"
-	}
-	return path
 }
 
 func (c context) currentToken() *Token {
@@ -88,8 +75,10 @@ func (c context) withGroup(g *TokenGroup) context {
 	return c
 }
 
-func (c context) withChild(path string) context {
-	c.path = c.path + "." + normalizePath(path)
+func (c context) withChild(p *parser, key string) context {
+	n := p.newPathNode()
+	n.Key(c.path, key)
+	c.path = n
 
 	return c
 }
@@ -97,14 +86,16 @@ func (c context) withChild(path string) context {
 // withPath returns a context at path, which the caller has already built.
 // parseMapKey stores a key's path on the key node; the entry's value hangs
 // under the same path, so reusing it saves building the same string twice.
-func (c context) withPath(path string) context {
+func (c context) withPath(path *ast.PathNode) context {
 	c.path = path
 
 	return c
 }
 
-func (c context) withIndex(idx uint) context {
-	c.path = c.path + "[" + strconv.FormatUint(uint64(idx), 10) + "]"
+func (c context) withIndex(p *parser, idx uint) context {
+	n := p.newPathNode()
+	n.Index(c.path, idx)
+	c.path = n
 
 	return c
 }
@@ -132,8 +123,11 @@ func (c context) withFlowSequence() context {
 	return c
 }
 
-func newContext() context {
-	return context{path: "$"}
+func (p *parser) newContext() context {
+	root := p.newPathNode()
+	root.Literal("$")
+
+	return context{path: root}
 }
 
 func (c context) goNext() {

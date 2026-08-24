@@ -189,6 +189,10 @@ type Node interface {
 	GetPath() string
 	// SetPath set YAMLPath for the current node
 	SetPath(string)
+	// GetPathNode returns the step of the path trie this node ends
+	GetPathNode() *PathNode
+	// SetPathNode records the step of the path trie this node ends
+	SetPathNode(*PathNode)
 	// MarshalYAML
 	MarshalYAML() ([]byte, error)
 	// already read length
@@ -214,7 +218,7 @@ type ScalarNode interface {
 }
 
 type BaseNode struct {
-	Path    string
+	path    *PathNode
 	Comment *CommentGroupNode
 	read    int
 }
@@ -240,7 +244,7 @@ func (n *BaseNode) GetPath() string {
 	if n == nil {
 		return ""
 	}
-	return n.Path
+	return n.path.String()
 }
 
 // SetPath set YAMLPath for the current node.
@@ -248,7 +252,25 @@ func (n *BaseNode) SetPath(path string) {
 	if n == nil {
 		return
 	}
-	n.Path = path
+	p := &PathNode{}
+	p.Literal(path)
+	n.path = p
+}
+
+// GetPathNode returns the step of the path trie this node ends.
+func (n *BaseNode) GetPathNode() *PathNode {
+	if n == nil {
+		return nil
+	}
+	return n.path
+}
+
+// SetPathNode records the step of the path trie this node ends.
+func (n *BaseNode) SetPathNode(p *PathNode) {
+	if n == nil {
+		return
+	}
+	n.path = p
 }
 
 // GetComment returns comment token instance
