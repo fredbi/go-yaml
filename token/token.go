@@ -577,11 +577,27 @@ func isNumber(value string) bool {
 	return num != nil
 }
 
-func toNumber(value string) (*NumberValue, error) {
-	if len(value) == 0 {
-		return nil, nil
+// mayBeNumber reports whether value can start a number.
+//
+// Every form toNumber accepts -- decimal, 0x, 0o, 0b, a float written with a
+// leading '.', and any of them signed -- starts with a digit, a '+', a '-' or
+// a '.'. Any other first byte skips the strconv calls below, each of which
+// allocates a *strconv.NumError when it fails. Most scalars in a document are
+// not numbers, so most of those calls were made only to be thrown away.
+func mayBeNumber(value string) bool {
+	if value == "" {
+		return false
 	}
-	if strings.HasPrefix(value, "_") {
+	switch c := value[0]; c {
+	case '+', '-', '.':
+		return true
+	default:
+		return c >= '0' && c <= '9'
+	}
+}
+
+func toNumber(value string) (*NumberValue, error) {
+	if !mayBeNumber(value) {
 		return nil, nil
 	}
 	dotCount := strings.Count(value, ".")
