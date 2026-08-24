@@ -63,6 +63,10 @@ type Scanner struct {
 	flowIndent  int
 	indentState IndentState
 	savedPos    *token.Position
+	// posSlab hands out the position every token carries. posBlock is how many
+	// one allocation covers, sized from the source.
+	posSlab  []token.Position
+	posBlock int
 	// initErr holds what is wrong with the source itself, found before any
 	// token was read and reported by the first Scan.
 	initErr error
@@ -248,14 +252,33 @@ func printable(r rune) bool {
 	}
 }
 
+// posBlock is how many positions one allocation covers, and the bounds the
+// count taken from the source is held to.
+const (
+	minPosBlock = 16
+	maxPosBlock = 512
+)
+
+// pos returns the position of the cursor.
+//
+// Every token carries one, and they come from blocks rather than one allocation
+// each: a document of N tokens costs N/posBlock allocations. A block is never
+// reused -- Init starts a fresh one -- so positions handed to a caller stay
+// valid however often the scanner is reinitialised.
 func (s *Scanner) pos() *token.Position {
-	return &token.Position{
-		Line:        s.line,
-		Column:      s.column,
-		Offset:      s.offset,
-		IndentNum:   s.indentNum,
-		IndentLevel: s.indentLevel,
+	if len(s.posSlab) == 0 {
+		s.posSlab = make([]token.Position, s.posBlock)
 	}
+	pos := &s.posSlab[0]
+	s.posSlab = s.posSlab[1:]
+
+	pos.Line = s.line
+	pos.Column = s.column
+	pos.Offset = s.offset
+	pos.IndentNum = s.indentNum
+	pos.IndentLevel = s.indentLevel
+
+	return pos
 }
 
 func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
@@ -2290,6 +2313,11 @@ func (s *Scanner) Init(text string) {
 	s.line = 1
 	s.column = 1
 	s.offset = 0
+	// A token takes a dozen bytes of source on average, and carries one
+	// position. Start a fresh block: the one in hand may still be reachable
+	// through tokens an earlier Init produced.
+	s.posSlab = nil
+	s.posBlock = min(max(len(src)/12, minPosBlock), maxPosBlock)
 	s.isFirstCharAtLine = true
 	s.clearState()
 }
