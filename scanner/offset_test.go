@@ -22,17 +22,16 @@ func sourceText(origin string) string {
 
 // at returns the source from offset onwards.
 //
-// Token.Position.Offset is a 0-based byte index. It still addresses the source
-// with every byte order mark removed rather than the source as handed in, which
-// is the remaining half of the defect: Init rewrites the text before scanning
-// it. This is the one place the test encodes what an Offset means.
+// Token.Position.Offset is a 0-based byte index into the source as it was
+// handed in, byte order marks included: the scanner steps over a mark rather
+// than deleting it. This is the one place the test encodes what an Offset
+// means.
 func at(src string, offset int) string {
-	stripped := strings.ReplaceAll(src, bom, "")
-	if offset < 0 || offset > len(stripped) {
+	if offset < 0 || offset > len(src) {
 		return ""
 	}
 
-	return stripped[offset:]
+	return src[offset:]
 }
 
 // offsetMissLedger records how many tokens of each type carry an Offset that
@@ -43,18 +42,14 @@ func at(src string, offset int) string {
 // the start of its indentation. A consumer drawing a caret under an error puts
 // it in the wrong column. 1,031 of 3,489 tokens are affected.
 //
-// Offset counting bytes rather than runes was the other half of the defect and
-// is fixed; this half is not. The counts barely moved when the unit changed,
-// which is the point: the suite is almost entirely ASCII, so the two defects
-// were always independent.
+// Offset counting bytes rather than runes was one half of the defect, and a
+// byte order mark shifting every offset after it was another. Both are fixed;
+// this one is not. The counts barely moved when the unit changed, which is the
+// point: the suite is almost entirely ASCII, so the defects were independent.
 //
-// Two things have to change to empty this ledger, both in the scan loop and
-// both recorded in ANALYSIS-go-openapi.md §6 as roadmap phase O:
-//
-//   - a token's position has to be taken where its own text starts rather than
-//     where Origin does;
-//   - Init has to skip a byte order mark and count its bytes rather than
-//     rewriting the source to drop it, which shifts every offset after one.
+// One thing has to change to empty this ledger, recorded in
+// ANALYSIS-go-openapi.md as roadmap phase O: a token's position has to be taken
+// where its own text starts rather than where Origin does.
 //
 // The ledger is a ratchet in both directions. A type that starts missing more
 // fails as a regression; one that starts missing fewer fails too, and the fix

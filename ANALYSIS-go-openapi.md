@@ -252,7 +252,7 @@ memory ceiling on document size.
 Note it is **not a speed problem**: the conversion is ~1% of runtime. Fix it for memory and
 correctness, not throughput.
 
-### Offsets: what the byte rewrite fixed
+### Offsets: what is fixed
 
 The scanner holds the source as a string and decodes UTF-8 at the cursor.
 `token.Position.Offset` is a **0-based byte index**, so `src[Offset:]` is the token. `Line` and
@@ -272,6 +272,16 @@ Three places had been mixing the units, and each was a defect rather than a tran
 Token columns are unchanged: they were compared token for token against the previous scanner on
 ASCII and on multibyte block scalars.
 
+**A byte order mark no longer shifts the offsets after it.** `Init` used to scan
+`strings.ReplaceAll(text, byteOrderMark, "")`, so a document carrying a mark was tokenized against a text
+the caller never wrote and every offset after it was three bytes short. The scan steps over a mark and
+counts its bytes instead, and `Context.previousChar` steps back over one, so nothing that asks what came
+before sees a character that is not content. `TestOffsetsCountAByteOrderMark` pins the offsets; the YAML
+Test Suite carries no mark at all, so those cases are its own.
+
+This matters more than it did: a token's `Value` and `Origin` are now slices of the source, so rewriting
+the source also copied the whole document and pointed every token into the copy.
+
 ### ⏳ Offsets: what is still wrong
 
 **`Offset` addresses the start of `Origin`, not the token.** `Origin` holds the whitespace written
@@ -283,12 +293,6 @@ type to its count and ratchets both ways, so the fix is recorded by lowering the
 
 The count barely moved when offsets changed from runes to bytes (1,030 to 1,031), which is the
 evidence that the two defects were always independent. The suite is almost entirely ASCII.
-
-**A byte order mark shifts every offset after it.** `Init` does
-`strings.ReplaceAll(text, byteOrderMark, "")` and scans the rewrite, so positions address a source
-the caller never handed in: three bytes short per mark that stands before them. The scan should
-skip a mark and count its bytes instead of deleting it. Nothing in the YAML Test Suite exercises
-this -- 402 cases, 0 marks -- so a fix needs its own cases.
 
 **A byte order mark is rejected where a node may go, and that must survive any further change.**
 YAML 1.2 excludes U+FEFF from `nb-char` (`nb-char ::= c-printable - b-char - c-byte-order-mark`),
@@ -462,7 +466,7 @@ Ordering is driven by dependency, not by value:
 | **S** | Reader-fed byte scanner; grouping as an iterator pipeline; per-document parse. | The streaming goal. Needs P to be worth anything. |
 | **Y** | Consumer-side: the JSON-projecting lexer becomes a streaming projection. | Needs S. |
 | **B** | The defect series: block spans, BOM, the 12 conformance items. | Independent, upstreamable individually. |
-| **O** | Offsets (§6). ~~Count bytes~~ **done**. Remaining: address the token rather than its leading whitespace (1,031 of 3,489 tokens, `offsetMissLedger`); skip a byte order mark instead of rewriting the source to drop it; settle whether the mark check is complete. | Rides with S — the scan loop is where all three live. |
+| **O** | Offsets (§6). ~~Count bytes~~ **done**. ~~Skip a byte order mark rather than rewriting the source~~ **done**. Remaining: address the token rather than its leading whitespace (1,031 of 3,489 tokens, `offsetMissLedger`); settle whether the mark check is complete. | Rides with S — the scan loop is where both live. |
 | **M** | Allocation and memory churn (§4): zero-copy tokens, positions by value. | After S — it is where the residual 2× lives. |
 | **(SWAR)** | Byte-class scanning kernels. | Only if the profile still points there. Far off; see §8b. |
 

@@ -368,11 +368,17 @@ func (c *Context) source(s, e int) string {
 	return c.src[s:e]
 }
 
+// previousChar returns the character before the cursor, stepping back over a
+// byte order mark: the scanner steps over one rather than reading it, so
+// nothing that asks what came before should see it.
 func (c *Context) previousChar() rune {
-	if c.idx > 0 {
-		r, _ := utf8.DecodeLastRuneInString(c.src[:c.idx])
-
-		return r
+	end := c.idx
+	for end > 0 {
+		r, w := utf8.DecodeLastRuneInString(c.src[:end])
+		if r != byteOrderMark {
+			return r
+		}
+		end -= w
 	}
 
 	return rune(0)

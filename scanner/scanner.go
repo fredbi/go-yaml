@@ -1078,11 +1078,11 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	// while a plain scalar was being buffered, so a '#' pressed up against
 	// anything that had already been emitted -- a closing quote, a comma, a
 	// bracket -- started a comment where YAML has none.
-	if ctx.idx > 0 {
-		c := ctx.previousChar()
-		if c != ' ' && c != '\t' && !s.isNewLineChar(c) {
-			return false
-		}
+	// previousChar steps back over a byte order mark and returns 0 where
+	// nothing stands before the cursor, so a comment opening the stream after
+	// one is a comment that starts a line.
+	if c := ctx.previousChar(); c != rune(0) && c != ' ' && c != '\t' && !s.isNewLineChar(c) {
+		return false
 	}
 
 	s.addBufferedTokenIfExists(ctx)
@@ -2120,6 +2120,17 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 func (s *Scanner) scan(ctx *Context) error {
 	for ctx.next() {
 		c := ctx.currentChar()
+		if c == byteOrderMark {
+			// validateByteOrderMarks has already refused a mark anywhere a node
+			// may go, so the one here opens a document and is not content. Step
+			// over it, counting its bytes: an offset addresses the source as it
+			// was handed in, and deleting the mark instead moved every offset
+			// after it.
+			s.progressOnly(ctx, 1)
+			ctx.resetBuffer()
+
+			continue
+		}
 		// First, change the IndentState.
 		// If the target character is the first character in a line, IndentState is Up/Down/Equal state.
 		// The second and subsequent letters are Keep.
@@ -2325,7 +2336,11 @@ func (s *Scanner) scan(ctx *Context) error {
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
 	s.initErr = validateStream(text)
-	src := strings.ReplaceAll(text, string(byteOrderMark), "")
+	// The source is scanned as it was handed in. A byte order mark is stepped
+	// over where one stands, so every offset addresses the text the caller
+	// wrote rather than a rewrite of it -- and a token, which points into the
+	// source rather than copying it, points into that same text.
+	src := text
 	s.source = src
 	s.sourcePos = 0
 	s.sourceSize = len(src)
