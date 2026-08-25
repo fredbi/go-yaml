@@ -1968,7 +1968,7 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		if v != nil || (doc.Body != nil && doc.Body.Type() == ast.NullType) {
+		if v != nil || (doc.Body != nil && doc.Body.Type() == ast.NullType) || isEmptyDocument(doc) {
 			normalizedFile.Docs = append(normalizedFile.Docs, doc)
 			cm := CommentMap{}
 			maps.Copy(cm, d.toCommentMap)
@@ -2006,6 +2006,27 @@ func (d *Decoder) decodeInit(ctx context.Context) error {
 	return nil
 }
 
+// isEmptyDocument reports whether doc holds no value and is a document all the
+// same.
+//
+// "---" opens a document and "..." closes one, so a document written with
+// either marker exists whatever stands between them: "---\n...\n" holds the
+// empty node and decodes to null. A run of comments carries no marker and is
+// no document at all -- l-yaml-stream puts those in a document prefix -- so
+// "# c\n" decodes to nothing.
+func isEmptyDocument(doc *ast.DocumentNode) bool {
+	if doc.Start == nil && doc.End == nil {
+		return false
+	}
+	if doc.Body == nil {
+		return true
+	}
+
+	_, comments := doc.Body.(*ast.CommentGroupNode)
+
+	return comments
+}
+
 func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
 	d.decodeDepth = 0
 	d.anchorValueMap = make(map[string]reflect.Value)
@@ -2019,7 +2040,20 @@ func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
 	if len(d.parsedFile.Docs) <= d.streamIndex {
 		return io.EOF
 	}
-	body := d.parsedFile.Docs[d.streamIndex].Body
+	doc := d.parsedFile.Docs[d.streamIndex]
+	body := doc.Body
+	if isEmptyDocument(doc) {
+		// A document written with "---" or "..." and holding nothing holds the
+		// empty node, which decodes to null. Leaving the stream index where it
+		// was returned the document before it again and never reached the ones
+		// after it.
+		if dst := v.Elem(); dst.IsValid() {
+			dst.Set(reflect.Zero(dst.Type()))
+		}
+		d.streamIndex++
+
+		return nil
+	}
 	if body == nil {
 		return nil
 	}
