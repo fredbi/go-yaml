@@ -98,7 +98,10 @@ type Parser struct {
 	// entries holds the entries of every mapping open at this point in the
 	// descent, innermost run last. parseMap takes its run off the end once the
 	// mapping is built.
-	entries               []*ast.MappingValueNode
+	entries []*ast.MappingValueNode
+	// lineComments holds the comment closing a token's line, against that
+	// token. It is nil where the mode did not ask for comments.
+	lineComments          map[*Token]*token.Token
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
 	omitNodePaths         bool
@@ -131,7 +134,7 @@ func (p *Parser) newTokenRef(tokens []*Token) *tokenRef {
 	ref := &p.refSlab[0]
 	p.refSlab = p.refSlab[1:]
 
-	ref.tokens, ref.size, ref.idx = tokens, len(tokens), 0
+	ref.tokens, ref.idx = tokens, 0
 
 	return ref
 }
@@ -214,15 +217,16 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 		raw.add(tk)
 	}
 
-	tks, err := createGroupedTokens(&raw)
+	tks, lineComments, err := createGroupedTokens(&raw)
 	if err != nil {
 		return nil, err
 	}
 
 	p := &Parser{
-		tokens:   tks,
-		raw:      raw,
-		keyIndex: make(map[mapKeyRef]ast.MapKeyNode),
+		tokens:       tks,
+		raw:          raw,
+		lineComments: lineComments,
+		keyIndex:     make(map[mapKeyRef]ast.MapKeyNode),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -464,7 +468,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 // reached a sequence entry node that nothing renders, or -- in a mapping -- the
 // entry after the comma, one place further on than it was written.
 func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error {
-	if entryTk == nil || entryTk.LineComment == nil || len(values) == 0 {
+	if entryTk == nil || ctx.lineComment(entryTk) == nil || len(values) == 0 {
 		return nil
 	}
 
@@ -476,7 +480,7 @@ func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error
 	if target.GetComment() != nil {
 		return nil
 	}
-	comment := ast.CommentGroup([]*token.Token{entryTk.LineComment})
+	comment := ast.CommentGroup([]*token.Token{ctx.lineComment(entryTk)})
 	comment.SetPathNode(ctx.path)
 
 	return target.SetComment(comment)

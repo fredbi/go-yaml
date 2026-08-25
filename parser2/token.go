@@ -63,9 +63,8 @@ func (t TokenGroupType) String() string {
 }
 
 type Token struct {
-	Token       *token.Token
-	Group       *TokenGroup
-	LineComment *token.Token
+	Token *token.Token
+	Group *TokenGroup
 }
 
 func (t *Token) RawToken() *token.Token {
@@ -221,8 +220,20 @@ type grouper struct {
 	writeB       bool
 	// nested counts the passes running inside another pass.
 	nested int
+	// lineComments holds the comment written at the end of a token's line,
+	// against the token it belongs to. It stays nil where the mode did not ask
+	// for comments, and then no token has one.
+	lineComments map[*Token]*token.Token
 	// block is how many of each one allocation covers.
 	block int
+}
+
+// setLineComment records that comment closes the line tk stands on.
+func (g *grouper) setLineComment(tk *Token, comment *token.Token) {
+	if g.lineComments == nil {
+		g.lineComments = make(map[*Token]*token.Token)
+	}
+	g.lineComments[tk] = comment
 }
 
 // out returns an empty slice with room for n tokens, taken from whichever
@@ -345,41 +356,41 @@ func (g *grouper) list2(a, b *Token) []*Token {
 // createGroupedTokens reads the tokens of a stream into the groups the parser
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
-func createGroupedTokens(raw *rawTokens) ([]*Token, error) {
+func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	var err error
 	g := newGrouper(raw.n)
 	tks := g.wrap(raw)
 	tks = g.createLineCommentTokenGroups(tks)
 	tks, err = g.createLiteralAndFoldedTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks, err = g.createAnchorAndAliasTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks, err = g.createScalarTagTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks, err = g.createAnchorWithScalarTagTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks, err = g.createMapKeyTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks = g.createMapKeyValueTokenGroups(tks)
 	tks, err = g.createDirectiveTokenGroups(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tks, err = g.createDocumentTokens(tks)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return tks, nil
+	return tks, g.lineComments, nil
 }
 
 // newTokens wraps every raw token in the [Token] the grouping passes work on.
@@ -412,7 +423,7 @@ func (g *grouper) createLineCommentTokenGroups(tokens []*Token) []*Token {
 		switch tk.Type() {
 		case token.CommentType:
 			if i > 0 && tokens[i-1].Line() == tk.Line() {
-				tokens[i-1].LineComment = tk.RawToken()
+				g.setLineComment(tokens[i-1], tk.RawToken())
 			} else {
 				ret = append(ret, tk)
 			}

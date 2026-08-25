@@ -27,6 +27,10 @@ type context struct {
 	// arena hands out the nodes the descent builds. It is shared by every
 	// context of one parse, so a copy carries the same one.
 	arena *ast.Arena
+	// lineComments holds the comment closing a token's line, against that
+	// token. It is nil where the mode did not ask for comments, and reading a
+	// nil map costs nothing.
+	lineComments map[*Token]*token.Token
 	// keyBase is where the keys of the mapping being parsed start in the
 	// parser's key stack. parseMap and parseFlowMap set it; every entry of
 	// that mapping is parsed under it, and a nested mapping raises it.
@@ -35,12 +39,11 @@ type context struct {
 
 type tokenRef struct {
 	tokens []*Token
-	size   int
 	idx    int
 }
 
 func (c context) currentToken() *Token {
-	if c.tokenRef.idx >= c.tokenRef.size {
+	if c.tokenRef.idx >= len(c.tokenRef.tokens) {
 		return nil
 	}
 	return c.tokenRef.tokens[c.tokenRef.idx]
@@ -51,14 +54,14 @@ func (c context) isComment() bool {
 }
 
 func (c context) nextToken() *Token {
-	if c.tokenRef.idx+1 >= c.tokenRef.size {
+	if c.tokenRef.idx+1 >= len(c.tokenRef.tokens) {
 		return nil
 	}
 	return c.tokenRef.tokens[c.tokenRef.idx+1]
 }
 
 func (c context) nextNotCommentToken() *Token {
-	for i := c.tokenRef.idx + 1; i < c.tokenRef.size; i++ {
+	for i := c.tokenRef.idx + 1; i < len(c.tokenRef.tokens); i++ {
 		tk := c.tokenRef.tokens[i]
 		if tk.Type() == token.CommentType {
 			continue
@@ -133,7 +136,7 @@ func (c context) withFlowSequence() context {
 }
 
 func (p *Parser) newContext() context {
-	ctx := context{arena: ast.NewArena(len(p.tokens))}
+	ctx := context{arena: ast.NewArena(len(p.tokens)), lineComments: p.lineComments}
 
 	root := p.newPathNode()
 	if root == nil {
@@ -145,17 +148,23 @@ func (p *Parser) newContext() context {
 	return ctx
 }
 
+// lineComment returns the comment closing the line tk stands on, or nil where
+// there is none. A stream read without ParseComments has none at all.
+func (c context) lineComment(tk *Token) *token.Token {
+	return c.lineComments[tk]
+}
+
 func (c context) goNext() {
 	ref := c.tokenRef
-	if ref.size <= ref.idx+1 {
-		ref.idx = ref.size
+	if len(ref.tokens) <= ref.idx+1 {
+		ref.idx = len(ref.tokens)
 	} else {
 		ref.idx++
 	}
 }
 
 func (c context) next() bool {
-	return c.tokenRef.idx < c.tokenRef.size
+	return c.tokenRef.idx < len(c.tokenRef.tokens)
 }
 
 func (c context) insertNullToken(tk *Token) *Token {
@@ -190,22 +199,20 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 func (c context) insertToken(tk *Token) {
 	ref := c.tokenRef
 	idx := ref.idx
-	if ref.size < idx {
+	if len(ref.tokens) < idx {
 		return
 	}
-	if ref.size == idx {
+	if len(ref.tokens) == idx {
 		ref.tokens = append(ref.tokens, tk)
-		ref.size = len(ref.tokens)
+
 		return
 	}
 
 	ref.tokens = append(ref.tokens[:idx+1], ref.tokens[idx:]...)
 	ref.tokens[idx] = tk
-	ref.size = len(ref.tokens)
 }
 
 func (c context) addToken(tk *Token) {
 	ref := c.tokenRef
 	ref.tokens = append(ref.tokens, tk)
-	ref.size = len(ref.tokens)
 }
