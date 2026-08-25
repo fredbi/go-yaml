@@ -1503,7 +1503,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
 			node.ValueHeadComments[len(node.Values)-1] = headComment
 		}
-		seqEntry := ast.SequenceEntry(entryTk.RawToken(), value, headComment)
+		seqEntry := ctx.arena.SequenceEntry(entryTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
 			return nil, err
 		}
@@ -1542,7 +1542,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		seqEntry := ast.SequenceEntry(seqTk.RawToken(), value, headComment)
+		seqEntry := ctx.arena.SequenceEntry(seqTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, seqTk); err != nil {
 			return nil, err
 		}

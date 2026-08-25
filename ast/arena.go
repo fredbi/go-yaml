@@ -57,6 +57,7 @@ type Arena struct {
 	mappingValues block[MappingValueNode]
 	mappings      block[MappingNode]
 	sequences     block[SequenceNode]
+	sequenceEntry block[SequenceEntryNode]
 
 	size int
 }
@@ -99,6 +100,15 @@ func (a *Arena) Integer(tk *token.Token) *IntegerNode {
 func (a *Arena) Float(tk *token.Token) *FloatNode {
 	n := a.floats.next(a.blockSize())
 	n.Token = tk
+
+	return n
+}
+
+// SequenceEntry returns a [SequenceEntryNode] for start, as [SequenceEntry]
+// does.
+func (a *Arena) SequenceEntry(start *token.Token, value Node, headComment *CommentGroupNode) *SequenceEntryNode {
+	n := a.sequenceEntry.next(a.blockSize())
+	n.Start, n.Value, n.HeadComment = start, value, headComment
 
 	return n
 }
