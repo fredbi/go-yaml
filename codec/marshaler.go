@@ -13,76 +13,80 @@ import (
 
 // The interfaces a type implements to encode itself.
 //
-// A value is written by whichever of these its type satisfies. Marshaler hands
-// back a value to be encoded in its place; BytesMarshaler hands back the YAML
-// text to write as it stands. The Context forms take a context.Context and are
-// used where the encode was started with one.
+// [Marshaler] writes the YAML text of the value, as [encoding/json.Marshaler]
+// writes its JSON. [GoYAMLMarshaler] hands back another Go value to encode in
+// its place, which is what github.com/go-yaml/yaml asks for and is kept so a
+// type written for that library encodes here unchanged.
 //
-// An error returned by MarshalYAML stops the encoding and is returned to the
-// caller.
-
-// BytesMarshaler returns the YAML text to write in place of the value.
-type BytesMarshaler interface {
-	MarshalYAML() ([]byte, error)
-}
-
-// BytesMarshalerContext is [BytesMarshaler] with a context.
-type BytesMarshalerContext interface {
-	MarshalYAML(context.Context) ([]byte, error)
-}
-
-// Marshaler returns the value to encode in place of this one.
+// A type satisfying more than one is written by the first the encoder looks
+// for, so implement the one that says what the type means. The Context forms
+// take a context.Context and are used where the encode was started with one.
 //
-// The signature matches github.com/go-yaml/yaml, so a type written for that
-// library encodes here unchanged.
+// An error returned by MarshalYAML stops the encoding and reaches the caller.
+
+// Marshaler returns the YAML text to write for the value.
 type Marshaler interface {
-	MarshalYAML() (interface{}, error)
+	MarshalYAML() ([]byte, error)
 }
 
 // ContextMarshaler is [Marshaler] with a context.
 type ContextMarshaler interface {
+	MarshalYAML(context.Context) ([]byte, error)
+}
+
+// GoYAMLMarshaler returns another Go value to encode in place of this one.
+//
+// This is github.com/go-yaml/yaml's shape. Prefer [Marshaler], which writes the
+// text and needs no second pass over what it returns.
+type GoYAMLMarshaler interface {
+	MarshalYAML() (interface{}, error)
+}
+
+// ContextGoYAMLMarshaler is [GoYAMLMarshaler] with a context.
+type ContextGoYAMLMarshaler interface {
 	MarshalYAML(context.Context) (interface{}, error)
 }
 
 // The interfaces a type implements to decode itself.
 //
-// A value is read by whichever of these its type satisfies. BytesUnmarshaler
-// is handed the YAML text as written; Unmarshaler is handed a function to
-// decode into whatever it likes; NodeUnmarshaler is handed the [ast.Node],
-// which is what a type that wants the comments or the positions needs.
+// [Unmarshaler] is handed the YAML text of the value, as
+// [encoding/json.Unmarshaler] is handed its JSON. [GoYAMLUnmarshaler] is handed
+// a function that decodes into whatever it is given, which is what
+// github.com/go-yaml/yaml asks for. [NodeUnmarshaler] is handed the
+// [ast.Node], which carries what the text does not -- the comments, and where
+// each token stood.
 
-// BytesUnmarshaler is handed the YAML text of the value.
-type BytesUnmarshaler interface {
-	UnmarshalYAML([]byte) error
-}
-
-// BytesUnmarshalerContext is [BytesUnmarshaler] with a context.
-type BytesUnmarshalerContext interface {
-	UnmarshalYAML(context.Context, []byte) error
-}
-
-// Unmarshaler is handed a function that decodes the value into what it is
-// given.
-//
-// The signature matches github.com/go-yaml/yaml, so a type written for that
-// library decodes here unchanged.
+// Unmarshaler is handed the YAML text of the value.
 type Unmarshaler interface {
-	UnmarshalYAML(func(interface{}) error) error
+	UnmarshalYAML([]byte) error
 }
 
 // ContextUnmarshaler is [Unmarshaler] with a context.
 type ContextUnmarshaler interface {
+	UnmarshalYAML(context.Context, []byte) error
+}
+
+// GoYAMLUnmarshaler is handed a function that decodes the value into whatever
+// it is given.
+//
+// This is github.com/go-yaml/yaml's shape. Prefer [Unmarshaler], which is handed
+// the text directly.
+type GoYAMLUnmarshaler interface {
+	UnmarshalYAML(func(interface{}) error) error
+}
+
+// ContextGoYAMLUnmarshaler is [GoYAMLUnmarshaler] with a context.
+type ContextGoYAMLUnmarshaler interface {
 	UnmarshalYAML(context.Context, func(interface{}) error) error
 }
 
-// NodeUnmarshaler is handed the node the value was read from, which carries
-// what the text does not: the comments, and where each token stood.
+// NodeUnmarshaler is handed the node the value was read from.
 type NodeUnmarshaler interface {
 	UnmarshalYAML(ast.Node) error
 }
 
-// NodeUnmarshalerContext is [NodeUnmarshaler] with a context.
-type NodeUnmarshalerContext interface {
+// ContextNodeUnmarshaler is [NodeUnmarshaler] with a context.
+type ContextNodeUnmarshaler interface {
 	UnmarshalYAML(context.Context, ast.Node) error
 }
 

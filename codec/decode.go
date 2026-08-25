@@ -754,12 +754,12 @@ func (d *Decoder) canDecodeByUnmarshaler(dst reflect.Value) bool {
 	}
 	iface := ptrValue.Interface()
 	switch iface.(type) {
-	case BytesUnmarshalerContext,
-		BytesUnmarshaler,
-		ContextUnmarshaler,
+	case ContextUnmarshaler,
 		Unmarshaler,
+		ContextGoYAMLUnmarshaler,
+		GoYAMLUnmarshaler,
 		NodeUnmarshaler,
-		NodeUnmarshalerContext,
+		ContextNodeUnmarshaler,
 		*time.Time,
 		*time.Duration,
 		encoding.TextUnmarshaler:
@@ -784,7 +784,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 	}
 	iface := ptrValue.Interface()
 
-	if unmarshaler, ok := iface.(BytesUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextUnmarshaler); ok {
 		b, err := d.unmarshalableDocument(src)
 		if err != nil {
 			return err
@@ -795,7 +795,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(BytesUnmarshaler); ok {
+	if unmarshaler, ok := iface.(Unmarshaler); ok {
 		b, err := d.unmarshalableDocument(src)
 		if err != nil {
 			return err
@@ -806,7 +806,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(ContextUnmarshaler); ok {
+	if unmarshaler, ok := iface.(ContextGoYAMLUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {
@@ -822,7 +822,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(Unmarshaler); ok {
+	if unmarshaler, ok := iface.(GoYAMLUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {
@@ -846,7 +846,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(NodeUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextNodeUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, src); err != nil {
 			return err
 		}
@@ -890,7 +890,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		}
 	}
 
-	return errors.New("does not implemented Unmarshaler")
+	return errors.New("does not implemented GoYAMLUnmarshaler")
 }
 
 var (

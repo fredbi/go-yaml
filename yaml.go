@@ -26,16 +26,16 @@ import (
 
 // The interfaces a type implements to encode or decode itself.
 type (
-	BytesMarshaler          = codec.BytesMarshaler
-	BytesMarshalerContext   = codec.BytesMarshalerContext
-	Marshaler               = codec.Marshaler
-	ContextMarshaler        = codec.ContextMarshaler
-	BytesUnmarshaler        = codec.BytesUnmarshaler
-	BytesUnmarshalerContext = codec.BytesUnmarshalerContext
-	Unmarshaler             = codec.Unmarshaler
-	ContextUnmarshaler      = codec.ContextUnmarshaler
-	NodeUnmarshaler         = codec.NodeUnmarshaler
-	NodeUnmarshalerContext  = codec.NodeUnmarshalerContext
+	Marshaler                = codec.Marshaler
+	ContextMarshaler         = codec.ContextMarshaler
+	GoYAMLMarshaler          = codec.GoYAMLMarshaler
+	ContextGoYAMLMarshaler   = codec.ContextGoYAMLMarshaler
+	Unmarshaler              = codec.Unmarshaler
+	ContextUnmarshaler       = codec.ContextUnmarshaler
+	GoYAMLUnmarshaler        = codec.GoYAMLUnmarshaler
+	ContextGoYAMLUnmarshaler = codec.ContextGoYAMLUnmarshaler
+	NodeUnmarshaler          = codec.NodeUnmarshaler
+	ContextNodeUnmarshaler   = codec.ContextNodeUnmarshaler
 )
 
 // The types a caller names to hold a document or to steer a conversion.

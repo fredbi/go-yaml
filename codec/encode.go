@@ -342,13 +342,13 @@ func (e *Encoder) canEncodeByMarshaler(v reflect.Value) bool {
 	}
 	iface := v.Interface()
 	switch iface.(type) {
-	case BytesMarshalerContext:
-		return true
-	case BytesMarshaler:
-		return true
 	case ContextMarshaler:
 		return true
 	case Marshaler:
+		return true
+	case ContextGoYAMLMarshaler:
+		return true
+	case GoYAMLMarshaler:
 		return true
 	case time.Time, *time.Time:
 		return true
@@ -377,7 +377,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(BytesMarshalerContext); ok {
+	if marshaler, ok := iface.(ContextMarshaler); ok {
 		doc, err := marshaler.MarshalYAML(ctx)
 		if err != nil {
 			return nil, err
@@ -389,7 +389,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(BytesMarshaler); ok {
+	if marshaler, ok := iface.(Marshaler); ok {
 		doc, err := marshaler.MarshalYAML()
 		if err != nil {
 			return nil, err
@@ -401,7 +401,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(ContextMarshaler); ok {
+	if marshaler, ok := iface.(ContextGoYAMLMarshaler); ok {
 		marshalV, err := marshaler.MarshalYAML(ctx)
 		if err != nil {
 			return nil, err
@@ -409,7 +409,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return e.encodeValue(ctx, reflect.ValueOf(marshalV), column)
 	}
 
-	if marshaler, ok := iface.(Marshaler); ok {
+	if marshaler, ok := iface.(GoYAMLMarshaler); ok {
 		marshalV, err := marshaler.MarshalYAML()
 		if err != nil {
 			return nil, err
@@ -456,7 +456,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		}
 	}
 
-	return nil, errors.New("does not implemented Marshaler")
+	return nil, errors.New("does not implemented GoYAMLMarshaler")
 }
 
 func (e *Encoder) encodeValue(ctx context.Context, v reflect.Value, column int) (ast.Node, error) {

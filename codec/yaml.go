@@ -187,10 +187,10 @@ func FromJSON(bytes []byte) ([]byte, error) {
 	return out, nil
 }
 
-// RawMessage is a raw encoded YAML value. It implements [BytesMarshaler] and
-// [BytesUnmarshaler] and can be used to delay YAML decoding or precompute a YAML
+// RawMessage is a raw encoded YAML value. It implements [Marshaler] and
+// [Unmarshaler] and can be used to delay YAML decoding or precompute a YAML
 // encoding.
-// It also implements [json.Marshaler] and [json.Unmarshaler].
+// It also implements [json.GoYAMLMarshaler] and [json.GoYAMLUnmarshaler].
 //
 // This is similar to [json.RawMessage] in the stdlib.
 type RawMessage []byte
