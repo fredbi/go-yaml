@@ -336,12 +336,14 @@ var (
 		".NaN",
 		".NAN",
 	}
-	reservedKeywordMap = map[string]func(string, string, Position) *Token{}
-	// reservedEncKeywordMap contains is the keyword map used at encoding time.
-	// This is supposed to be a superset of reservedKeywordMap,
+	// reservedKeywordTypes maps each keyword YAML 1.2 resolves to a type of its
+	// own -- null, true, .inf, .nan -- to that type.
+	reservedKeywordTypes = map[string]Type{}
+	// reservedEncKeywordTypes is the keyword map used at encoding time.
+	// This is supposed to be a superset of reservedKeywordTypes,
 	// and used to quote legacy keywords present in YAML 1.1 or lesser for compatibility reasons,
 	// even though this library is supposed to be YAML 1.2-compliant.
-	reservedEncKeywordMap = map[string]func(string, string, Position) *Token{}
+	reservedEncKeywordTypes = map[string]Type{}
 )
 
 // Indicator returns the indicator a token of type t is, or NotIndicator where
@@ -388,45 +390,23 @@ func (t Type) CharacterType() CharacterType {
 	}
 }
 
-func reservedKeywordToken(typ Type, value, org string, pos Position) *Token {
-	return &Token{
-		Type:     typ,
-		Value:    value,
-		Origin:   org,
-		Position: pos,
-	}
-}
-
 func init() {
 	for _, keyword := range reservedNullKeywords {
-		f := func(value, org string, pos Position) *Token {
-			return reservedKeywordToken(NullType, value, org, pos)
-		}
-
-		reservedKeywordMap[keyword] = f
-		reservedEncKeywordMap[keyword] = f
+		reservedKeywordTypes[keyword] = NullType
+		reservedEncKeywordTypes[keyword] = NullType
 	}
 	for _, keyword := range reservedBoolKeywords {
-		f := func(value, org string, pos Position) *Token {
-			return reservedKeywordToken(BoolType, value, org, pos)
-		}
-		reservedKeywordMap[keyword] = f
-		reservedEncKeywordMap[keyword] = f
+		reservedKeywordTypes[keyword] = BoolType
+		reservedEncKeywordTypes[keyword] = BoolType
 	}
 	for _, keyword := range reservedLegacyBoolKeywords {
-		reservedEncKeywordMap[keyword] = func(value, org string, pos Position) *Token {
-			return reservedKeywordToken(BoolType, value, org, pos)
-		}
+		reservedEncKeywordTypes[keyword] = BoolType
 	}
 	for _, keyword := range reservedInfKeywords {
-		reservedKeywordMap[keyword] = func(value, org string, pos Position) *Token {
-			return reservedKeywordToken(InfinityType, value, org, pos)
-		}
+		reservedKeywordTypes[keyword] = InfinityType
 	}
 	for _, keyword := range reservedNanKeywords {
-		reservedKeywordMap[keyword] = func(value, org string, pos Position) *Token {
-			return reservedKeywordToken(NanType, value, org, pos)
-		}
+		reservedKeywordTypes[keyword] = NanType
 	}
 }
 
@@ -461,104 +441,22 @@ const (
 )
 
 var (
-	// ReservedTagKeywordMap map for reserved tag keywords
-	ReservedTagKeywordMap = map[ReservedTagKeyword]func(string, string, Position) *Token{
-		IntegerTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		FloatTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		NullTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		SequenceTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		MappingTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		StringTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		BinaryTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		OrderedMapTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		SetTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		TimestampTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		BooleanTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
-		MergeTag: func(value, org string, pos Position) *Token {
-			return &Token{
-				Type:     TagType,
-				Value:    value,
-				Origin:   org,
-				Position: pos,
-			}
-		},
+	// ReservedTagKeywordMap holds the tags YAML 1.2 reserves. A tag outside it is
+	// the document's own, and a scalar carrying one keeps the type its text says
+	// rather than the one the tag would resolve to.
+	ReservedTagKeywordMap = map[ReservedTagKeyword]struct{}{
+		IntegerTag:    {},
+		FloatTag:      {},
+		NullTag:       {},
+		SequenceTag:   {},
+		MappingTag:    {},
+		StringTag:     {},
+		BinaryTag:     {},
+		OrderedMapTag: {},
+		SetTag:        {},
+		TimestampTag:  {},
+		BooleanTag:    {},
+		MergeTag:      {},
 	}
 )
 
@@ -716,7 +614,7 @@ func IsNeedQuoted(value string) bool {
 	if value == "" {
 		return true
 	}
-	if _, exists := reservedEncKeywordMap[value]; exists {
+	if _, exists := reservedEncKeywordTypes[value]; exists {
 		return true
 	}
 	if isNumber(value) {
@@ -769,30 +667,47 @@ func LiteralBlockHeader(value string) string {
 
 // New create reserved keyword token or number token and other string token.
 func New(value string, org string, pos Position) *Token {
-	fn := reservedKeywordMap[value]
-	if fn != nil {
-		return fn(value, org, pos)
+	tk := makeToken(value, org, pos)
+
+	return &tk
+}
+
+// makeToken builds the token for value without settling where it lives. New
+// puts it on the heap; a caller holding its tokens in a slice of values keeps
+// this one out of the heap altogether, which is why New is thin enough to
+// inline.
+func makeToken(value string, org string, pos Position) Token {
+	tk := Token{
+		Type:     StringType,
+		Value:    value,
+		Origin:   org,
+		Position: pos,
 	}
-	if num := ToNumber(value); num != nil {
-		tk := &Token{
-			Type:     IntegerType,
-			Value:    value,
-			Origin:   org,
-			Position: pos,
-		}
-		switch num.Type {
-		case NumberTypeFloat:
-			tk.Type = FloatType
-		case NumberTypeBinary:
-			tk.Type = BinaryIntegerType
-		case NumberTypeOctet:
-			tk.Type = OctetIntegerType
-		case NumberTypeHex:
-			tk.Type = HexIntegerType
-		}
+
+	if typ, ok := reservedKeywordTypes[value]; ok {
+		tk.Type = typ
+
 		return tk
 	}
-	return String(value, org, pos)
+
+	num := ToNumber(value)
+	if num == nil {
+		return tk
+	}
+
+	tk.Type = IntegerType
+	switch num.Type {
+	case NumberTypeFloat:
+		tk.Type = FloatType
+	case NumberTypeBinary:
+		tk.Type = BinaryIntegerType
+	case NumberTypeOctet:
+		tk.Type = OctetIntegerType
+	case NumberTypeHex:
+		tk.Type = HexIntegerType
+	}
+
+	return tk
 }
 
 // Position type for position in YAML document
@@ -1023,10 +938,6 @@ func Alias(org string, pos Position) *Token {
 
 // Tag create token for Tag
 func Tag(value string, org string, pos Position) *Token {
-	fn := ReservedTagKeywordMap[ReservedTagKeyword(value)]
-	if fn != nil {
-		return fn(value, org, pos)
-	}
 	return &Token{
 		Type:     TagType,
 		Value:    value,
