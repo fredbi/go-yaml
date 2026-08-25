@@ -29,9 +29,15 @@ type Context struct {
 	// Context does, and reading a whole document costs one allocation per block
 	// rather than one per token.
 	blocks [][]token.Token
-	// written counts the tokens read, read counts those handed over. Neither
-	// winds back: a slot handed over is never written again.
+	// writeBlock is the block being filled.
+	writeBlock int
+	// written counts the tokens read, read counts those handed over.
 	written int
+	// yield, where a caller is reading through Scanner.Tokens, takes each token
+	// as it is read instead of the buffer taking it. stopped records that yield
+	// asked to stop, which the scan loop reads to give up.
+	yield   func(token.Token) bool
+	stopped bool
 	// read counts the tokens handed over, and readBlock and readOffset address
 	// the next one. Tokens are handed over in the order they were read, so the
 	// cursor walks the blocks rather than indexing into them.
@@ -171,10 +177,13 @@ func (c *Context) reset(src string) {
 	// The blocks are dropped rather than reused: a caller may still hold tokens
 	// from the source just read, and those stand in the blocks themselves.
 	c.blocks = nil
+	c.writeBlock = 0
 	c.written = 0
 	c.read = 0
 	c.readBlock = 0
 	c.readOffset = 0
+	c.yield = nil
+	c.stopped = false
 	c.forgetTokens()
 	c.resetBuffer()
 	c.mstate = nil
@@ -391,7 +400,22 @@ func (c *Context) addToken(tk *token.Token) {
 		return
 	}
 	c.lookback.Derive(tk)
+	c.recordToken(tk)
+
+	if c.yield != nil {
+		// iter.Seq must not be called again once it has asked to stop.
+		if !c.stopped && !c.yield(*tk) {
+			c.stopped = true
+		}
+
+		return
+	}
+
 	c.appendToken(*tk)
+}
+
+// recordToken keeps what the tokens already read say about the ones to come.
+func (c *Context) recordToken(tk *token.Token) {
 
 	c.prevPropRun = c.propRun
 	switch {
@@ -666,14 +690,47 @@ var tokenBlockSizes = [...]int{32, 64, 128, 256}
 // appendToken writes tk into the buffer, taking a new block where the current
 // one is full.
 func (c *Context) appendToken(tk token.Token) {
-	if len(c.blocks) == 0 || len(c.blocks[len(c.blocks)-1]) == cap(c.blocks[len(c.blocks)-1]) {
+	if c.writeBlock == len(c.blocks) {
 		size := tokenBlockSizes[min(len(c.blocks), len(tokenBlockSizes)-1)]
 		c.blocks = append(c.blocks, make([]token.Token, 0, size))
 	}
 
-	block := &c.blocks[len(c.blocks)-1]
+	block := &c.blocks[c.writeBlock]
 	*block = append(*block, tk)
+	if len(*block) == cap(*block) {
+		c.writeBlock++
+	}
 	c.written++
+}
+
+// popValue takes a copy of the oldest token not yet handed over, and reports
+// false where there is none.
+//
+// Nothing keeps the room the token stood in, so the buffer starts again from
+// its first block once it runs dry: a caller reading by value holds the
+// scanner to a block or two whatever the document's length.
+func (c *Context) popValue() (token.Token, bool) {
+	tk, ok := c.popToken()
+	if !ok {
+		c.rewind()
+
+		return token.Token{}, false
+	}
+
+	return *tk, true
+}
+
+// rewind empties the buffer, keeping the blocks to be written again. Call it
+// only where every token read has been handed over by value.
+func (c *Context) rewind() {
+	for i := range c.blocks {
+		c.blocks[i] = c.blocks[i][:0]
+	}
+	c.writeBlock = 0
+	c.written = 0
+	c.read = 0
+	c.readBlock = 0
+	c.readOffset = 0
 }
 
 // popToken takes the oldest token not yet handed over, and reports false where

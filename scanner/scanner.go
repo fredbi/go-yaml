@@ -1964,7 +1964,7 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 func (s *Scanner) scan(ctx *Context) error {
 	emitted := ctx.written
 	for ctx.next() {
-		if ctx.written > emitted {
+		if ctx.stopped || ctx.written > emitted {
 			return nil
 		}
 		c := ctx.currentChar()
@@ -2326,7 +2326,100 @@ func (s *Scanner) stop(err error) {
 
 	var invalidTokenErr *InvalidTokenError
 	if errors.As(err, &invalidTokenErr) && invalidTokenErr.Token != nil {
-		s.lookback.Derive(invalidTokenErr.Token)
-		s.ctx.appendToken(*invalidTokenErr.Token)
+		s.ctx.addToken(invalidTokenErr.Token)
+	}
+}
+
+// NextToken returns the next token of the source by value, and false where
+// there is none.
+//
+// A source the scanner refuses stops it, the same way it stops Next: the tokens
+// read before the refusal come first, then the token the refusal names, and
+// then NextToken reports false for good. Err says what is wrong.
+//
+// Nothing keeps the room a token stood in, so the scanner holds a block or two
+// whatever the document's length. A caller that wants a token to outlive the
+// next call keeps its own copy -- which it has, since the token is a value.
+func (s *Scanner) NextToken() (token.Token, bool) {
+	if s.ctx == nil {
+		return token.Token{}, false
+	}
+
+	for {
+		if tk, ok := s.ctx.popValue(); ok {
+			return tk, true
+		}
+		if s.err != nil {
+			return token.Token{}, false
+		}
+		if err := s.initErr; err != nil {
+			s.initErr = nil
+			s.stop(err)
+
+			continue
+		}
+		if !s.ctx.next() {
+			return token.Token{}, false
+		}
+		if err := s.scan(s.ctx); err != nil {
+			s.stop(err)
+
+			continue
+		}
+	}
+}
+
+// Tokens returns an iterator over the tokens of the source, by value.
+//
+// The scan hands each token straight to the loop as it is read, so no token is
+// buffered on the way: this is the cheaper of the two ways to read a source
+// through, and NextToken is there for a caller that cannot be driven.
+//
+// The loop ends both on the end of the source and on a refusal, so call Err
+// after it to tell the two apart. Breaking out leaves the scanner where it
+// stands, and a further Tokens or NextToken reads on from there.
+func (s *Scanner) Tokens() iter.Seq[token.Token] {
+	return func(yield func(token.Token) bool) {
+		if s.ctx == nil {
+			return
+		}
+
+		// Whatever NextToken left buffered comes first.
+		for {
+			tk, ok := s.ctx.popValue()
+			if !ok {
+				break
+			}
+			if !yield(tk) {
+				return
+			}
+		}
+
+		s.ctx.yield = yield
+		s.ctx.stopped = false
+		defer func() {
+			s.ctx.yield = nil
+			s.ctx.stopped = false
+		}()
+
+		for !s.ctx.stopped {
+			if s.err != nil {
+				return
+			}
+			if err := s.initErr; err != nil {
+				s.initErr = nil
+				s.stop(err)
+
+				continue
+			}
+			if !s.ctx.next() {
+				return
+			}
+			if err := s.scan(s.ctx); err != nil {
+				s.stop(err)
+
+				continue
+			}
+		}
 	}
 }

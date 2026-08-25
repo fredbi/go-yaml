@@ -81,9 +81,10 @@ c: 2
 	assert.NotZerof(t, breaks, "expected the source to put a comment above some token")
 }
 
-// Scan and Next read the same source through the same scan, one in a batch and
-// one token at a time. Up to a refusal -- past which Next stops and Scan reads
-// on -- they have to agree token for token.
+// Scan, Next, Tokens and NextToken read the same source through the same scan:
+// in a batch, one pointer at a time, pushed by value and pulled by value. Up to
+// a refusal -- past which only Scan reads on -- all four have to agree token for
+// token.
 func TestScanAndNextAgree(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
 	require.NoError(t, err)
@@ -108,9 +109,31 @@ func TestScanAndNextAgree(t *testing.T) {
 			pulled = append(pulled, tk)
 		}
 
+		var byValue scanner.Scanner
+		byValue.Init(src)
+		var pushed []token.Token
+		for tk := range byValue.Tokens() {
+			pushed = append(pushed, tk)
+		}
+
+		var oneValue scanner.Scanner
+		oneValue.Init(src)
+		var pulledValues []token.Token
+		for {
+			tk, ok := oneValue.NextToken()
+			if !ok {
+				break
+			}
+			pulledValues = append(pulledValues, tk)
+		}
+
 		require.Lenf(t, pulled, len(tks), "%s: Next yielded %d tokens, Scan %d", test.Name, len(pulled), len(tks))
+		require.Lenf(t, pushed, len(tks), "%s: Tokens yielded %d tokens, Scan %d", test.Name, len(pushed), len(tks))
+		require.Lenf(t, pulledValues, len(tks), "%s: NextToken yielded %d tokens, Scan %d", test.Name, len(pulledValues), len(tks))
 		for i := range tks {
-			assert.Equalf(t, *tks[i], *pulled[i], "%s: token %d differs", test.Name, i)
+			assert.Equalf(t, *tks[i], *pulled[i], "%s: token %d differs from Next", test.Name, i)
+			assert.Equalf(t, *tks[i], pushed[i], "%s: token %d differs from Tokens", test.Name, i)
+			assert.Equalf(t, *tks[i], pulledValues[i], "%s: token %d differs from NextToken", test.Name, i)
 		}
 		if batchErr != nil {
 			require.EqualErrorf(t, one.Err(), batchErr.Error(), "%s: the refusals differ", test.Name)
@@ -121,4 +144,45 @@ func TestScanAndNextAgree(t *testing.T) {
 	}
 
 	t.Logf("compared %d tokens over %d cases", compared, len(tests))
+}
+
+// Breaking out of Tokens leaves the scanner on the token after the one the loop
+// stopped on, so reading on picks the stream up where it was left.
+func TestTokensResumesAfterBreak(t *testing.T) {
+	const src = "a: 1\nb: 2\nc: 3\n"
+
+	var whole scanner.Scanner
+	whole.Init(src)
+	var want []token.Token
+	for tk := range whole.Tokens() {
+		want = append(want, tk)
+	}
+	require.Greater(t, len(want), 6)
+
+	var s scanner.Scanner
+	s.Init(src)
+
+	var got []token.Token
+	for tk := range s.Tokens() {
+		got = append(got, tk)
+		if len(got) == 3 {
+			break
+		}
+	}
+	require.Len(t, got, 3)
+
+	// Read on, both ways, to check neither loses nor repeats a token.
+	tk, ok := s.NextToken()
+	require.True(t, ok)
+	got = append(got, tk)
+
+	for tk := range s.Tokens() {
+		got = append(got, tk)
+	}
+
+	require.NoError(t, s.Err())
+	require.Len(t, got, len(want))
+	for i := range want {
+		assert.Equalf(t, want[i], got[i], "token %d differs after the break", i)
+	}
 }
