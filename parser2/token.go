@@ -451,22 +451,20 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.groupAnchorsWithScalarTags(
-		g.groupScalarTags(
-			g.groupAnchors(
-				g.groupBlockScalars(
-					g.attachLineComments(
-						g.stream(raw)))))))
+	tks := g.collect(raw.n, g.groupMapKeyValues(
+		g.groupMapKeysByValue(
+			g.groupExplicitKeys(
+				g.groupAnchorsWithScalarTags(
+					g.groupScalarTags(
+						g.groupAnchors(
+							g.groupBlockScalars(
+								g.attachLineComments(
+									g.stream(raw))))))))))
 	if g.err != nil {
 		return nil, nil, g.err
 	}
 
-	tks, err := g.createMapKeyTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
-	}
-	tks = g.collect(len(tks), g.groupMapKeyValues(slices.Values(tks)))
-	tks, err = g.createDirectiveTokenGroups(tks)
+	tks, err := g.createDirectiveTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -792,49 +790,119 @@ func (g *grouper) groupAnchorsWithScalarTags(in iter.Seq[*Token]) iter.Seq[*Toke
 	}
 }
 
-func (g *grouper) createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
-	tks, err := g.createMapKeyByMappingKey(tokens)
-	if err != nil {
-		return nil, err
-	}
+// groupExplicitKeys joins a '?' with the body that names its key.
+//
+// The body is held until the token that ends it arrives: a token at or left of
+// the '?' in block context, and the ':' or ',' or bracket that closes the entry
+// in flow context. That is the widest window of the ten passes, and it is the
+// key itself -- the parser is about to read it.
+func (g *grouper) groupExplicitKeys(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			flowDepth int
+			key       *Token // a '?', while the body naming its key is read
+			keyColumn int
+			keyInFlow bool
+			bodyDepth int
+			body      []*Token
+		)
 
-	return g.collect(len(tks), g.groupMapKeysByValue(slices.Values(tks))), g.err
-}
+		emit := func() bool {
+			grouped, err := g.groupExplicitKeyBody(body)
+			if err != nil {
+				g.fail(err)
 
-func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	var flowDepth int
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.MappingStartType, token.SequenceStartType:
-			flowDepth++
-			ret = append(ret, tk)
-		case token.MappingEndType, token.SequenceEndType:
-			if flowDepth > 0 {
-				flowDepth--
+				return false
 			}
-			ret = append(ret, tk)
-		case token.MappingKeyType:
+
 			// A '?' with nothing after it opens an entry whose key is e-node,
 			// which is what "? \n" and "?\n: v\n" are. The group holds the
 			// indicator alone and the parser supplies the null.
-			end := explicitKeyEnd(tokens, i, flowDepth > 0)
-			body, err := g.groupExplicitKeyBody(tokens[i+1 : end])
-			if err != nil {
-				return nil, err
+			members := []*Token{key}
+			if len(grouped) == 0 {
+				members = append(members, g.implicitNullKeyToken(key))
 			}
-			group := []*Token{tk}
-			if len(body) == 0 {
-				group = append(group, g.implicitNullKeyToken(tk))
+			members = append(members, grouped...)
+
+			key, body = nil, body[:0]
+
+			return yield(g.group(TokenGroupMapKey, members))
+		}
+
+		for tk := range in {
+			if key != nil {
+				if !endsExplicitKeyBody(tk, keyColumn, keyInFlow, &bodyDepth) {
+					body = append(body, tk)
+
+					continue
+				}
+				if !emit() {
+					return
+				}
+				// The token that ended the body is not part of it, and is read
+				// as any other token would be.
 			}
-			ret = append(ret, g.group(TokenGroupMapKey, append(group, body...)))
-			i = end - 1
-		default:
-			ret = append(ret, tk)
+
+			switch tk.Type() {
+			case token.MappingStartType, token.SequenceStartType:
+				flowDepth++
+				if !yield(tk) {
+					return
+				}
+			case token.MappingEndType, token.SequenceEndType:
+				if flowDepth > 0 {
+					flowDepth--
+				}
+				if !yield(tk) {
+					return
+				}
+			case token.MappingKeyType:
+				key, keyColumn, keyInFlow, bodyDepth = tk, tk.Column(), flowDepth > 0, 0
+			default:
+				if !yield(tk) {
+					return
+				}
+			}
+		}
+
+		if key != nil {
+			emit()
 		}
 	}
-	return ret, nil
+}
+
+// endsExplicitKeyBody reports whether tk stands past the body of the explicit
+// key introduced by a '?' at keyColumn, and counts the flow collections opened
+// inside that body.
+//
+// In block context the body is everything indented deeper than the '?' itself,
+// and nothing else bounds it -- in particular a ':' on the same line does not.
+// "? []: x" has the mapping {[]: x} for its key and no value at all, which is
+// what the test suite records for it.
+//
+// A flow collection is not indentation-sensitive, so there the body runs to the
+// punctuation that ends it: its ':', a ',', or the bracket closing the
+// collection it sits in.
+func endsExplicitKeyBody(tk *Token, keyColumn int, inFlow bool, depth *int) bool {
+	if !inFlow {
+		return tk.Column() <= keyColumn
+	}
+
+	switch tk.Type() {
+	case token.MappingStartType, token.SequenceStartType:
+		*depth++
+	case token.MappingEndType, token.SequenceEndType:
+		if *depth == 0 {
+			return true
+		}
+		*depth--
+	case token.MappingValueType, token.CollectEntryType:
+		if *depth == 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // keyWindow holds the tokens a map key could still be made from. Everything
@@ -1252,8 +1320,8 @@ func isScalarType(tk *Token) bool {
 // The passes before this one -- literals, anchors, tags -- have already run over
 // these tokens, so only the mapping ones are needed.
 func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
-	// Called from inside createMapKeyByMappingKey, which is filling a buffer of
-	// its own and reading another.
+	// Called from inside groupExplicitKeys, which is reading one of the
+	// grouper's two buffers and filling the other.
 	g.nested++
 	defer func() { g.nested-- }()
 
