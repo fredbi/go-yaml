@@ -450,16 +450,12 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.groupAnchors(g.groupBlockScalars(g.attachLineComments(g.stream(raw)))))
+	tks := g.collect(raw.n, g.groupScalarTags(g.groupAnchors(g.groupBlockScalars(g.attachLineComments(g.stream(raw))))))
 	if g.err != nil {
 		return nil, nil, g.err
 	}
 
-	tks, err := g.createScalarTagTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
-	}
-	tks, err = g.createAnchorWithScalarTagTokenGroups(tks)
+	tks, err := g.createAnchorWithScalarTagTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -656,80 +652,96 @@ func (g *grouper) groupAnchors(in iter.Seq[*Token]) iter.Seq[*Token] {
 	}
 }
 
-func (g *grouper) createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		if tk.Type() != token.TagType {
-			ret = append(ret, tk)
-			continue
+// groupScalarTags joins a tag with the scalar it tags.
+//
+// One token is held: the tag, until the token after it says whether it tags
+// that one or stands on its own. A tag on its own is left in the stream and the
+// parser reads what it tags from there -- a tag on its own line, or one in
+// front of a collection.
+func (g *grouper) groupScalarTags(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var tag *Token // a tag, waiting to see what it tags
+
+		for tk := range in {
+			if tag != nil {
+				grouped, ok := g.taggedScalar(tag, tk)
+				if !ok {
+					return
+				}
+				if grouped != nil {
+					if !yield(grouped) {
+						return
+					}
+					tag = nil
+
+					continue
+				}
+				// The tag stands on its own, and tk is read as any other token
+				// would be -- including as the next tag.
+				if !yield(tag) {
+					return
+				}
+				tag = nil
+			}
+
+			if tk.Type() == token.TagType {
+				tag = tk
+
+				continue
+			}
+			if !yield(tk) {
+				return
+			}
 		}
-		tag := tk.RawToken()
-		if strings.HasPrefix(tag.Value, "!!") {
-			// secondary tag.
-			switch token.ReservedTagKeyword(tag.Value) {
-			case token.IntegerTag, token.FloatTag, token.StringTag, token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
-				if len(tokens) <= i+1 {
-					ret = append(ret, tk)
-					continue
-				}
-				if tk.Line() != tokens[i+1].Line() {
-					ret = append(ret, tk)
-					continue
-				}
-				if tokens[i+1].GroupType() == TokenGroupAnchorName {
-					ret = append(ret, tk)
-					continue
-				}
-				if isScalarType(tokens[i+1]) {
-					ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
-					i++
-				} else {
-					ret = append(ret, tk)
-				}
-			case token.MergeTag:
-				if len(tokens) <= i+1 {
-					ret = append(ret, tk)
-					continue
-				}
-				if tk.Line() != tokens[i+1].Line() {
-					ret = append(ret, tk)
-					continue
-				}
-				if tokens[i+1].GroupType() == TokenGroupAnchorName {
-					ret = append(ret, tk)
-					continue
-				}
-				if tokens[i+1].Type() != token.MergeKeyType {
-					return nil, errors.ErrSyntax("could not find merge key", tokens[i+1].RawToken())
-				}
-				ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
-				i++
-			default:
-				ret = append(ret, tk)
-			}
-		} else {
-			if len(tokens) <= i+1 {
-				ret = append(ret, tk)
-				continue
-			}
-			if tk.Line() != tokens[i+1].Line() {
-				ret = append(ret, tk)
-				continue
-			}
-			if tokens[i+1].GroupType() == TokenGroupAnchorName {
-				ret = append(ret, tk)
-				continue
-			}
-			if isFlowType(tokens[i+1]) {
-				ret = append(ret, tk)
-				continue
-			}
-			ret = append(ret, g.group2(TokenGroupScalarTag, tk, tokens[i+1]))
-			i++
+
+		if tag != nil {
+			yield(tag)
 		}
 	}
-	return ret, nil
+}
+
+// taggedScalar returns the group joining tag with next, or nil where the tag
+// stands on its own. It reports false where the document is refused.
+//
+// A tag never reaches past its own line, and never takes an anchor name: the
+// anchor is what holds the tag, and groupAnchorsWithScalarTags joins those.
+func (g *grouper) taggedScalar(tag, next *Token) (*Token, bool) {
+	if tag.Line() != next.Line() || next.GroupType() == TokenGroupAnchorName {
+		return nil, true
+	}
+
+	value := tag.RawToken().Value
+	if !strings.HasPrefix(value, "!!") {
+		// A tag the document defines. It tags a scalar, and a flow indicator is
+		// not one.
+		if isFlowType(next) {
+			return nil, true
+		}
+
+		return g.group2(TokenGroupScalarTag, tag, next), true
+	}
+
+	switch token.ReservedTagKeyword(value) {
+	case token.IntegerTag, token.FloatTag, token.StringTag,
+		token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
+		if !isScalarType(next) {
+			return nil, true
+		}
+
+		return g.group2(TokenGroupScalarTag, tag, next), true
+	case token.MergeTag:
+		if next.Type() != token.MergeKeyType {
+			g.fail(errors.ErrSyntax("could not find merge key", next.RawToken()))
+
+			return nil, false
+		}
+
+		return g.group2(TokenGroupScalarTag, tag, next), true
+	default:
+		// A reserved tag that resolves to a collection, or one we do not read:
+		// it stands on its own and the parser reads what it tags.
+		return nil, true
+	}
 }
 
 func (g *grouper) createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
