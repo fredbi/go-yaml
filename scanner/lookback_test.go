@@ -11,6 +11,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -78,4 +79,46 @@ c: 2
 	}
 	assert.NotZerof(t, blanks, "expected the source to leave a blank line above some token")
 	assert.NotZerof(t, breaks, "expected the source to put a comment above some token")
+}
+
+// Scan and Next read the same source through the same scan, one in a batch and
+// one token at a time. Up to a refusal -- past which Next stops and Scan reads
+// on -- they have to agree token for token.
+func TestScanAndNextAgree(t *testing.T) {
+	tests, err := yamltestsuite.TestSuites()
+	require.NoError(t, err)
+	require.NotEmpty(t, tests)
+
+	var compared int
+	for _, test := range tests {
+		src := string(test.InYAML)
+
+		var batch scanner.Scanner
+		batch.Init(src)
+		tks, batchErr := batch.Scan()
+		if errors.Is(batchErr, io.EOF) {
+			// The source held no token at all, which is not a refusal.
+			batchErr = nil
+		}
+
+		var one scanner.Scanner
+		one.Init(src)
+		var pulled token.Tokens
+		for tk := range one.All() {
+			pulled = append(pulled, tk)
+		}
+
+		require.Lenf(t, pulled, len(tks), "%s: Next yielded %d tokens, Scan %d", test.Name, len(pulled), len(tks))
+		for i := range tks {
+			assert.Equalf(t, *tks[i], *pulled[i], "%s: token %d differs", test.Name, i)
+		}
+		if batchErr != nil {
+			require.EqualErrorf(t, one.Err(), batchErr.Error(), "%s: the refusals differ", test.Name)
+		} else {
+			require.NoErrorf(t, one.Err(), "%s: Next refused a source Scan accepted", test.Name)
+		}
+		compared += len(tks)
+	}
+
+	t.Logf("compared %d tokens over %d cases", compared, len(tests))
 }

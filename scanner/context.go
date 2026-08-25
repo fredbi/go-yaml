@@ -25,6 +25,20 @@ type Context struct {
 	// src rather than a copy of the buffer.
 	originStart int
 	tokens      token.Tokens
+	// tokensRead counts how many of tokens the caller has taken.
+	tokensRead int
+	// lastTk is the token emitted most recently. tokens is drained as the
+	// caller takes them, so it is not the place to ask what came before.
+	lastTk *token.Token
+	// lastContentTk is the last token emitted that is part of the document
+	// rather than a note about it. A comment may stand between a key and its
+	// ':', on its own line, without making the two any less adjacent.
+	lastContentTk *token.Token
+	// propRun describes the run of property tokens ending at lastTk, and
+	// prevPropRun the run ending at the token before it. keyStartColumn reads
+	// them to find where a key made only of already-cut tokens begins.
+	propRun     propertyRun
+	prevPropRun propertyRun
 	mstate      *MultiLineState
 	// lookback belongs to the Scanner and outlives the Context, so a token
 	// still reads what stands above it when the source is scanned in more than
@@ -83,12 +97,62 @@ func (c *Context) clear() {
 	c.mstate = nil
 }
 
+// abandon drops the text read towards a token that was refused, leaving only
+// the cursor. What the scanner reads next then starts a token of its own.
+func (c *Context) abandon() {
+	c.clear()
+	c.lastTk = nil
+	c.lastContentTk = nil
+	c.propRun = propertyRun{}
+	c.prevPropRun = propertyRun{}
+}
+
+// lastContentToken returns the last token emitted that is part of the document
+// rather than a note about it.
+func (c *Context) lastContentToken() *token.Token {
+	return c.lastContentTk
+}
+
+// keyStartColumn reports the column a map key made only of already-cut tokens
+// begins at, or 0 where the tokens do not form such a key.
+//
+// A quoted scalar is one token and starts where it stands. An anchor, an alias
+// or a tag may carry an empty scalar, and then the key is the run of them: the
+// key of "&a : v" begins at the '&', two tokens before the ':'.
+func (c *Context) keyStartColumn() int {
+	last := c.lastTk
+	if last == nil {
+		return 0
+	}
+
+	column := last.Position.Column
+	found := last.Type.Indicator() == token.QuotedScalarIndicator || isPropertyToken(last)
+
+	// The properties standing on the same line immediately before last are part
+	// of the same key.
+	if c.prevPropRun.length > 0 && c.prevPropRun.line == last.Position.Line {
+		column = c.prevPropRun.startColumn
+		found = true
+	}
+
+	if !found {
+		return 0
+	}
+
+	return int(column)
+}
+
 func (c *Context) reset(src string) {
 	c.idx = 0
 	c.originStart = 0
 	c.size = len(src)
 	c.src = src
 	c.tokens = c.tokens[:0]
+	c.tokensRead = 0
+	c.lastTk = nil
+	c.lastContentTk = nil
+	c.propRun = propertyRun{}
+	c.prevPropRun = propertyRun{}
 	c.resetBuffer()
 	c.mstate = nil
 }
@@ -305,6 +369,29 @@ func (c *Context) addToken(tk *token.Token) {
 	}
 	c.lookback.Derive(tk)
 	c.tokens = append(c.tokens, tk)
+
+	c.prevPropRun = c.propRun
+	switch {
+	case !isPropertyToken(tk):
+		c.propRun = propertyRun{}
+	case c.propRun.length > 0 && c.propRun.line == tk.Position.Line:
+		c.propRun.length++
+	default:
+		c.propRun = propertyRun{startColumn: tk.Position.Column, line: tk.Position.Line, length: 1}
+	}
+
+	c.lastTk = tk
+	if tk.Type != token.CommentType {
+		c.lastContentTk = tk
+	}
+}
+
+// propertyRun is a run of consecutive property tokens -- anchor, alias, tag --
+// standing on one line. startColumn is where the first of them begins.
+type propertyRun struct {
+	startColumn int32
+	line        int32
+	length      int
 }
 
 func (c *Context) addBuf(r rune) {
@@ -532,8 +619,21 @@ func (c *Context) setTokenTypeByPrevTag(tk *token.Token) {
 }
 
 func (c *Context) lastToken() *token.Token {
-	if len(c.tokens) != 0 {
-		return c.tokens[len(c.tokens)-1]
+	return c.lastTk
+}
+
+// popToken takes the oldest token not yet handed over. It reports false when
+// there is none, and the buffer is then reused for the tokens read next.
+func (c *Context) popToken() (*token.Token, bool) {
+	if c.tokensRead >= len(c.tokens) {
+		c.tokens = c.tokens[:0]
+		c.tokensRead = 0
+
+		return nil, false
 	}
-	return nil
+
+	tk := c.tokens[c.tokensRead]
+	c.tokensRead++
+
+	return tk, true
 }

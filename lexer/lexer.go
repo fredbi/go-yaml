@@ -4,9 +4,6 @@
 package lexer
 
 import (
-	"errors"
-	"io"
-
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -22,16 +19,9 @@ func Tokenize(src string) (token.Tokens, error) {
 	s.Init(src)
 
 	var tokens token.Tokens
-	for {
-		subTokens, err := s.Scan()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		tokens.Add(subTokens...)
-		if err != nil {
-			return tokens, err
-		}
+	for tk := range s.All() {
+		tokens = append(tokens, tk)
 	}
 
-	return tokens, nil
+	return tokens, s.Err()
 }

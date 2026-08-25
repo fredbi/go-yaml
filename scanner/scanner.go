@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"strings"
 	"unicode/utf8"
 
@@ -77,6 +78,13 @@ type Scanner struct {
 	// lookback fills in each token's BlankLineAbove and CommentBreaksAbove as
 	// it is emitted, from the tokens emitted before it.
 	lookback token.Lookback
+	// ctx holds the cursor into the source and the tokens read but not yet
+	// taken. It lasts as long as the source does, so a scan can stop on a token
+	// and go on from there.
+	ctx *Context
+	// err is what stopped Next. Once set it stays set: the scanner serves the
+	// tokens it had already read and then nothing more.
+	err error
 }
 
 // byteOrderMark is YAML 1.2's c-byte-order-mark.
@@ -1403,13 +1411,13 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if tk != nil {
 		s.lastDelimColumn = int(tk.Position.Column)
 		ctx.addToken(tk)
-	} else if col := keyStartColumn(ctx.tokens); col > 0 {
+	} else if col := ctx.keyStartColumn(); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens:
 		// it is quoted, or it is an empty scalar carrying an anchor, an alias or
 		// a tag. What the following lines are measured against is where the key
 		// begins, so for "&a :" that is the '&' and not the name after it.
 		s.lastDelimColumn = col
-	} else if last := lastContentToken(ctx.tokens); last == nil || int(last.Position.Line) != s.line {
+	} else if last := ctx.lastContentToken(); last == nil || int(last.Position.Line) != s.line {
 		// Nothing precedes this ':' on its line, so the key was written above
 		// it after a '?'. The ':' is then where the entry sits, and the level
 		// its value is measured against. Left at the level of whatever the key
@@ -1435,7 +1443,7 @@ func followsJSONLikeKey(ctx *Context) bool {
 		return false
 	}
 
-	tk := lastContentToken(ctx.tokens)
+	tk := ctx.lastContentToken()
 	if tk == nil {
 		return false
 	}
@@ -1451,48 +1459,6 @@ func followsJSONLikeKey(ctx *Context) bool {
 // one closes the key rather than belonging to it: "{a:}" is the pair a/null.
 func isFlowIndicator(c rune) bool {
 	return c == ',' || c == '}' || c == ']'
-}
-
-// lastContentToken returns the last token that is part of the document rather
-// than a note about it. A comment may stand between a key and its ':', on its
-// own line, without making the two any less adjacent.
-func lastContentToken(tokens token.Tokens) *token.Token {
-	for i := len(tokens) - 1; i >= 0; i-- {
-		if tokens[i].Type != token.CommentType {
-			return tokens[i]
-		}
-	}
-
-	return nil
-}
-
-// keyStartColumn reports the column a map key made only of already-cut tokens
-// begins at, or 0 when the tokens do not form such a key.
-//
-// A quoted scalar is one token and starts where it stands. An anchor, an alias
-// or a tag may carry an empty scalar, and then the key is the run of them: the
-// key of "&a : v" begins at the '&', two tokens before the ':'.
-func keyStartColumn(tokens token.Tokens) int {
-	last := len(tokens) - 1
-	if last < 0 {
-		return 0
-	}
-
-	line := tokens[last].Position.Line
-	column := tokens[last].Position.Column
-	found := tokens[last].Type.Indicator() == token.QuotedScalarIndicator || isPropertyToken(tokens[last])
-
-	for i := last - 1; i >= 0 && tokens[i].Position.Line == line; i-- {
-		if !isPropertyToken(tokens[i]) {
-			break
-		}
-		column = tokens[i].Position.Column
-		found = true
-	}
-	if !found {
-		return 0
-	}
-	return int(column)
 }
 
 // isPropertyToken reports whether tk introduces a node property: an anchor, an
@@ -1986,8 +1952,19 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 	return false, err
 }
 
+// scan reads the source until it has a token, and returns with that token
+// buffered in ctx. The source is left where it stands, so calling scan again
+// reads on from there.
+//
+// The character that produced the token is fully consumed before scan returns,
+// so nothing has to be re-read; emitted counts the tokens ctx already held, so
+// a token another call left behind does not end this one straight away.
 func (s *Scanner) scan(ctx *Context) error {
+	emitted := len(ctx.tokens)
 	for ctx.next() {
+		if len(ctx.tokens) > emitted {
+			return nil
+		}
 		c := ctx.currentChar()
 		if c == byteOrderMark {
 			// validateByteOrderMarks has already refused a mark anywhere a node
@@ -2212,7 +2189,12 @@ func (s *Scanner) Init(text string) {
 	s.column = 1
 	s.offset = 0
 	s.isFirstCharAtLine = true
+	s.err = nil
 	s.lookback.Reset()
+	if s.ctx != nil {
+		s.ctx.release()
+	}
+	s.ctx = newContext(src, &s.lookback)
 	s.clearState()
 }
 
@@ -2245,12 +2227,18 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 	if s.sourcePos >= s.sourceSize {
 		return nil, io.EOF
 	}
-	ctx := newContext(s.source[s.sourcePos:], &s.lookback)
-	defer ctx.release()
 
-	var tokens token.Tokens
-	err := s.scan(ctx)
-	tokens = append(tokens, ctx.tokens...)
+	ctx := s.ctx
+	var err error
+	for ctx.next() {
+		if err = s.scan(ctx); err != nil {
+			break
+		}
+	}
+
+	tokens := ctx.tokens[ctx.tokensRead:]
+	ctx.tokens = ctx.tokens[len(ctx.tokens):]
+	ctx.tokensRead = 0
 
 	if err != nil {
 		var invalidTokenErr *InvalidTokenError
@@ -2258,7 +2246,87 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 			s.lookback.Derive(invalidTokenErr.Token)
 			tokens = append(tokens, invalidTokenErr.Token)
 		}
+		// What was refused is dropped along with the text read towards it, so a
+		// caller that scans on reads the rest of the source afresh rather than
+		// continuing the token the refusal interrupted.
+		ctx.abandon()
+
 		return tokens, err
 	}
+
 	return tokens, nil
+}
+
+// Next returns the next token of the source, and false when there is none.
+//
+// A source the scanner refuses stops it. The tokens read before the refusal are
+// handed over first, then the token the refusal names, and then Next reports
+// false for good; Err says what is wrong. Err is nil where the source simply
+// ran out.
+//
+// Next and Scan read the same source and may be used together, but a scanner is
+// normally driven by one or the other.
+func (s *Scanner) Next() (*token.Token, bool) {
+	if s.ctx == nil {
+		return nil, false
+	}
+
+	for {
+		if tk, ok := s.ctx.popToken(); ok {
+			return tk, true
+		}
+		if s.err != nil {
+			return nil, false
+		}
+		if err := s.initErr; err != nil {
+			s.initErr = nil
+			s.stop(err)
+
+			continue
+		}
+		if !s.ctx.next() {
+			return nil, false
+		}
+		if err := s.scan(s.ctx); err != nil {
+			s.stop(err)
+
+			continue
+		}
+	}
+}
+
+// Err returns what stopped the scanner, or nil where the source ran out with
+// nothing wrong with it.
+func (s *Scanner) Err() error {
+	return s.err
+}
+
+// All returns an iterator over the tokens of the source. Stopping early leaves
+// the scanner where it stands, so a further Next reads on from there.
+//
+// The loop ends both on the end of the source and on a refusal, so call Err
+// after it to tell the two apart.
+func (s *Scanner) All() iter.Seq[*token.Token] {
+	return func(yield func(*token.Token) bool) {
+		for {
+			tk, ok := s.Next()
+			if !ok || !yield(tk) {
+				return
+			}
+		}
+	}
+}
+
+// stop puts the scanner in error. The token err names, if it names one, is
+// queued behind the tokens already read so that it is handed over in the place
+// it holds in the source.
+func (s *Scanner) stop(err error) {
+	s.err = err
+	s.sourcePos = s.sourceSize
+
+	var invalidTokenErr *InvalidTokenError
+	if errors.As(err, &invalidTokenErr) && invalidTokenErr.Token != nil {
+		s.lookback.Derive(invalidTokenErr.Token)
+		s.ctx.tokens = append(s.ctx.tokens, invalidTokenErr.Token)
+	}
 }
