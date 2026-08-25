@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package parser
 
 import (
@@ -21,26 +24,79 @@ type context struct {
 	// inside a flow sequence is an implicit key, which a flow mapping's key is
 	// not, and the two are held to different rules.
 	inFlowSequence bool
+	// depth counts the groups stepped into to reach here, and says which token
+	// reference this context reads. It sits beside the flags, in room the
+	// struct was padding out anyway.
+	depth int32
 	// arena hands out the nodes the descent builds. It is shared by every
 	// context of one parse, so a copy carries the same one.
 	arena *ast.Arena
+	// lineComments holds the comment closing a token's line, against that
+	// token. It is nil where the mode did not ask for comments, and reading a
+	// nil map costs nothing.
+	lineComments map[*Token]*token.Token
 	// keyBase is where the keys of the mapping being parsed start in the
 	// parser's key stack. parseMap and parseFlowMap set it; every entry of
 	// that mapping is parsed under it, and a nested mapping raises it.
 	keyBase int
 }
 
+// tokenRef is where the parser stands in a run of tokens.
+//
+// The run is either in hand -- a group's members, which are two tokens most of
+// the time -- or drawn from a stream as it is read. Either way the parser only
+// ever reads forward from idx, one token ahead at the most, so the tokens
+// before it are never asked for again.
 type tokenRef struct {
 	tokens []*Token
-	size   int
-	idx    int
+	// pair is where a group's two members are copied to, so that reading a
+	// group needs no slice of its own. tokens points into it.
+	pair [2]*Token
+	idx  int
+	// pull draws the next token of a stream, where the run is one. It is nil
+	// for a run already in hand, and drained once the stream has ended.
+	pull    func() (*Token, bool)
+	drained bool
+}
+
+// at returns the i'th token of the run, drawing from the stream where it has to
+// and where there is one. It returns nil past the end of the run.
+func (r *tokenRef) at(i int) *Token {
+	for r.pull != nil && !r.drained && i >= len(r.tokens) {
+		tk, ok := r.pull()
+		if !ok {
+			r.drained = true
+
+			break
+		}
+		r.tokens = append(r.tokens, tk)
+	}
+
+	if i < len(r.tokens) {
+		return r.tokens[i]
+	}
+
+	return nil
+}
+
+// end returns the index just past the run, drawing the rest of the stream where
+// there is one.
+func (r *tokenRef) end() int {
+	for r.pull != nil && !r.drained {
+		tk, ok := r.pull()
+		if !ok {
+			r.drained = true
+
+			break
+		}
+		r.tokens = append(r.tokens, tk)
+	}
+
+	return len(r.tokens)
 }
 
 func (c context) currentToken() *Token {
-	if c.tokenRef.idx >= c.tokenRef.size {
-		return nil
-	}
-	return c.tokenRef.tokens[c.tokenRef.idx]
+	return c.tokenRef.at(c.tokenRef.idx)
 }
 
 func (c context) isComment() bool {
@@ -48,15 +104,15 @@ func (c context) isComment() bool {
 }
 
 func (c context) nextToken() *Token {
-	if c.tokenRef.idx+1 >= c.tokenRef.size {
-		return nil
-	}
-	return c.tokenRef.tokens[c.tokenRef.idx+1]
+	return c.tokenRef.at(c.tokenRef.idx + 1)
 }
 
 func (c context) nextNotCommentToken() *Token {
-	for i := c.tokenRef.idx + 1; i < c.tokenRef.size; i++ {
-		tk := c.tokenRef.tokens[i]
+	for i := c.tokenRef.idx + 1; ; i++ {
+		tk := c.tokenRef.at(i)
+		if tk == nil {
+			break
+		}
 		if tk.Type() == token.CommentType {
 			continue
 		}
@@ -69,13 +125,14 @@ func (c context) isTokenNotFound() bool {
 	return c.currentToken() == nil
 }
 
-func (c context) withGroup(p *parser, g *TokenGroup) context {
-	c.tokenRef = p.newTokenRef(g.Tokens)
+func (c context) withGroup(p *Parser, g *TokenGroup) context {
+	c.depth++
+	c.tokenRef = p.tokenRefAt(c.depth, g)
 
 	return c
 }
 
-func (c context) withChild(p *parser, key string) context {
+func (c context) withChild(p *Parser, key string) context {
 	n := p.newPathNode()
 	if n == nil {
 		return c
@@ -95,7 +152,7 @@ func (c context) withPath(path *ast.PathNode) context {
 	return c
 }
 
-func (c context) withIndex(p *parser, idx uint) context {
+func (c context) withIndex(p *Parser, idx uint) context {
 	n := p.newPathNode()
 	if n == nil {
 		return c
@@ -129,8 +186,11 @@ func (c context) withFlowSequence() context {
 	return c
 }
 
-func (p *parser) newContext() context {
-	ctx := context{arena: ast.NewArena(len(p.tokens))}
+func (p *Parser) newContext() context {
+	// Sized from the tokens of the stream, not from the documents it holds:
+	// len(p.tokens) is the document count, which is one for most streams and
+	// left every block at its floor of sixteen nodes.
+	ctx := context{arena: ast.NewArena(p.raw.n), lineComments: p.lineComments}
 
 	root := p.newPathNode()
 	if root == nil {
@@ -142,17 +202,23 @@ func (p *parser) newContext() context {
 	return ctx
 }
 
+// lineComment returns the comment closing the line tk stands on, or nil where
+// there is none. A stream read without ParseComments has none at all.
+func (c context) lineComment(tk *Token) *token.Token {
+	return c.lineComments[tk]
+}
+
 func (c context) goNext() {
 	ref := c.tokenRef
-	if ref.size <= ref.idx+1 {
-		ref.idx = ref.size
+	if ref.at(ref.idx+1) == nil {
+		ref.idx = ref.end()
 	} else {
 		ref.idx++
 	}
 }
 
 func (c context) next() bool {
-	return c.tokenRef.idx < c.tokenRef.size
+	return c.tokenRef.at(c.tokenRef.idx) != nil
 }
 
 func (c context) insertNullToken(tk *Token) *Token {
@@ -186,23 +252,23 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 
 func (c context) insertToken(tk *Token) {
 	ref := c.tokenRef
+	ref.at(ref.idx) // draw enough of a stream to know where idx stands
 	idx := ref.idx
-	if ref.size < idx {
+	if len(ref.tokens) < idx {
 		return
 	}
-	if ref.size == idx {
+	if len(ref.tokens) == idx {
 		ref.tokens = append(ref.tokens, tk)
-		ref.size = len(ref.tokens)
+
 		return
 	}
 
 	ref.tokens = append(ref.tokens[:idx+1], ref.tokens[idx:]...)
 	ref.tokens[idx] = tk
-	ref.size = len(ref.tokens)
 }
 
 func (c context) addToken(tk *Token) {
 	ref := c.tokenRef
+	ref.end() // the token goes after everything the run holds
 	ref.tokens = append(ref.tokens, tk)
-	ref.size = len(ref.tokens)
 }

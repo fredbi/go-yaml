@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -68,7 +68,7 @@ func TestCollectionBreadth(t *testing.T) {
 	}
 
 	for _, w := range all {
-		f, err := parser2.ParseBytes(w.Data, 0)
+		f, err := parser.ParseBytes(w.Data, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestSlidingPeak(t *testing.T) {
 	}
 
 	for _, w := range all {
-		f, err := parser2.ParseBytes(w.Data, 0)
+		f, err := parser.ParseBytes(w.Data, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

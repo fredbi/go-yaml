@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -265,7 +265,7 @@ func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.
 }
 
 func (e *Encoder) encodeDocument(doc []byte) (ast.Node, error) {
-	f, err := parser2.ParseBytes(doc, 0)
+	f, err := parser.ParseBytes(doc, 0)
 	if err != nil {
 		return nil, err
 	}

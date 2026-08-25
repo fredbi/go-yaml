@@ -20,7 +20,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/internal/format"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -1949,15 +1949,15 @@ func (d *Decoder) resolveReference(ctx context.Context) error {
 }
 
 func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
-	var parseMode parser2.Mode
+	var parseMode parser.Mode
 	if d.toCommentMap != nil {
-		parseMode = parser2.ParseComments
+		parseMode = parser.ParseComments
 	}
-	var opts []parser2.Option
+	var opts []parser.Option
 	if d.allowDuplicateMapKey {
-		opts = append(opts, parser2.AllowDuplicateMapKey())
+		opts = append(opts, parser.AllowDuplicateMapKey())
 	}
-	f, err := parser2.ParseBytes(bytes, parseMode, opts...)
+	f, err := parser.ParseBytes(bytes, parseMode, opts...)
 	if err != nil {
 		return nil, err
 	}

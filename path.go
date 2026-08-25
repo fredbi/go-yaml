@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/printer"
 )
 
@@ -235,7 +235,7 @@ func (p *Path) ReadNode(r io.Reader) (ast.Node, error) {
 	if _, err := io.Copy(&buf, r); err != nil {
 		return nil, err
 	}
-	f, err := parser2.ParseBytes(buf.Bytes(), 0)
+	f, err := parser.ParseBytes(buf.Bytes(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +294,7 @@ func (p *Path) MergeFromReader(dst *ast.File, src io.Reader) error {
 	if _, err := io.Copy(&buf, src); err != nil {
 		return err
 	}
-	file, err := parser2.ParseBytes(buf.Bytes(), 0)
+	file, err := parser.ParseBytes(buf.Bytes(), 0)
 	if err != nil {
 		return err
 	}
@@ -336,7 +336,7 @@ func (p *Path) ReplaceWithReader(dst *ast.File, src io.Reader) error {
 	if _, err := io.Copy(&buf, src); err != nil {
 		return err
 	}
-	file, err := parser2.ParseBytes(buf.Bytes(), 0)
+	file, err := parser.ParseBytes(buf.Bytes(), 0)
 	if err != nil {
 		return err
 	}
@@ -375,7 +375,7 @@ func (p *Path) ReplaceWithNode(dst *ast.File, node ast.Node) error {
 
 // AnnotateSource add annotation to passed source ( see section 5.1 in README.md ).
 func (p *Path) AnnotateSource(source []byte, colored bool) ([]byte, error) {
-	file, err := parser2.ParseBytes(source, 0)
+	file, err := parser.ParseBytes(source, 0)
 	if err != nil {
 		return nil, err
 	}

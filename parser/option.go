@@ -1,12 +1,15 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package parser
 
 // Option represents parser's option.
-type Option func(p *parser)
+type Option func(p *Parser)
 
 // AllowDuplicateMapKey allow the use of keys with the same name in the same map,
 // but by default, this is not permitted.
 func AllowDuplicateMapKey() Option {
-	return func(p *parser) {
+	return func(p *Parser) {
 		p.allowDuplicateMapKey = true
 	}
 }
@@ -23,7 +26,7 @@ func AllowDuplicateMapKey() Option {
 // document is large, the paths go unread, and that memory is worth the
 // accessor going quiet.
 func OmitNodePaths() Option {
-	return func(p *parser) {
+	return func(p *Parser) {
 		p.omitNodePaths = true
 	}
 }
