@@ -451,24 +451,21 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.groupMapKeyValues(
-		g.groupMapKeysByValue(
-			g.groupExplicitKeys(
-				g.groupAnchorsWithScalarTags(
-					g.groupScalarTags(
-						g.groupAnchors(
-							g.groupBlockScalars(
-								g.attachLineComments(
-									g.stream(raw))))))))))
+	tks := g.collect(raw.n, g.groupDirectives(
+		g.groupMapKeyValues(
+			g.groupMapKeysByValue(
+				g.groupExplicitKeys(
+					g.groupAnchorsWithScalarTags(
+						g.groupScalarTags(
+							g.groupAnchors(
+								g.groupBlockScalars(
+									g.attachLineComments(
+										g.stream(raw)))))))))))
 	if g.err != nil {
 		return nil, nil, g.err
 	}
 
-	tks, err := g.createDirectiveTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
-	}
-	tks, err = g.createDocumentTokens(tks)
+	tks, err := g.createDocumentTokens(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1168,49 +1165,80 @@ func (g *grouper) keyedValue(key, value *Token) *Token {
 	return g.group2(TokenGroupMapKeyValue, key, value)
 }
 
-func (g *grouper) createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.DirectiveType:
-			if i+1 >= len(tokens) {
-				return nil, errors.ErrSyntax("undefined directive value", tk.RawToken())
-			}
-			directiveName := g.group2(TokenGroupDirectiveName, tk, tokens[i+1])
-			i++
-			var valueTks []*Token
-			for j := i + 1; j < len(tokens); j++ {
-				if tokens[j].Line() != tk.Line() {
-					break
+// groupDirectives joins a '%' with its name and the values written after it on
+// its line.
+//
+// The window is that line and the comment lines that may follow it: a directive
+// has to be followed by the '---' that opens the document, and the comments in
+// between belong to neither. They are the reason a perfectly ordinary
+// "%YAML 1.2" with a note above the header was refused whenever comments were
+// being parsed.
+func (g *grouper) groupDirectives(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			directive *Token // a '%', while its name and values are read
+			name      *Token // the '%' joined with its name
+			values    []*Token
+			comments  []*Token
+		)
+
+		for tk := range in {
+			if directive != nil {
+				if name == nil {
+					name = g.group2(TokenGroupDirectiveName, directive, tk)
+
+					continue
 				}
-				valueTks = append(valueTks, tokens[j])
-				i++
-			}
-			// A directive may be followed by comment lines before the '---' that
-			// opens the document. They belong to neither, and are the reason a
-			// perfectly ordinary "%YAML 1.2" with a note above the header was
-			// refused whenever comments were being parsed.
-			var comments []*Token
-			for j := i + 1; j < len(tokens) && tokens[j].Type() == token.CommentType; j++ {
-				comments = append(comments, tokens[j])
-				i++
+				if tk.Line() == directive.Line() {
+					values = append(values, tk)
+
+					continue
+				}
+				if tk.Type() == token.CommentType {
+					comments = append(comments, tk)
+
+					continue
+				}
+				if tk.Type() != token.DocumentHeaderType {
+					g.fail(errors.ErrSyntax("unexpected directive value. document not started", directive.RawToken()))
+
+					return
+				}
+
+				head := name
+				if len(values) != 0 {
+					head = g.group(TokenGroupDirective, append([]*Token{name}, values...))
+				}
+				if !yield(head) {
+					return
+				}
+				for _, c := range comments {
+					if !yield(c) {
+						return
+					}
+				}
+				directive, name, values, comments = nil, nil, nil, nil
+				// The '---' is not part of the directive, and is read as any
+				// other token would be.
 			}
 
-			if i+1 >= len(tokens) || tokens[i+1].Type() != token.DocumentHeaderType {
-				return nil, errors.ErrSyntax("unexpected directive value. document not started", tk.RawToken())
+			if tk.Type() == token.DirectiveType {
+				directive = tk
+
+				continue
 			}
-			if len(valueTks) != 0 {
-				ret = append(ret, g.group(TokenGroupDirective, append([]*Token{directiveName}, valueTks...)))
-			} else {
-				ret = append(ret, directiveName)
+			if !yield(tk) {
+				return
 			}
-			ret = append(ret, comments...)
-		default:
-			ret = append(ret, tk)
+		}
+
+		switch {
+		case directive != nil && name == nil:
+			g.fail(errors.ErrSyntax("undefined directive value", directive.RawToken()))
+		case directive != nil:
+			g.fail(errors.ErrSyntax("unexpected directive value. document not started", directive.RawToken()))
 		}
 	}
-	return ret, nil
 }
 
 func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
