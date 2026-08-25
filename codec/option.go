@@ -96,7 +96,7 @@ func UseOrderedMap() DecodeOption {
 	}
 }
 
-// UseJSONUnmarshaler if neither `BytesUnmarshaler` nor `InterfaceUnmarshaler` is implemented
+// UseJSONUnmarshaler if neither `BytesUnmarshaler` nor `Unmarshaler` is implemented
 // and `UnmashalJSON([]byte)error` is implemented, convert the argument from `YAML` to `JSON` and then call it.
 func UseJSONUnmarshaler() DecodeOption {
 	return func(d *Decoder) error {
@@ -204,7 +204,7 @@ func MarshalAnchor(callback func(*ast.AnchorNode, interface{}) error) EncodeOpti
 	}
 }
 
-// UseJSONMarshaler if neither `BytesMarshaler` nor `InterfaceMarshaler`
+// UseJSONMarshaler if neither `BytesMarshaler` nor `Marshaler`
 // nor `encoding.TextMarshaler` is implemented and `MarshalJSON()([]byte, error)` is implemented,
 // call `MarshalJSON` to convert the returned `JSON` to `YAML` for processing.
 func UseJSONMarshaler() EncodeOption {

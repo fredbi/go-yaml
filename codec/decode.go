@@ -756,8 +756,8 @@ func (d *Decoder) canDecodeByUnmarshaler(dst reflect.Value) bool {
 	switch iface.(type) {
 	case BytesUnmarshalerContext,
 		BytesUnmarshaler,
-		InterfaceUnmarshalerContext,
-		InterfaceUnmarshaler,
+		ContextUnmarshaler,
+		Unmarshaler,
 		NodeUnmarshaler,
 		NodeUnmarshalerContext,
 		*time.Time,
@@ -806,7 +806,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(InterfaceUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {
@@ -822,7 +822,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(InterfaceUnmarshaler); ok {
+	if unmarshaler, ok := iface.(Unmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {

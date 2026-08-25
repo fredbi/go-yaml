@@ -390,11 +390,11 @@ func Test_WithCommentOption(t *testing.T) {
 			}{X: 10},
 		}
 		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
-			yaml.CommentMap{
-				"$.foo":     []*yaml.Comment{codec.LineComment("foo comment")},
-				"$.bar":     []*yaml.Comment{codec.LineComment("bar comment")},
-				"$.bar.bbb": []*yaml.Comment{codec.LineComment("bbb comment")},
-				"$.baz.x":   []*yaml.Comment{codec.LineComment("x comment")},
+			codec.CommentMap{
+				"$.foo":     []*codec.Comment{codec.LineComment("foo comment")},
+				"$.bar":     []*codec.Comment{codec.LineComment("bar comment")},
+				"$.bar.bbb": []*codec.Comment{codec.LineComment("bbb comment")},
+				"$.baz.x":   []*codec.Comment{codec.LineComment("x comment")},
 			},
 		))
 		if err != nil {
@@ -423,9 +423,9 @@ baz:
 			},
 		}
 		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
-			yaml.CommentMap{
-				"$.foo.bar":     []*yaml.Comment{codec.HeadComment(" bar head comment"), codec.LineComment(" bar line comment")},
-				"$.foo.bar.baz": []*yaml.Comment{codec.LineComment(" baz line comment")},
+			codec.CommentMap{
+				"$.foo.bar":     []*codec.Comment{codec.HeadComment(" bar head comment"), codec.LineComment(" bar line comment")},
+				"$.foo.bar.baz": []*codec.Comment{codec.LineComment(" baz line comment")},
 			},
 		))
 		if err != nil {
@@ -458,11 +458,11 @@ foo:
 		}
 
 		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
-			yaml.CommentMap{
-				"$.foo":     []*yaml.Comment{codec.HeadComment("foo comment")},
-				"$.bar":     []*yaml.Comment{codec.HeadComment("bar comment")},
-				"$.bar.bbb": []*yaml.Comment{codec.HeadComment("bbb comment")},
-				"$.baz.x":   []*yaml.Comment{codec.HeadComment("x comment")},
+			codec.CommentMap{
+				"$.foo":     []*codec.Comment{codec.HeadComment("foo comment")},
+				"$.bar":     []*codec.Comment{codec.HeadComment("bar comment")},
+				"$.bar.bbb": []*codec.Comment{codec.HeadComment("bbb comment")},
+				"$.baz.x":   []*codec.Comment{codec.HeadComment("x comment")},
 			},
 		))
 		if err != nil {
@@ -501,26 +501,26 @@ baz:
 		}
 
 		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
-			yaml.CommentMap{
-				"$.foo": []*yaml.Comment{
+			codec.CommentMap{
+				"$.foo": []*codec.Comment{
 					codec.HeadComment(
 						"foo comment",
 						"foo comment2",
 					),
 				},
-				"$.bar": []*yaml.Comment{
+				"$.bar": []*codec.Comment{
 					codec.HeadComment(
 						"bar comment",
 						"bar comment2",
 					),
 				},
-				"$.bar.bbb": []*yaml.Comment{
+				"$.bar.bbb": []*codec.Comment{
 					codec.HeadComment(
 						"bbb comment",
 						"bbb comment2",
 					),
 				},
-				"$.baz.x": []*yaml.Comment{
+				"$.baz.x": []*codec.Comment{
 					codec.HeadComment(
 						"x comment",
 						"x comment2",
@@ -561,10 +561,10 @@ baz:
 		}
 
 		b, err := yaml.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
-			yaml.CommentMap{
-				"$.bar.bbb": []*yaml.Comment{codec.FootComment("ccc: ddd")},
-				"$.baz[1]":  []*yaml.Comment{codec.FootComment("- 3")},
-				"$.baz":     []*yaml.Comment{codec.FootComment(" foot comment", "foot comment2")},
+			codec.CommentMap{
+				"$.bar.bbb": []*codec.Comment{codec.FootComment("ccc: ddd")},
+				"$.baz[1]":  []*codec.Comment{codec.FootComment("- 3")},
+				"$.baz":     []*codec.Comment{codec.FootComment(" foot comment", "foot comment2")},
 			},
 		))
 		if err != nil {
@@ -621,63 +621,63 @@ baz:
 		}
 
 		b, err := yaml.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
-			yaml.CommentMap{
-				"$.foo": []*yaml.Comment{
+			codec.CommentMap{
+				"$.foo": []*codec.Comment{
 					codec.HeadComment(" foo head comment", " foo head comment2"),
 					codec.LineComment(" foo line comment"),
 				},
-				"$.foo.a": []*yaml.Comment{
+				"$.foo.a": []*codec.Comment{
 					codec.HeadComment(" a head comment"),
 					codec.LineComment(" a line comment"),
 				},
-				"$.foo.a.b": []*yaml.Comment{
+				"$.foo.a.b": []*codec.Comment{
 					codec.HeadComment(" b head comment"),
 					codec.LineComment(" b line comment"),
 				},
-				"$.foo.a.b.c": []*yaml.Comment{
+				"$.foo.a.b.c": []*codec.Comment{
 					codec.LineComment(" c line comment"),
 				},
-				"$.o": []*yaml.Comment{
+				"$.o": []*codec.Comment{
 					codec.LineComment(" o line comment"),
 				},
-				"$.o.p": []*yaml.Comment{
+				"$.o.p": []*codec.Comment{
 					codec.HeadComment(" p head comment", " p head comment2"),
 					codec.LineComment(" p line comment"),
 				},
-				"$.o.p.q": []*yaml.Comment{
+				"$.o.p.q": []*codec.Comment{
 					codec.HeadComment(" q head comment", " q head comment2"),
 					codec.LineComment(" q line comment"),
 				},
-				"$.o.p.q.r": []*yaml.Comment{
+				"$.o.p.q.r": []*codec.Comment{
 					codec.LineComment(" r line comment"),
 				},
-				"$.t.u": []*yaml.Comment{
+				"$.t.u": []*codec.Comment{
 					codec.LineComment(" u line comment"),
 				},
-				"$.bar": []*yaml.Comment{
+				"$.bar": []*codec.Comment{
 					codec.HeadComment(" bar head comment"),
 					codec.LineComment(" bar line comment"),
 				},
-				"$.bar.bbb": []*yaml.Comment{
+				"$.bar.bbb": []*codec.Comment{
 					codec.HeadComment(" bbb head comment"),
 					codec.LineComment(" bbb line comment"),
 					codec.FootComment(" bbb foot comment"),
 				},
-				"$.baz[0]": []*yaml.Comment{
+				"$.baz[0]": []*codec.Comment{
 					codec.HeadComment(" sequence head comment"),
 					codec.LineComment(" sequence line comment"),
 				},
-				"$.baz[1]": []*yaml.Comment{
+				"$.baz[1]": []*codec.Comment{
 					codec.HeadComment(" sequence head comment2"),
 					codec.LineComment(" sequence line comment2"),
 					codec.FootComment(" sequence foot comment"),
 				},
-				"$.baz": []*yaml.Comment{
+				"$.baz": []*codec.Comment{
 					codec.HeadComment(" baz head comment", " baz head comment2"),
 					codec.LineComment(" baz line comment"),
 					codec.FootComment(" baz foot comment"),
 				},
-				"$.hoge.moga": []*yaml.Comment{
+				"$.hoge.moga": []*codec.Comment{
 					codec.LineComment(" moga line comment"),
 					codec.FootComment(" moga foot comment"),
 				},
@@ -735,10 +735,10 @@ func Test_CommentToMapOption(t *testing.T) {
 	type testCase struct {
 		name     string
 		yml      string
-		options  []yaml.DecodeOption
+		options  []codec.DecodeOption
 		expected []struct {
 			path     string
-			comments []*yaml.Comment
+			comments []*codec.Comment
 		}
 	}
 
@@ -754,12 +754,12 @@ baz:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.foo", []*yaml.Comment{codec.LineComment("foo comment")}},
-				{"$.bar", []*yaml.Comment{codec.LineComment("bar comment")}},
-				{"$.bar.bbb", []*yaml.Comment{codec.LineComment("bbb comment")}},
-				{"$.baz.x", []*yaml.Comment{codec.LineComment("x comment")}},
+				{"$.foo", []*codec.Comment{codec.LineComment("foo comment")}},
+				{"$.bar", []*codec.Comment{codec.LineComment("bar comment")}},
+				{"$.bar.bbb", []*codec.Comment{codec.LineComment("bbb comment")}},
+				{"$.baz.x", []*codec.Comment{codec.LineComment("x comment")}},
 			},
 		},
 		{
@@ -769,9 +769,9 @@ foo:
   bar: baz # comment`,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.foo.bar", []*yaml.Comment{codec.LineComment(" comment")}},
+				{"$.foo.bar", []*codec.Comment{codec.LineComment(" comment")}},
 			},
 		},
 		{
@@ -789,12 +789,12 @@ baz:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.foo", []*yaml.Comment{codec.HeadComment("foo comment")}},
-				{"$.bar", []*yaml.Comment{codec.HeadComment("bar comment")}},
-				{"$.bar.bbb", []*yaml.Comment{codec.HeadComment("bbb comment")}},
-				{"$.baz.x", []*yaml.Comment{codec.HeadComment("x comment")}},
+				{"$.foo", []*codec.Comment{codec.HeadComment("foo comment")}},
+				{"$.bar", []*codec.Comment{codec.HeadComment("bar comment")}},
+				{"$.bar.bbb", []*codec.Comment{codec.HeadComment("bbb comment")}},
+				{"$.baz.x", []*codec.Comment{codec.HeadComment("x comment")}},
 			},
 		},
 		{
@@ -817,17 +817,17 @@ fifth:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.first", []*yaml.Comment{codec.HeadComment("first comment")}},
-				{"$.second", []*yaml.Comment{codec.HeadComment("second comment")}},
-				{"$.second.third", []*yaml.Comment{codec.HeadComment("third comment")}},
-				{"$.second.forth", []*yaml.Comment{codec.HeadComment("forth comment")}},
-				{"$.fifth", []*yaml.Comment{codec.HeadComment("fifth comment")}},
-				{"$.fifth.sixth", []*yaml.Comment{codec.HeadComment("sixth comment")}},
-				{"$.fifth.seventh", []*yaml.Comment{codec.HeadComment("seventh comment")}},
+				{"$.first", []*codec.Comment{codec.HeadComment("first comment")}},
+				{"$.second", []*codec.Comment{codec.HeadComment("second comment")}},
+				{"$.second.third", []*codec.Comment{codec.HeadComment("third comment")}},
+				{"$.second.forth", []*codec.Comment{codec.HeadComment("forth comment")}},
+				{"$.fifth", []*codec.Comment{codec.HeadComment("fifth comment")}},
+				{"$.fifth.sixth", []*codec.Comment{codec.HeadComment("sixth comment")}},
+				{"$.fifth.seventh", []*codec.Comment{codec.HeadComment("seventh comment")}},
 			},
-			options: []yaml.DecodeOption{codec.UseOrderedMap()},
+			options: []codec.DecodeOption{codec.UseOrderedMap()},
 		},
 		{
 			name: "multiple head comments",
@@ -848,12 +848,12 @@ baz:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.foo", []*yaml.Comment{codec.HeadComment("foo comment", "foo comment2")}},
-				{"$.bar", []*yaml.Comment{codec.HeadComment("bar comment", "bar comment2")}},
-				{"$.bar.bbb", []*yaml.Comment{codec.HeadComment("bbb comment", "bbb comment2")}},
-				{"$.baz.x", []*yaml.Comment{codec.HeadComment("x comment", "x comment2")}},
+				{"$.foo", []*codec.Comment{codec.HeadComment("foo comment", "foo comment2")}},
+				{"$.bar", []*codec.Comment{codec.HeadComment("bar comment", "bar comment2")}},
+				{"$.bar.bbb", []*codec.Comment{codec.HeadComment("bbb comment", "bbb comment2")}},
+				{"$.baz.x", []*codec.Comment{codec.HeadComment("x comment", "x comment2")}},
 			},
 		},
 		{
@@ -871,11 +871,11 @@ baz:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.bar.bbb", []*yaml.Comment{codec.FootComment("ccc: ddd")}},
-				{"$.baz[1]", []*yaml.Comment{codec.FootComment("- 3")}},
-				{"$.baz", []*yaml.Comment{codec.FootComment(" foot comment", "foot comment2")}},
+				{"$.bar.bbb", []*codec.Comment{codec.FootComment("ccc: ddd")}},
+				{"$.baz[1]", []*codec.Comment{codec.FootComment("- 3")}},
+				{"$.baz", []*codec.Comment{codec.FootComment(" foot comment", "foot comment2")}},
 			},
 		},
 		{
@@ -919,32 +919,32 @@ hoge:
 `,
 			expected: []struct {
 				path     string
-				comments []*yaml.Comment
+				comments []*codec.Comment
 			}{
-				{"$.foo", []*yaml.Comment{codec.HeadComment(" foo head comment", " foo head comment2"), codec.LineComment(" foo line comment")}},
-				{"$.foo.a", []*yaml.Comment{codec.HeadComment(" a head comment"), codec.LineComment(" a line comment")}},
-				{"$.foo.a.b", []*yaml.Comment{codec.HeadComment(" b head comment"), codec.LineComment(" b line comment")}},
-				{"$.foo.a.b.c", []*yaml.Comment{codec.LineComment(" c line comment")}},
-				{"$.o", []*yaml.Comment{codec.LineComment(" o line comment")}},
-				{"$.o.p", []*yaml.Comment{codec.HeadComment(" p head comment", " p head comment2"), codec.LineComment(" p line comment")}},
-				{"$.o.p.q", []*yaml.Comment{codec.HeadComment(" q head comment", " q head comment2"), codec.LineComment(" q line comment")}},
-				{"$.o.p.q.r", []*yaml.Comment{codec.LineComment(" r line comment")}},
-				{"$.t.u", []*yaml.Comment{codec.LineComment(" u line comment")}},
-				{"$.bar", []*yaml.Comment{codec.HeadComment(" bar head comment"), codec.LineComment(" bar line comment")}},
-				{"$.bar.bbb", []*yaml.Comment{codec.HeadComment(" bbb head comment"), codec.LineComment(" bbb line comment"), codec.FootComment(" bbb foot comment")}},
-				{"$.baz[0]", []*yaml.Comment{codec.HeadComment(" sequence head comment"), codec.LineComment(" sequence line comment")}},
-				{"$.baz[1]", []*yaml.Comment{codec.HeadComment(" sequence head comment2"), codec.LineComment(" sequence line comment2"), codec.FootComment(" sequence foot comment")}},
-				{"$.baz", []*yaml.Comment{codec.HeadComment(" baz head comment", " baz head comment2"), codec.LineComment(" baz line comment")}},
-				{"$.hoge", []*yaml.Comment{codec.FootComment(" hoge foot comment")}},
-				{"$.hoge.moga", []*yaml.Comment{codec.LineComment(" moga line comment"), codec.FootComment(" moga foot comment")}},
+				{"$.foo", []*codec.Comment{codec.HeadComment(" foo head comment", " foo head comment2"), codec.LineComment(" foo line comment")}},
+				{"$.foo.a", []*codec.Comment{codec.HeadComment(" a head comment"), codec.LineComment(" a line comment")}},
+				{"$.foo.a.b", []*codec.Comment{codec.HeadComment(" b head comment"), codec.LineComment(" b line comment")}},
+				{"$.foo.a.b.c", []*codec.Comment{codec.LineComment(" c line comment")}},
+				{"$.o", []*codec.Comment{codec.LineComment(" o line comment")}},
+				{"$.o.p", []*codec.Comment{codec.HeadComment(" p head comment", " p head comment2"), codec.LineComment(" p line comment")}},
+				{"$.o.p.q", []*codec.Comment{codec.HeadComment(" q head comment", " q head comment2"), codec.LineComment(" q line comment")}},
+				{"$.o.p.q.r", []*codec.Comment{codec.LineComment(" r line comment")}},
+				{"$.t.u", []*codec.Comment{codec.LineComment(" u line comment")}},
+				{"$.bar", []*codec.Comment{codec.HeadComment(" bar head comment"), codec.LineComment(" bar line comment")}},
+				{"$.bar.bbb", []*codec.Comment{codec.HeadComment(" bbb head comment"), codec.LineComment(" bbb line comment"), codec.FootComment(" bbb foot comment")}},
+				{"$.baz[0]", []*codec.Comment{codec.HeadComment(" sequence head comment"), codec.LineComment(" sequence line comment")}},
+				{"$.baz[1]", []*codec.Comment{codec.HeadComment(" sequence head comment2"), codec.LineComment(" sequence line comment2"), codec.FootComment(" sequence foot comment")}},
+				{"$.baz", []*codec.Comment{codec.HeadComment(" baz head comment", " baz head comment2"), codec.LineComment(" baz line comment")}},
+				{"$.hoge", []*codec.Comment{codec.FootComment(" hoge foot comment")}},
+				{"$.hoge.moga", []*codec.Comment{codec.LineComment(" moga line comment"), codec.FootComment(" moga foot comment")}},
 			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cm := yaml.CommentMap{}
-			opts := []yaml.DecodeOption{codec.CommentToMap(cm)}
+			cm := codec.CommentMap{}
+			opts := []codec.DecodeOption{codec.CommentToMap(cm)}
 			opts = append(opts, tc.options...)
 
 			var v interface{}
@@ -975,7 +975,7 @@ func TestCommentMapRoundTrip(t *testing.T) {
 		name          string
 		source        string
 		expect        string
-		encodeOptions []yaml.EncodeOption
+		encodeOptions []codec.EncodeOption
 	}{
 		{
 			name: "simple map",
@@ -1001,18 +1001,18 @@ a: 1 # line
 		{
 			name:          "single quotes",
 			source:        `'a#b': c # c comment`,
-			encodeOptions: []yaml.EncodeOption{codec.UseSingleQuote(true)},
+			encodeOptions: []codec.EncodeOption{codec.UseSingleQuote(true)},
 		},
 		{
 			name:          "single quotes added in encode",
 			source:        `a#b: c # c comment`,
-			encodeOptions: []yaml.EncodeOption{codec.UseSingleQuote(true)},
+			encodeOptions: []codec.EncodeOption{codec.UseSingleQuote(true)},
 			expect:        `'a#b': c # c comment`,
 		},
 		{
 			name:          "double quotes quotes transformed to single quotes",
 			source:        `"a#b": c # c comment`,
-			encodeOptions: []yaml.EncodeOption{codec.UseSingleQuote(true)},
+			encodeOptions: []codec.EncodeOption{codec.UseSingleQuote(true)},
 			expect:        `'a#b': c # c comment`,
 		},
 		{
@@ -1034,7 +1034,7 @@ a: 1 # line
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var val any
-			cm := yaml.CommentMap{}
+			cm := codec.CommentMap{}
 			source := strings.TrimSpace(test.source)
 			if err := yaml.UnmarshalWithOptions([]byte(source), &val, codec.CommentToMap(cm)); err != nil {
 				t.Fatalf("%+v", err)

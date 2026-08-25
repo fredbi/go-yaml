@@ -7,14 +7,14 @@
 // encoding packages. Everything that does the work lives a layer down and is
 // named here so that ordinary use needs one import:
 //
-//   - [codec] encodes and decodes -- [Encoder], [Decoder], and the options that
-//     steer them.
+//   - [codec] encodes and decodes -- [Encoder], [Decoder], the options that
+//     steer them, and the comment types.
 //   - [github.com/go-openapi/go-yaml/ast] is the document as a tree.
 //   - [github.com/go-openapi/go-yaml/parser] builds that tree from a source,
 //     and [github.com/go-openapi/go-yaml/scanner] hands it the tokens.
 //
-// Reach for [codec] directly to encode or decode with options: this package
-// names the option types but not the twenty-five constructors that build them.
+// Reach for [codec] directly to encode or decode with options, or to work with
+// the comments of a document.
 package yaml
 
 import (
@@ -26,16 +26,16 @@ import (
 
 // The interfaces a type implements to encode or decode itself.
 type (
-	BytesMarshaler              = codec.BytesMarshaler
-	BytesMarshalerContext       = codec.BytesMarshalerContext
-	InterfaceMarshaler          = codec.InterfaceMarshaler
-	InterfaceMarshalerContext   = codec.InterfaceMarshalerContext
-	BytesUnmarshaler            = codec.BytesUnmarshaler
-	BytesUnmarshalerContext     = codec.BytesUnmarshalerContext
-	InterfaceUnmarshaler        = codec.InterfaceUnmarshaler
-	InterfaceUnmarshalerContext = codec.InterfaceUnmarshalerContext
-	NodeUnmarshaler             = codec.NodeUnmarshaler
-	NodeUnmarshalerContext      = codec.NodeUnmarshalerContext
+	BytesMarshaler          = codec.BytesMarshaler
+	BytesMarshalerContext   = codec.BytesMarshalerContext
+	Marshaler               = codec.Marshaler
+	ContextMarshaler        = codec.ContextMarshaler
+	BytesUnmarshaler        = codec.BytesUnmarshaler
+	BytesUnmarshalerContext = codec.BytesUnmarshalerContext
+	Unmarshaler             = codec.Unmarshaler
+	ContextUnmarshaler      = codec.ContextUnmarshaler
+	NodeUnmarshaler         = codec.NodeUnmarshaler
+	NodeUnmarshalerContext  = codec.NodeUnmarshalerContext
 )
 
 // The types a caller names to hold a document or to steer a conversion.
@@ -44,38 +44,21 @@ type (
 	Encoder = codec.Encoder
 	// Decoder reads YAML documents from a stream.
 	Decoder = codec.Decoder
-	// EncodeOption steers an [Encoder]. The constructors are in [codec].
-	EncodeOption = codec.EncodeOption
-	// DecodeOption steers a [Decoder]. The constructors are in [codec].
-	DecodeOption = codec.DecodeOption
 	// MapItem is an item in a [MapSlice].
 	MapItem = codec.MapItem
 	// MapSlice encodes and decodes as a YAML map, keeping the order of its keys.
 	MapSlice = codec.MapSlice
 	// RawMessage is a YAML document held as written, encoded and decoded verbatim.
 	RawMessage = codec.RawMessage
-	// Comment is the text of a comment and where it goes.
-	Comment = codec.Comment
-	// CommentMap holds the comments of a document against the path of each value.
-	CommentMap = codec.CommentMap
-	// CommentPosition says whether a comment stands above, beside or below its value.
-	CommentPosition = codec.CommentPosition
-)
-
-// Where a comment stands relative to its value.
-const (
-	CommentHeadPosition = codec.CommentHeadPosition
-	CommentLinePosition = codec.CommentLinePosition
-	CommentFootPosition = codec.CommentFootPosition
 )
 
 // NewEncoder returns an [Encoder] writing to w.
-func NewEncoder(w io.Writer, opts ...EncodeOption) *Encoder {
+func NewEncoder(w io.Writer, opts ...codec.EncodeOption) *Encoder {
 	return codec.NewEncoder(w, opts...)
 }
 
 // NewDecoder returns a [Decoder] reading from r.
-func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
+func NewDecoder(r io.Reader, opts ...codec.DecodeOption) *Decoder {
 	return codec.NewDecoder(r, opts...)
 }
 
@@ -88,12 +71,12 @@ func Marshal(v interface{}) ([]byte, error) {
 }
 
 // MarshalWithOptions serializes v into a YAML document, with opts.
-func MarshalWithOptions(v interface{}, opts ...EncodeOption) ([]byte, error) {
+func MarshalWithOptions(v interface{}, opts ...codec.EncodeOption) ([]byte, error) {
 	return codec.MarshalWithOptions(v, opts...)
 }
 
 // MarshalContext serializes v into a YAML document, with ctx and opts.
-func MarshalContext(ctx context.Context, v interface{}, opts ...EncodeOption) ([]byte, error) {
+func MarshalContext(ctx context.Context, v interface{}, opts ...codec.EncodeOption) ([]byte, error) {
 	return codec.MarshalContext(ctx, v, opts...)
 }
 
@@ -105,12 +88,12 @@ func Unmarshal(data []byte, v interface{}) error {
 }
 
 // UnmarshalWithOptions decodes data into v, with opts.
-func UnmarshalWithOptions(data []byte, v interface{}, opts ...DecodeOption) error {
+func UnmarshalWithOptions(data []byte, v interface{}, opts ...codec.DecodeOption) error {
 	return codec.UnmarshalWithOptions(data, v, opts...)
 }
 
 // UnmarshalContext decodes data into v, with ctx and opts.
-func UnmarshalContext(ctx context.Context, data []byte, v interface{}, opts ...DecodeOption) error {
+func UnmarshalContext(ctx context.Context, data []byte, v interface{}, opts ...codec.DecodeOption) error {
 	return codec.UnmarshalContext(ctx, data, v, opts...)
 }
 

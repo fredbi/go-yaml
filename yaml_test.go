@@ -21,7 +21,7 @@ key: value # line comment
 	var v struct {
 		Key string
 	}
-	comments := yaml.CommentMap{}
+	comments := codec.CommentMap{}
 
 	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, codec.Strict(), codec.CommentToMap(comments)); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ foo: bar # comment
 - b
 - c # comment
 `
-	cm := yaml.CommentMap{}
+	cm := codec.CommentMap{}
 	dec := yaml.NewDecoder(strings.NewReader(yml), codec.CommentToMap(cm))
 	var commentPathsWithDocIndex [][]string
 	for {

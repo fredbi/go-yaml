@@ -2466,7 +2466,7 @@ foo: # comment
 `,
 	} {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
-			m := yaml.CommentMap{}
+			m := codec.CommentMap{}
 			var v T
 			if err := yaml.UnmarshalWithOptions(
 				[]byte(test),
@@ -3088,7 +3088,7 @@ a:
 	var v struct {
 		A unmarshalList
 	}
-	cm := yaml.CommentMap{}
+	cm := codec.CommentMap{}
 	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, codec.CommentToMap(cm)); err != nil {
 		t.Fatal(err)
 	}
@@ -3677,7 +3677,7 @@ foo: # comment
 bar: *m
 baz: *seq
 `
-	m := yaml.CommentMap{}
+	m := codec.CommentMap{}
 	var v T
 	if err := yaml.UnmarshalWithOptions(
 		[]byte(yml),

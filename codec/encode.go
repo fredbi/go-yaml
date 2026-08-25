@@ -346,9 +346,9 @@ func (e *Encoder) canEncodeByMarshaler(v reflect.Value) bool {
 		return true
 	case BytesMarshaler:
 		return true
-	case InterfaceMarshalerContext:
+	case ContextMarshaler:
 		return true
-	case InterfaceMarshaler:
+	case Marshaler:
 		return true
 	case time.Time, *time.Time:
 		return true
@@ -401,7 +401,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(InterfaceMarshalerContext); ok {
+	if marshaler, ok := iface.(ContextMarshaler); ok {
 		marshalV, err := marshaler.MarshalYAML(ctx)
 		if err != nil {
 			return nil, err
@@ -409,7 +409,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return e.encodeValue(ctx, reflect.ValueOf(marshalV), column)
 	}
 
-	if marshaler, ok := iface.(InterfaceMarshaler); ok {
+	if marshaler, ok := iface.(Marshaler); ok {
 		marshalV, err := marshaler.MarshalYAML()
 		if err != nil {
 			return nil, err

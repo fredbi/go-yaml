@@ -39,7 +39,7 @@ func TestEncoder(t *testing.T) {
 	tests := []struct {
 		source  string
 		value   interface{}
-		options []yaml.EncodeOption
+		options []codec.EncodeOption
 	}{
 		{
 			"null\n",
@@ -169,7 +169,7 @@ func TestEncoder(t *testing.T) {
 		{
 			"v:\n  - A\n  - B\n",
 			map[string][]string{"v": {"A", "B"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.IndentSequence(true),
 			},
 		},
@@ -181,7 +181,7 @@ func TestEncoder(t *testing.T) {
 		{
 			"v:\n  - A\n  - B\n",
 			map[string][2]string{"v": {"A", "B"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.IndentSequence(true),
 			},
 		},
@@ -257,21 +257,21 @@ func TestEncoder(t *testing.T) {
 		{
 			"v: |-\n  username: hello\n  password: hello123\n",
 			map[string]interface{}{"v": "username: hello\npassword: hello123"},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseLiteralStyleIfMultiline(true),
 			},
 		},
 		{
 			"v: |-\n  # comment\n  username: hello\n  password: hello123\n",
 			map[string]interface{}{"v": "# comment\nusername: hello\npassword: hello123"},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseLiteralStyleIfMultiline(true),
 			},
 		},
 		{
 			"v: \"# comment\\nusername: hello\\npassword: hello123\"\n",
 			map[string]interface{}{"v": "# comment\nusername: hello\npassword: hello123"},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseLiteralStyleIfMultiline(false),
 			},
 		},
@@ -300,7 +300,7 @@ func TestEncoder(t *testing.T) {
 					2,
 				},
 			},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.IndentSequence(true),
 			},
 		},
@@ -723,7 +723,7 @@ func TestEncoder(t *testing.T) {
 				A int
 				B int `yaml:"b,omitempty"`
 			}{1, 0},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitEmpty(),
 			},
 		},
@@ -733,7 +733,7 @@ func TestEncoder(t *testing.T) {
 				A int
 				B int `yaml:"b,omitempty"`
 			}{0, 0},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitEmpty(),
 			},
 		},
@@ -743,7 +743,7 @@ func TestEncoder(t *testing.T) {
 				A netip.Addr         `yaml:"a"`
 				B struct{ X, y int } `yaml:"b"`
 			}{},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitEmpty(),
 			},
 		},
@@ -755,7 +755,7 @@ func TestEncoder(t *testing.T) {
 				A int
 				B int
 			}{1, 0},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitZero(),
 			},
 		},
@@ -765,7 +765,7 @@ func TestEncoder(t *testing.T) {
 				A int
 				B int
 			}{0, 0},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitZero(),
 			},
 		},
@@ -775,7 +775,7 @@ func TestEncoder(t *testing.T) {
 				A netip.Addr         `yaml:"a"`
 				B struct{ X, y int } `yaml:"b"`
 			}{},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitZero(),
 			},
 		},
@@ -784,7 +784,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				unexportedStruct
 			}{},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.OmitZero(),
 			},
 		},
@@ -819,7 +819,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c,d", "e"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
@@ -828,7 +828,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c]", "d"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
@@ -837,7 +837,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c}", "d"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
@@ -846,7 +846,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", `c"`, "d"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
@@ -855,7 +855,7 @@ func TestEncoder(t *testing.T) {
 			struct {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c'", "d"}},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
@@ -953,21 +953,21 @@ func TestEncoder(t *testing.T) {
 		{
 			`v: '''a''b'` + "\n",
 			map[string]string{"v": `'a'b`},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(true),
 			},
 		},
 		{
 			`v: "'a'b"` + "\n",
 			map[string]string{"v": `'a'b`},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(false),
 			},
 		},
 		{
 			`a: '\.yaml'` + "\n",
 			map[string]string{"a": `\.yaml`},
-			[]yaml.EncodeOption{
+			[]codec.EncodeOption{
 				codec.UseSingleQuote(true),
 			},
 		},
@@ -1968,7 +1968,7 @@ func TestMarshalIndentWithMultipleText(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  map[string]interface{}
-		indent yaml.EncodeOption
+		indent codec.EncodeOption
 		want   string
 	}{
 		{

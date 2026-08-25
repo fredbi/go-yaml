@@ -11,58 +11,77 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 )
 
-// BytesMarshaler interface may be implemented by types to customize their
-// behavior when being marshaled into a YAML document. The returned value
-// is marshaled in place of the original value implementing Marshaler.
+// The interfaces a type implements to encode itself.
 //
-// If an error is returned by MarshalYAML, the marshaling procedure stops
-// and returns with the provided error.
+// A value is written by whichever of these its type satisfies. Marshaler hands
+// back a value to be encoded in its place; BytesMarshaler hands back the YAML
+// text to write as it stands. The Context forms take a context.Context and are
+// used where the encode was started with one.
+//
+// An error returned by MarshalYAML stops the encoding and is returned to the
+// caller.
+
+// BytesMarshaler returns the YAML text to write in place of the value.
 type BytesMarshaler interface {
 	MarshalYAML() ([]byte, error)
 }
 
-// BytesMarshalerContext interface use BytesMarshaler with context.Context.
+// BytesMarshalerContext is [BytesMarshaler] with a context.
 type BytesMarshalerContext interface {
 	MarshalYAML(context.Context) ([]byte, error)
 }
 
-// InterfaceMarshaler interface has MarshalYAML compatible with github.com/go-yaml/yaml package.
-type InterfaceMarshaler interface {
+// Marshaler returns the value to encode in place of this one.
+//
+// The signature matches github.com/go-yaml/yaml, so a type written for that
+// library encodes here unchanged.
+type Marshaler interface {
 	MarshalYAML() (interface{}, error)
 }
 
-// InterfaceMarshalerContext interface use InterfaceMarshaler with context.Context.
-type InterfaceMarshalerContext interface {
+// ContextMarshaler is [Marshaler] with a context.
+type ContextMarshaler interface {
 	MarshalYAML(context.Context) (interface{}, error)
 }
 
-// BytesUnmarshaler interface may be implemented by types to customize their
-// behavior when being unmarshaled from a YAML document.
+// The interfaces a type implements to decode itself.
+//
+// A value is read by whichever of these its type satisfies. BytesUnmarshaler
+// is handed the YAML text as written; Unmarshaler is handed a function to
+// decode into whatever it likes; NodeUnmarshaler is handed the [ast.Node],
+// which is what a type that wants the comments or the positions needs.
+
+// BytesUnmarshaler is handed the YAML text of the value.
 type BytesUnmarshaler interface {
 	UnmarshalYAML([]byte) error
 }
 
-// BytesUnmarshalerContext interface use BytesUnmarshaler with context.Context.
+// BytesUnmarshalerContext is [BytesUnmarshaler] with a context.
 type BytesUnmarshalerContext interface {
 	UnmarshalYAML(context.Context, []byte) error
 }
 
-// InterfaceUnmarshaler interface has UnmarshalYAML compatible with github.com/go-yaml/yaml package.
-type InterfaceUnmarshaler interface {
+// Unmarshaler is handed a function that decodes the value into what it is
+// given.
+//
+// The signature matches github.com/go-yaml/yaml, so a type written for that
+// library decodes here unchanged.
+type Unmarshaler interface {
 	UnmarshalYAML(func(interface{}) error) error
 }
 
-// InterfaceUnmarshalerContext interface use InterfaceUnmarshaler with context.Context.
-type InterfaceUnmarshalerContext interface {
+// ContextUnmarshaler is [Unmarshaler] with a context.
+type ContextUnmarshaler interface {
 	UnmarshalYAML(context.Context, func(interface{}) error) error
 }
 
-// NodeUnmarshaler interface is similar to BytesUnmarshaler but provide related AST node instead of raw YAML source.
+// NodeUnmarshaler is handed the node the value was read from, which carries
+// what the text does not: the comments, and where each token stood.
 type NodeUnmarshaler interface {
 	UnmarshalYAML(ast.Node) error
 }
 
-// NodeUnmarshalerContext interface is similar to BytesUnmarshaler but provide related AST node instead of raw YAML source.
+// NodeUnmarshalerContext is [NodeUnmarshaler] with a context.
 type NodeUnmarshalerContext interface {
 	UnmarshalYAML(context.Context, ast.Node) error
 }

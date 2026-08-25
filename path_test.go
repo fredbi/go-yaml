@@ -1096,7 +1096,7 @@ spec:
 
 // valueNode builds the replacement with codec.ValueToNode, which writes a
 // multiline string as an *ast.StringNode.
-func valueNode(v any, opts ...yaml.EncodeOption) func(*testing.T) ast.Node {
+func valueNode(v any, opts ...codec.EncodeOption) func(*testing.T) ast.Node {
 	return func(t *testing.T) ast.Node {
 		t.Helper()
 		node, err := codec.ValueToNode(v, opts...)
