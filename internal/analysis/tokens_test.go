@@ -13,9 +13,9 @@ import (
 //
 // The counts are what turn the allocation profile into a per-token figure.
 // The figure that started this work: azure_swagger is 35,472 tokens, and
-// lexer.Tokenize allocated 164,505 times for it -- 4.6 allocations and 360
-// bytes per token, when a token.Token was 96 bytes in two objects. It is 56
-// bytes in one now.
+// scanning it allocated 164,505 times -- 4.6 allocations and 360 bytes per
+// token, when a token.Token was 96 bytes in two objects. It is 56 bytes in one
+// now.
 func TestTokenDensity(t *testing.T) {
 	all, err := workloads.All()
 	if err != nil {

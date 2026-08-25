@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/printer"
 )
 
@@ -78,7 +77,7 @@ alias: *x
 		}
 	})
 	t.Run("print error token with document header", func(t *testing.T) {
-		tokens, _ := lexer.Tokenize(`---
+		tokens := tokenize(t, `---
 a:
  b:
   c:
