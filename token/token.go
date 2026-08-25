@@ -722,6 +722,21 @@ func isTimestamp(value string) bool {
 	return false
 }
 
+// NeedsQuotedSpelling reports whether value holds a character that only a
+// double-quoted scalar can carry.
+//
+// There are two. A carriage return: YAML normalizes a stream's line breaks on
+// read, so "\r\n" and a lone "\r" both arrive as "\n" and no plain,
+// single-quoted or block scalar keeps one. And U+FEFF, the byte order mark:
+// nb-char excludes it, so it is not a character a plain or block scalar may
+// hold -- a quoted one may, because nb-double-char and nb-single-char are built
+// from nb-json instead.
+//
+// Written as "\r" and "\ufeff" inside a double-quoted scalar, both survive.
+func NeedsQuotedSpelling(value string) bool {
+	return strings.ContainsRune(value, '\r') || strings.ContainsRune(value, '\ufeff')
+}
+
 // isLeadingZeroDecimal reports whether value is a run of decimal digits written
 // with a leading zero, such as "088253".
 //
@@ -782,9 +797,7 @@ func IsNeedQuoted(value string) bool {
 	if isTimestamp(value) {
 		return true
 	}
-	if strings.ContainsRune(value, '\r') {
-		// A carriage return survives no spelling but a double-quoted one: the
-		// scanner normalizes every other form's line breaks to "\n".
+	if NeedsQuotedSpelling(value) {
 		return true
 	}
 	for i, c := range value {
@@ -803,12 +816,14 @@ func IsNeedQuoted(value string) bool {
 // LiteralBlockHeader returns the block scalar header value needs, or "" where
 // value has no block scalar spelling.
 //
-// A value holding a carriage return has none. YAML normalizes a stream's line
-// breaks on read -- "\r\n" and a lone "\r" both become "\n" -- so a block
-// scalar cannot carry a CR whatever it is written with. Such a value has to be
-// double-quoted, where "\r" is an escape and survives.
+// A value holding a carriage return or a byte order mark has none, for two
+// different reasons. YAML normalizes a stream's line breaks on read -- "\r\n"
+// and a lone "\r" both become "\n" -- so a block scalar cannot carry a CR
+// whatever it is written with. And nb-char excludes U+FEFF, so no block or
+// plain scalar may hold one at all. Both have to be double-quoted, where each
+// is an escape.
 func LiteralBlockHeader(value string) string {
-	if strings.ContainsRune(value, '\r') {
+	if NeedsQuotedSpelling(value) {
 		return ""
 	}
 

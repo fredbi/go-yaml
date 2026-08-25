@@ -813,7 +813,7 @@ func (n *StringNode) String() string {
 		}
 		block := strings.TrimSuffix(strings.TrimSuffix(strings.Join(values, lbc), fmt.Sprintf("%s%s%s", lbc, indent, space)), fmt.Sprintf("%s%s", indent, space))
 		return fmt.Sprintf("%s%s%s", header, lbc, block)
-	} else if breaksNeedQuoting(n.Value) {
+	} else if token.NeedsQuotedSpelling(n.Value) {
 		quoted := strconv.Quote(n.Value)
 		if n.Comment != nil {
 			return addCommentString(quoted, n.Comment)
@@ -827,16 +827,6 @@ func (n *StringNode) String() string {
 		return addCommentString(n.Value, n.Comment)
 	}
 	return n.Value
-}
-
-// breaksNeedQuoting reports whether value holds a line break that only a
-// double-quoted scalar can carry.
-//
-// A carriage return is the one such break. The scanner normalizes "\r\n" and a
-// lone "\r" to "\n", so a plain, single-quoted or block scalar holding one
-// reads back changed; "\r" written as an escape survives.
-func breaksNeedQuoting(value string) bool {
-	return strings.ContainsRune(value, '\r')
 }
 
 func (n *StringNode) stringWithoutComment() string {
@@ -857,7 +847,7 @@ func (n *StringNode) stringWithoutComment() string {
 		}
 		block := strings.TrimSuffix(strings.TrimSuffix(strings.Join(values, lbc), fmt.Sprintf("%s%s%s", lbc, indent, space)), fmt.Sprintf("  %s", space))
 		return fmt.Sprintf("%s%s%s", header, lbc, block)
-	} else if breaksNeedQuoting(n.Value) {
+	} else if token.NeedsQuotedSpelling(n.Value) {
 		return strconv.Quote(n.Value)
 	} else if len(n.Value) > 0 && (n.Value[0] == '{' || n.Value[0] == '[') {
 		return fmt.Sprintf(`'%s'`, n.Value)

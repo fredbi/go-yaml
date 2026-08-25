@@ -108,3 +108,32 @@ func TestMarshalQuotesLeadingZeroDecimals(t *testing.T) {
 		})
 	}
 }
+
+// TestMarshalStringHoldingAByteOrderMark checks that a string holding U+FEFF
+// survives Marshal and Unmarshal.
+//
+// nb-char excludes the mark, so no plain or block scalar may hold one. A quoted
+// scalar may -- nb-double-char and nb-single-char are built from nb-json
+// instead -- so the value has to come out quoted, where "\ufeff" is an escape.
+func TestMarshalStringHoldingAByteOrderMark(t *testing.T) {
+	const mark = "\ufeff"
+
+	tests := map[string]string{
+		"in the middle":     "x" + mark + "y",
+		"the whole value":   mark,
+		"opening the value": mark + "x",
+		"with a line feed":  "x\n" + mark + "y\n",
+	}
+
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			out, err := yaml.Marshal(in)
+			require.NoError(t, err)
+			require.NotContains(t, string(out[:len(out)-1]), mark, "the mark is written as an escape, not as itself")
+
+			var back string
+			require.NoError(t, yaml.Unmarshal(out, &back))
+			require.Equal(t, in, back)
+		})
+	}
+}

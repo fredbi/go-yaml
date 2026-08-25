@@ -56,6 +56,16 @@ func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
 		{name: "alone on a line inside a document", src: "a: 1\n" + bom + "\nb: 2\n"},
 		{name: "before a directive that may not stand there", src: "a: 1\n" + bom + "%YAML 1.2\n---\nb: 2\n"},
 		{name: "inside a flow sequence", src: "[" + bom + "a]\n"},
+
+		// nb-double-char and nb-single-char are built from nb-json, which is
+		// #x9 | [#x20-#x10FFFF] and takes the mark like any other character.
+		// So a quoted scalar holds one where a plain or block scalar may not.
+		{name: "inside a double-quoted scalar", src: "a: \"x" + bom + "y\"\n", ok: true},
+		{name: "inside a single-quoted scalar", src: "a: 'x" + bom + "y'\n", ok: true},
+		{name: "the whole of a double-quoted scalar", src: "a: \"" + bom + "\"\n", ok: true},
+		{name: "inside a quoted scalar in a flow sequence", src: "[\"a" + bom + "b\"]\n", ok: true},
+		{name: "opening a quoted scalar's second line", src: "a: \"x\n" + bom + "y\"\n"},
+		{name: "inside a block scalar", src: "a: |\n  x" + bom + "y\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

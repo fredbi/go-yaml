@@ -147,6 +147,14 @@ func validateStream(text string) error {
 // Marks are dropped rather than read, which is what a file saved by an editor
 // that writes one needs. Init removes every one of them once this has passed.
 func validateByteOrderMarks(text string) error {
+	// Marks opening the stream stand in the prefix that l-yaml-stream begins
+	// with, which always admits them. Where they are the only ones, there is
+	// nothing to place and nothing to read the quoted scalars for.
+	if !strings.ContainsRune(strings.TrimLeft(text, string(byteOrderMark)), byteOrderMark) {
+		return nil
+	}
+
+	quoted := quotedRanges(text)
 	lines := strings.Split(text, "\n")
 	offset := 1
 
@@ -156,17 +164,20 @@ func validateByteOrderMarks(text string) error {
 
 		if rest := line[marks*utf8.RuneLen(byteOrderMark):]; strings.ContainsRune(rest, byteOrderMark) {
 			column := marks + 1 + strings.IndexRune(rest, byteOrderMark)
+			at := offset + column - 1
 
-			return ErrInvalidToken(
-				"found a byte order mark inside a line, where a node may not hold one",
-				token.Invalid(
-					string(byteOrderMark),
-					token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(offset + column - 1)},
-				),
-			)
+			if !quoted.holds(at - 1) {
+				return ErrInvalidToken(
+					"found a byte order mark inside a line, where a node may not hold one",
+					token.Invalid(
+						string(byteOrderMark),
+						token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(at)},
+					),
+				)
+			}
 		}
 
-		if marks > 0 && !opensADocument(lines, i, marks) {
+		if marks > 0 && !quoted.holds(offset-1) && !opensADocument(lines, i, marks) {
 			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)}))
 		}
 
@@ -174,6 +185,62 @@ func validateByteOrderMarks(text string) error {
 	}
 
 	return nil
+}
+
+// byteRanges holds half-open byte ranges of the source, in the order they were
+// read.
+type byteRanges []struct{ start, end int }
+
+// holds reports whether at falls inside one of the ranges.
+func (r byteRanges) holds(at int) bool {
+	for _, span := range r {
+		if at >= span.start && at < span.end {
+			return true
+		}
+	}
+
+	return false
+}
+
+// quotedRanges returns the source each quoted scalar of text covers.
+//
+// nb-char excludes the byte order mark, so no plain or block scalar may hold
+// one. A quoted scalar may: nb-double-char and nb-single-char are built from
+// nb-json, which is #x9 | [#x20-#x10FFFF] and takes the mark like any other
+// character. So "a: \"x<mark>y\"" is YAML 1.2 and "a: x<mark>y" is not.
+//
+// Telling the two apart means knowing where the quoted scalars are, which is
+// what a scanner works out. This runs one over the text and keeps the spans;
+// it runs only where a mark stands somewhere other than the head of the
+// stream, which is rare. A source the scanner refuses returns the spans it
+// reached: the refusal itself surfaces from the scan the caller asked for.
+func quotedRanges(text string) byteRanges {
+	var s Scanner
+	s.reset(text)
+
+	var ranges byteRanges
+	for {
+		tokens, err := s.Scan()
+		if err != nil {
+			return ranges
+		}
+		for _, tk := range tokens {
+			switch tk.Type {
+			case token.SingleQuoteType, token.DoubleQuoteType:
+			default:
+				continue
+			}
+			written := strings.TrimLeft(tk.Origin, " \t\n\r")
+			start := int(tk.Position.Offset)
+			if start < 0 || start+len(written) > len(text) || !strings.HasPrefix(text[start:], written) {
+				// The token's offset does not address its text, so the span
+				// cannot be trusted. Leaving it out refuses a mark that a
+				// quoted scalar may hold, which is where this started.
+				continue
+			}
+			ranges = append(ranges, struct{ start, end int }{start, start + len(written)})
+		}
+	}
 }
 
 // leadingMarks counts the byte order marks a line opens with.
@@ -2195,6 +2262,13 @@ func (s *Scanner) scan(ctx *Context) error {
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
 	s.initErr = validateStream(text)
+	s.reset(text)
+}
+
+// reset prepares s to tokenize text without judging whether text is a stream at
+// all. validateByteOrderMarks reads the quoted scalars back out of a scanner,
+// and cannot be the thing that decides whether that scanner may run.
+func (s *Scanner) reset(text string) {
 	// The source is scanned as it was handed in. A byte order mark is stepped
 	// over where one stands, so every offset addresses the text the caller
 	// wrote rather than a rewrite of it -- and a token, which points into the
