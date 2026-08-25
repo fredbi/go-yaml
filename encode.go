@@ -41,7 +41,7 @@ type Encoder struct {
 	omitEmpty                  bool
 	autoInt                    bool
 	useLiteralStyleIfMultiline bool
-	commentMap                 map[*Path][]*Comment
+	commentMap                 map[nodeFilter][]*Comment
 	written                    bool
 
 	line           int
@@ -137,6 +137,18 @@ func (e *Encoder) EncodeToNodeContext(ctx context.Context, v interface{}) (ast.N
 		return nil, err
 	}
 	return node, nil
+}
+
+// nodeFilter picks one node out of a tree.
+//
+// The encoder writes a comment at the value a [CommentMap] key addresses, and
+// what it needs of that key is this and nothing else: hand it the document,
+// take back the node, or nil where the key addresses nothing here. A YAML path
+// is what the caller writes and [Path] is what resolves one, but the encoder
+// never asks what a path is -- so it does not depend on the query language, and
+// a caller with another way to reach a node can pass that instead.
+type nodeFilter interface {
+	FilterNode(ast.Node) (ast.Node, error)
 }
 
 func (e *Encoder) setCommentByCommentMap(node ast.Node) error {
