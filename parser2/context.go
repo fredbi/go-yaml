@@ -187,7 +187,10 @@ func (c context) withFlowSequence() context {
 }
 
 func (p *Parser) newContext() context {
-	ctx := context{arena: ast.NewArena(len(p.tokens)), lineComments: p.lineComments}
+	// Sized from the tokens of the stream, not from the documents it holds:
+	// len(p.tokens) is the document count, which is one for most streams and
+	// left every block at its floor of sixteen nodes.
+	ctx := context{arena: ast.NewArena(p.raw.n), lineComments: p.lineComments}
 
 	root := p.newPathNode()
 	if root == nil {
