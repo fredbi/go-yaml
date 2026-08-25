@@ -197,21 +197,42 @@ func (c *Context) resetBuffer() {
 	c.originStart = c.idx
 }
 
-// text returns buf as a string.
+// text returns buf as a string, taken from the source where it stands there
+// verbatim.
 //
-// A Go substring shares the bytes it is taken from, so where buf is a verbatim
-// copy of the source between start and the cursor, the string costs nothing:
-// the token points into the document rather than carrying its own copy of it.
-// Scanning rewrites the text often enough -- escapes, folding, chomping -- that
-// the two are compared rather than assumed equal.
+// A Go substring shares the bytes it is taken from, so a token whose text is
+// the source's own costs nothing: it points into the document rather than
+// carrying a copy of it. Scanning rewrites the text often enough -- escapes,
+// folding, chomping -- that the source window at start is compared with buf
+// rather than assumed equal to it.
+//
+// Two windows are tried. The one at start catches a plain scalar, which is cut
+// only once the scanner knows it did not run on to the next line, so that by
+// then the cursor stands well past it. The one ending at the cursor catches a
+// scalar whose text does not begin where the token does -- a quoted one, whose
+// value stands inside the quotes.
 func (c *Context) text(buf []byte, start int) string {
-	if start >= 0 && start <= c.idx && c.idx <= len(c.src) {
-		if span := c.src[start:c.idx]; len(span) == len(buf) && span == string(buf) {
-			return span
-		}
+	if span, ok := c.window(buf, start); ok {
+		return span
+	}
+	if span, ok := c.window(buf, c.idx-len(buf)); ok {
+		return span
 	}
 
 	return string(buf)
+}
+
+// window returns the len(buf) bytes of the source at start, and reports whether
+// they are buf's own.
+func (c *Context) window(buf []byte, start int) (string, bool) {
+	end := start + len(buf)
+	if start < 0 || end > len(c.src) {
+		return "", false
+	}
+
+	span := c.src[start:end]
+
+	return span, span == string(buf)
 }
 
 func (c *Context) breakMultiLine() {
@@ -645,7 +666,10 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		return token.Token{}, false
 	}
 	origin := c.text(c.obuf, c.originStart)
-	value := c.text(source, c.idx-len(source))
+	// pos.Offset is where the value starts in the source. The cursor is not:
+	// a plain scalar is cut only once the scanner knows it did not run on to
+	// the next line, by which time the cursor stands well past it.
+	value := c.text(source, int(pos.Offset))
 
 	var tk token.Token
 	if c.isMultiLine() {
