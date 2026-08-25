@@ -516,65 +516,125 @@ func mayBeNumber(value string) bool {
 	}
 }
 
-func toNumber(value string) (*NumberValue, error) {
+// numberShape is what a number's text says about it before any of it is
+// parsed: which kind of number it would be, in which base, and which characters
+// carry the digits.
+type numberShape struct {
+	typ      NumberType
+	base     int
+	digits   string
+	negative bool
+}
+
+// shapeOfNumber reads value as a number without parsing it, and reports false
+// where the text cannot be one at all. Where it reports true the digits still
+// have to be checked, which is what [numberShape.check] does.
+//
+// TrimPrefix and ReplaceAll hand back value itself where there is nothing to
+// take out, so a number written plainly costs nothing here.
+func shapeOfNumber(value string) (numberShape, bool) {
 	if !mayBeNumber(value) {
-		return nil, nil
+		return numberShape{}, false
 	}
+
 	dotCount := strings.Count(value, ".")
 	if dotCount > 1 {
+		return numberShape{}, false
+	}
+
+	shape := numberShape{
+		negative: strings.HasPrefix(value, "-"),
+		digits:   strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-"), "_", ""),
+	}
+
+	switch {
+	case strings.HasPrefix(shape.digits, "0x"):
+		shape.digits = strings.TrimPrefix(shape.digits, "0x")
+		shape.base, shape.typ = 16, NumberTypeHex
+	case strings.HasPrefix(shape.digits, "0o"):
+		shape.digits = strings.TrimPrefix(shape.digits, "0o")
+		shape.base, shape.typ = 8, NumberTypeOctet
+	case strings.HasPrefix(shape.digits, "0b"):
+		shape.digits = strings.TrimPrefix(shape.digits, "0b")
+		shape.base, shape.typ = 2, NumberTypeBinary
+	case strings.HasPrefix(shape.digits, "0") && len(shape.digits) > 1 && dotCount == 0:
+		shape.base, shape.typ = 8, NumberTypeOctet
+	case dotCount == 1:
+		shape.typ = NumberTypeFloat
+	default:
+		shape.base, shape.typ = 10, NumberTypeDecimal
+	}
+
+	return shape, true
+}
+
+// check reads the digits to see whether they are a number of this shape, and
+// returns what strconv made of them so that a caller can tell a number too big
+// to hold from text that is not a number at all.
+//
+// A negative is checked against the unsigned digits and the smallest int64
+// rather than by putting the sign back, which would mean building a string for
+// strconv to read.
+func (s numberShape) check() error {
+	if s.typ == NumberTypeFloat {
+		_, err := strconv.ParseFloat(s.digits, 64)
+
+		return err
+	}
+
+	u, err := strconv.ParseUint(s.digits, s.base, 64)
+	if err != nil {
+		return err
+	}
+	if s.negative && u > 1<<63 {
+		return &strconv.NumError{Func: "ParseInt", Num: s.digits, Err: strconv.ErrRange}
+	}
+
+	return nil
+}
+
+// numberType reports which kind of number value is, and false where it is not
+// one.
+//
+// The text is read and checked but not converted, and nothing here allocates:
+// typing a scalar costs no memory. What the number means is the caller's, from
+// [Token.Value] or [ast.ScalarNode.Text].
+func numberType(value string) (NumberType, bool) {
+	shape, ok := shapeOfNumber(value)
+	if !ok || shape.check() != nil {
+		return "", false
+	}
+
+	return shape.typ, true
+}
+
+func toNumber(value string) (*NumberValue, error) {
+	shape, ok := shapeOfNumber(value)
+	if !ok {
 		return nil, nil
 	}
 
-	isNegative := strings.HasPrefix(value, "-")
-	normalized := strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-"), "_", "")
-
-	var (
-		typ  NumberType
-		base int
-	)
-	switch {
-	case strings.HasPrefix(normalized, "0x"):
-		normalized = strings.TrimPrefix(normalized, "0x")
-		base = 16
-		typ = NumberTypeHex
-	case strings.HasPrefix(normalized, "0o"):
-		normalized = strings.TrimPrefix(normalized, "0o")
-		base = 8
-		typ = NumberTypeOctet
-	case strings.HasPrefix(normalized, "0b"):
-		normalized = strings.TrimPrefix(normalized, "0b")
-		base = 2
-		typ = NumberTypeBinary
-	case strings.HasPrefix(normalized, "0") && len(normalized) > 1 && dotCount == 0:
-		base = 8
-		typ = NumberTypeOctet
-	case dotCount == 1:
-		typ = NumberTypeFloat
-	default:
-		typ = NumberTypeDecimal
-		base = 10
-	}
-
-	text := normalized
-	if isNegative {
+	text := shape.digits
+	if shape.negative {
 		text = "-" + text
 	}
 
 	var v any
-	if typ == NumberTypeFloat {
+	switch {
+	case shape.typ == NumberTypeFloat:
 		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return nil, err
 		}
 		v = f
-	} else if isNegative {
-		i, err := strconv.ParseInt(text, base, 64)
+	case shape.negative:
+		i, err := strconv.ParseInt(text, shape.base, 64)
 		if err != nil {
 			return nil, err
 		}
 		v = i
-	} else {
-		u, err := strconv.ParseUint(text, base, 64)
+	default:
+		u, err := strconv.ParseUint(text, shape.base, 64)
 		if err != nil {
 			return nil, err
 		}
@@ -582,7 +642,7 @@ func toNumber(value string) (*NumberValue, error) {
 	}
 
 	return &NumberValue{
-		Type:  typ,
+		Type:  shape.typ,
 		Value: v,
 		Text:  text,
 	}, nil
@@ -690,13 +750,12 @@ func Make(value string, org string, pos Position) Token {
 		return tk
 	}
 
-	num := ToNumber(value)
-	if num == nil {
+	typ, ok := numberType(value)
+	if !ok {
 		return tk
 	}
 
-	tk.Type = IntegerType
-	switch num.Type {
+	switch typ {
 	case NumberTypeFloat:
 		tk.Type = FloatType
 	case NumberTypeBinary:
@@ -705,6 +764,8 @@ func Make(value string, org string, pos Position) Token {
 		tk.Type = OctetIntegerType
 	case NumberTypeHex:
 		tk.Type = HexIntegerType
+	default:
+		tk.Type = IntegerType
 	}
 
 	return tk
