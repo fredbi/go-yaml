@@ -271,12 +271,12 @@ func (s *Scanner) pos() token.Position {
 	}
 }
 
-func (s *Scanner) bufferedToken(ctx *Context) *token.Token {
+func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	if s.hasSavedPos {
-		tk := ctx.bufferedToken(s.savedPos)
+		tk, ok := ctx.bufferedToken(s.savedPos)
 		s.hasSavedPos = false
 
-		return tk
+		return tk, ok
 	}
 	line := s.line
 	column := s.column - utf8.RuneCount(ctx.buf)
@@ -424,7 +424,9 @@ func (s *Scanner) isChangedToIndentStateUp() bool {
 }
 
 func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
-	ctx.addToken(s.bufferedToken(ctx))
+	if tk, ok := s.bufferedToken(ctx); ok {
+		ctx.addToken(&tk)
+	}
 }
 
 func (s *Scanner) breakMultiLine(ctx *Context) {
@@ -1407,10 +1409,10 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	}
 
 	// mapping value
-	tk := s.bufferedToken(ctx)
-	if tk != nil {
+	tk, ok := s.bufferedToken(ctx)
+	if ok {
 		s.lastDelimColumn = int(tk.Position.Column)
-		ctx.addToken(tk)
+		ctx.addToken(&tk)
 	} else if col := ctx.keyStartColumn(); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens:
 		// it is quoted, or it is an empty scalar carrying an anchor, an alias or
@@ -1960,9 +1962,9 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 // so nothing has to be re-read; emitted counts the tokens ctx already held, so
 // a token another call left behind does not end this one straight away.
 func (s *Scanner) scan(ctx *Context) error {
-	emitted := len(ctx.tokens)
+	emitted := ctx.written
 	for ctx.next() {
-		if len(ctx.tokens) > emitted {
+		if ctx.written > emitted {
 			return nil
 		}
 		c := ctx.currentChar()
@@ -2236,9 +2238,7 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 		}
 	}
 
-	tokens := ctx.tokens[ctx.tokensRead:]
-	ctx.tokens = ctx.tokens[len(ctx.tokens):]
-	ctx.tokensRead = 0
+	tokens := ctx.takeTokens()
 
 	if err != nil {
 		var invalidTokenErr *InvalidTokenError
@@ -2327,6 +2327,6 @@ func (s *Scanner) stop(err error) {
 	var invalidTokenErr *InvalidTokenError
 	if errors.As(err, &invalidTokenErr) && invalidTokenErr.Token != nil {
 		s.lookback.Derive(invalidTokenErr.Token)
-		s.ctx.tokens = append(s.ctx.tokens, invalidTokenErr.Token)
+		s.ctx.appendToken(*invalidTokenErr.Token)
 	}
 }

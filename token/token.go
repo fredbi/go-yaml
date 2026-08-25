@@ -667,16 +667,15 @@ func LiteralBlockHeader(value string) string {
 
 // New create reserved keyword token or number token and other string token.
 func New(value string, org string, pos Position) *Token {
-	tk := makeToken(value, org, pos)
+	tk := Make(value, org, pos)
 
 	return &tk
 }
 
-// makeToken builds the token for value without settling where it lives. New
-// puts it on the heap; a caller holding its tokens in a slice of values keeps
-// this one out of the heap altogether, which is why New is thin enough to
-// inline.
-func makeToken(value string, org string, pos Position) Token {
+// Make builds the token for value without settling where it lives. New puts it
+// on the heap; a caller holding its tokens in a slice of values keeps this one
+// out of the heap altogether, which is why New is thin enough to inline.
+func Make(value string, org string, pos Position) Token {
 	tk := Token{
 		Type:     StringType,
 		Value:    value,
@@ -818,7 +817,14 @@ func (t Tokens) Dump() {
 
 // String create token for String
 func String(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeString(value, org, pos)
+
+	return &tk
+}
+
+// MakeString builds a string token without settling where it lives.
+func MakeString(value string, org string, pos Position) Token {
+	return Token{
 		Type:     StringType,
 		Value:    value,
 		Origin:   org,

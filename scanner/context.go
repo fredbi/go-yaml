@@ -24,16 +24,29 @@ type Context struct {
 	// a verbatim copy of the source from there, the token's text is a slice of
 	// src rather than a copy of the buffer.
 	originStart int
-	tokens      token.Tokens
-	// tokensRead counts how many of tokens the caller has taken.
-	tokensRead int
-	// lastTk is the token emitted most recently. tokens is drained as the
-	// caller takes them, so it is not the place to ask what came before.
-	lastTk *token.Token
-	// lastContentTk is the last token emitted that is part of the document
-	// rather than a note about it. A comment may stand between a key and its
-	// ':', on its own line, without making the two any less adjacent.
-	lastContentTk *token.Token
+	// blocks holds the tokens read, as values, in blocks that are never copied
+	// or resized. A token's address therefore holds good for as long as the
+	// Context does, and reading a whole document costs one allocation per block
+	// rather than one per token.
+	blocks [][]token.Token
+	// written counts the tokens read, read counts those handed over. Neither
+	// winds back: a slot handed over is never written again.
+	written int
+	// read counts the tokens handed over, and readBlock and readOffset address
+	// the next one. Tokens are handed over in the order they were read, so the
+	// cursor walks the blocks rather than indexing into them.
+	read       int
+	readBlock  int
+	readOffset int
+	// lastTk is a copy of the token emitted most recently. tokens is drained as
+	// the caller takes them, so it is not the place to ask what came before.
+	lastTk    token.Token
+	hasLastTk bool
+	// lastContentTk is a copy of the last token emitted that is part of the
+	// document rather than a note about it. A comment may stand between a key
+	// and its ':', on its own line, without making the two any less adjacent.
+	lastContentTk    token.Token
+	hasLastContentTk bool
 	// propRun describes the run of property tokens ending at lastTk, and
 	// prevPropRun the run ending at the token before it. keyStartColumn reads
 	// them to find where a key made only of already-cut tokens begins.
@@ -73,8 +86,7 @@ var (
 
 func createContext() *Context {
 	return &Context{
-		idx:    0,
-		tokens: token.Tokens{},
+		idx: 0,
 	}
 }
 
@@ -101,8 +113,13 @@ func (c *Context) clear() {
 // the cursor. What the scanner reads next then starts a token of its own.
 func (c *Context) abandon() {
 	c.clear()
-	c.lastTk = nil
-	c.lastContentTk = nil
+	c.forgetTokens()
+}
+
+// forgetTokens drops what the tokens already emitted say about the next one.
+func (c *Context) forgetTokens() {
+	c.lastTk, c.hasLastTk = token.Token{}, false
+	c.lastContentTk, c.hasLastContentTk = token.Token{}, false
 	c.propRun = propertyRun{}
 	c.prevPropRun = propertyRun{}
 }
@@ -110,7 +127,11 @@ func (c *Context) abandon() {
 // lastContentToken returns the last token emitted that is part of the document
 // rather than a note about it.
 func (c *Context) lastContentToken() *token.Token {
-	return c.lastContentTk
+	if !c.hasLastContentTk {
+		return nil
+	}
+
+	return &c.lastContentTk
 }
 
 // keyStartColumn reports the column a map key made only of already-cut tokens
@@ -120,10 +141,10 @@ func (c *Context) lastContentToken() *token.Token {
 // or a tag may carry an empty scalar, and then the key is the run of them: the
 // key of "&a : v" begins at the '&', two tokens before the ':'.
 func (c *Context) keyStartColumn() int {
-	last := c.lastTk
-	if last == nil {
+	if !c.hasLastTk {
 		return 0
 	}
+	last := &c.lastTk
 
 	column := last.Position.Column
 	found := last.Type.Indicator() == token.QuotedScalarIndicator || isPropertyToken(last)
@@ -147,12 +168,14 @@ func (c *Context) reset(src string) {
 	c.originStart = 0
 	c.size = len(src)
 	c.src = src
-	c.tokens = c.tokens[:0]
-	c.tokensRead = 0
-	c.lastTk = nil
-	c.lastContentTk = nil
-	c.propRun = propertyRun{}
-	c.prevPropRun = propertyRun{}
+	// The blocks are dropped rather than reused: a caller may still hold tokens
+	// from the source just read, and those stand in the blocks themselves.
+	c.blocks = nil
+	c.written = 0
+	c.read = 0
+	c.readBlock = 0
+	c.readOffset = 0
+	c.forgetTokens()
 	c.resetBuffer()
 	c.mstate = nil
 }
@@ -368,7 +391,7 @@ func (c *Context) addToken(tk *token.Token) {
 		return
 	}
 	c.lookback.Derive(tk)
-	c.tokens = append(c.tokens, tk)
+	c.appendToken(*tk)
 
 	c.prevPropRun = c.propRun
 	switch {
@@ -380,9 +403,9 @@ func (c *Context) addToken(tk *token.Token) {
 		c.propRun = propertyRun{startColumn: tk.Position.Column, line: tk.Position.Line, length: 1}
 	}
 
-	c.lastTk = tk
+	c.lastTk, c.hasLastTk = *tk, true
 	if tk.Type != token.CommentType {
-		c.lastContentTk = tk
+		c.lastContentTk, c.hasLastContentTk = *tk, true
 	}
 }
 
@@ -581,27 +604,35 @@ func (c *Context) bufferedSrc() []byte {
 	return src
 }
 
-func (c *Context) bufferedToken(pos token.Position) *token.Token {
+// bufferedToken cuts the text read so far into a token, and reports false where
+// there is nothing to cut.
+//
+// The token is returned by value: a caller that hands it straight to addToken
+// keeps it off the heap, since neither addToken nor setTokenTypeByPrevTag holds
+// on to it.
+func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 	if c.idx == 0 {
-		return nil
+		return token.Token{}, false
 	}
 	source := c.bufferedSrc()
 	if len(source) == 0 {
 		c.buf = c.buf[:0] // clear value's buffer only.
-		return nil
+
+		return token.Token{}, false
 	}
 	origin := c.text(c.obuf, c.originStart)
 	value := c.text(source, c.idx-len(source))
 
-	var tk *token.Token
+	var tk token.Token
 	if c.isMultiLine() {
-		tk = token.String(value, origin, pos)
+		tk = token.MakeString(value, origin, pos)
 	} else {
-		tk = token.New(value, origin, pos)
+		tk = token.Make(value, origin, pos)
 	}
-	c.setTokenTypeByPrevTag(tk)
+	c.setTokenTypeByPrevTag(&tk)
 	c.resetBuffer()
-	return tk
+
+	return tk, true
 }
 
 func (c *Context) setTokenTypeByPrevTag(tk *token.Token) {
@@ -619,21 +650,60 @@ func (c *Context) setTokenTypeByPrevTag(tk *token.Token) {
 }
 
 func (c *Context) lastToken() *token.Token {
-	return c.lastTk
+	if !c.hasLastTk {
+		return nil
+	}
+
+	return &c.lastTk
 }
 
-// popToken takes the oldest token not yet handed over. It reports false when
-// there is none, and the buffer is then reused for the tokens read next.
-func (c *Context) popToken() (*token.Token, bool) {
-	if c.tokensRead >= len(c.tokens) {
-		c.tokens = c.tokens[:0]
-		c.tokensRead = 0
+// tokenBlockSizes gives the size of each block in turn, the last of them for
+// every block after the fourth. A short document is read into a block it can
+// nearly fill, and a long one settles on blocks big enough that the blocks
+// slice itself hardly counts.
+var tokenBlockSizes = [...]int{32, 64, 128, 256}
 
+// appendToken writes tk into the buffer, taking a new block where the current
+// one is full.
+func (c *Context) appendToken(tk token.Token) {
+	if len(c.blocks) == 0 || len(c.blocks[len(c.blocks)-1]) == cap(c.blocks[len(c.blocks)-1]) {
+		size := tokenBlockSizes[min(len(c.blocks), len(tokenBlockSizes)-1)]
+		c.blocks = append(c.blocks, make([]token.Token, 0, size))
+	}
+
+	block := &c.blocks[len(c.blocks)-1]
+	*block = append(*block, tk)
+	c.written++
+}
+
+// popToken takes the oldest token not yet handed over, and reports false where
+// there is none.
+func (c *Context) popToken() (*token.Token, bool) {
+	if c.read >= c.written {
 		return nil, false
 	}
 
-	tk := c.tokens[c.tokensRead]
-	c.tokensRead++
+	for c.readOffset >= len(c.blocks[c.readBlock]) {
+		c.readBlock++
+		c.readOffset = 0
+	}
+
+	tk := &c.blocks[c.readBlock][c.readOffset]
+	c.readOffset++
+	c.read++
 
 	return tk, true
+}
+
+// takeTokens hands over the tokens not yet taken, each addressed inside the
+// block it stands in.
+func (c *Context) takeTokens() token.Tokens {
+	tokens := make(token.Tokens, 0, c.written-c.read)
+	for {
+		tk, ok := c.popToken()
+		if !ok {
+			return tokens
+		}
+		tokens = append(tokens, tk)
+	}
 }

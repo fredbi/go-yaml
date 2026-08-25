@@ -16,8 +16,13 @@ import "strings"
 // has to walk back over the tokens already emitted, and nothing has to hold
 // them.
 type Lookback struct {
-	prev  *Token
-	prev2 *Token
+	// prev and prev2 are copies, not the tokens themselves: a scanner holding
+	// its tokens in a slice of values reuses the room a token stood in as soon
+	// as the token has been handed over.
+	prev     Token
+	prev2    Token
+	hasPrev  bool
+	hasPrev2 bool
 
 	// blockHeader answers, for the prefix ending one and two tokens back,
 	// whether it ends on a literal or folded header once the comments between
@@ -38,7 +43,7 @@ func (l *Lookback) Derive(tk *Token) {
 	if tk == nil {
 		return
 	}
-	if l.prev != nil {
+	if l.hasPrev {
 		tk.BlankLineAbove = l.blankLineAbove(tk)
 		tk.CommentBreaksAbove = l.commentBreaksAbove(tk)
 	}
@@ -63,17 +68,17 @@ func (l *Lookback) read(tk *Token) {
 		l.blockHeader[0] = tk.Type == LiteralType || tk.Type == FoldedType
 		l.commentBreaks = 0
 	}
-	l.prev2 = l.prev
-	l.prev = tk
+	l.prev2, l.hasPrev2 = l.prev, l.hasPrev
+	l.prev, l.hasPrev = *tk, true
 }
 
 // blankLineAbove reports whether the author left an empty line above t.
 func (l *Lookback) blankLineAbove(t *Token) bool {
 	const lbc = "\n"
 
-	prev := l.prev
-	// blockHeader for the prefix before prev, which is what says whether prev
-	// is block scalar content.
+	prev := &l.prev
+	// blockHeader for the prefix before prev, which says whether prev is block
+	// scalar content.
 	header := l.blockHeader[1]
 
 	var adjustment int32
@@ -85,8 +90,8 @@ func (l *Lookback) blankLineAbove(t *Token) bool {
 	// -- and not part of that gap.
 	if prev.Type == SequenceEntryType {
 		adjustment = t.Position.Line - prev.Position.Line
-		if l.prev2 != nil {
-			prev = l.prev2
+		if l.hasPrev2 {
+			prev = &l.prev2
 			header = l.blockHeader[2]
 		}
 	}
