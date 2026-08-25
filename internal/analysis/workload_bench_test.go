@@ -9,6 +9,7 @@ import (
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/parser2"
 )
 
 // The three stages a document goes through, benchmarked over the same
@@ -36,6 +37,16 @@ func BenchmarkWorkloadParse(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
 			if _, err := parser.ParseBytes(src, 0); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkWorkloadParse2(b *testing.B) {
+	forEachWorkload(b, func(b *testing.B, src []byte) {
+		for b.Loop() {
+			if _, err := parser2.ParseBytes(src, 0); err != nil {
 				b.Fatal(err)
 			}
 		}
