@@ -119,21 +119,24 @@ type Parser struct {
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
 	pathSlab []ast.PathNode
-	// refSlab hands out the tokenRef every step into a token group needs.
-	refSlab []tokenRef
+	// refs holds one token reference per depth of the descent. They are held by
+	// pointer, so growing the slice leaves the ones in hand where they are.
+	refs []*tokenRef
 }
 
-// refBlockSize is how many token references one allocation covers.
-const refBlockSize = 128
-
-// newTokenRef returns a reference positioned at the start of tokens.
-func (p *Parser) newTokenRef(tokens []*Token) *tokenRef {
-	if len(p.refSlab) == 0 {
-		p.refSlab = make([]tokenRef, refBlockSize)
+// tokenRefAt returns the reference for a group read at depth, positioned at the
+// start of tokens.
+//
+// The parse is depth first, so one group at most is being read at each depth at
+// any moment: the reference for a depth is set again for the next group read
+// there rather than another being taken. A document nested N deep costs N
+// references however many groups it holds.
+func (p *Parser) tokenRefAt(depth int32, tokens []*Token) *tokenRef {
+	for int(depth) >= len(p.refs) {
+		p.refs = append(p.refs, new(tokenRef))
 	}
-	ref := &p.refSlab[0]
-	p.refSlab = p.refSlab[1:]
 
+	ref := p.refs[depth]
 	ref.tokens, ref.idx = tokens, 0
 
 	return ref

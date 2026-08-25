@@ -24,6 +24,10 @@ type context struct {
 	// inside a flow sequence is an implicit key, which a flow mapping's key is
 	// not, and the two are held to different rules.
 	inFlowSequence bool
+	// depth counts the groups stepped into to reach here, and says which token
+	// reference this context reads. It sits beside the flags, in room the
+	// struct was padding out anyway.
+	depth int32
 	// arena hands out the nodes the descent builds. It is shared by every
 	// context of one parse, so a copy carries the same one.
 	arena *ast.Arena
@@ -76,7 +80,8 @@ func (c context) isTokenNotFound() bool {
 }
 
 func (c context) withGroup(p *Parser, g *TokenGroup) context {
-	c.tokenRef = p.newTokenRef(g.Tokens)
+	c.depth++
+	c.tokenRef = p.tokenRefAt(c.depth, g.Tokens)
 
 	return c
 }
