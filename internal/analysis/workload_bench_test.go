@@ -6,6 +6,8 @@ package analysis
 import (
 	"testing"
 
+	v3 "go.yaml.in/yaml/v3"
+
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/parser"
@@ -92,4 +94,18 @@ func forEachWorkload(b *testing.B, measure func(*testing.B, []byte)) {
 			measure(b, workload.Data)
 		})
 	}
+}
+
+// BenchmarkWorkloadV3Node is the outside reference: go.yaml.in/yaml/v3 reading
+// the same documents into its own node tree, which is the nearest thing it has
+// to an AST.
+func BenchmarkWorkloadV3Node(b *testing.B) {
+	forEachWorkload(b, func(b *testing.B, src []byte) {
+		for b.Loop() {
+			var n v3.Node
+			if err := v3.Unmarshal(src, &n); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
