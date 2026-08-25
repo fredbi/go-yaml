@@ -450,16 +450,17 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.groupScalarTags(g.groupAnchors(g.groupBlockScalars(g.attachLineComments(g.stream(raw))))))
+	tks := g.collect(raw.n, g.groupAnchorsWithScalarTags(
+		g.groupScalarTags(
+			g.groupAnchors(
+				g.groupBlockScalars(
+					g.attachLineComments(
+						g.stream(raw)))))))
 	if g.err != nil {
 		return nil, nil, g.err
 	}
 
-	tks, err := g.createAnchorWithScalarTagTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
-	}
-	tks, err = g.createMapKeyTokenGroups(tks)
+	tks, err := g.createMapKeyTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -744,31 +745,50 @@ func (g *grouper) taggedScalar(tag, next *Token) (*Token, bool) {
 	}
 }
 
-func (g *grouper) createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.GroupType() {
-		case TokenGroupAnchorName:
-			if i+1 >= len(tokens) {
-				// An anchor with nothing after it names the empty node. The
-				// parser supplies that null; there is nothing to group here.
-				ret = append(ret, tk)
+// groupAnchorsWithScalarTags joins an anchor name with a tagged scalar.
+//
+// groupAnchors could not: the tag was still a token of its own when it ran, and
+// only groupScalarTags turns it into the scalar the anchor names. One token is
+// held, the anchor name, until the token after it says whether that is what it
+// names.
+func (g *grouper) groupAnchorsWithScalarTags(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var name *Token // an anchor name, waiting to see whether a tagged scalar follows
+
+		for tk := range in {
+			if name != nil {
+				if name.Line() == tk.Line() && tk.GroupType() == TokenGroupScalarTag {
+					if !yield(g.group2(TokenGroupAnchor, name, tk)) {
+						return
+					}
+					name = nil
+
+					continue
+				}
+				// The anchor names something else, or the empty node, and tk is
+				// read as any other token would be.
+				if !yield(name) {
+					return
+				}
+				name = nil
+			}
+
+			if tk.GroupType() == TokenGroupAnchorName {
+				name = tk
 
 				continue
 			}
-			valueTk := tokens[i+1]
-			if tk.Line() == valueTk.Line() && valueTk.GroupType() == TokenGroupScalarTag {
-				ret = append(ret, g.group2(TokenGroupAnchor, tk, tokens[i+1]))
-				i++
-			} else {
-				ret = append(ret, tk)
+			if !yield(tk) {
+				return
 			}
-		default:
-			ret = append(ret, tk)
+		}
+
+		if name != nil {
+			// An anchor with nothing after it names the empty node. The parser
+			// supplies that null; there is nothing to group here.
+			yield(name)
 		}
 	}
-	return ret, nil
 }
 
 func (g *grouper) createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
