@@ -296,6 +296,10 @@ type grouper struct {
 	writeB       bool
 	// nested counts the passes running inside another pass.
 	nested int
+	// err is the first refusal a pass reported. A pass that fails stops
+	// yielding, so the passes below it read a stream that ends early;
+	// createGroupedTokens reads err rather than what they made of it.
+	err error
 	// lineComments holds the comment written at the end of a token's line,
 	// against the token it belongs to. It stays nil where the mode did not ask
 	// for comments, and then no token has one.
@@ -310,6 +314,15 @@ func (g *grouper) setLineComment(tk *Token, comment *token.Token) {
 		g.lineComments = make(map[*Token]*token.Token)
 	}
 	g.lineComments[tk] = comment
+}
+
+// fail records a refusal. The first stands: a pass that stops yielding leaves
+// the ones below it reading a stream that ends early, and what they make of
+// that says less than what went wrong here.
+func (g *grouper) fail(err error) {
+	if g.err == nil {
+		g.err = err
+	}
 }
 
 // out returns an empty slice with room for n tokens, taken from whichever
@@ -437,12 +450,12 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.groupBlockScalars(g.attachLineComments(g.stream(raw))))
-	tks, err := g.createAnchorAndAliasTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
+	tks := g.collect(raw.n, g.groupAnchors(g.groupBlockScalars(g.attachLineComments(g.stream(raw)))))
+	if g.err != nil {
+		return nil, nil, g.err
 	}
-	tks, err = g.createScalarTagTokenGroups(tks)
+
+	tks, err := g.createScalarTagTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -568,46 +581,79 @@ func (g *grouper) groupBlockScalars(in iter.Seq[*Token]) iter.Seq[*Token] {
 	}
 }
 
-func (g *grouper) createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.AnchorType:
-			if i+1 >= len(tokens) {
-				return nil, errors.ErrSyntax("undefined anchor name", tk.RawToken())
-			}
-			anchorName := g.group2(TokenGroupAnchorName, tk, tokens[i+1])
-			if i+2 >= len(tokens) {
-				// An anchor with nothing after it names the empty node. The
-				// parser supplies that null; there is nothing to group here.
-				ret = append(ret, anchorName)
-				i++ // the name is part of the group, not a token of its own
+// groupAnchors joins "&" with the name after it, that name with what it names,
+// and "*" with the name after it.
+//
+// Two tokens are held at the most: the "&" until its name arrives, and then the
+// name group until the token after it says whether the anchor names a scalar on
+// the same line or an empty node.
+func (g *grouper) groupAnchors(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			anchor *Token // a "&", waiting for its name
+			name   *Token // an anchor name, waiting to see what it names
+			alias  *Token // a "*", waiting for its name
+		)
 
-				break
+		for tk := range in {
+			switch {
+			case alias != nil:
+				if !yield(g.group2(TokenGroupAlias, alias, tk)) {
+					return
+				}
+				alias = nil
+
+				continue
+			case anchor != nil:
+				name, anchor = g.group2(TokenGroupAnchorName, anchor, tk), nil
+
+				continue
+			case name != nil:
+				sameLine := name.Line() == tk.Line()
+				if sameLine && tk.Type() == token.SequenceEntryType {
+					g.fail(errors.ErrSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
+
+					return
+				}
+				if sameLine && isScalarType(tk) {
+					if !yield(g.group2(TokenGroupAnchor, name, tk)) {
+						return
+					}
+					name = nil
+
+					continue
+				}
+				// The anchor names the empty node, and tk is read as any other
+				// token would be.
+				if !yield(name) {
+					return
+				}
+				name = nil
 			}
-			valueTk := tokens[i+2]
-			if tk.Line() == valueTk.Line() && valueTk.Type() == token.SequenceEntryType {
-				return nil, errors.ErrSyntax("sequence entries are not allowed after anchor on the same line", valueTk.RawToken())
+
+			switch tk.Type() {
+			case token.AnchorType:
+				anchor = tk
+			case token.AliasType:
+				alias = tk
+			default:
+				if !yield(tk) {
+					return
+				}
 			}
-			if tk.Line() == valueTk.Line() && isScalarType(valueTk) {
-				ret = append(ret, g.group2(TokenGroupAnchor, anchorName, valueTk))
-				i++
-			} else {
-				ret = append(ret, anchorName)
-			}
-			i++
-		case token.AliasType:
-			if i+1 == len(tokens) {
-				return nil, errors.ErrSyntax("undefined alias name", tk.RawToken())
-			}
-			ret = append(ret, g.group2(TokenGroupAlias, tk, tokens[i+1]))
-			i++
-		default:
-			ret = append(ret, tk)
+		}
+
+		switch {
+		case anchor != nil:
+			g.fail(errors.ErrSyntax("undefined anchor name", anchor.RawToken()))
+		case alias != nil:
+			g.fail(errors.ErrSyntax("undefined alias name", alias.RawToken()))
+		case name != nil:
+			// An anchor with nothing after it names the empty node. The parser
+			// supplies that null; there is nothing to group here.
+			yield(name)
 		}
 	}
-	return ret, nil
 }
 
 func (g *grouper) createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
