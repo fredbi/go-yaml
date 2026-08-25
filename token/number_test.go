@@ -40,6 +40,12 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 	for _, value := range cases {
 		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
 			num := ToNumber(value)
+			if num == nil {
+				_, isInt := ParseInteger(value)
+				_, isFloat := ParseFloat(value)
+				assert.Falsef(t, isInt, "%q is not a number, ParseInteger accepted it", value)
+				assert.Falsef(t, isFloat, "%q is not a number, ParseFloat accepted it", value)
+			}
 			typ, ok := numberType(value)
 
 			if num == nil {
@@ -49,6 +55,26 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 			}
 			assert.Truef(t, ok, "ToNumber says %q is a %s, numberType says it is not a number", value, num.Type)
 			assert.Equalf(t, num.Type, typ, "%q: the kinds differ", value)
+
+			// ParseInteger and ParseFloat are what a node converts with, and
+			// have to reach the value ToNumber reached.
+			if num.Type == NumberTypeFloat {
+				f, ok := ParseFloat(value)
+				assert.Truef(t, ok, "%q is a float, ParseFloat refused it", value)
+				assert.Equalf(t, num.Value, f, "%q: the float values differ", value)
+
+				_, ok = ParseInteger(value)
+				assert.Falsef(t, ok, "%q is a float, ParseInteger accepted it", value)
+
+				return
+			}
+
+			i, ok := ParseInteger(value)
+			assert.Truef(t, ok, "%q is a %s, ParseInteger refused it", value, num.Type)
+			assert.Equalf(t, num.Value, i, "%q: the integer values differ", value)
+
+			_, ok = ParseFloat(value)
+			assert.Falsef(t, ok, "%q is an integer, ParseFloat accepted it", value)
 		})
 	}
 }

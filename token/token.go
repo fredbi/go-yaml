@@ -593,6 +593,58 @@ func (s numberShape) check() error {
 	return nil
 }
 
+// ParseInteger returns what an integer scalar means: an int64 where the text
+// carries a sign, a uint64 where it does not. It reports false where text is
+// not an integer.
+//
+// A scalar is typed without being converted, so this is where the conversion
+// happens: once each time it is asked for, rather than once for every number in
+// the document whether or not anything reads it.
+func ParseInteger(text string) (any, bool) {
+	shape, ok := shapeOfNumber(text)
+	if !ok || shape.typ == NumberTypeFloat {
+		return nil, false
+	}
+
+	u, err := strconv.ParseUint(shape.digits, shape.base, 64)
+	if err != nil {
+		return nil, false
+	}
+	if !shape.negative {
+		return u, true
+	}
+
+	// The digits are read unsigned and negated here, rather than read again
+	// with the sign put back, which would mean building a string for strconv.
+	switch {
+	case u > 1<<63:
+		return nil, false
+	case u == 1<<63:
+		return int64(-1 << 63), true // the smallest int64, which -int64(u) cannot hold
+	default:
+		return -int64(u), true
+	}
+}
+
+// ParseFloat returns what a float scalar means, and reports false where text is
+// not a float. See [ParseInteger] for when the conversion happens.
+func ParseFloat(text string) (float64, bool) {
+	shape, ok := shapeOfNumber(text)
+	if !ok || shape.typ != NumberTypeFloat {
+		return 0, false
+	}
+
+	f, err := strconv.ParseFloat(shape.digits, 64)
+	if err != nil {
+		return 0, false
+	}
+	if shape.negative {
+		return -f, true
+	}
+
+	return f, true
+}
+
 // numberType reports which kind of number value is, and false where it is not
 // one.
 //

@@ -335,38 +335,13 @@ func Bool(tk *token.Token) *BoolNode {
 func Integer(tk *token.Token) *IntegerNode {
 	return &IntegerNode{
 		Token: tk,
-		Value: integerValue(tk),
 	}
 }
 
 // Float create node for float value
-// integerValue reads tk as an integer, or nil where it is not one.
-func integerValue(tk *token.Token) any {
-	if num := token.ToNumber(tk.Value); num != nil {
-		return num.Value
-	}
-
-	return nil
-}
-
-// floatValue reads tk as a float, or 0 where it is not one.
-func floatValue(tk *token.Token) float64 {
-	num := token.ToNumber(tk.Value)
-	if num == nil || num.Type != token.NumberTypeFloat {
-		return 0
-	}
-	v, ok := num.Value.(float64)
-	if !ok {
-		return 0
-	}
-
-	return v
-}
-
 func Float(tk *token.Token) *FloatNode {
 	return &FloatNode{
 		Token: tk,
-		Value: floatValue(tk),
 	}
 }
 
@@ -630,7 +605,6 @@ func (n *NullNode) IsMergeKey() bool {
 type IntegerNode struct {
 	BaseNode
 	Token *token.Token
-	Value interface{} // int64 or uint64 value
 }
 
 // Read implements (io.Reader).Read
@@ -651,9 +625,20 @@ func (n *IntegerNode) AddColumn(col int) {
 	n.Token.AddColumn(col)
 }
 
-// GetValue returns int64 value
+// GetValue reads the integer and returns it as an int64 where the document
+// wrote a sign, and as a uint64 where it did not. It returns nil where the text
+// is not an integer after all.
+//
+// The parser types the scalar without converting it, so the conversion happens
+// here, each time it is asked for. Use [IntegerNode.Text] to read the digits as
+// the document wrote them.
 func (n *IntegerNode) GetValue() interface{} {
-	return n.Value
+	if n.Token == nil {
+		return nil
+	}
+	v, _ := token.ParseInteger(n.Token.Value)
+
+	return v
 }
 
 // String int64 to text
@@ -681,9 +666,7 @@ func (n *IntegerNode) IsMergeKey() bool {
 // FloatNode type of float node
 type FloatNode struct {
 	BaseNode
-	Token     *token.Token
-	Precision int
-	Value     float64
+	Token *token.Token
 }
 
 // Read implements (io.Reader).Read
@@ -704,9 +687,19 @@ func (n *FloatNode) AddColumn(col int) {
 	n.Token.AddColumn(col)
 }
 
-// GetValue returns float64 value
+// GetValue reads the float and returns it as a float64, or 0 where the text is
+// not a float after all.
+//
+// The parser types the scalar without converting it, so the conversion happens
+// here, each time it is asked for. Use [FloatNode.Text] to read the number as
+// the document wrote it.
 func (n *FloatNode) GetValue() interface{} {
-	return n.Value
+	if n.Token == nil {
+		return float64(0)
+	}
+	v, _ := token.ParseFloat(n.Token.Value)
+
+	return v
 }
 
 // String float64 to text

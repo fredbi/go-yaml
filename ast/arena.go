@@ -90,7 +90,7 @@ func (a *Arena) String(tk *token.Token) *StringNode {
 // Integer returns an [IntegerNode] for tk, as [Integer] does.
 func (a *Arena) Integer(tk *token.Token) *IntegerNode {
 	n := a.integers.next(a.blockSize())
-	n.Token, n.Value = tk, integerValue(tk)
+	n.Token = tk
 
 	return n
 }
@@ -98,7 +98,7 @@ func (a *Arena) Integer(tk *token.Token) *IntegerNode {
 // Float returns a [FloatNode] for tk, as [Float] does.
 func (a *Arena) Float(tk *token.Token) *FloatNode {
 	n := a.floats.next(a.blockSize())
-	n.Token, n.Value = tk, floatValue(tk)
+	n.Token = tk
 
 	return n
 }

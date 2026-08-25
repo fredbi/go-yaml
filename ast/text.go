@@ -13,6 +13,9 @@ import "github.com/go-openapi/go-yaml/token"
 // numbers rather than converting them reads the document itself and allocates
 // nothing. A quoted or block scalar had to be rewritten while it was scanned,
 // and its text is that rewrite.
+//
+// GetValue converts, and converts when it is asked to: parsing a document whose
+// numbers nothing reads converts none of them.
 
 // Text returns the null as it was written: "null", "~", or nothing at all
 // where the document left the value out.
