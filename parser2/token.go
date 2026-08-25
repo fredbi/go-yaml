@@ -797,7 +797,8 @@ func (g *grouper) createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	return g.createMapKeyByMappingValue(tks)
+
+	return g.collect(len(tks), g.groupMapKeysByValue(slices.Values(tks))), g.err
 }
 
 func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
@@ -836,76 +837,205 @@ func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 	return ret, nil
 }
 
-func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
+// keyWindow holds the tokens a map key could still be made from. Everything
+// before it has been handed on.
+//
+// The window is one token wide most of the time -- the scalar in front of a
+// ':' -- and widens to hold a flow collection while one is open, because
+// "[a, b]: v" keys on the whole collection.
+type keyWindow struct {
+	held []*Token
+	// openers holds the index in held of each flow collection still open,
+	// outermost first, and seq says which of them are sequences. A pair written
+	// directly inside a sequence is an implicit key and has to fit on one line
+	// with its ':'; inside a mapping the same pair may span lines.
+	openers []int
+	seq     []bool
+}
 
-	// One entry per flow collection still open, innermost last, recording
-	// whether it is a sequence. A pair written directly inside a sequence is an
-	// implicit key and has to fit on one line with its ':'; inside a mapping the
-	// same pair may span lines.
-	var flow []bool
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.MappingStartType:
-			flow = append(flow, false)
-			ret = append(ret, tk)
-		case token.SequenceStartType:
-			flow = append(flow, true)
-			ret = append(ret, tk)
-		case token.MappingEndType, token.SequenceEndType:
-			if len(flow) > 0 {
-				flow = flow[:len(flow)-1]
-			}
-			ret = append(ret, tk)
-		case token.MappingValueType:
-			flowDepth := len(flow)
-			if hasNoKey(tokens, i, flowDepth > 0) {
-				// The key is absent: ": value", "- :", "{ : }", "{a: 1, : 2}".
-				// YAML 1.2 allows it, and an absent key is the null node -- so
-				// there is nothing to reject here, only a node to supply.
-				ret = append(ret, g.group2(TokenGroupMapKey, g.implicitNullKeyToken(tk), tk))
+// keepFrom is where the window has to start for a ':' arriving next to find its
+// key. Everything before it can be handed on.
+func (w *keyWindow) keepFrom() int {
+	if len(w.openers) > 0 {
+		// A collection still open may yet close and stand as a key.
+		return withKeyProperties(w.held, w.openers[0])
+	}
 
-				continue
-			}
-			mapKeyTk := tokens[keyCandidateIndex(tokens, i)]
-			if closesFlowCollection(mapKeyTk) {
-				// The key is the flow collection that just closed, so it has
-				// to be taken whole: "[a, b]: v" keys on the sequence, not on
-				// the ']' that ends it.
-				start := flowCollectionStart(ret)
-				if start < 0 {
-					return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
-				}
-				start = withKeyProperties(ret, start)
-				if ret[start].Line() != mapKeyTk.Line() {
-					// An implicit key has to be a single-line node, so a
-					// collection spanning lines cannot be one.
-					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
-				}
-				if flowDepth > 0 && flow[flowDepth-1] && mapKeyTk.Line() != tk.Line() {
-					// Directly inside a sequence the ':' is part of that one
-					// line too. Inside a mapping it is separation like any
-					// other, and may follow on the next line.
-					return nil, errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken())
-				}
-				keyTokens := append(append([]*Token{}, ret[start:]...), tk)
-				ret = append(ret[:start], g.group(TokenGroupMapKey, keyTokens))
+	last := lastContentIndex(w.held)
+	if last < 0 {
+		return len(w.held)
+	}
+	if closesFlowCollection(w.held[last]) {
+		start := flowCollectionStart(w.held[:last+1])
+		if start < 0 {
+			return last
+		}
 
-				continue
-			}
-			if isNotMapKeyType(mapKeyTk) {
-				return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
-			}
-			newTk := g.token()
-			newTk.Token, newTk.Group = mapKeyTk.Token, mapKeyTk.Group
-			mapKeyTk.Token = nil
-			mapKeyTk.Group = g.newGroup2(TokenGroupMapKey, newTk, tk)
-		default:
-			ret = append(ret, tk)
+		return withKeyProperties(w.held, start)
+	}
+
+	return last
+}
+
+// release hands on the tokens that can no longer take part in a key.
+func (w *keyWindow) release(yield func(*Token) bool) bool {
+	keep := w.keepFrom()
+	for _, tk := range w.held[:keep] {
+		if !yield(tk) {
+			return false
 		}
 	}
-	return ret, nil
+
+	w.held = append(w.held[:0], w.held[keep:]...)
+	for i := range w.openers {
+		w.openers[i] -= keep
+	}
+
+	return true
+}
+
+// lastContentIndex is where the last token of the window that is not a comment
+// stands. A comment may sit between a key and its ':' without parting them.
+func lastContentIndex(held []*Token) int {
+	for i := len(held) - 1; i >= 0; i-- {
+		if held[i].Type() != token.CommentType {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// groupMapKeysByValue joins a key with the ':' that follows it.
+//
+// The key is held rather than handed on and rewritten where it stands, which is
+// what the pass did while it read a slice: in a stream the token would be gone
+// by the time its ':' arrived.
+func (g *grouper) groupMapKeysByValue(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var w keyWindow
+
+		for tk := range in {
+			switch tk.Type() {
+			case token.MappingStartType, token.SequenceStartType:
+				w.openers = append(w.openers, len(w.held))
+				w.seq = append(w.seq, tk.Type() == token.SequenceStartType)
+				w.held = append(w.held, tk)
+			case token.MappingEndType, token.SequenceEndType:
+				if len(w.openers) > 0 {
+					w.openers = w.openers[:len(w.openers)-1]
+					w.seq = w.seq[:len(w.seq)-1]
+				}
+				w.held = append(w.held, tk)
+			case token.MappingValueType:
+				if !g.keyBefore(&w, tk) {
+					return
+				}
+			default:
+				w.held = append(w.held, tk)
+			}
+
+			if !w.release(yield) {
+				return
+			}
+		}
+
+		for _, tk := range w.held {
+			if !yield(tk) {
+				return
+			}
+		}
+	}
+}
+
+// keyBefore reads the key the ':' belongs to out of the window, and puts the
+// group it makes back there. It reports false where the document is refused.
+func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
+	inFlow := len(w.openers) > 0
+	last := lastContentIndex(w.held)
+
+	if w.hasNoKey(last, tk, inFlow) {
+		// The key is absent: ": value", "- :", "{ : }", "{a: 1, : 2}". YAML 1.2
+		// allows it, and an absent key is the null node -- so there is nothing
+		// to reject here, only a node to supply.
+		w.held = append(w.held, g.group2(TokenGroupMapKey, g.implicitNullKeyToken(tk), tk))
+
+		return true
+	}
+
+	key := w.held[last]
+	if closesFlowCollection(key) {
+		// The key is the flow collection that just closed, so it has to be
+		// taken whole: "[a, b]: v" keys on the sequence, not on the ']' that
+		// ends it.
+		start := flowCollectionStart(w.held[:last+1])
+		if start < 0 {
+			g.fail(errors.ErrSyntax("found an invalid key for this map", tk.RawToken()))
+
+			return false
+		}
+		start = withKeyProperties(w.held, start)
+		if w.held[start].Line() != key.Line() {
+			// An implicit key has to be a single-line node, so a collection
+			// spanning lines cannot be one.
+			g.fail(errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken()))
+
+			return false
+		}
+		if inFlow && w.seq[len(w.seq)-1] && key.Line() != tk.Line() {
+			// Directly inside a sequence the ':' is part of that one line too.
+			// Inside a mapping it is separation like any other, and may follow
+			// on the next line.
+			g.fail(errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken()))
+
+			return false
+		}
+
+		keyTokens := append(append([]*Token{}, w.held[start:]...), tk)
+		w.held = append(w.held[:start], g.group(TokenGroupMapKey, keyTokens))
+
+		return true
+	}
+
+	if isNotMapKeyType(key) {
+		g.fail(errors.ErrSyntax("found an invalid key for this map", tk.RawToken()))
+
+		return false
+	}
+
+	// The key stays where it stands in the window and becomes the group, so
+	// that the comments written between it and its ':' keep their place after
+	// it.
+	held := g.token()
+	held.Token, held.Group = key.Token, key.Group
+	key.Token = nil
+	key.Group = g.newGroup2(TokenGroupMapKey, held, tk)
+
+	return true
+}
+
+// hasNoKey reports whether the ':' has no key in front of it.
+//
+// Three ways that happens. There is nothing before it at all; what is before it
+// is punctuation that cannot be a key; or -- in block context only -- the
+// candidate sits on an earlier line, and an implicit key must share its line
+// with its ':'. A flow collection is not line-sensitive, so the last rule does
+// not apply inside one, and an explicit "?" key is exempt everywhere: naming
+// the key separately is precisely what "?" is for.
+func (w *keyWindow) hasNoKey(last int, tk *Token, inFlow bool) bool {
+	if last < 0 {
+		return true
+	}
+
+	candidate := w.held[last]
+	if precedesAbsentKey(candidate) {
+		return true
+	}
+	if inFlow || candidate.Group != nil {
+		return false
+	}
+
+	return keyEndLine(candidate) != tk.Line()
 }
 
 // groupMapKeyValues joins a map key with the value written on its line.
@@ -1127,9 +1257,9 @@ func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
 	g.nested++
 	defer func() { g.nested-- }()
 
-	grouped, err := g.createMapKeyByMappingValue(body)
-	if err != nil {
-		return nil, err
+	grouped := g.collect(len(body), g.groupMapKeysByValue(slices.Values(body)))
+	if g.err != nil {
+		return nil, g.err
 	}
 
 	return g.collect(len(grouped), g.groupMapKeyValues(slices.Values(grouped))), nil
@@ -1185,31 +1315,6 @@ func explicitFlowKeyEnd(tokens []*Token, i int) int {
 	}
 
 	return j
-}
-
-// hasNoKey reports whether the ':' at tokens[i] has no key in front of it.
-//
-// Three ways that happens. There is nothing before it at all; what is before it
-// is punctuation that cannot be a key; or -- in block context only -- the
-// candidate sits on an earlier line, and an implicit key must share its line
-// with its ':'. A flow collection is not line-sensitive, so the last rule does
-// not apply inside one, and an explicit "?" key is exempt everywhere: naming
-// the key separately is precisely what "?" is for.
-func hasNoKey(tokens []*Token, i int, inFlow bool) bool {
-	j := keyCandidateIndex(tokens, i)
-	if j < 0 {
-		return true
-	}
-
-	candidate := tokens[j]
-	if precedesAbsentKey(candidate) {
-		return true
-	}
-	if inFlow || candidate.Group != nil {
-		return false
-	}
-
-	return keyEndLine(candidate) != tokens[i].Line()
 }
 
 // keyEndLine reports the line on which a key token ends.
