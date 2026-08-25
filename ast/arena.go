@@ -33,6 +33,32 @@ func (b *block[T]) next(size int) *T {
 	return v
 }
 
+// slab hands out runs of T from blocks, for a run whose length is already
+// known.
+type slab[T any] struct {
+	free []T
+}
+
+// take returns a copy of src that no later take will write over, and nil for an
+// empty run.
+//
+// The capacity is held to the length, so appending to what it returns takes a
+// new allocation rather than writing over the run handed out next.
+func (s *slab[T]) take(src []T, size int) []T {
+	if len(src) == 0 {
+		return nil
+	}
+	if len(s.free) < len(src) {
+		s.free = make([]T, max(size, len(src)))
+	}
+
+	out := s.free[:len(src):len(src)]
+	copy(out, src)
+	s.free = s.free[len(src):]
+
+	return out
+}
+
 // Arena hands out nodes from blocks rather than one allocation each.
 //
 // A parser building a tree of N nodes costs N/size allocations rather than N.
@@ -58,6 +84,9 @@ type Arena struct {
 	mappings      block[MappingNode]
 	sequences     block[SequenceNode]
 	sequenceEntry block[SequenceEntryNode]
+	// mappingRuns holds the entry lists of the mappings, so that a mapping's
+	// Values costs no allocation of its own.
+	mappingRuns slab[*MappingValueNode]
 
 	size int
 }
@@ -138,11 +167,15 @@ func (a *Arena) MappingValue(tk *token.Token, key MapKeyNode, value Node) *Mappi
 	return n
 }
 
-// Mapping returns a [MappingNode] for tk, as [Mapping] does.
-func (a *Arena) Mapping(tk *token.Token, isFlowStyle bool, values ...*MappingValueNode) *MappingNode {
+// Mapping returns a [MappingNode] for tk holding values, as [Mapping] does.
+//
+// values is copied, and the copy is held to its own length: a caller appending
+// to the mapping's Values takes an allocation of its own rather than writing
+// over another mapping's entries.
+func (a *Arena) Mapping(tk *token.Token, isFlowStyle bool, values []*MappingValueNode) *MappingNode {
 	n := a.mappings.next(a.blockSize())
 	n.Start, n.IsFlowStyle = tk, isFlowStyle
-	n.Values = append([]*MappingValueNode{}, values...)
+	n.Values = a.mappingRuns.take(values, a.blockSize())
 
 	return n
 }

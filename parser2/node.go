@@ -8,8 +8,8 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-func newMappingNode(ctx context, tk *Token, isFlow bool, values ...*ast.MappingValueNode) (*ast.MappingNode, error) {
-	node := ctx.arena.Mapping(tk.RawToken(), isFlow, values...)
+func newMappingNode(ctx context, tk *token.Token, isFlow bool, values []*ast.MappingValueNode) (*ast.MappingNode, error) {
+	node := ctx.arena.Mapping(tk, isFlow, values)
 	node.SetPathNode(ctx.path)
 	return node, nil
 }

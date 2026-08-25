@@ -93,8 +93,12 @@ var yamlVersionMap = map[string]YAMLVersion{
 }
 
 type Parser struct {
-	tokens                []*Token
-	raw                   rawTokens
+	tokens []*Token
+	raw    rawTokens
+	// entries holds the entries of every mapping open at this point in the
+	// descent, innermost run last. parseMap takes its run off the end once the
+	// mapping is built.
+	entries               []*ast.MappingValueNode
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
 	omitNodePaths         bool
@@ -483,7 +487,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
 
-	node, err := newMappingNode(ctx, ctx.currentToken(), true)
+	node, err := newMappingNode(ctx, ctx.currentToken().RawToken(), true, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -673,15 +677,19 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
 
+	// The entries are gathered on a stack the parser reuses for every mapping,
+	// so a mapping's Values is allocated once, at its own length, rather than
+	// grown an entry at a time. entryBase is where this mapping's run starts.
+	entryBase := len(p.entries)
+	defer func() { p.entries = p.entries[:entryBase] }()
+
 	keyTk := ctx.currentToken()
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
 		return nil, err
 	}
-	mapNode, err := newMappingNode(ctx, &Token{Token: keyValueNode.GetToken()}, false, keyValueNode)
-	if err != nil {
-		return nil, err
-	}
+	p.entries = append(p.entries, keyValueNode)
+
 	var tk *Token
 	if ctx.isComment() {
 		tk = ctx.nextNotCommentToken()
@@ -714,13 +722,18 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 		if err := setHeadComment(cm, entry); err != nil {
 			return nil, err
 		}
-		mapNode.Values = append(mapNode.Values, entry)
+		p.entries = append(p.entries, entry)
 		if ctx.isComment() {
 			tk = ctx.nextNotCommentToken()
 		} else {
 			tk = ctx.currentToken()
 		}
 	}
+	mapNode, err := newMappingNode(ctx, keyValueNode.GetToken(), false, p.entries[entryBase:])
+	if err != nil {
+		return nil, err
+	}
+
 	if ctx.isComment() {
 		if keyTk.Column() <= ctx.currentToken().Column() {
 			// If the comment is in the same or deeper column as the last element column in map value,

@@ -6,7 +6,7 @@ import (
 )
 
 func newMappingNode(ctx context, tk *Token, isFlow bool, values ...*ast.MappingValueNode) (*ast.MappingNode, error) {
-	node := ctx.arena.Mapping(tk.RawToken(), isFlow, values...)
+	node := ctx.arena.Mapping(tk.RawToken(), isFlow, values)
 	node.SetPathNode(ctx.path)
 	return node, nil
 }
