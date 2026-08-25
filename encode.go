@@ -570,7 +570,9 @@ func (e *Encoder) isNeedQuoted(v string) bool {
 	if e.isJSONStyle {
 		return true
 	}
-	if e.useLiteralStyleIfMultiline && strings.ContainsAny(v, "\n\r") {
+	if e.useLiteralStyleIfMultiline && strings.Contains(v, "\n") && !strings.ContainsRune(v, '\r') {
+		// A value holding a carriage return has no block scalar spelling, so
+		// the literal style cannot be given to it however the option is set.
 		return false
 	}
 	if e.isFlowStyle && strings.ContainsAny(v, `]},'"`) {

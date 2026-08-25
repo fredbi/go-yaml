@@ -801,11 +801,10 @@ func (n *StringNode) String() string {
 		return quoted
 	}
 
-	lbc := token.DetectLineBreakCharacter(n.Value)
-	if strings.Contains(n.Value, lbc) {
+	if header := token.LiteralBlockHeader(n.Value); header != "" {
 		// This block assumes that the line breaks in this inside scalar content and the Outside scalar content are the same.
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
-		header := token.LiteralBlockHeader(n.Value)
+		lbc := token.DetectLineBreakCharacter(n.Value)
 		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
 		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
 		values := []string{}
@@ -814,6 +813,13 @@ func (n *StringNode) String() string {
 		}
 		block := strings.TrimSuffix(strings.TrimSuffix(strings.Join(values, lbc), fmt.Sprintf("%s%s%s", lbc, indent, space)), fmt.Sprintf("%s%s", indent, space))
 		return fmt.Sprintf("%s%s%s", header, lbc, block)
+	} else if breaksNeedQuoting(n.Value) {
+		quoted := strconv.Quote(n.Value)
+		if n.Comment != nil {
+			return addCommentString(quoted, n.Comment)
+		}
+
+		return quoted
 	} else if len(n.Value) > 0 && (n.Value[0] == '{' || n.Value[0] == '[') {
 		return fmt.Sprintf(`'%s'`, n.Value)
 	}
@@ -823,17 +829,26 @@ func (n *StringNode) String() string {
 	return n.Value
 }
 
+// breaksNeedQuoting reports whether value holds a line break that only a
+// double-quoted scalar can carry.
+//
+// A carriage return is the one such break. The scanner normalizes "\r\n" and a
+// lone "\r" to "\n", so a plain, single-quoted or block scalar holding one
+// reads back changed; "\r" written as an escape survives.
+func breaksNeedQuoting(value string) bool {
+	return strings.ContainsRune(value, '\r')
+}
+
 func (n *StringNode) stringWithoutComment() string {
 	switch n.Token.Type {
 	case token.SingleQuoteType, token.DoubleQuoteType:
 		return quotedString(n)
 	}
 
-	lbc := token.DetectLineBreakCharacter(n.Value)
-	if strings.Contains(n.Value, lbc) {
+	if header := token.LiteralBlockHeader(n.Value); header != "" {
 		// This block assumes that the line breaks in this inside scalar content and the Outside scalar content are the same.
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
-		header := token.LiteralBlockHeader(n.Value)
+		lbc := token.DetectLineBreakCharacter(n.Value)
 		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
 		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
 		values := []string{}
@@ -842,6 +857,8 @@ func (n *StringNode) stringWithoutComment() string {
 		}
 		block := strings.TrimSuffix(strings.TrimSuffix(strings.Join(values, lbc), fmt.Sprintf("%s%s%s", lbc, indent, space)), fmt.Sprintf("  %s", space))
 		return fmt.Sprintf("%s%s%s", header, lbc, block)
+	} else if breaksNeedQuoting(n.Value) {
+		return strconv.Quote(n.Value)
 	} else if len(n.Value) > 0 && (n.Value[0] == '{' || n.Value[0] == '[') {
 		return fmt.Sprintf(`'%s'`, n.Value)
 	}

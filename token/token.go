@@ -749,6 +749,11 @@ func IsNeedQuoted(value string) bool {
 	if isTimestamp(value) {
 		return true
 	}
+	if strings.ContainsRune(value, '\r') {
+		// A carriage return survives no spelling but a double-quoted one: the
+		// scanner normalizes every other form's line breaks to "\n".
+		return true
+	}
 	for i, c := range value {
 		switch c {
 		case '#', '\\':
@@ -762,8 +767,18 @@ func IsNeedQuoted(value string) bool {
 	return false
 }
 
-// LiteralBlockHeader detect literal block scalar header
+// LiteralBlockHeader returns the block scalar header value needs, or "" where
+// value has no block scalar spelling.
+//
+// A value holding a carriage return has none. YAML normalizes a stream's line
+// breaks on read -- "\r\n" and a lone "\r" both become "\n" -- so a block
+// scalar cannot carry a CR whatever it is written with. Such a value has to be
+// double-quoted, where "\r" is an escape and survives.
 func LiteralBlockHeader(value string) string {
+	if strings.ContainsRune(value, '\r') {
+		return ""
+	}
+
 	lbc := DetectLineBreakCharacter(value)
 
 	switch {
