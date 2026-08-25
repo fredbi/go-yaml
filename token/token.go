@@ -722,6 +722,36 @@ func isTimestamp(value string) bool {
 	return false
 }
 
+// isLeadingZeroDecimal reports whether value is a run of decimal digits written
+// with a leading zero, such as "088253".
+//
+// This library resolves integers as YAML 1.1 does, where "0" followed by digits
+// is octal and "088253" is not octal at all -- so it reads a string, as PyYAML
+// does. YAML 1.2's core schema resolves [-+]?[0-9]+ and reads the integer
+// 88253. The two schemas also disagree on the value of "0777": 511 here and in
+// go.yaml.in/yaml/v3, 777 under 1.2 core.
+//
+// Encoding such a value quoted means a reader following either schema reads
+// back the string that was written. This is why the encoder already quotes the
+// 1.1 bool keywords -- "y", "yes", "on" -- that this library does not resolve.
+func isLeadingZeroDecimal(value string) bool {
+	digits := value
+	if digits != "" && (digits[0] == '+' || digits[0] == '-') {
+		digits = digits[1:]
+	}
+	if len(digits) < 2 || digits[0] != '0' {
+		return false
+	}
+
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
 // IsNeedQuoted checks whether the value needs quote for passed string or not
 func IsNeedQuoted(value string) bool {
 	if value == "" {
@@ -731,6 +761,9 @@ func IsNeedQuoted(value string) bool {
 		return true
 	}
 	if isNumber(value) {
+		return true
+	}
+	if isLeadingZeroDecimal(value) {
 		return true
 	}
 	if value == "-" {

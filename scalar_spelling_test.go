@@ -75,3 +75,36 @@ func TestMarshalCarriageReturnInAMapping(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(out, &back))
 	require.Equal(t, in, back)
 }
+
+// TestMarshalQuotesLeadingZeroDecimals checks that a string of decimal digits
+// written with a leading zero comes out quoted.
+//
+// This library resolves integers as YAML 1.1 does, where "0" followed by digits
+// is octal and "088253" is not octal at all, so it reads a string. A reader
+// following YAML 1.2's core schema resolves [-+]?[0-9]+ and reads the integer
+// 88253 from the same unquoted text. Quoting settles it for both.
+func TestMarshalQuotesLeadingZeroDecimals(t *testing.T) {
+	quoted := []string{"088253", "09", "0777", "00", "010", "-088", "+09"}
+	for _, in := range quoted {
+		t.Run(in, func(t *testing.T) {
+			out, err := yaml.Marshal(in)
+			require.NoError(t, err)
+			require.Equal(t, "\""+in+"\"\n", string(out))
+
+			var back string
+			require.NoError(t, yaml.Unmarshal(out, &back))
+			require.Equal(t, in, back)
+		})
+	}
+
+	// A leading zero followed by anything but digits resolves to a string
+	// under every schema, so it stays plain.
+	plain := []string{"08a", "0-8", "0 9"}
+	for _, in := range plain {
+		t.Run(in, func(t *testing.T) {
+			out, err := yaml.Marshal(in)
+			require.NoError(t, err)
+			require.Equal(t, in+"\n", string(out))
+		})
+	}
+}
