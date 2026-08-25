@@ -5,14 +5,17 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
+	"github.com/go-openapi/go-yaml/internal/yamlpath"
 	"github.com/go-openapi/go-yaml/token"
 )
 
 var (
-	ErrInvalidQuery               = errors.New("invalid query")
-	ErrInvalidPath                = errors.New("invalid path instance")
-	ErrInvalidPathString          = errors.New("invalid path string")
-	ErrNotFoundNode               = errors.New("node not found")
+	// The four path errors are raised by the engine [Path] embeds and are
+	// named here so a caller matching on them needs one import.
+	ErrInvalidQuery               = yamlpath.ErrInvalidQuery
+	ErrInvalidPath                = yamlpath.ErrInvalidPath
+	ErrInvalidPathString          = yamlpath.ErrInvalidPathString
+	ErrNotFoundNode               = yamlpath.ErrNotFoundNode
 	ErrUnknownCommentPositionType = errors.New("unknown comment position type")
 	ErrInvalidCommentMapValue     = errors.New("invalid comment map value. it must be not nil value")
 	ErrDecodeRequiredPointerType  = errors.New("required pointer type value")
