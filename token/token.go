@@ -883,15 +883,7 @@ func (t Tokens) InvalidToken() *Token {
 }
 
 func (t *Tokens) add(tk *Token) {
-	tokens := *t
-	if len(tokens) == 0 {
-		tokens = append(tokens, tk)
-	} else {
-		tk.BlankLineAbove = blankLineAbove(tk, tokens)
-		tk.CommentBreaksAbove = commentBreaksAbove(tk, tokens)
-		tokens = append(tokens, tk)
-	}
-	*t = tokens
+	*t = append(*t, tk)
 }
 
 // Add append new some tokens

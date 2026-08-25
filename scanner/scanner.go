@@ -74,6 +74,9 @@ type Scanner struct {
 	// initErr holds what is wrong with the source itself, found before any
 	// token was read and reported by the first Scan.
 	initErr error
+	// lookback fills in each token's BlankLineAbove and CommentBreaksAbove as
+	// it is emitted, from the tokens emitted before it.
+	lookback token.Lookback
 }
 
 // byteOrderMark is YAML 1.2's c-byte-order-mark.
@@ -2209,6 +2212,7 @@ func (s *Scanner) Init(text string) {
 	s.column = 1
 	s.offset = 0
 	s.isFirstCharAtLine = true
+	s.lookback.Reset()
 	s.clearState()
 }
 
@@ -2230,6 +2234,8 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 
 		var invalidTokenErr *InvalidTokenError
 		if errors.As(err, &invalidTokenErr) {
+			s.lookback.Derive(invalidTokenErr.Token)
+
 			return token.Tokens{invalidTokenErr.Token}, err
 		}
 
@@ -2239,7 +2245,7 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 	if s.sourcePos >= s.sourceSize {
 		return nil, io.EOF
 	}
-	ctx := newContext(s.source[s.sourcePos:])
+	ctx := newContext(s.source[s.sourcePos:], &s.lookback)
 	defer ctx.release()
 
 	var tokens token.Tokens
@@ -2249,6 +2255,7 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 	if err != nil {
 		var invalidTokenErr *InvalidTokenError
 		if errors.As(err, &invalidTokenErr) {
+			s.lookback.Derive(invalidTokenErr.Token)
 			tokens = append(tokens, invalidTokenErr.Token)
 		}
 		return tokens, err

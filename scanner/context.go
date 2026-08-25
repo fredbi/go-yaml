@@ -26,6 +26,10 @@ type Context struct {
 	originStart int
 	tokens      token.Tokens
 	mstate      *MultiLineState
+	// lookback belongs to the Scanner and outlives the Context, so a token
+	// still reads what stands above it when the source is scanned in more than
+	// one pass.
+	lookback *token.Lookback
 }
 
 type MultiLineState struct {
@@ -60,13 +64,17 @@ func createContext() *Context {
 	}
 }
 
-func newContext(src string) *Context {
+func newContext(src string, lookback *token.Lookback) *Context {
 	ctx, _ := ctxPool.Get().(*Context)
 	ctx.reset(src)
+	ctx.lookback = lookback
 	return ctx
 }
 
 func (c *Context) release() {
+	// The lookback belongs to the Scanner. Dropping it here keeps a pooled
+	// Context from holding a Scanner that is done with.
+	c.lookback = nil
 	ctxPool.Put(c)
 }
 
@@ -295,6 +303,7 @@ func (c *Context) addToken(tk *token.Token) {
 	if tk == nil {
 		return
 	}
+	c.lookback.Derive(tk)
 	c.tokens = append(c.tokens, tk)
 }
 
