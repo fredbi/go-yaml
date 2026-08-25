@@ -41,19 +41,62 @@ type context struct {
 	keyBase int
 }
 
+// tokenRef is where the parser stands in a run of tokens.
+//
+// The run is either in hand -- a group's members, which are two tokens most of
+// the time -- or drawn from a stream as it is read. Either way the parser only
+// ever reads forward from idx, one token ahead at the most, so the tokens
+// before it are never asked for again.
 type tokenRef struct {
 	tokens []*Token
 	// pair is where a group's two members are copied to, so that reading a
 	// group needs no slice of its own. tokens points into it.
 	pair [2]*Token
 	idx  int
+	// pull draws the next token of a stream, where the run is one. It is nil
+	// for a run already in hand, and drained once the stream has ended.
+	pull    func() (*Token, bool)
+	drained bool
+}
+
+// at returns the i'th token of the run, drawing from the stream where it has to
+// and where there is one. It returns nil past the end of the run.
+func (r *tokenRef) at(i int) *Token {
+	for r.pull != nil && !r.drained && i >= len(r.tokens) {
+		tk, ok := r.pull()
+		if !ok {
+			r.drained = true
+
+			break
+		}
+		r.tokens = append(r.tokens, tk)
+	}
+
+	if i < len(r.tokens) {
+		return r.tokens[i]
+	}
+
+	return nil
+}
+
+// end returns the index just past the run, drawing the rest of the stream where
+// there is one.
+func (r *tokenRef) end() int {
+	for r.pull != nil && !r.drained {
+		tk, ok := r.pull()
+		if !ok {
+			r.drained = true
+
+			break
+		}
+		r.tokens = append(r.tokens, tk)
+	}
+
+	return len(r.tokens)
 }
 
 func (c context) currentToken() *Token {
-	if c.tokenRef.idx >= len(c.tokenRef.tokens) {
-		return nil
-	}
-	return c.tokenRef.tokens[c.tokenRef.idx]
+	return c.tokenRef.at(c.tokenRef.idx)
 }
 
 func (c context) isComment() bool {
@@ -61,15 +104,15 @@ func (c context) isComment() bool {
 }
 
 func (c context) nextToken() *Token {
-	if c.tokenRef.idx+1 >= len(c.tokenRef.tokens) {
-		return nil
-	}
-	return c.tokenRef.tokens[c.tokenRef.idx+1]
+	return c.tokenRef.at(c.tokenRef.idx + 1)
 }
 
 func (c context) nextNotCommentToken() *Token {
-	for i := c.tokenRef.idx + 1; i < len(c.tokenRef.tokens); i++ {
-		tk := c.tokenRef.tokens[i]
+	for i := c.tokenRef.idx + 1; ; i++ {
+		tk := c.tokenRef.at(i)
+		if tk == nil {
+			break
+		}
 		if tk.Type() == token.CommentType {
 			continue
 		}
@@ -164,15 +207,15 @@ func (c context) lineComment(tk *Token) *token.Token {
 
 func (c context) goNext() {
 	ref := c.tokenRef
-	if len(ref.tokens) <= ref.idx+1 {
-		ref.idx = len(ref.tokens)
+	if ref.at(ref.idx+1) == nil {
+		ref.idx = ref.end()
 	} else {
 		ref.idx++
 	}
 }
 
 func (c context) next() bool {
-	return c.tokenRef.idx < len(c.tokenRef.tokens)
+	return c.tokenRef.at(c.tokenRef.idx) != nil
 }
 
 func (c context) insertNullToken(tk *Token) *Token {
@@ -206,6 +249,7 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 
 func (c context) insertToken(tk *Token) {
 	ref := c.tokenRef
+	ref.at(ref.idx) // draw enough of a stream to know where idx stands
 	idx := ref.idx
 	if len(ref.tokens) < idx {
 		return
@@ -222,5 +266,6 @@ func (c context) insertToken(tk *Token) {
 
 func (c context) addToken(tk *Token) {
 	ref := c.tokenRef
+	ref.end() // the token goes after everything the run holds
 	ref.tokens = append(ref.tokens, tk)
 }

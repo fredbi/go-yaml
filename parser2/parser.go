@@ -138,6 +138,7 @@ func (p *Parser) tokenRefAt(depth int32, g *TokenGroup) *tokenRef {
 
 	ref := p.refs[depth]
 	ref.tokens, ref.idx = g.Members(&ref.pair), 0
+	ref.pull, ref.drained = nil, false
 
 	return ref
 }
