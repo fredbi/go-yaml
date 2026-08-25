@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 // Character type for character
@@ -756,6 +757,31 @@ type Token struct {
 	// token. The renderer writes one back where it finds one, which is how a
 	// document keeps the spacing it was written with.
 	BlankLineAbove bool
+}
+
+// TextBytes returns s as bytes without copying it.
+//
+// The bytes are the string's own. A Go string is immutable, and a token's text
+// is usually a window into the document rather than a copy of it, so writing
+// through them corrupts the value and every other value cut from the same
+// source. Read them. Copy them before keeping them past the document.
+func TextBytes(s string) []byte {
+	if len(s) == 0 {
+		return nil
+	}
+
+	//nolint:gosec // the bytes are the string's own, and the doc comment says not to write to them
+	return unsafe.Slice(unsafe.StringData(s), len(s))
+}
+
+// Bytes returns t's value as bytes, without copying it. See [TextBytes] for
+// what a caller may do with them.
+func (t *Token) Bytes() []byte {
+	if t == nil {
+		return nil
+	}
+
+	return TextBytes(t.Value)
 }
 
 // AddColumn append column number to current position of column

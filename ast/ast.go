@@ -215,6 +215,14 @@ type MapKeyNode interface {
 type ScalarNode interface {
 	MapKeyNode
 	GetValue() interface{}
+	// Text returns the scalar as text, unconverted: the digits of a number as
+	// the document wrote them, a quoted string with its quotes and escapes
+	// resolved, a block scalar folded and chomped. Deciding what a number
+	// means is the caller's, and Text is where it starts.
+	Text() string
+	// Bytes returns Text as bytes, without copying it. See [token.TextBytes]
+	// for what a caller may do with them.
+	Bytes() []byte
 }
 
 type BaseNode struct {
