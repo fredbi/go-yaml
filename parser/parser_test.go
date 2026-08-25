@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/expressions"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -1732,7 +1732,7 @@ baz:
 		t.Fatalf("failed to parse comment:\nexpected:\n%s\ngot:\n%s", strings.TrimPrefix(expected, "\n"), got)
 	}
 	t.Run("foo[0].bar", func(t *testing.T) {
-		path, err := yaml.PathString("$.foo[0].bar")
+		path, err := expressions.PathString("$.foo[0].bar")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1745,7 +1745,7 @@ baz:
 		}
 	})
 	t.Run("baz[0]", func(t *testing.T) {
-		path, err := yaml.PathString("$.baz[0]")
+		path, err := expressions.PathString("$.baz[0]")
 		if err != nil {
 			t.Fatal(err)
 		}

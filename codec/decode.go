@@ -1,4 +1,4 @@
-package yaml
+package codec
 
 import (
 	"bytes"
@@ -878,7 +878,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 			if err != nil {
 				return err
 			}
-			jsonBytes, err := YAMLToJSON(b)
+			jsonBytes, err := ToJSON(b)
 			if err != nil {
 				return err
 			}

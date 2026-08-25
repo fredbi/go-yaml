@@ -1,4 +1,4 @@
-package yaml
+package codec
 
 import (
 	"context"

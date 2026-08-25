@@ -1,27 +1,30 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package yaml
 
 import (
-	"fmt"
+	stderrors "errors"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/errors"
-	"github.com/go-openapi/go-yaml/internal/yamlpath"
 	"github.com/go-openapi/go-yaml/token"
 )
 
+// The errors a caller matches a failure against.
+//
+// Each is declared by [codec], where it is raised, and named here so that
+// matching on one needs no second import. The errors a path raises are in
+// [github.com/go-openapi/go-yaml/expressions].
 var (
-	// The four path errors are raised by the engine [Path] embeds and are
-	// named here so a caller matching on them needs one import.
-	ErrInvalidQuery               = yamlpath.ErrInvalidQuery
-	ErrInvalidPath                = yamlpath.ErrInvalidPath
-	ErrInvalidPathString          = yamlpath.ErrInvalidPathString
-	ErrNotFoundNode               = yamlpath.ErrNotFoundNode
-	ErrUnknownCommentPositionType = errors.New("unknown comment position type")
-	ErrInvalidCommentMapValue     = errors.New("invalid comment map value. it must be not nil value")
-	ErrDecodeRequiredPointerType  = errors.New("required pointer type value")
-	ErrExceededMaxDepth           = errors.New("exceeded max depth")
+	ErrUnknownCommentPositionType = codec.ErrUnknownCommentPositionType
+	ErrInvalidCommentMapValue     = codec.ErrInvalidCommentMapValue
+	ErrDecodeRequiredPointerType  = codec.ErrDecodeRequiredPointerType
+	ErrExceededMaxDepth           = codec.ErrExceededMaxDepth
 )
 
+// The error types a failure may be unwrapped to.
 type (
 	SyntaxError             = errors.SyntaxError
 	TypeError               = errors.TypeError
@@ -32,67 +35,19 @@ type (
 	Error                   = errors.Error
 )
 
-// The three errors below report a comment that cannot be placed where
-// [CommentPosition] asks for.
-//
-// A node holds one comment group and no placement, so the encoder writes a
-// comment by choosing which node to hang the group on: above goes to the entry,
-// beside goes to the entry's key, below goes to a field of its own. Where the
-// value the path addresses has no such node around it -- it is the whole
-// document, or it sits somewhere the choice does not apply -- there is nowhere
-// to put the comment and one of these is returned.
-
-// ErrUnsupportedHeadPositionType reports a comment that cannot be written above
-// the value the path addressed.
-func ErrUnsupportedHeadPositionType(node ast.Node) error {
-	return fmt.Errorf("unsupported comment head position for %s", node.Type())
-}
-
-// ErrUnsupportedLinePositionType reports a comment that cannot be written
-// beside the value the path addressed.
-func ErrUnsupportedLinePositionType(node ast.Node) error {
-	return fmt.Errorf("unsupported comment line position for %s", node.Type())
-}
-
-// ErrUnsupportedFootPositionType reports a comment that cannot be written below
-// the value the path addressed.
-func ErrUnsupportedFootPositionType(node ast.Node) error {
-	return fmt.Errorf("unsupported comment foot position for %s", node.Type())
-}
-
-// IsInvalidQueryError whether err is ErrInvalidQuery or not.
-func IsInvalidQueryError(err error) bool {
-	return errors.Is(err, ErrInvalidQuery)
-}
-
-// IsInvalidPathError whether err is ErrInvalidPath or not.
-func IsInvalidPathError(err error) bool {
-	return errors.Is(err, ErrInvalidPath)
-}
-
-// IsInvalidPathStringError whether err is ErrInvalidPathString or not.
-func IsInvalidPathStringError(err error) bool {
-	return errors.Is(err, ErrInvalidPathString)
-}
-
-// IsNotFoundNodeError whether err is ErrNotFoundNode or not.
-func IsNotFoundNodeError(err error) bool {
-	return errors.Is(err, ErrNotFoundNode)
-}
-
 // IsInvalidTokenTypeError whether err is ast.ErrInvalidTokenType or not.
 func IsInvalidTokenTypeError(err error) bool {
-	return errors.Is(err, ast.ErrInvalidTokenType)
+	return stderrors.Is(err, ast.ErrInvalidTokenType)
 }
 
 // IsInvalidAnchorNameError whether err is ast.ErrInvalidAnchorName or not.
 func IsInvalidAnchorNameError(err error) bool {
-	return errors.Is(err, ast.ErrInvalidAnchorName)
+	return stderrors.Is(err, ast.ErrInvalidAnchorName)
 }
 
 // IsInvalidAliasNameError whether err is ast.ErrInvalidAliasName or not.
 func IsInvalidAliasNameError(err error) bool {
-	return errors.Is(err, ast.ErrInvalidAliasName)
+	return stderrors.Is(err, ast.ErrInvalidAliasName)
 }
 
 // FormatErrorWithToken renders msg as an error reported at tk, drawing the

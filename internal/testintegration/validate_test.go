@@ -7,6 +7,7 @@ import (
 	"github.com/go-playground/validator/v10"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 func TestStructValidator(t *testing.T) {
@@ -212,8 +213,8 @@ map:
 			validate := validator.New()
 			dec := yaml.NewDecoder(
 				strings.NewReader(tc.YAMLContent),
-				yaml.Validator(validate),
-				yaml.Strict(),
+				codec.Validator(validate),
+				codec.Strict(),
 			)
 			err := dec.Decode(tc.Instance)
 			switch {

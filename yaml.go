@@ -1,357 +1,153 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+// Package yaml reads and writes YAML documents.
+//
+// The entry points are [Marshal] and [Unmarshal], as in the standard library's
+// encoding packages. Everything that does the work lives a layer down and is
+// named here so that ordinary use needs one import:
+//
+//   - [codec] encodes and decodes -- [Encoder], [Decoder], and the options that
+//     steer them.
+//   - [github.com/go-openapi/go-yaml/ast] is the document as a tree.
+//   - [github.com/go-openapi/go-yaml/parser] builds that tree from a source,
+//     and [github.com/go-openapi/go-yaml/scanner] hands it the tokens.
+//
+// Reach for [codec] directly to encode or decode with options: this package
+// names the option types but not the twenty-five constructors that build them.
 package yaml
 
 import (
-	"bytes"
 	"context"
 	"io"
-	"reflect"
-	"sync"
 
-	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
-// BytesMarshaler interface may be implemented by types to customize their
-// behavior when being marshaled into a YAML document. The returned value
-// is marshaled in place of the original value implementing Marshaler.
-//
-// If an error is returned by MarshalYAML, the marshaling procedure stops
-// and returns with the provided error.
-type BytesMarshaler interface {
-	MarshalYAML() ([]byte, error)
+// The interfaces a type implements to encode or decode itself.
+type (
+	BytesMarshaler              = codec.BytesMarshaler
+	BytesMarshalerContext       = codec.BytesMarshalerContext
+	InterfaceMarshaler          = codec.InterfaceMarshaler
+	InterfaceMarshalerContext   = codec.InterfaceMarshalerContext
+	BytesUnmarshaler            = codec.BytesUnmarshaler
+	BytesUnmarshalerContext     = codec.BytesUnmarshalerContext
+	InterfaceUnmarshaler        = codec.InterfaceUnmarshaler
+	InterfaceUnmarshalerContext = codec.InterfaceUnmarshalerContext
+	NodeUnmarshaler             = codec.NodeUnmarshaler
+	NodeUnmarshalerContext      = codec.NodeUnmarshalerContext
+)
+
+// The types a caller names to hold a document or to steer a conversion.
+type (
+	// Encoder writes YAML documents to a stream.
+	Encoder = codec.Encoder
+	// Decoder reads YAML documents from a stream.
+	Decoder = codec.Decoder
+	// EncodeOption steers an [Encoder]. The constructors are in [codec].
+	EncodeOption = codec.EncodeOption
+	// DecodeOption steers a [Decoder]. The constructors are in [codec].
+	DecodeOption = codec.DecodeOption
+	// MapItem is an item in a [MapSlice].
+	MapItem = codec.MapItem
+	// MapSlice encodes and decodes as a YAML map, keeping the order of its keys.
+	MapSlice = codec.MapSlice
+	// RawMessage is a YAML document held as written, encoded and decoded verbatim.
+	RawMessage = codec.RawMessage
+	// Comment is the text of a comment and where it goes.
+	Comment = codec.Comment
+	// CommentMap holds the comments of a document against the path of each value.
+	CommentMap = codec.CommentMap
+	// CommentPosition says whether a comment stands above, beside or below its value.
+	CommentPosition = codec.CommentPosition
+)
+
+// Where a comment stands relative to its value.
+const (
+	CommentHeadPosition = codec.CommentHeadPosition
+	CommentLinePosition = codec.CommentLinePosition
+	CommentFootPosition = codec.CommentFootPosition
+)
+
+// NewEncoder returns an [Encoder] writing to w.
+func NewEncoder(w io.Writer, opts ...EncodeOption) *Encoder {
+	return codec.NewEncoder(w, opts...)
 }
 
-// BytesMarshalerContext interface use BytesMarshaler with context.Context.
-type BytesMarshalerContext interface {
-	MarshalYAML(context.Context) ([]byte, error)
+// NewDecoder returns a [Decoder] reading from r.
+func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
+	return codec.NewDecoder(r, opts...)
 }
 
-// InterfaceMarshaler interface has MarshalYAML compatible with github.com/go-yaml/yaml package.
-type InterfaceMarshaler interface {
-	MarshalYAML() (interface{}, error)
-}
-
-// InterfaceMarshalerContext interface use InterfaceMarshaler with context.Context.
-type InterfaceMarshalerContext interface {
-	MarshalYAML(context.Context) (interface{}, error)
-}
-
-// BytesUnmarshaler interface may be implemented by types to customize their
-// behavior when being unmarshaled from a YAML document.
-type BytesUnmarshaler interface {
-	UnmarshalYAML([]byte) error
-}
-
-// BytesUnmarshalerContext interface use BytesUnmarshaler with context.Context.
-type BytesUnmarshalerContext interface {
-	UnmarshalYAML(context.Context, []byte) error
-}
-
-// InterfaceUnmarshaler interface has UnmarshalYAML compatible with github.com/go-yaml/yaml package.
-type InterfaceUnmarshaler interface {
-	UnmarshalYAML(func(interface{}) error) error
-}
-
-// InterfaceUnmarshalerContext interface use InterfaceUnmarshaler with context.Context.
-type InterfaceUnmarshalerContext interface {
-	UnmarshalYAML(context.Context, func(interface{}) error) error
-}
-
-// NodeUnmarshaler interface is similar to BytesUnmarshaler but provide related AST node instead of raw YAML source.
-type NodeUnmarshaler interface {
-	UnmarshalYAML(ast.Node) error
-}
-
-// NodeUnmarshalerContext interface is similar to BytesUnmarshaler but provide related AST node instead of raw YAML source.
-type NodeUnmarshalerContext interface {
-	UnmarshalYAML(context.Context, ast.Node) error
-}
-
-// MapItem is an item in a MapSlice.
-type MapItem struct {
-	Key, Value interface{}
-}
-
-// MapSlice encodes and decodes as a YAML map.
-// The order of keys is preserved when encoding and decoding.
-type MapSlice []MapItem
-
-// ToMap convert to map[interface{}]interface{}.
-func (s MapSlice) ToMap() map[interface{}]interface{} {
-	v := map[interface{}]interface{}{}
-	for _, item := range s {
-		v[item.Key] = item.Value
-	}
-	return v
-}
-
-// Marshal serializes the value provided into a YAML document. The structure
-// of the generated document will reflect the structure of the value itself.
-// Maps and pointers (to struct, string, int, etc) are accepted as the in value.
+// Marshal serializes v into a YAML document.
 //
-// Struct fields are only marshaled if they are exported (have an upper case
-// first letter), and are marshaled using the field name lowercased as the
-// default key. Custom keys may be defined via the "yaml" name in the field
-// tag: the content preceding the first comma is used as the key, and the
-// following comma-separated options are used to tweak the marshaling process.
-// Conflicting names result in a runtime error.
-//
-// The field tag format accepted is:
-//
-//	`(...) yaml:"[<key>][,<flag1>[,<flag2>]]" (...)`
-//
-// The following flags are currently supported:
-//
-//	omitempty    Only include the field if it's not set to the zero
-//	             value for the type or to empty slices or maps.
-//	             Zero valued structs will be omitted if all their public
-//	             fields are zero, unless they implement an IsZero
-//	             method (see the IsZeroer interface type), in which
-//	             case the field will be included if that method returns true.
-//	             Note that this definition is slightly different from the Go's
-//	             encoding/json 'omitempty' definition. It combines some elements
-//	             of 'omitempty' and 'omitzero'. See https://github.com/go-openapi/go-yaml/issues/695.
-//
-//	omitzero      The omitzero tag behaves in the same way as the interpretation of the omitzero tag in the encoding/json library.
-//	              1) If the field type has an "IsZero() bool" method, that will be used to determine whether the value is zero.
-//	              2) Otherwise, the value is zero if it is the zero value for its type.
-//
-//	flow         Marshal using a flow style (useful for structs,
-//	             sequences and maps).
-//
-//	inline       Inline the field, which must be a struct or a map,
-//	             causing all of its fields or keys to be processed as if
-//	             they were part of the outer struct. For maps, keys must
-//	             not conflict with the yaml keys of other struct fields.
-//
-//	anchor       Marshal with anchor. If want to define anchor name explicitly, use anchor=name style.
-//	             Otherwise, if used 'anchor' name only, used the field name lowercased as the anchor name
-//
-//	alias        Marshal with alias. If want to define alias name explicitly, use alias=name style.
-//	             Otherwise, If omitted alias name and the field type is pointer type,
-//	             assigned anchor name automatically from same pointer address.
-//
-// In addition, if the key is "-", the field is ignored.
-//
-// For example:
-//
-//	type T struct {
-//	    F int `yaml:"a,omitempty"`
-//	    B int
-//	}
-//	yaml.Marshal(&T{B: 2}) // Returns "b: 2\n"
-//	yaml.Marshal(&T{F: 1}) // Returns "a: 1\nb: 0\n"
+// See [codec.Marshal] for how a Go value is mapped onto YAML and what the
+// struct tags mean.
 func Marshal(v interface{}) ([]byte, error) {
-	return MarshalWithOptions(v)
+	return codec.Marshal(v)
 }
 
-// MarshalWithOptions serializes the value provided into a YAML document with EncodeOptions.
+// MarshalWithOptions serializes v into a YAML document, with opts.
 func MarshalWithOptions(v interface{}, opts ...EncodeOption) ([]byte, error) {
-	return MarshalContext(context.Background(), v, opts...)
+	return codec.MarshalWithOptions(v, opts...)
 }
 
-// MarshalContext serializes the value provided into a YAML document with context.Context and EncodeOptions.
+// MarshalContext serializes v into a YAML document, with ctx and opts.
 func MarshalContext(ctx context.Context, v interface{}, opts ...EncodeOption) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := NewEncoder(&buf, opts...).EncodeContext(ctx, v); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return codec.MarshalContext(ctx, v, opts...)
 }
 
-// ValueToNode convert from value to ast.Node.
-func ValueToNode(v interface{}, opts ...EncodeOption) (ast.Node, error) {
-	var buf bytes.Buffer
-	node, err := NewEncoder(&buf, opts...).EncodeToNode(v)
-	if err != nil {
-		return nil, err
-	}
-	return node, nil
-}
-
-// Unmarshal decodes the first document found within the in byte slice
-// and assigns decoded values into the out value.
+// Unmarshal decodes the YAML document data into the value pointed to by v.
 //
-// Struct fields are only unmarshalled if they are exported (have an
-// upper case first letter), and are unmarshalled using the field name
-// lowercased as the default key. Custom keys may be defined via the
-// "yaml" name in the field tag: the content preceding the first comma
-// is used as the key, and the following comma-separated options are
-// used to tweak the marshaling process (see Marshal).
-// Conflicting names result in a runtime error.
-//
-// For example:
-//
-//	type T struct {
-//	    F int `yaml:"a,omitempty"`
-//	    B int
-//	}
-//	var t T
-//	yaml.Unmarshal([]byte("a: 1\nb: 2"), &t)
-//
-// See the documentation of Marshal for the format of tags and a list of
-// supported tag options.
+// See [codec.Unmarshal] for how a YAML document is mapped onto a Go value.
 func Unmarshal(data []byte, v interface{}) error {
-	return UnmarshalWithOptions(data, v)
+	return codec.Unmarshal(data, v)
 }
 
-// UnmarshalWithOptions decodes with DecodeOptions the first document found within the in byte slice
-// and assigns decoded values into the out value.
+// UnmarshalWithOptions decodes data into v, with opts.
 func UnmarshalWithOptions(data []byte, v interface{}, opts ...DecodeOption) error {
-	return UnmarshalContext(context.Background(), data, v, opts...)
+	return codec.UnmarshalWithOptions(data, v, opts...)
 }
 
-// UnmarshalContext decodes with context.Context and DecodeOptions.
+// UnmarshalContext decodes data into v, with ctx and opts.
 func UnmarshalContext(ctx context.Context, data []byte, v interface{}, opts ...DecodeOption) error {
-	dec := NewDecoder(bytes.NewBuffer(data), opts...)
-	if err := dec.DecodeContext(ctx, v); err != nil {
-		if err == io.EOF {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return codec.UnmarshalContext(ctx, data, v, opts...)
 }
 
-// NodeToValue converts node to the value pointed to by v.
-func NodeToValue(node ast.Node, v interface{}, opts ...DecodeOption) error {
-	var buf bytes.Buffer
-	if err := NewDecoder(&buf, opts...).DecodeFromNode(node, v); err != nil {
-		return err
-	}
-	return nil
+// ToJSON converts a YAML document to the JSON that holds the same values.
+func ToJSON(bytes []byte) ([]byte, error) {
+	return codec.ToJSON(bytes)
 }
 
-// FormatError is a utility function that takes advantage of the metadata
-// stored in the errors returned by this package's parser.
-//
-// If the second argument `colored` is true, the error message is colorized.
-// If the third argument `inclSource` is true, the error message will
-// contain snippets of the YAML source that was used.
+// FromJSON converts a JSON document to the YAML that holds the same values.
+func FromJSON(bytes []byte) ([]byte, error) {
+	return codec.FromJSON(bytes)
+}
+
+// FormatError renders e, drawing the source around it where the error carries
+// one and inclSource asks for it.
 func FormatError(e error, colored, inclSource bool) string {
-	var yamlErr Error
-	if errors.As(e, &yamlErr) {
-		return yamlErr.FormatError(colored, inclSource)
-	}
-
-	return e.Error()
+	return codec.FormatError(e, colored, inclSource)
 }
 
-// YAMLToJSON convert YAML bytes to JSON.
-func YAMLToJSON(bytes []byte) ([]byte, error) {
-	var v interface{}
-	if err := UnmarshalWithOptions(bytes, &v, UseOrderedMap()); err != nil {
-		return nil, err
-	}
-	out, err := MarshalWithOptions(v, JSON())
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// JSONToYAML convert JSON bytes to YAML.
-func JSONToYAML(bytes []byte) ([]byte, error) {
-	var v interface{}
-	if err := UnmarshalWithOptions(bytes, &v, UseOrderedMap()); err != nil {
-		return nil, err
-	}
-	out, err := Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-var (
-	globalCustomMarshalerMu    sync.Mutex
-	globalCustomUnmarshalerMu  sync.Mutex
-	globalCustomMarshalerMap   = map[reflect.Type]func(context.Context, interface{}) ([]byte, error){}
-	globalCustomUnmarshalerMap = map[reflect.Type]func(context.Context, interface{}, []byte) error{}
-)
-
-// RegisterCustomMarshaler overrides any encoding process for the type specified in generics.
-// If you want to switch the behavior for each encoder, use `CustomMarshaler` defined as EncodeOption.
-//
-// NOTE: If type T implements MarshalYAML for pointer receiver, the type specified in RegisterCustomMarshaler must be *T.
-// If RegisterCustomMarshaler and CustomMarshaler of EncodeOption are specified for the same type,
-// the CustomMarshaler specified in EncodeOption takes precedence.
+// RegisterCustomMarshaler registers a function that encodes values of type T,
+// for a type whose own MarshalYAML cannot be defined.
 func RegisterCustomMarshaler[T any](marshaler func(T) ([]byte, error)) {
-	globalCustomMarshalerMu.Lock()
-	defer globalCustomMarshalerMu.Unlock()
-
-	var typ T
-	globalCustomMarshalerMap[reflect.TypeOf(typ)] = func(ctx context.Context, v interface{}) ([]byte, error) {
-		return marshaler(v.(T))
-	}
+	codec.RegisterCustomMarshaler(marshaler)
 }
 
-// RegisterCustomMarshalerContext overrides any encoding process for the type specified in generics.
-// Similar to RegisterCustomMarshalerContext, but allows passing a context to the unmarshaler function.
+// RegisterCustomMarshalerContext is [RegisterCustomMarshaler] with a context.
 func RegisterCustomMarshalerContext[T any](marshaler func(context.Context, T) ([]byte, error)) {
-	globalCustomMarshalerMu.Lock()
-	defer globalCustomMarshalerMu.Unlock()
-
-	var typ T
-	globalCustomMarshalerMap[reflect.TypeOf(typ)] = func(ctx context.Context, v interface{}) ([]byte, error) {
-		return marshaler(ctx, v.(T))
-	}
+	codec.RegisterCustomMarshalerContext(marshaler)
 }
 
-// RegisterCustomUnmarshaler overrides any decoding process for the type specified in generics.
-// If you want to switch the behavior for each decoder, use `CustomUnmarshaler` defined as DecodeOption.
-//
-// NOTE: If RegisterCustomUnmarshaler and CustomUnmarshaler of DecodeOption are specified for the same type,
-// the CustomUnmarshaler specified in DecodeOption takes precedence.
+// RegisterCustomUnmarshaler registers a function that decodes values of type T,
+// for a type whose own UnmarshalYAML cannot be defined.
 func RegisterCustomUnmarshaler[T any](unmarshaler func(*T, []byte) error) {
-	globalCustomUnmarshalerMu.Lock()
-	defer globalCustomUnmarshalerMu.Unlock()
-
-	var typ *T
-	globalCustomUnmarshalerMap[reflect.TypeOf(typ)] = func(ctx context.Context, v interface{}, b []byte) error {
-		return unmarshaler(v.(*T), b)
-	}
+	codec.RegisterCustomUnmarshaler(unmarshaler)
 }
 
-// RegisterCustomUnmarshalerContext overrides any decoding process for the type specified in generics.
-// Similar to RegisterCustomUnmarshalerContext, but allows passing a context to the unmarshaler function.
+// RegisterCustomUnmarshalerContext is [RegisterCustomUnmarshaler] with a context.
 func RegisterCustomUnmarshalerContext[T any](unmarshaler func(context.Context, *T, []byte) error) {
-	globalCustomUnmarshalerMu.Lock()
-	defer globalCustomUnmarshalerMu.Unlock()
-
-	var typ *T
-	globalCustomUnmarshalerMap[reflect.TypeOf(typ)] = func(ctx context.Context, v interface{}, b []byte) error {
-		return unmarshaler(ctx, v.(*T), b)
-	}
-}
-
-// RawMessage is a raw encoded YAML value. It implements [BytesMarshaler] and
-// [BytesUnmarshaler] and can be used to delay YAML decoding or precompute a YAML
-// encoding.
-// It also implements [json.Marshaler] and [json.Unmarshaler].
-//
-// This is similar to [json.RawMessage] in the stdlib.
-type RawMessage []byte
-
-func (m RawMessage) MarshalYAML() ([]byte, error) {
-	if m == nil {
-		return []byte("null"), nil
-	}
-	return m, nil
-}
-
-func (m *RawMessage) UnmarshalYAML(dt []byte) error {
-	if m == nil {
-		return errors.New("yaml.RawMessage: UnmarshalYAML on nil pointer")
-	}
-	*m = append((*m)[0:0], dt...)
-	return nil
-}
-
-func (m *RawMessage) UnmarshalJSON(b []byte) error {
-	return m.UnmarshalYAML(b)
-}
-
-func (m RawMessage) MarshalJSON() ([]byte, error) {
-	return YAMLToJSON(m)
+	codec.RegisterCustomUnmarshalerContext(unmarshaler)
 }

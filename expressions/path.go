@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package yaml
+package expressions
 
 import (
 	"bytes"
+	"errors"
 	"io"
 
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/yamlpath"
 )
 
@@ -116,7 +118,7 @@ func (p *Path) Read(r io.Reader, v interface{}) error {
 		return err
 	}
 
-	if err := NodeToValue(node, v); err != nil {
+	if err := codec.NodeToValue(node, v); err != nil {
 		return err
 	}
 
@@ -126,7 +128,7 @@ func (p *Path) Read(r io.Reader, v interface{}) error {
 // Filter encodes target, then decodes the value p addresses in the result
 // into v.
 func (p *Path) Filter(target, v interface{}) error {
-	b, err := Marshal(target)
+	b, err := codec.Marshal(target)
 	if err != nil {
 		return err
 	}
@@ -136,4 +138,39 @@ func (p *Path) Filter(target, v interface{}) error {
 	}
 
 	return nil
+}
+
+// The errors a path raises. Each is declared by the engine [Path] embeds and
+// named here so that matching on one needs no second import.
+var (
+	// ErrInvalidQuery reports a path that asks for something the document
+	// cannot answer, such as an index into a mapping.
+	ErrInvalidQuery = yamlpath.ErrInvalidQuery
+	// ErrInvalidPath reports a Path that was never built by PathString or
+	// PathBuilder and holds nothing to walk.
+	ErrInvalidPath = yamlpath.ErrInvalidPath
+	// ErrInvalidPathString reports text that is not a YAML path.
+	ErrInvalidPathString = yamlpath.ErrInvalidPathString
+	// ErrNotFoundNode reports a path that addresses no node of the document.
+	ErrNotFoundNode = yamlpath.ErrNotFoundNode
+)
+
+// IsInvalidQueryError reports whether err is [ErrInvalidQuery].
+func IsInvalidQueryError(err error) bool {
+	return errors.Is(err, ErrInvalidQuery)
+}
+
+// IsInvalidPathError reports whether err is [ErrInvalidPath].
+func IsInvalidPathError(err error) bool {
+	return errors.Is(err, ErrInvalidPath)
+}
+
+// IsInvalidPathStringError reports whether err is [ErrInvalidPathString].
+func IsInvalidPathStringError(err error) bool {
+	return errors.Is(err, ErrInvalidPathString)
+}
+
+// IsNotFoundNodeError reports whether err is [ErrNotFoundNode].
+func IsNotFoundNodeError(err error) bool {
+	return errors.Is(err, ErrNotFoundNode)
 }

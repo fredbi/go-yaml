@@ -1,4 +1,4 @@
-package yaml
+package codec
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/internal/yamlpath"
 )
 
 // DecodeOption functional option type for Decoder
@@ -368,7 +369,7 @@ func WithComment(cm CommentMap) EncodeOption {
 	return func(e *Encoder) error {
 		commentMap := map[nodeFilter][]*Comment{}
 		for k, v := range cm {
-			path, err := PathString(k)
+			path, err := yamlpath.PathString(k)
 			if err != nil {
 				return err
 			}

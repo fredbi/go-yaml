@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -22,10 +23,10 @@ key: value # line comment
 	}
 	comments := yaml.CommentMap{}
 
-	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, yaml.Strict(), yaml.CommentToMap(comments)); err != nil {
+	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, codec.Strict(), codec.CommentToMap(comments)); err != nil {
 		t.Fatal(err)
 	}
-	out, err := yaml.MarshalWithOptions(v, yaml.WithComment(comments))
+	out, err := yaml.MarshalWithOptions(v, codec.WithComment(comments))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +51,7 @@ foo: bar # comment
 - c # comment
 `
 	cm := yaml.CommentMap{}
-	dec := yaml.NewDecoder(strings.NewReader(yml), yaml.CommentToMap(cm))
+	dec := yaml.NewDecoder(strings.NewReader(yml), codec.CommentToMap(cm))
 	var commentPathsWithDocIndex [][]string
 	for {
 		var v any
@@ -119,7 +120,7 @@ i: &i [*h,*h,*h,*h,*h,*h,*h,*h,*h,*h]
 	if err := yaml.Unmarshal([]byte(data), &v); err != nil {
 		t.Fatal(err)
 	}
-	got, err := yaml.MarshalWithOptions(v, yaml.WithSmartAnchor())
+	got, err := yaml.MarshalWithOptions(v, codec.WithSmartAnchor())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +420,7 @@ dynamicField:
 
 	t.Run("UseJSONUnmarshaler and json.RawMessage", func(t *testing.T) {
 		var wrapper rawJSONWrapper
-		if err := yaml.UnmarshalWithOptions(rawData, &wrapper, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(rawData, &wrapper, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if wrapper.StaticField != "value" {
@@ -436,7 +437,7 @@ dynamicField:
 
 	t.Run("UseJSONUnmarshaler and yaml.RawMessage", func(t *testing.T) {
 		var wrapper rawYAMLWrapper
-		if err := yaml.UnmarshalWithOptions(rawData, &wrapper, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(rawData, &wrapper, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if wrapper.StaticField != "value" {
@@ -460,19 +461,19 @@ dynamicField:
 			StaticField:  "value",
 			DynamicField: json.RawMessage(dynamicFieldBytes),
 		}
-		wrapperBytes, err := yaml.MarshalWithOptions(&wrapper, yaml.UseJSONMarshaler())
+		wrapperBytes, err := yaml.MarshalWithOptions(&wrapper, codec.UseJSONMarshaler())
 		if err != nil {
 			t.Fatal(err)
 		}
 		var unmarshaledWrapper rawJSONWrapper
-		if err := yaml.UnmarshalWithOptions(wrapperBytes, &unmarshaledWrapper, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(wrapperBytes, &unmarshaledWrapper, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if unmarshaledWrapper.StaticField != wrapper.StaticField {
 			t.Fatalf("unexpected unmarshaled static field value: %s", unmarshaledWrapper.StaticField)
 		}
 		var unmarshaledDynamicFieldValue dynamicField
-		if err := yaml.UnmarshalWithOptions(unmarshaledWrapper.DynamicField, &unmarshaledDynamicFieldValue, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(unmarshaledWrapper.DynamicField, &unmarshaledDynamicFieldValue, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if !unmarshaledDynamicFieldValue.Equals(expectedDynamicFieldValue) {
@@ -489,19 +490,19 @@ dynamicField:
 			StaticField:  "value",
 			DynamicField: yaml.RawMessage(dynamicFieldBytes),
 		}
-		wrapperBytes, err := yaml.MarshalWithOptions(&wrapper, yaml.UseJSONMarshaler())
+		wrapperBytes, err := yaml.MarshalWithOptions(&wrapper, codec.UseJSONMarshaler())
 		if err != nil {
 			t.Fatal(err)
 		}
 		var unmarshaledWrapper rawYAMLWrapper
-		if err := yaml.UnmarshalWithOptions(wrapperBytes, &unmarshaledWrapper, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(wrapperBytes, &unmarshaledWrapper, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if unmarshaledWrapper.StaticField != wrapper.StaticField {
 			t.Fatalf("unexpected unmarshaled static field value: %s", unmarshaledWrapper.StaticField)
 		}
 		var unmarshaledDynamicFieldValue dynamicField
-		if err := yaml.UnmarshalWithOptions(unmarshaledWrapper.DynamicField, &unmarshaledDynamicFieldValue, yaml.UseJSONUnmarshaler()); err != nil {
+		if err := yaml.UnmarshalWithOptions(unmarshaledWrapper.DynamicField, &unmarshaledDynamicFieldValue, codec.UseJSONUnmarshaler()); err != nil {
 			t.Fatal(err)
 		}
 		if !unmarshaledDynamicFieldValue.Equals(expectedDynamicFieldValue) {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -169,7 +170,7 @@ func TestEncoder(t *testing.T) {
 			"v:\n  - A\n  - B\n",
 			map[string][]string{"v": {"A", "B"}},
 			[]yaml.EncodeOption{
-				yaml.IndentSequence(true),
+				codec.IndentSequence(true),
 			},
 		},
 		{
@@ -181,7 +182,7 @@ func TestEncoder(t *testing.T) {
 			"v:\n  - A\n  - B\n",
 			map[string][2]string{"v": {"A", "B"}},
 			[]yaml.EncodeOption{
-				yaml.IndentSequence(true),
+				codec.IndentSequence(true),
 			},
 		},
 		{
@@ -257,21 +258,21 @@ func TestEncoder(t *testing.T) {
 			"v: |-\n  username: hello\n  password: hello123\n",
 			map[string]interface{}{"v": "username: hello\npassword: hello123"},
 			[]yaml.EncodeOption{
-				yaml.UseLiteralStyleIfMultiline(true),
+				codec.UseLiteralStyleIfMultiline(true),
 			},
 		},
 		{
 			"v: |-\n  # comment\n  username: hello\n  password: hello123\n",
 			map[string]interface{}{"v": "# comment\nusername: hello\npassword: hello123"},
 			[]yaml.EncodeOption{
-				yaml.UseLiteralStyleIfMultiline(true),
+				codec.UseLiteralStyleIfMultiline(true),
 			},
 		},
 		{
 			"v: \"# comment\\nusername: hello\\npassword: hello123\"\n",
 			map[string]interface{}{"v": "# comment\nusername: hello\npassword: hello123"},
 			[]yaml.EncodeOption{
-				yaml.UseLiteralStyleIfMultiline(false),
+				codec.UseLiteralStyleIfMultiline(false),
 			},
 		},
 		{
@@ -300,7 +301,7 @@ func TestEncoder(t *testing.T) {
 				},
 			},
 			[]yaml.EncodeOption{
-				yaml.IndentSequence(true),
+				codec.IndentSequence(true),
 			},
 		},
 		{
@@ -723,7 +724,7 @@ func TestEncoder(t *testing.T) {
 				B int `yaml:"b,omitempty"`
 			}{1, 0},
 			[]yaml.EncodeOption{
-				yaml.OmitEmpty(),
+				codec.OmitEmpty(),
 			},
 		},
 		{
@@ -733,7 +734,7 @@ func TestEncoder(t *testing.T) {
 				B int `yaml:"b,omitempty"`
 			}{0, 0},
 			[]yaml.EncodeOption{
-				yaml.OmitEmpty(),
+				codec.OmitEmpty(),
 			},
 		},
 		{
@@ -743,7 +744,7 @@ func TestEncoder(t *testing.T) {
 				B struct{ X, y int } `yaml:"b"`
 			}{},
 			[]yaml.EncodeOption{
-				yaml.OmitEmpty(),
+				codec.OmitEmpty(),
 			},
 		},
 
@@ -755,7 +756,7 @@ func TestEncoder(t *testing.T) {
 				B int
 			}{1, 0},
 			[]yaml.EncodeOption{
-				yaml.OmitZero(),
+				codec.OmitZero(),
 			},
 		},
 		{
@@ -765,7 +766,7 @@ func TestEncoder(t *testing.T) {
 				B int
 			}{0, 0},
 			[]yaml.EncodeOption{
-				yaml.OmitZero(),
+				codec.OmitZero(),
 			},
 		},
 		{
@@ -775,7 +776,7 @@ func TestEncoder(t *testing.T) {
 				B struct{ X, y int } `yaml:"b"`
 			}{},
 			[]yaml.EncodeOption{
-				yaml.OmitZero(),
+				codec.OmitZero(),
 			},
 		},
 		{
@@ -784,7 +785,7 @@ func TestEncoder(t *testing.T) {
 				unexportedStruct
 			}{},
 			[]yaml.EncodeOption{
-				yaml.OmitZero(),
+				codec.OmitZero(),
 			},
 		},
 
@@ -819,7 +820,7 @@ func TestEncoder(t *testing.T) {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c,d", "e"}},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		{
@@ -828,7 +829,7 @@ func TestEncoder(t *testing.T) {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c]", "d"}},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		{
@@ -837,7 +838,7 @@ func TestEncoder(t *testing.T) {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c}", "d"}},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		{
@@ -846,7 +847,7 @@ func TestEncoder(t *testing.T) {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", `c"`, "d"}},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		{
@@ -855,7 +856,7 @@ func TestEncoder(t *testing.T) {
 				A []string `yaml:"a,flow"`
 			}{[]string{"b", "c'", "d"}},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		// No quoting in non-flow mode
@@ -953,21 +954,21 @@ func TestEncoder(t *testing.T) {
 			`v: '''a''b'` + "\n",
 			map[string]string{"v": `'a'b`},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(true),
+				codec.UseSingleQuote(true),
 			},
 		},
 		{
 			`v: "'a'b"` + "\n",
 			map[string]string{"v": `'a'b`},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(false),
+				codec.UseSingleQuote(false),
 			},
 		},
 		{
 			`a: '\.yaml'` + "\n",
 			map[string]string{"a": `\.yaml`},
 			[]yaml.EncodeOption{
-				yaml.UseSingleQuote(true),
+				codec.UseSingleQuote(true),
 			},
 		},
 	}
@@ -1182,7 +1183,7 @@ func TestEncodeWithNestedYAML(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		yamlBytesForced, err := yaml.MarshalWithOptions(test.value, yaml.UseLiteralStyleIfMultiline(true))
+		yamlBytesForced, err := yaml.MarshalWithOptions(test.value, codec.UseLiteralStyleIfMultiline(true))
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
@@ -1299,7 +1300,7 @@ c: true
 
 func TestEncoder_Flow(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf, yaml.Flow(true))
+	enc := yaml.NewEncoder(&buf, codec.Flow(true))
 	var v struct {
 		A int
 		B string
@@ -1348,7 +1349,7 @@ m: {test: [1, 2, 3]}
 
 func TestEncoder_JSON(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf, yaml.JSON())
+	enc := yaml.NewEncoder(&buf, codec.JSON())
 	type st struct {
 		I int8
 		S string
@@ -1439,7 +1440,7 @@ func TestEncoder_MarshalAnchor(t *testing.T) {
 		},
 	}
 	hostIdx := 1
-	opt := yaml.MarshalAnchor(func(anchor *ast.AnchorNode, value interface{}) error {
+	opt := codec.MarshalAnchor(func(anchor *ast.AnchorNode, value interface{}) error {
 		if _, ok := value.(*Host); ok {
 			nameNode, _ := anchor.Name.(*ast.StringNode)
 			nameNode.Value = fmt.Sprintf("host%d", hostIdx)
@@ -1480,7 +1481,7 @@ func (t useJSONMarshalerTest) MarshalJSON() ([]byte, error) {
 }
 
 func TestEncoder_UseJSONMarshaler(t *testing.T) {
-	got, err := yaml.MarshalWithOptions(useJSONMarshalerTest{}, yaml.UseJSONMarshaler())
+	got, err := yaml.MarshalWithOptions(useJSONMarshalerTest{}, codec.UseJSONMarshaler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1500,7 +1501,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 		type T struct {
 			Foo string `yaml:"foo"`
 		}
-		b, err := yaml.MarshalWithOptions(&T{Foo: "bar"}, yaml.CustomMarshaler[T](func(v T) ([]byte, error) {
+		b, err := yaml.MarshalWithOptions(&T{Foo: "bar"}, codec.CustomMarshaler[T](func(v T) ([]byte, error) {
 			return []byte(`"override"`), nil
 		}))
 		if err != nil {
@@ -1514,7 +1515,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 		type T struct {
 			Foo []byte `yaml:"foo"`
 		}
-		b, err := yaml.MarshalWithOptions(&T{Foo: []byte("bar")}, yaml.CustomMarshaler[[]byte](func(v []byte) ([]byte, error) {
+		b, err := yaml.MarshalWithOptions(&T{Foo: []byte("bar")}, codec.CustomMarshaler[[]byte](func(v []byte) ([]byte, error) {
 			if !bytes.Equal(v, []byte("bar")) {
 				t.Fatalf("failed to get src buffer: %q", v)
 			}
@@ -1532,7 +1533,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 			Foo []byte `yaml:"foo"`
 		}
 		ctx := context.WithValue(context.Background(), "plop", uint(42))
-		b, err := yaml.MarshalContext(ctx, &T{Foo: []byte("bar")}, yaml.CustomMarshalerContext[[]byte](func(ctx context.Context, v []byte) ([]byte, error) {
+		b, err := yaml.MarshalContext(ctx, &T{Foo: []byte("bar")}, codec.CustomMarshalerContext[[]byte](func(ctx context.Context, v []byte) ([]byte, error) {
 			if !bytes.Equal(v, []byte("bar")) {
 				t.Fatalf("failed to get src buffer: %q", v)
 			}
@@ -1587,7 +1588,7 @@ func TestEncoder_AutoInt(t *testing.T) {
 	} {
 		t.Run(test.desc, func(t *testing.T) {
 			var buf bytes.Buffer
-			enc := yaml.NewEncoder(&buf, yaml.AutoInt())
+			enc := yaml.NewEncoder(&buf, codec.AutoInt())
 			if err := enc.Encode(test.input); err != nil {
 				t.Fatalf("failed to encode: %s", err)
 			}
@@ -1691,7 +1692,7 @@ func ExampleMarshal_node() {
 	type T struct {
 		Text ast.Node `yaml:"text"`
 	}
-	stringNode, err := yaml.ValueToNode("node example")
+	stringNode, err := codec.ValueToNode("node example")
 	if err != nil {
 		panic(err)
 	}
@@ -1842,9 +1843,9 @@ func (v SlowMarshaler) MarshalYAML() ([]byte, error) {
 
 func (v FastMarshaler) MarshalYAML() (interface{}, error) {
 	return yaml.MapSlice{
-		{"tags", []string{"fast-marshaler"}},
-		{"a", v.A},
-		{"b", v.B},
+		{Key: "tags", Value: []string{"fast-marshaler"}},
+		{Key: "a", Value: v.A},
+		{Key: "b", Value: v.B},
 	}, nil
 }
 
@@ -1977,7 +1978,7 @@ func TestMarshalIndentWithMultipleText(t *testing.T) {
 line2
 line3`},
 			},
-			indent: yaml.Indent(2),
+			indent: codec.Indent(2),
 			want: `key:
 - |-
   line1
@@ -1994,7 +1995,7 @@ line2
 line3`},
 				},
 			},
-			indent: yaml.Indent(2),
+			indent: codec.Indent(2),
 			want: `key:
   key2:
   - |-
@@ -2008,7 +2009,7 @@ line3`},
 			input: map[string]interface{}{
 				"key": "line1\nline2\nline3",
 			},
-			indent: yaml.Indent(4),
+			indent: codec.Indent(4),
 			want: `key: |-
     line1
     line2
@@ -2064,7 +2065,7 @@ type customMapSliceOneItemMarshaler struct{}
 
 func (m *customMapSliceOneItemMarshaler) MarshalYAML() ([]byte, error) {
 	var v yaml.MapSlice
-	v = append(v, yaml.MapItem{"a", "b"})
+	v = append(v, yaml.MapItem{Key: "a", Value: "b"})
 	return yaml.Marshal(v)
 }
 
@@ -2072,8 +2073,8 @@ type customMapSliceTwoItemMarshaler struct{}
 
 func (m *customMapSliceTwoItemMarshaler) MarshalYAML() ([]byte, error) {
 	var v yaml.MapSlice
-	v = append(v, yaml.MapItem{"a", "b"})
-	v = append(v, yaml.MapItem{"b", "c"})
+	v = append(v, yaml.MapItem{Key: "a", Value: "b"})
+	v = append(v, yaml.MapItem{Key: "b", Value: "c"})
 	return yaml.Marshal(v)
 }
 
@@ -2108,7 +2109,7 @@ type Issue174 struct {
 }
 
 func (v Issue174) MarshalYAML() ([]byte, error) {
-	return yaml.MarshalWithOptions(map[string][]int{v.K: v.V}, yaml.Flow(true))
+	return yaml.MarshalWithOptions(map[string][]int{v.K: v.V}, codec.Flow(true))
 }
 
 func TestIssue174(t *testing.T) {

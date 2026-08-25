@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -1591,7 +1592,7 @@ func TestDecoder_TypeConversionError(t *testing.T) {
 
 func TestDecoder_AnchorReferenceDirs(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
-	dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("testdata"))
+	dec := yaml.NewDecoder(buf, codec.ReferenceDirs("testdata"))
 	var v struct {
 		A struct {
 			B int
@@ -1613,7 +1614,7 @@ func TestDecoder_AnchorReferenceDirsRecursive(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
 	dec := yaml.NewDecoder(
 		buf,
-		yaml.ReferenceDirs("testdata"),
+		codec.ReferenceDirs("testdata"),
 	)
 	var v struct {
 		A struct {
@@ -1634,7 +1635,7 @@ func TestDecoder_AnchorReferenceDirsRecursive(t *testing.T) {
 
 func TestDecoder_AnchorFiles(t *testing.T) {
 	buf := bytes.NewBufferString("a: *a\n")
-	dec := yaml.NewDecoder(buf, yaml.ReferenceFiles("testdata/anchor.yml"))
+	dec := yaml.NewDecoder(buf, codec.ReferenceFiles("testdata/anchor.yml"))
 	var v struct {
 		A struct {
 			B int
@@ -1670,7 +1671,7 @@ items:
 		Items []*Item
 	}
 	buf := bytes.NewBufferString(yml)
-	dec := yaml.NewDecoder(buf, yaml.AllowDuplicateMapKey())
+	dec := yaml.NewDecoder(buf, codec.AllowDuplicateMapKey())
 	var v T
 	if err := dec.Decode(&v); err != nil {
 		t.Fatalf("%+v", err)
@@ -1809,7 +1810,7 @@ b: hello
 		var v struct {
 			Base2 *Base2 `yaml:",inline"`
 		}
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.Strict()).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.Strict()).Decode(&v); err != nil {
 			t.Fatalf("%+v", err)
 		}
 		if v.Base2.Base.A != 1 {
@@ -1867,7 +1868,7 @@ c: true
 		*Base `yaml:",inline"`
 		C     bool
 	}
-	err := yaml.NewDecoder(strings.NewReader(yml), yaml.Strict()).Decode(&v)
+	err := yaml.NewDecoder(strings.NewReader(yml), codec.Strict()).Decode(&v)
 	if err == nil {
 		t.Fatalf("expected error")
 	}
@@ -1941,7 +1942,7 @@ c:
   b: 1
 `
 
-		err := yaml.NewDecoder(strings.NewReader(yml), yaml.DisallowUnknownField()).Decode(&v)
+		err := yaml.NewDecoder(strings.NewReader(yml), codec.DisallowUnknownField()).Decode(&v)
 		if err == nil {
 			t.Fatalf("error expected")
 		}
@@ -1956,7 +1957,7 @@ a: a
 b: 1
 `
 
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.DisallowUnknownField()).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.DisallowUnknownField()).Decode(&v); err != nil {
 			t.Fatalf(`parsing should succeed: %s`, err)
 		}
 		if v.A != "a" {
@@ -1984,7 +1985,7 @@ children:
 - b: 2
 `
 
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.DisallowUnknownField()).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.DisallowUnknownField()).Decode(&v); err != nil {
 			t.Fatalf(`parsing should succeed: %s`, err)
 		}
 
@@ -2010,7 +2011,7 @@ a: a_value
 x-some-extra-thing: b_value
 `
 
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.DisallowUnknownField(), yaml.AllowFieldPrefixes("x-")).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.DisallowUnknownField(), codec.AllowFieldPrefixes("x-")).Decode(&v); err != nil {
 			t.Fatalf(`parsing should succeed: %s`, err)
 		}
 
@@ -2020,7 +2021,7 @@ b: b_value
 x-some-extra-thing: b_value
 `
 
-		err := yaml.NewDecoder(strings.NewReader(yml), yaml.DisallowUnknownField(), yaml.AllowFieldPrefixes("x-")).Decode(&v)
+		err := yaml.NewDecoder(strings.NewReader(yml), codec.DisallowUnknownField(), codec.AllowFieldPrefixes("x-")).Decode(&v)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -2105,7 +2106,7 @@ a: c
 `
 	t.Run("map", func(t *testing.T) {
 		var v map[string]string
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.AllowDuplicateMapKey()).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.AllowDuplicateMapKey()).Decode(&v); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -2113,7 +2114,7 @@ a: c
 		var v struct {
 			A string
 		}
-		if err := yaml.NewDecoder(strings.NewReader(yml), yaml.AllowDuplicateMapKey()).Decode(&v); err != nil {
+		if err := yaml.NewDecoder(strings.NewReader(yml), codec.AllowDuplicateMapKey()).Decode(&v); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -2282,7 +2283,7 @@ func (t *useJSONUnmarshalerTest) UnmarshalJSON(b []byte) error {
 
 func TestDecoder_UseJSONUnmarshaler(t *testing.T) {
 	var v useJSONUnmarshalerTest
-	if err := yaml.UnmarshalWithOptions([]byte(`"a"`), &v, yaml.UseJSONUnmarshaler()); err != nil {
+	if err := yaml.UnmarshalWithOptions([]byte(`"a"`), &v, codec.UseJSONUnmarshaler()); err != nil {
 		t.Fatal(err)
 	}
 	if v.s != "a" {
@@ -2297,7 +2298,7 @@ func TestDecoder_CustomUnmarshaler(t *testing.T) {
 		}
 		src := []byte(`foo: "bar"`)
 		var v T
-		if err := yaml.UnmarshalWithOptions(src, &v, yaml.CustomUnmarshaler[T](func(dst *T, b []byte) error {
+		if err := yaml.UnmarshalWithOptions(src, &v, codec.CustomUnmarshaler[T](func(dst *T, b []byte) error {
 			if !bytes.Equal(src, b) {
 				t.Fatalf("failed to get decode target buffer. expected %q but got %q", src, b)
 			}
@@ -2323,7 +2324,7 @@ func TestDecoder_CustomUnmarshaler(t *testing.T) {
 		}
 		src := []byte(`foo: "bar"`)
 		var v T
-		if err := yaml.UnmarshalWithOptions(src, &v, yaml.CustomUnmarshaler[[]byte](func(dst *[]byte, b []byte) error {
+		if err := yaml.UnmarshalWithOptions(src, &v, codec.CustomUnmarshaler[[]byte](func(dst *[]byte, b []byte) error {
 			if !bytes.Equal(b, []byte(`"bar"`)) {
 				t.Fatalf("failed to get target buffer: %q", b)
 			}
@@ -2343,7 +2344,7 @@ func TestDecoder_CustomUnmarshaler(t *testing.T) {
 		src := []byte(`foo: "bar"`)
 		var v T
 		ctx := context.WithValue(context.Background(), "plop", uint(42))
-		if err := yaml.UnmarshalContext(ctx, src, &v, yaml.CustomUnmarshalerContext[[]byte](func(ctx context.Context, dst *[]byte, b []byte) error {
+		if err := yaml.UnmarshalContext(ctx, src, &v, codec.CustomUnmarshalerContext[[]byte](func(ctx context.Context, dst *[]byte, b []byte) error {
 			if !bytes.Equal(b, []byte(`"bar"`)) {
 				t.Fatalf("failed to get target buffer: %q", b)
 			}
@@ -2421,7 +2422,7 @@ map: *map`
 map: &map
   text: hello`)
 		var buf bytes.Buffer
-		dec := yaml.NewDecoder(&buf, yaml.ReferenceReaders(anchor))
+		dec := yaml.NewDecoder(&buf, codec.ReferenceReaders(anchor))
 		f, err := parser.ParseBytes([]byte("map: *map"), 0)
 		if err != nil {
 			t.Fatalf("failed to parse: %s", err)
@@ -2470,8 +2471,8 @@ foo: # comment
 			if err := yaml.UnmarshalWithOptions(
 				[]byte(test),
 				&v,
-				yaml.CommentToMap(m),
-				yaml.CustomUnmarshaler[T](func(dst *T, b []byte) error {
+				codec.CommentToMap(m),
+				codec.CustomUnmarshaler[T](func(dst *T, b []byte) error {
 					expected := bytes.Trim([]byte(test), "\n")
 					if !bytes.Equal(b, expected) {
 						return fmt.Errorf("failed to decode: got\n%s", string(test))
@@ -2514,7 +2515,7 @@ func ExampleDecoder_Decode_disallowUnknownField() {
 simple: string
 unknown: string
 `
-	err := yaml.NewDecoder(strings.NewReader(src), yaml.DisallowUnknownField()).Decode(&v)
+	err := yaml.NewDecoder(strings.NewReader(src), codec.DisallowUnknownField()).Decode(&v)
 	fmt.Printf("%v\n", err)
 
 	// OUTPUT:
@@ -2533,7 +2534,7 @@ func ExampleNodeToValue() {
 	var v struct {
 		Text string `yaml:"text"`
 	}
-	if err := yaml.NodeToValue(f.Docs[0].Body, &v); err != nil {
+	if err := codec.NodeToValue(f.Docs[0].Body, &v); err != nil {
 		panic(err)
 	}
 	fmt.Println(v.Text)
@@ -2854,7 +2855,7 @@ e:
 j: k
 `
 	var v interface{}
-	if err := yaml.NewDecoder(strings.NewReader(yml), yaml.UseOrderedMap()).Decode(&v); err != nil {
+	if err := yaml.NewDecoder(strings.NewReader(yml), codec.UseOrderedMap()).Decode(&v); err != nil {
 		t.Fatalf("%+v", err)
 	}
 	if _, ok := v.(yaml.MapSlice); !ok {
@@ -3088,7 +3089,7 @@ a:
 		A unmarshalList
 	}
 	cm := yaml.CommentMap{}
-	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, yaml.CommentToMap(cm)); err != nil {
+	if err := yaml.UnmarshalWithOptions([]byte(yml), &v, codec.CommentToMap(cm)); err != nil {
 		t.Fatal(err)
 	}
 	if len(v.A.v) != 4 {
@@ -3681,15 +3682,15 @@ baz: *seq
 	if err := yaml.UnmarshalWithOptions(
 		[]byte(yml),
 		&v,
-		yaml.CommentToMap(m),
-		yaml.CustomUnmarshaler[T](unmarshaler),
+		codec.CommentToMap(m),
+		codec.CustomUnmarshaler[T](unmarshaler),
 	); err != nil {
 		t.Fatal(err)
 	}
 	if err := yaml.UnmarshalWithOptions(
 		[]byte(yml),
 		&v,
-		yaml.CustomUnmarshaler[T](unmarshaler),
+		codec.CustomUnmarshaler[T](unmarshaler),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -3722,7 +3723,7 @@ disks:
 `)
 
 	var sample Sample
-	if err := yaml.UnmarshalWithOptions(data, &sample, yaml.CustomUnmarshaler[Disk](unmarshalDisk)); err != nil {
+	if err := yaml.UnmarshalWithOptions(data, &sample, codec.CustomUnmarshaler[Disk](unmarshalDisk)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -3751,7 +3752,7 @@ func TestBytesUnmarshalerWithLiteral(t *testing.T) {
 `)
 
 		var v []map[string]Literal
-		if err := yaml.UnmarshalWithOptions(data, &v, yaml.CustomUnmarshaler[Literal](unmarshalLit)); err != nil {
+		if err := yaml.UnmarshalWithOptions(data, &v, codec.CustomUnmarshaler[Literal](unmarshalLit)); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(v, []map[string]Literal{{"name": "foo\n  bar\n"}, {"name": "foo\nbar\n"}}) {
@@ -3781,7 +3782,7 @@ func TestBytesUnmarshalerWithLiteral(t *testing.T) {
 `)
 
 		var v []Literal
-		if err := yaml.UnmarshalWithOptions(data, &v, yaml.CustomUnmarshaler[Literal](unmarshalLit)); err != nil {
+		if err := yaml.UnmarshalWithOptions(data, &v, codec.CustomUnmarshaler[Literal](unmarshalLit)); err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(v, []Literal{"foo\n  bar\n", "foo\nbar\n"}) {
