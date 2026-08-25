@@ -41,11 +41,7 @@ func measure(src string, colonBack, colonLines, flowBack, keyBody *stat) {
 		return
 	}
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.attachLineComments(g.stream(&raw)))
-	tks, err := g.createLiteralAndFoldedTokenGroups(tks)
-	if err != nil {
-		return
-	}
+	tks := g.collect(raw.n, g.groupBlockScalars(g.attachLineComments(g.stream(&raw))))
 
 	for i, tk := range tks {
 		switch tk.Type() {

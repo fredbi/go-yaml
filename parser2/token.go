@@ -436,14 +436,9 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
-	var err error
 	g := newGrouper(raw.n)
-	tks := g.collect(raw.n, g.attachLineComments(g.stream(raw)))
-	tks, err = g.createLiteralAndFoldedTokenGroups(tks)
-	if err != nil {
-		return nil, nil, err
-	}
-	tks, err = g.createAnchorAndAliasTokenGroups(tks)
+	tks := g.collect(raw.n, g.groupBlockScalars(g.attachLineComments(g.stream(raw))))
+	tks, err := g.createAnchorAndAliasTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -531,30 +526,46 @@ func (g *grouper) attachLineComments(in iter.Seq[*Token]) iter.Seq[*Token] {
 	}
 }
 
-func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.LiteralType:
-			if i+1 < len(tokens) {
-				ret = append(ret, g.group2(TokenGroupLiteral, tk, tokens[i+1]))
-			} else {
-				ret = append(ret, g.group1(TokenGroupLiteral, tk))
+// groupBlockScalars joins a "|" or ">" header with the content that follows it.
+//
+// One token is held: the header, until the content arrives. A header ending the
+// stream has no content, and the group is the header alone -- which is what
+// "a: |" with nothing after it is.
+func (g *grouper) groupBlockScalars(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			header *Token
+			typ    TokenGroupType
+		)
+
+		for tk := range in {
+			if header != nil {
+				// Whatever follows the header is its content, read as it
+				// stands: a second "|" is content, not another header.
+				if !yield(g.group2(typ, header, tk)) {
+					return
+				}
+				header = nil
+
+				continue
 			}
-			i++
-		case token.FoldedType:
-			if i+1 < len(tokens) {
-				ret = append(ret, g.group2(TokenGroupFolded, tk, tokens[i+1]))
-			} else {
-				ret = append(ret, g.group1(TokenGroupFolded, tk))
+
+			switch tk.Type() {
+			case token.LiteralType:
+				header, typ = tk, TokenGroupLiteral
+			case token.FoldedType:
+				header, typ = tk, TokenGroupFolded
+			default:
+				if !yield(tk) {
+					return
+				}
 			}
-			i++
-		default:
-			ret = append(ret, tk)
+		}
+
+		if header != nil {
+			yield(g.group1(typ, header))
 		}
 	}
-	return ret, nil
 }
 
 func (g *grouper) createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
