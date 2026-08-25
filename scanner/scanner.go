@@ -905,7 +905,12 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	}
 
 	ctx.addOriginBuf('!')
-	s.progress(ctx, 1) // skip '!' character
+	// The offset counts the bytes the cursor has crossed, so it takes the '!'
+	// too. Left out, it stayed one byte behind for the rest of the document and
+	// every token after this one was reported a byte early. tagPos is taken
+	// before the step, where the tag's own text begins.
+	tagPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '!' character
 
 	// A verbatim tag, "!<...>", holds a URI and takes it as written: the
 	// characters a shorthand may not contain are ordinary inside the brackets.
@@ -928,14 +933,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case ' ':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
@@ -949,7 +954,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
@@ -959,7 +964,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				// the tag: "[!]" is the non-specific tag on the empty node and
 				// not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
@@ -1003,7 +1008,10 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('#')
-	s.progress(ctx, 1) // skip '#' character
+	// As in scanTag: the offset takes the '#', and the comment's own position
+	// is taken before the step.
+	commentPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '#' character
 
 	for idx, c := range ctx.src[ctx.idx:] {
 		ctx.addOriginBuf(c)
@@ -1015,7 +1023,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		}
 		value := ctx.source(ctx.idx, ctx.idx+idx)
 		progress := utf8.RuneCountInString(value)
-		ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+		ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		ctx.clear()
@@ -1023,7 +1031,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	}
 	// document ends with comment.
 	value := ctx.src[ctx.idx:]
-	ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+	ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
 	progress := utf8.RuneCountInString(value)
 	s.progressColumn(ctx, progress)
 	s.progressLine(ctx)
@@ -1617,8 +1625,15 @@ func (s *Scanner) validateMultiLineHeaderOption(opt string) error {
 
 func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	header := ctx.currentChar()
+	// headerIndex is where the indicator stands in the origin buffer, which
+	// also holds the indentation written before it. The comment's position is
+	// measured from the indicator, so the two have to be told apart.
+	headerIndex := len(ctx.obuf)
 	ctx.addOriginBuf(header)
-	s.progress(ctx, 1) // skip '|' or '>' character
+	// As in scanTag: the offset takes the indicator, and the header's own
+	// position is taken before the step.
+	headerPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '|' or '>' character
 
 	// The range gives idx in bytes, which is what endPos slices with, and what
 	// progressColumn advances by is characters. The two part company as soon as
@@ -1702,10 +1717,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	}
 	switch header {
 	case '|':
-		ctx.addToken(token.Literal("|"+opt, headerBuf, s.pos()))
+		ctx.addToken(token.Literal("|"+opt, headerBuf, headerPos))
 		ctx.setLiteral(s.lastDelimColumn, opt)
 	case '>':
-		ctx.addToken(token.Folded(">"+opt, headerBuf, s.pos()))
+		ctx.addToken(token.Folded(">"+opt, headerBuf, headerPos))
 		ctx.setFolded(s.lastDelimColumn, opt)
 	}
 	// The break that ended the header line is content of the scalar, and the
@@ -1717,9 +1732,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// there rather than moving the scanner: progressColumn below advances
 		// past the whole line, header included, so a bump here is counted
 		// twice.
-		pos := s.pos()
-		pos.Offset += int32(len(headerBuf))
-		pos.Column += int32(utf8.RuneCountInString(headerBuf))
+		pos := headerPos
+		fromHeader := headerBuf[headerIndex:]
+		pos.Offset += int32(len(fromHeader))
+		pos.Column += int32(utf8.RuneCountInString(fromHeader))
 		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep

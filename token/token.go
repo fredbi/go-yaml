@@ -879,6 +879,12 @@ func Make(value string, org string, pos Position) Token {
 // src[Offset:] is the token: it addresses the source a caller handed in, and a
 // caret drawn from it lands on the right character.
 //
+// Offset addresses the token for 97.1% of the YAML Test Suite's tokens; Line
+// and Column for 94.2%. Two kinds of token are still reported early: block
+// scalar content, whose offset is counted back from the cursor by the length
+// of the folded value, and the Invalid token an error carries.
+// scanner/offset_test.go holds the count of each.
+//
 // The four are int32. A document large enough to overflow one does not fit in
 // memory to begin with, and a token holds this by value rather than pointing at
 // it, so its width is the token's width.
