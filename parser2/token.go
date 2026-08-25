@@ -5,6 +5,7 @@ package parser2
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"strings"
 
@@ -437,8 +438,7 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	var err error
 	g := newGrouper(raw.n)
-	tks := g.wrap(raw)
-	tks = g.createLineCommentTokenGroups(tks)
+	tks := g.collect(raw.n, g.attachLineComments(g.stream(raw)))
 	tks, err = g.createLiteralAndFoldedTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
@@ -476,40 +476,59 @@ func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, err
 // The wrappers come from one block rather than one allocation each: a stream of
 // N tokens then costs two allocations instead of N+1. They are addressed by
 // pointer either way, and the block lives exactly as long as any token in it.
-// wrap returns a Token for each of raw's tokens, addressing them where they
-// stand: the tokens are not moved and no list of them is built on the way.
-func (g *grouper) wrap(raw *rawTokens) []*Token {
-	ret := g.out(raw.n)
-	block := make([]Token, raw.n)
+// stream yields a Token for each of raw's tokens, wrapping them where they
+// stand. The tokens are not moved, and the wrappers come from one block.
+//
+// Read it once: a second read wraps the same tokens again, in wrappers of its
+// own, and the groups built over the first set would not know about them.
+func (g *grouper) stream(raw *rawTokens) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		block := make([]Token, raw.n)
 
-	var i int
-	for _, b := range raw.blocks {
-		for j := range b {
-			block[i].Token = &b[j]
-			ret = append(ret, &block[i])
-			i++
+		var i int
+		for _, b := range raw.blocks {
+			for j := range b {
+				block[i].Token = &b[j]
+				if !yield(&block[i]) {
+					return
+				}
+				i++
+			}
 		}
 	}
-
-	return ret
 }
 
-func (g *grouper) createLineCommentTokenGroups(tokens []*Token) []*Token {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.Type() {
-		case token.CommentType:
-			if i > 0 && tokens[i-1].Line() == tk.Line() {
-				g.setLineComment(tokens[i-1], tk.RawToken())
-			} else {
-				ret = append(ret, tk)
+// collect reads a stream into a buffer, for the passes that still read a slice.
+func (g *grouper) collect(n int, in iter.Seq[*Token]) []*Token {
+	out := g.out(n)
+	for tk := range in {
+		out = append(out, tk)
+	}
+
+	return out
+}
+
+// attachLineComments attaches the comment closing a token's line to that token, and
+// drops it from the stream.
+//
+// Nothing is held back. The comment arrives after the token it belongs to, and
+// the attachment is recorded against the token rather than written into it, so
+// the token may already have been handed on.
+func (g *grouper) attachLineComments(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var prev *Token
+		for tk := range in {
+			if tk.Type() == token.CommentType && prev != nil && prev.Line() == tk.Line() {
+				g.setLineComment(prev, tk.RawToken())
+
+				continue
 			}
-		default:
-			ret = append(ret, tk)
+			if !yield(tk) {
+				return
+			}
+			prev = tk
 		}
 	}
-	return ret
 }
 
 func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
