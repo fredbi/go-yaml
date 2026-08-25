@@ -214,7 +214,7 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 		raw.add(tk)
 	}
 
-	tks, err := CreateGroupedTokens(raw.all())
+	tks, err := createGroupedTokens(&raw)
 	if err != nil {
 		return nil, err
 	}

@@ -36,15 +36,3 @@ func (r *rawTokens) add(tk token.Token) *token.Token {
 
 	return &(*block)[len(*block)-1]
 }
-
-// all addresses every token held, in the order they were read.
-func (r *rawTokens) all() token.Tokens {
-	tokens := make(token.Tokens, 0, r.n)
-	for _, block := range r.blocks {
-		for i := range block {
-			tokens = append(tokens, &block[i])
-		}
-	}
-
-	return tokens
-}

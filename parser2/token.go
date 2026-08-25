@@ -214,8 +214,43 @@ type grouper struct {
 	tokens []Token
 	groups []TokenGroup
 	lists  []*Token
+	// passA and passB are the two buffers the grouping passes write into. A
+	// pass reads one and writes the other, so the nine of them cost two
+	// allocations between them rather than one apiece.
+	passA, passB []*Token
+	writeB       bool
+	// nested counts the passes running inside another pass.
+	nested int
 	// block is how many of each one allocation covers.
 	block int
+}
+
+// out returns an empty slice with room for n tokens, taken from whichever
+// buffer the caller is not reading.
+//
+// The result of the last pass is kept, and the groups createDocumentTokens
+// builds address the buffer it read. Nothing may write either buffer after
+// that, so a pass added to CreateGroupedTokens goes before that one.
+func (g *grouper) out(n int) []*Token {
+	g.writeB = !g.writeB
+
+	if g.nested > 0 {
+		// A pass running inside another takes a buffer of its own: both of the
+		// grouper's are in hand, one being read and one being filled.
+		return make([]*Token, 0, n)
+	}
+
+	g.writeB = !g.writeB
+
+	buf := &g.passA
+	if g.writeB {
+		buf = &g.passB
+	}
+	if cap(*buf) < n {
+		*buf = make([]*Token, 0, n)
+	}
+
+	return (*buf)[:0]
 }
 
 const (
@@ -307,10 +342,13 @@ func (g *grouper) list2(a, b *Token) []*Token {
 	return tks
 }
 
-func CreateGroupedTokens(tokens token.Tokens) ([]*Token, error) {
+// createGroupedTokens reads the tokens of a stream into the groups the parser
+// walks. Each pass takes the tokens the one before it left and groups a little
+// more of them.
+func createGroupedTokens(raw *rawTokens) ([]*Token, error) {
 	var err error
-	g := newGrouper(len(tokens))
-	tks := newTokens(tokens)
+	g := newGrouper(raw.n)
+	tks := g.wrap(raw)
 	tks = g.createLineCommentTokenGroups(tks)
 	tks, err = g.createLiteralAndFoldedTokenGroups(tks)
 	if err != nil {
@@ -349,19 +387,26 @@ func CreateGroupedTokens(tokens token.Tokens) ([]*Token, error) {
 // The wrappers come from one block rather than one allocation each: a stream of
 // N tokens then costs two allocations instead of N+1. They are addressed by
 // pointer either way, and the block lives exactly as long as any token in it.
-func newTokens(tks token.Tokens) []*Token {
-	ret := make([]*Token, 0, len(tks))
-	block := make([]Token, len(tks))
-	for i, tk := range tks {
-		block[i].Token = tk
-		ret = append(ret, &block[i])
+// wrap returns a Token for each of raw's tokens, addressing them where they
+// stand: the tokens are not moved and no list of them is built on the way.
+func (g *grouper) wrap(raw *rawTokens) []*Token {
+	ret := g.out(raw.n)
+	block := make([]Token, raw.n)
+
+	var i int
+	for _, b := range raw.blocks {
+		for j := range b {
+			block[i].Token = &b[j]
+			ret = append(ret, &block[i])
+			i++
+		}
 	}
 
 	return ret
 }
 
 func (g *grouper) createLineCommentTokenGroups(tokens []*Token) []*Token {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
@@ -379,7 +424,7 @@ func (g *grouper) createLineCommentTokenGroups(tokens []*Token) []*Token {
 }
 
 func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
@@ -407,7 +452,7 @@ func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, 
 }
 
 func (g *grouper) createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
@@ -449,7 +494,7 @@ func (g *grouper) createAnchorAndAliasTokenGroups(tokens []*Token) ([]*Token, er
 }
 
 func (g *grouper) createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		if tk.Type() != token.TagType {
@@ -525,7 +570,7 @@ func (g *grouper) createScalarTagTokenGroups(tokens []*Token) ([]*Token, error) 
 }
 
 func (g *grouper) createAnchorWithScalarTagTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.GroupType() {
@@ -560,7 +605,7 @@ func (g *grouper) createMapKeyTokenGroups(tokens []*Token) ([]*Token, error) {
 }
 
 func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	var flowDepth int
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -596,7 +641,7 @@ func (g *grouper) createMapKeyByMappingKey(tokens []*Token) ([]*Token, error) {
 }
 
 func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 
 	// One entry per flow collection still open, innermost last, recording
 	// whether it is a sequence. A pair written directly inside a sequence is an
@@ -668,7 +713,7 @@ func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) 
 }
 
 func (g *grouper) createMapKeyValueTokenGroups(tokens []*Token) []*Token {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.GroupType() {
@@ -706,7 +751,7 @@ func (g *grouper) createMapKeyValueTokenGroups(tokens []*Token) []*Token {
 }
 
 func (g *grouper) createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
-	ret := make([]*Token, 0, len(tokens))
+	ret := g.out(len(tokens))
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
 		switch tk.Type() {
@@ -856,6 +901,11 @@ func isScalarType(tk *Token) bool {
 // The passes before this one -- literals, anchors, tags -- have already run over
 // these tokens, so only the mapping ones are needed.
 func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
+	// Called from inside createMapKeyByMappingKey, which is filling a buffer of
+	// its own and reading another.
+	g.nested++
+	defer func() { g.nested-- }()
+
 	grouped, err := g.createMapKeyByMappingValue(body)
 	if err != nil {
 		return nil, err
