@@ -4,9 +4,6 @@
 package yaml
 
 import (
-	stderrors "errors"
-
-	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/errors"
 	"github.com/go-openapi/go-yaml/token"
@@ -34,21 +31,6 @@ type (
 	UnexpectedNodeTypeError = errors.UnexpectedNodeTypeError
 	Error                   = errors.Error
 )
-
-// IsInvalidTokenTypeError whether err is ast.ErrInvalidTokenType or not.
-func IsInvalidTokenTypeError(err error) bool {
-	return stderrors.Is(err, ast.ErrInvalidTokenType)
-}
-
-// IsInvalidAnchorNameError whether err is ast.ErrInvalidAnchorName or not.
-func IsInvalidAnchorNameError(err error) bool {
-	return stderrors.Is(err, ast.ErrInvalidAnchorName)
-}
-
-// IsInvalidAliasNameError whether err is ast.ErrInvalidAliasName or not.
-func IsInvalidAliasNameError(err error) bool {
-	return stderrors.Is(err, ast.ErrInvalidAliasName)
-}
 
 // FormatErrorWithToken renders msg as an error reported at tk, drawing the
 // lines of source around it.

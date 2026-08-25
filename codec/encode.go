@@ -193,7 +193,7 @@ func (e *Encoder) setCommentByCommentMap(node ast.Node) error {
 func (e *Encoder) setHeadComment(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedHeadPositionType(node)
+		return ast.ErrUnsupportedHeadPositionType(node)
 	}
 	switch p := parent.(type) {
 	case *ast.MappingValueNode:
@@ -217,7 +217,7 @@ func (e *Encoder) setHeadComment(node ast.Node, filtered ast.Node, comment *ast.
 		}
 		p.ValueHeadComments[foundIdx] = comment
 	default:
-		return ErrUnsupportedHeadPositionType(node)
+		return ast.ErrUnsupportedHeadPositionType(node)
 	}
 	return nil
 }
@@ -241,7 +241,7 @@ func (e *Encoder) setLineComment(node ast.Node, filtered ast.Node, comment *ast.
 func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedLinePositionType(node)
+		return ast.ErrUnsupportedLinePositionType(node)
 	}
 	switch p := parent.(type) {
 	case *ast.MappingValueNode:
@@ -253,7 +253,7 @@ func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node
 			return err
 		}
 	default:
-		return ErrUnsupportedLinePositionType(parent)
+		return ast.ErrUnsupportedLinePositionType(parent)
 	}
 	return nil
 }
@@ -261,7 +261,7 @@ func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node
 func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedFootPositionType(node)
+		return ast.ErrUnsupportedFootPositionType(node)
 	}
 	switch n := parent.(type) {
 	case *ast.MappingValueNode:
@@ -271,7 +271,7 @@ func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.
 	case *ast.SequenceNode:
 		n.FootComment = comment
 	default:
-		return ErrUnsupportedFootPositionType(n)
+		return ast.ErrUnsupportedFootPositionType(n)
 	}
 	return nil
 }
