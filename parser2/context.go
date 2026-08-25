@@ -43,7 +43,10 @@ type context struct {
 
 type tokenRef struct {
 	tokens []*Token
-	idx    int
+	// pair is where a group's two members are copied to, so that reading a
+	// group needs no slice of its own. tokens points into it.
+	pair [2]*Token
+	idx  int
 }
 
 func (c context) currentToken() *Token {
@@ -81,7 +84,7 @@ func (c context) isTokenNotFound() bool {
 
 func (c context) withGroup(p *Parser, g *TokenGroup) context {
 	c.depth++
-	c.tokenRef = p.tokenRefAt(c.depth, g.Tokens)
+	c.tokenRef = p.tokenRefAt(c.depth, g)
 
 	return c
 }

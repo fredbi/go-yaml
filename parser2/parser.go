@@ -131,13 +131,13 @@ type Parser struct {
 // any moment: the reference for a depth is set again for the next group read
 // there rather than another being taken. A document nested N deep costs N
 // references however many groups it holds.
-func (p *Parser) tokenRefAt(depth int32, tokens []*Token) *tokenRef {
+func (p *Parser) tokenRefAt(depth int32, g *TokenGroup) *tokenRef {
 	for int(depth) >= len(p.refs) {
 		p.refs = append(p.refs, new(tokenRef))
 	}
 
 	ref := p.refs[depth]
-	ref.tokens, ref.idx = tokens, 0
+	ref.tokens, ref.idx = g.Members(&ref.pair), 0
 
 	return ref
 }
@@ -256,14 +256,15 @@ func (p *Parser) parse(ctx context) (*ast.File, error) {
 }
 
 func (p *Parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.DocumentNode, error) {
-	if len(docGroup.Tokens) == 0 {
+	if docGroup.Len() == 0 {
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
 
 	var (
-		tokens = docGroup.Tokens
-		start  *token.Token
-		end    *token.Token
+		docPair [2]*Token
+		tokens  = docGroup.Members(&docPair)
+		start   *token.Token
+		end     *token.Token
 	)
 	if docGroup.First().Type() == token.DocumentHeaderType {
 		start = docGroup.First().RawToken()
@@ -282,10 +283,7 @@ func (p *Parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.Document
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
 
-	body, err := p.parseDocumentBody(ctx.withGroup(p, &TokenGroup{
-		Type:   TokenGroupDocumentBody,
-		Tokens: tokens,
-	}))
+	body, err := p.parseDocumentBody(ctx.withGroup(p, newTokenGroup(TokenGroupDocumentBody, tokens)))
 	if err != nil {
 		return nil, err
 	}
@@ -811,7 +809,7 @@ func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 // ordinary document. A key spanning more tokens is a flow collection used as a
 // key, which has to be parsed as a node like any other.
 func (p *Parser) parseMapKeyValueNode(ctx context, g *TokenGroup) (ast.Node, error) {
-	if len(g.Tokens) <= 2 {
+	if g.Len() <= 2 {
 		return p.parseScalarValue(ctx, g.First())
 	}
 
@@ -1072,10 +1070,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// A comment may stand between the two. It belongs to the entry below
 		// and says nothing about where this one ends, so what follows the
 		// anchor is looked for past it.
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1129,10 +1124,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// ----
 		//   key: &anchor
 		// next
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1625,10 +1617,7 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// A comment may stand between the two. It belongs to what comes after
 		// and says nothing about where this entry ends, so what follows the
 		// anchor is looked for past it.
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1662,10 +1651,7 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// ----
 		//   - &anchor
 		// next
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1693,10 +1679,10 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 
 	switch directive.Name.String() {
 	case "YAML":
-		if len(g.Tokens) != 2 {
+		if g.Len() != 2 {
 			return nil, errors.ErrSyntax("unexpected format YAML directive", g.First().RawToken())
 		}
-		valueTk := g.Tokens[1]
+		valueTk := g.At(1)
 		valueRawTk := valueTk.RawToken()
 		value := valueRawTk.Value
 		ver, exists := yamlVersionMap[value]
@@ -1713,10 +1699,10 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 		}
 		directive.Values = append(directive.Values, versionNode)
 	case "TAG":
-		if len(g.Tokens) != 3 {
+		if g.Len() != 3 {
 			return nil, errors.ErrSyntax("unexpected format TAG directive", g.First().RawToken())
 		}
-		tagKey, err := newStringNode(ctx, g.Tokens[1])
+		tagKey, err := newStringNode(ctx, g.At(1))
 		if err != nil {
 			return nil, err
 		}
@@ -1727,14 +1713,15 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 			p.tagHandles = make(map[string]struct{})
 		}
 		p.tagHandles[tagKey.Value] = struct{}{}
-		tagValue, err := newStringNode(ctx, g.Tokens[2])
+		tagValue, err := newStringNode(ctx, g.At(2))
 		if err != nil {
 			return nil, err
 		}
 		directive.Values = append(directive.Values, tagKey, tagValue)
 	default:
-		if len(g.Tokens) > 1 {
-			for _, tk := range g.Tokens[1:] {
+		if g.Len() > 1 {
+			for i := 1; i < g.Len(); i++ {
+				tk := g.At(i)
 				value, err := newStringNode(ctx, tk)
 				if err != nil {
 					return nil, err

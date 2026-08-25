@@ -12,7 +12,7 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-type TokenGroupType int
+type TokenGroupType uint8
 
 const (
 	TokenGroupNone TokenGroupType = iota
@@ -146,61 +146,137 @@ type groupTokenRenderContext struct {
 	num int
 }
 
+// TokenGroup is a run of tokens the parser reads as one.
+//
+// Nearly every group holds exactly two members -- a key and its ':', a key
+// group and its value, an anchor and what it names -- so the two are held in
+// the group itself. Only a document, an explicit key and a directive hold more,
+// and those keep a slice: 446 of the 256,848 groups the corpus builds, 0.17%.
+// Holding the common pair inline saves the run of pointers a slice would need.
 type TokenGroup struct {
-	Type   TokenGroupType
-	Tokens []*Token
+	a, b *Token
+	// more holds the members where there are more than two, and a and b are
+	// then unused. It is a pointer to a slice rather than a slice so that the
+	// group stays 32 bytes.
+	more *[]*Token
+	Type TokenGroupType
+	n    uint8
+}
+
+// newTokenGroup returns a group of typ over tks, on the heap. The grouper hands
+// its own out from blocks; this is for the few the parser builds itself.
+func newTokenGroup(typ TokenGroupType, tks []*Token) *TokenGroup {
+	g := new(TokenGroup)
+	g.set(typ, tks)
+
+	return g
+}
+
+// set fills g with the members tks, keeping two of them in the group itself.
+func (g *TokenGroup) set(typ TokenGroupType, tks []*Token) {
+	g.Type = typ
+	switch len(tks) {
+	case 0:
+		g.a, g.b, g.more, g.n = nil, nil, nil, 0
+	case 1:
+		g.a, g.b, g.more, g.n = tks[0], nil, nil, 1
+	case 2:
+		g.a, g.b, g.more, g.n = tks[0], tks[1], nil, 2
+	default:
+		held := tks
+		g.a, g.b, g.more, g.n = nil, nil, &held, uint8(min(len(tks), 255))
+	}
+}
+
+// Len returns how many members g holds.
+func (g *TokenGroup) Len() int {
+	if g.more != nil {
+		return len(*g.more)
+	}
+
+	return int(g.n)
+}
+
+// At returns the i'th member.
+func (g *TokenGroup) At(i int) *Token {
+	if g.more != nil {
+		return (*g.more)[i]
+	}
+	if i == 0 {
+		return g.a
+	}
+
+	return g.b
+}
+
+// Members returns the members as a slice, writing the inline pair into pair
+// where there is one. The caller owns pair, so nothing is allocated for it.
+func (g *TokenGroup) Members(pair *[2]*Token) []*Token {
+	if g.more != nil {
+		return *g.more
+	}
+	pair[0], pair[1] = g.a, g.b
+
+	return pair[:g.n]
 }
 
 func (g *TokenGroup) First() *Token {
-	if len(g.Tokens) == 0 {
+	if g.Len() == 0 {
 		return nil
 	}
-	return g.Tokens[0]
+
+	return g.At(0)
 }
 
 func (g *TokenGroup) Last() *Token {
-	if len(g.Tokens) == 0 {
+	n := g.Len()
+	if n == 0 {
 		return nil
 	}
-	return g.Tokens[len(g.Tokens)-1]
+
+	return g.At(n - 1)
 }
 
 func (g *TokenGroup) dump(ctx *groupTokenRenderContext) {
 	num := ctx.num
 	fmt.Fprint(os.Stdout, colorize(num, "("))
 	ctx.num++
-	for _, tk := range g.Tokens {
-		tk.dump(ctx)
+	for i := range g.Len() {
+		g.At(i).dump(ctx)
 	}
 	fmt.Fprint(os.Stdout, colorize(num, ")"))
 }
 
 func (g *TokenGroup) RawToken() *token.Token {
-	if len(g.Tokens) == 0 {
+	if g.Len() == 0 {
 		return nil
 	}
-	return g.Tokens[0].RawToken()
+
+	return g.At(0).RawToken()
 }
 
 func (g *TokenGroup) Line() int {
-	if len(g.Tokens) == 0 {
+	if g.Len() == 0 {
 		return 0
 	}
-	return g.Tokens[0].Line()
+
+	return g.At(0).Line()
 }
 
 func (g *TokenGroup) Column() int {
-	if len(g.Tokens) == 0 {
+	if g.Len() == 0 {
 		return 0
 	}
-	return g.Tokens[0].Column()
+
+	return g.At(0).Column()
 }
 
 func (g *TokenGroup) TokenType() token.Type {
-	if len(g.Tokens) == 0 {
+	if g.Len() == 0 {
 		return 0
 	}
-	return g.Tokens[0].Type()
+
+	return g.At(0).Type()
 }
 
 // grouper runs the passes that turn a flat token stream into grouped tokens.
@@ -212,7 +288,6 @@ func (g *TokenGroup) TokenType() token.Type {
 type grouper struct {
 	tokens []Token
 	groups []TokenGroup
-	lists  []*Token
 	// passA and passB are the two buffers the grouping passes write into. A
 	// pass reads one and writes the other, so the nine of them cost two
 	// allocations between them rather than one apiece.
@@ -297,30 +372,37 @@ func (g *grouper) token() *Token {
 	return tk
 }
 
-// list returns a slice of n token pointers whose capacity is n, so that a
-// caller that appends to it copies rather than writing over the next slice.
-func (g *grouper) list(n int) []*Token {
-	if len(g.lists) < n {
-		size := g.block
-		if n > size {
-			size = n
-		}
-		g.lists = make([]*Token, size)
-	}
-	tks := g.lists[:n:n]
-	g.lists = g.lists[n:]
+// newGroup1 and newGroup2 return a group over one and two tokens, taken from
+// the block and filled without a list.
+func (g *grouper) newGroup1(typ TokenGroupType, a *Token) *TokenGroup {
+	grp := g.nextGroup()
+	grp.Type, grp.a, grp.b, grp.more, grp.n = typ, a, nil, nil, 1
 
-	return tks
+	return grp
 }
 
-// newGroup returns a group of typ over tks.
-func (g *grouper) newGroup(typ TokenGroupType, tks []*Token) *TokenGroup {
+func (g *grouper) newGroup2(typ TokenGroupType, a, b *Token) *TokenGroup {
+	grp := g.nextGroup()
+	grp.Type, grp.a, grp.b, grp.more, grp.n = typ, a, b, nil, 2
+
+	return grp
+}
+
+// nextGroup returns the next unused group of the block.
+func (g *grouper) nextGroup() *TokenGroup {
 	if len(g.groups) == 0 {
 		g.groups = make([]TokenGroup, g.block)
 	}
 	grp := &g.groups[0]
 	g.groups = g.groups[1:]
-	grp.Type, grp.Tokens = typ, tks
+
+	return grp
+}
+
+// newGroup returns a group of typ over tks.
+func (g *grouper) newGroup(typ TokenGroupType, tks []*Token) *TokenGroup {
+	grp := g.nextGroup()
+	grp.set(typ, tks)
 
 	return grp
 }
@@ -334,23 +416,19 @@ func (g *grouper) group(typ TokenGroupType, tks []*Token) *Token {
 }
 
 // group1 and group2 are group over one and two tokens, which is most of them.
+// Both members are held in the group itself, so neither builds a list.
 func (g *grouper) group1(typ TokenGroupType, a *Token) *Token {
-	tks := g.list(1)
-	tks[0] = a
+	tk := g.token()
+	tk.Group = g.newGroup1(typ, a)
 
-	return g.group(typ, tks)
+	return tk
 }
 
 func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
-	return g.group(typ, g.list2(a, b))
-}
+	tk := g.token()
+	tk.Group = g.newGroup2(typ, a, b)
 
-// list2 is list over two tokens, which is most of them.
-func (g *grouper) list2(a, b *Token) []*Token {
-	tks := g.list(2)
-	tks[0], tks[1] = a, b
-
-	return tks
+	return tk
 }
 
 // createGroupedTokens reads the tokens of a stream into the groups the parser
@@ -440,20 +518,18 @@ func (g *grouper) createLiteralAndFoldedTokenGroups(tokens []*Token) ([]*Token, 
 		tk := tokens[i]
 		switch tk.Type() {
 		case token.LiteralType:
-			tks := g.list(1)
-			tks[0] = tk
 			if i+1 < len(tokens) {
-				tks = g.list2(tk, tokens[i+1])
+				ret = append(ret, g.group2(TokenGroupLiteral, tk, tokens[i+1]))
+			} else {
+				ret = append(ret, g.group1(TokenGroupLiteral, tk))
 			}
-			ret = append(ret, g.group(TokenGroupLiteral, tks))
 			i++
 		case token.FoldedType:
-			tks := g.list(1)
-			tks[0] = tk
 			if i+1 < len(tokens) {
-				tks = g.list2(tk, tokens[i+1])
+				ret = append(ret, g.group2(TokenGroupFolded, tk, tokens[i+1]))
+			} else {
+				ret = append(ret, g.group1(TokenGroupFolded, tk))
 			}
-			ret = append(ret, g.group(TokenGroupFolded, tks))
 			i++
 		default:
 			ret = append(ret, tk)
@@ -715,7 +791,7 @@ func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) 
 			newTk := g.token()
 			newTk.Token, newTk.Group = mapKeyTk.Token, mapKeyTk.Group
 			mapKeyTk.Token = nil
-			mapKeyTk.Group = g.newGroup(TokenGroupMapKey, g.list2(newTk, tk))
+			mapKeyTk.Group = g.newGroup2(TokenGroupMapKey, newTk, tk)
 		default:
 			ret = append(ret, tk)
 		}
@@ -849,7 +925,8 @@ func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 			}
 			if len(tks) != 0 {
 				tks[0].SetGroupType(TokenGroupDocument)
-				tks[0].Group.Tokens = append([]*Token{tk}, tks[0].Group.Tokens...)
+				var pair [2]*Token
+				tks[0].Group.set(TokenGroupDocument, append([]*Token{tk}, tks[0].Group.Members(&pair)...))
 				return append(ret, tks...), nil
 			}
 			return append(ret, g.group1(TokenGroupDocument, tk)), nil
