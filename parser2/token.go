@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/internal/errors"
@@ -464,7 +465,7 @@ func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, err
 	if err != nil {
 		return nil, nil, err
 	}
-	tks = g.createMapKeyValueTokenGroups(tks)
+	tks = g.collect(len(tks), g.groupMapKeyValues(slices.Values(tks)))
 	tks, err = g.createDirectiveTokenGroups(tks)
 	if err != nil {
 		return nil, nil, err
@@ -907,42 +908,66 @@ func (g *grouper) createMapKeyByMappingValue(tokens []*Token) ([]*Token, error) 
 	return ret, nil
 }
 
-func (g *grouper) createMapKeyValueTokenGroups(tokens []*Token) []*Token {
-	ret := g.out(len(tokens))
-	for i := 0; i < len(tokens); i++ {
-		tk := tokens[i]
-		switch tk.GroupType() {
-		case TokenGroupMapKey:
-			if len(tokens) <= i+1 {
-				ret = append(ret, tk)
-				continue
-			}
-			valueTk := tokens[i+1]
-			if tk.Line() != valueTk.Line() {
-				ret = append(ret, tk)
-				continue
-			}
-			if valueTk.GroupType() == TokenGroupAnchorName {
-				ret = append(ret, tk)
-				continue
-			}
-			if valueTk.Type() == token.TagType && valueTk.GroupType() != TokenGroupScalarTag {
-				ret = append(ret, tk)
-				continue
+// groupMapKeyValues joins a map key with the value written on its line.
+//
+// One token is held, the key, until the token after it says whether that is its
+// value. A key whose value is on a later line keeps its own group, and the
+// parser reads the value from the stream: "a:\n  b" is a key and a mapping, not
+// a pair.
+func (g *grouper) groupMapKeyValues(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var key *Token // a map key, waiting to see whether its value follows
+
+		for tk := range in {
+			if key != nil {
+				if pair := g.keyedValue(key, tk); pair != nil {
+					if !yield(pair) {
+						return
+					}
+					key = nil
+
+					continue
+				}
+				if !yield(key) {
+					return
+				}
+				key = nil
 			}
 
-			if isScalarType(valueTk) || valueTk.Type() == token.TagType {
-				ret = append(ret, g.group2(TokenGroupMapKeyValue, tk, valueTk))
-				i++
-			} else {
-				ret = append(ret, tk)
+			if tk.GroupType() == TokenGroupMapKey {
+				key = tk
+
 				continue
 			}
-		default:
-			ret = append(ret, tk)
+			if !yield(tk) {
+				return
+			}
+		}
+
+		if key != nil {
+			yield(key)
 		}
 	}
-	return ret
+}
+
+// keyedValue returns the group joining key with value, or nil where value is
+// not the key's.
+//
+// A value has to stand on the key's line. An anchor name is not a value but
+// what holds one, and a tag that has not been joined to a scalar is the same,
+// so both leave the key on its own.
+func (g *grouper) keyedValue(key, value *Token) *Token {
+	if key.Line() != value.Line() || value.GroupType() == TokenGroupAnchorName {
+		return nil
+	}
+	if value.Type() == token.TagType && value.GroupType() != TokenGroupScalarTag {
+		return nil
+	}
+	if !isScalarType(value) && value.Type() != token.TagType {
+		return nil
+	}
+
+	return g.group2(TokenGroupMapKeyValue, key, value)
 }
 
 func (g *grouper) createDirectiveTokenGroups(tokens []*Token) ([]*Token, error) {
@@ -1107,7 +1132,7 @@ func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
 		return nil, err
 	}
 
-	return g.createMapKeyValueTokenGroups(grouped), nil
+	return g.collect(len(grouped), g.groupMapKeyValues(slices.Values(grouped))), nil
 }
 
 // explicitKeyEnd returns the index just past the body of the explicit key
