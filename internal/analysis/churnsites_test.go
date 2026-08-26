@@ -12,6 +12,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
+	"github.com/go-openapi/go-yaml/internal/lab/labparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -43,7 +44,14 @@ func TestWriteChurnProfile(t *testing.T) {
 
 	runtime.GC()
 
-	f, err := parser.ParseBytes(w.Data, 0)
+	// CHURN_PARSER=lab profiles internal/lab/labparser instead, so an
+	// experiment can be attributed the same way production is.
+	var f any
+	if os.Getenv("CHURN_PARSER") == "lab" {
+		f, err = labparser.ParseBytes(w.Data, 0)
+	} else {
+		f, err = parser.ParseBytes(w.Data, 0)
+	}
 	require.NoError(t, err)
 
 	// The tree has to survive the GC below, or every byte it holds is counted
@@ -56,7 +64,10 @@ func TestWriteChurnProfile(t *testing.T) {
 	require.NoError(t, out.Close())
 
 	runtime.KeepAlive(f)
-	holdTree = f
+	holdAny = f
 
 	t.Logf("wrote %s for %s (%d KiB of source)", path, name, len(w.Data)/1024)
 }
+
+// holdAny keeps the last tree reachable whichever parser built it.
+var holdAny any

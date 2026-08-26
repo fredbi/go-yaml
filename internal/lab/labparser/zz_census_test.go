@@ -43,7 +43,7 @@ func TestGroupCensus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tks, _, err := createGroupedTokens(&raw)
+	tks, _, _, err := createGroupedTokens(&raw)
 	if err != nil {
 		t.Fatal(err)
 	}
