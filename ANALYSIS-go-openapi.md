@@ -1,11 +1,16 @@
 # go-yaml: analysis for the go-openapi fork
 
-Working document. Everything below was **measured**, not inferred, against
-`edee2f9` (`v1.19.2-5`) on 2026-07-31. Reproduce with `cd internal/analysis && go test -v ./...`
-(see §10).
+> [!IMPORTANT]
+> **This measures `goccy/go-yaml`, not this library.** Everything below was measured against
+> `edee2f9` (`v1.19.2-5`) on 2026-07-31, at the fork point. It is the evidence for why the fork
+> exists, and several of its findings no longer describe this code — the `[]rune` scanner is gone,
+> `Position.Offset` is a byte index, and the conformance numbers have moved. Read it as a record of
+> where we started.
+>
+> Reproduce the benchmarks with `cd internal/analysis && go test -v ./...` (see §10).
 
-Companion document: `PROPOSALS-go-openapi.md` — the subset of this that is worth
-sending upstream, written as an ask rather than an analysis.
+A companion document, `PROPOSALS-go-openapi.md`, held the subset written as an ask to upstream. The
+fork is now a hard fork, so it was archived rather than sent; its reproducers are kept with the plans.
 
 ---
 
@@ -246,7 +251,7 @@ memory ceiling on document size.
   cannot address source bytes in any document containing non-ASCII text. Combined with the
   known comment bug (upstream #856, which loses one per comment line), the two errors have
   *opposite signs* and cancel on an ASCII document with exactly one comment, which makes the
-  defect easy to dismiss. Detail in `PROPOSALS-go-openapi.md` §1b.
+  defect easy to dismiss. Detail in the archived `PROPOSALS-go-openapi.md` §1b.
 - **No reader entry point**, so input cannot stream.
 
 Note it is **not a speed problem**: the conversion is ~1% of runtime. Fix it for memory and
@@ -376,7 +381,7 @@ Of the 32, **12 are go-yaml's behaviour rather than the consumer's**:
   mapping is legal YAML but rejected (`4MUZ/2`, `VJP3/1`), and a tab-only line between
   block entries (`DK95/4`).
 
-Plus three defects found independently, detailed in `PROPOSALS-go-openapi.md`:
+Plus three defects found independently, detailed in the archived `PROPOSALS-go-openapi.md`:
 
 - **Block collections have no usable span**: `Start` is a separator token *inside* the first
   entry, `End` is nil (§1).
