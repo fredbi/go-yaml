@@ -4,14 +4,14 @@
 package parser
 
 import (
-	stderrors "errors"
+	"errors"
 	"fmt"
 	"iter"
 	"os"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -36,14 +36,14 @@ func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
 		err = scanErr
 	}
 	if err != nil {
-		return nil, errors.WithSource(asSyntaxError(err), errors.Source{Text: text, FirstLine: 1})
+		return nil, yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: text, FirstLine: 1})
 	}
 
 	f, err := p.Parse()
 	if err != nil {
 		// An error drawn under the document needs the document. Parse reads a
 		// token stream and has none, so it is told here, where the text is.
-		return nil, errors.WithSource(err, errors.Source{Text: text, FirstLine: 1})
+		return nil, yamlerrors.WithSource(err, yamlerrors.Source{Text: text, FirstLine: 1})
 	}
 
 	return f, nil
@@ -69,8 +69,8 @@ func ParseFile(filename string, mode Mode, opts ...Option) (*ast.File, error) {
 // so a caller sees one kind of error whichever stage refused the document.
 func asSyntaxError(err error) error {
 	var invalid *scanner.InvalidTokenError
-	if stderrors.As(err, &invalid) {
-		return errors.ErrSyntax(invalid.Message, invalid.Token)
+	if errors.As(err, &invalid) {
+		return yamlerrors.NewSyntax(invalid.Message, invalid.Token)
 	}
 
 	return err
@@ -216,7 +216,7 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 			// the scanner reports one, and Scanner.Err returns it.
 			held := raw.add(tk)
 
-			return nil, errors.ErrSyntax("found an invalid token", held)
+			return nil, yamlerrors.NewSyntax("found an invalid token", held)
 		}
 		raw.add(tk)
 	}
@@ -315,7 +315,7 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 		}
 	}
 	if ctx.next() {
-		return nil, errors.ErrSyntax("value is not allowed in this context", ctx.currentToken().RawToken())
+		return nil, yamlerrors.NewSyntax("value is not allowed in this context", ctx.currentToken().RawToken())
 	}
 	return node, nil
 }
@@ -393,13 +393,13 @@ func (p *Parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 	case token.SequenceEndType:
 		// SequenceEndType is always validated in parseFlowSequence.
 		// Therefore, if this is found in other cases, it is treated as a syntax error.
-		return nil, errors.ErrSyntax("could not find '[' character corresponding to ']'", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("could not find '[' character corresponding to ']'", tk.RawToken())
 	case token.MappingEndType:
 		// MappingEndType is always validated in parseFlowMap.
 		// Therefore, if this is found in other cases, it is treated as a syntax error.
-		return nil, errors.ErrSyntax("could not find '{' character corresponding to '}'", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("could not find '{' character corresponding to '}'", tk.RawToken())
 	case token.MappingValueType:
-		return nil, errors.ErrSyntax("found an invalid key for this map", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("found an invalid key for this map", tk.RawToken())
 	}
 	node, err := p.parseScalarValue(ctx, tk)
 	if err != nil {
@@ -433,7 +433,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 		case TokenGroupScalarTag:
 			return p.parseTag(ctx.withGroup(p, tk.Group))
 		default:
-			return nil, errors.ErrSyntax("unexpected scalar value", tk.RawToken())
+			return nil, yamlerrors.NewSyntax("unexpected scalar value", tk.RawToken())
 		}
 	}
 	switch tk.Type() {
@@ -458,7 +458,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 		// Examples of cases where the value does not exist include cases like `key: !!str,` or `!!str : value`.
 		return p.parseScalarTag(ctx)
 	}
-	return nil, errors.ErrSyntax("unexpected scalar value type", tk.RawToken())
+	return nil, yamlerrors.NewSyntax("unexpected scalar value type", tk.RawToken())
 }
 
 // attachTrailingComment gives a comment written after a ',' to the entry the
@@ -530,7 +530,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				headComment = mergeComments(headComment, next)
 			}
 		} else if !isFirst {
-			return nil, errors.ErrSyntax("',' or '}' must be specified", tk.RawToken())
+			return nil, yamlerrors.NewSyntax("',' or '}' must be specified", tk.RawToken())
 		}
 
 		if tk := ctx.currentToken(); tk.Type() == token.MappingEndType {
@@ -571,7 +571,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			} else {
 				ctx.goNext()
 				if ctx.isTokenNotFound() {
-					return nil, errors.ErrSyntax("could not find map value", colonTk.RawToken())
+					return nil, yamlerrors.NewSyntax("could not find map value", colonTk.RawToken())
 				}
 				value, err := p.parseToken(ctx, ctx.currentToken())
 				if err != nil {
@@ -589,7 +589,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if errTk == nil {
 					errTk = tk
 				}
-				return nil, errors.ErrSyntax("could not find flow map content", errTk.RawToken())
+				return nil, yamlerrors.NewSyntax("could not find flow map content", errTk.RawToken())
 			}
 			key, err := p.parseScalarValue(ctx, mapKeyTk)
 			if err != nil {
@@ -621,7 +621,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 		isFirst = false
 	}
 	if node.End == nil {
-		return nil, errors.ErrSyntax("could not find flow mapping end token '}'", node.Start)
+		return nil, yamlerrors.NewSyntax("could not find flow mapping end token '}'", node.Start)
 	}
 
 	// set line comment if exists. e.g.) } # comment
@@ -644,7 +644,7 @@ func (p *Parser) isFlowMapDelim(tk *Token) bool {
 // concatenations summing to O(N^2).
 func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode, error) {
 	if keyTk.Group == nil {
-		return nil, errors.ErrSyntax("unexpected map key", keyTk.RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected map key", keyTk.RawToken())
 	}
 	if keyTk.GroupType() == TokenGroupMapKeyValue {
 		node, err := p.parseMapKeyValue(ctx.withGroup(p, keyTk.Group), keyTk.Group, nil)
@@ -667,7 +667,7 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 
 	valueTk := ctx.currentToken()
 	if keyTk.Line() == valueTk.Line() && valueTk.Type() == token.SequenceEntryType {
-		return nil, errors.ErrSyntax("block sequence entries are not allowed in this context", valueTk.RawToken())
+		return nil, yamlerrors.NewSyntax("block sequence entries are not allowed in this context", valueTk.RawToken())
 	}
 	childCtx := p.valueContext(ctx, key)
 	value, err := p.parseMapValue(childCtx, key, keyTk.Group.Last())
@@ -711,7 +711,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			break
 		}
 		if !p.isMapToken(tk) {
-			return nil, errors.ErrSyntax("non-map value is specified", tk.RawToken())
+			return nil, yamlerrors.NewSyntax("non-map value is specified", tk.RawToken())
 		}
 		cm := p.parseHeadComment(ctx)
 		if typ == token.MappingEndType {
@@ -772,7 +772,7 @@ func (p *Parser) validateMapKeyValueNextToken(ctx context, keyTk, tk *Token) err
 	}
 	// a: b
 	//  c <= this token is invalid.
-	return errors.ErrSyntax("value is not allowed in this context. map key-value is pre-defined", tk.RawToken())
+	return yamlerrors.NewSyntax("value is not allowed in this context. map key-value is pre-defined", tk.RawToken())
 }
 
 func (p *Parser) isMapToken(tk *Token) bool {
@@ -785,10 +785,10 @@ func (p *Parser) isMapToken(tk *Token) bool {
 
 func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*ast.MappingValueNode, error) {
 	if g.Type != TokenGroupMapKeyValue {
-		return nil, errors.ErrSyntax("unexpected map key-value pair", g.RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected map key-value pair", g.RawToken())
 	}
 	if g.First().Group == nil {
-		return nil, errors.ErrSyntax("unexpected map key", g.RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected map key", g.RawToken())
 	}
 	keyGroup := g.First().Group
 	key, err := p.parseMapKey(ctx.withGroup(p, keyGroup), keyGroup)
@@ -819,7 +819,7 @@ func (p *Parser) parseMapKeyValueNode(ctx context, g *TokenGroup) (ast.Node, err
 
 func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error) {
 	if g.Type != TokenGroupMapKey {
-		return nil, errors.ErrSyntax("unexpected map key", g.RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected map key", g.RawToken())
 	}
 	if g.First().Type() == token.MappingKeyType {
 		mapKeyTk := g.First()
@@ -832,7 +832,7 @@ func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 		}
 		ctx.goNext() // skip mapping key token
 		if ctx.isTokenNotFound() {
-			return nil, errors.ErrSyntax("could not find value for mapping key", mapKeyTk.RawToken())
+			return nil, yamlerrors.NewSyntax("could not find value for mapping key", mapKeyTk.RawToken())
 		}
 
 		value, err := p.parseToken(ctx, ctx.currentToken())
@@ -841,7 +841,7 @@ func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 		}
 		scalar, ok := value.(ast.MapKeyNode)
 		if !ok {
-			return nil, errors.ErrSyntax("cannot use this node as a map key", value.GetToken())
+			return nil, yamlerrors.NewSyntax("cannot use this node as a map key", value.GetToken())
 		}
 		key.Value = scalar
 		if _, isScalar := value.(ast.ScalarNode); !isScalar {
@@ -859,7 +859,7 @@ func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 		return key, nil
 	}
 	if g.Last().Type() != token.MappingValueType {
-		return nil, errors.ErrSyntax("expected map key-value delimiter ':'", g.Last().RawToken())
+		return nil, yamlerrors.NewSyntax("expected map key-value delimiter ':'", g.Last().RawToken())
 	}
 
 	scalar, err := p.parseMapKeyValueNode(ctx, g)
@@ -868,7 +868,7 @@ func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 	}
 	key, ok := scalar.(ast.MapKeyNode)
 	if !ok {
-		return nil, errors.ErrSyntax("cannot take map-key node", scalar.GetToken())
+		return nil, yamlerrors.NewSyntax("cannot take map-key node", scalar.GetToken())
 	}
 	keyText := p.mapKeyText(key)
 	key.SetPathNode(ctx.withChild(p, keyText).path)
@@ -890,7 +890,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 	if !p.allowDuplicateMapKey {
 		if n := p.recordMapKey(ctx.keyBase, keyText, key); n != nil {
 			pos := n.GetToken().Position
-			return errors.ErrSyntax(
+			return yamlerrors.NewSyntax(
 				fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
 				tk,
 			)
@@ -907,7 +907,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		if ctx.inFlowSequence && isScalarKeyToken(tk) {
 			origin = p.removeRightWhiteSpace(origin)
 			if int(tk.Position.Line)+p.newLineCharacterNum(origin) != colonTk.Line() {
-				return errors.ErrSyntax("map key definition includes an implicit line break", tk)
+				return yamlerrors.NewSyntax("map key definition includes an implicit line break", tk)
 			}
 		}
 		return nil
@@ -916,7 +916,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		return nil
 	}
 	if p.existsNewLineCharacter(origin) {
-		return errors.ErrSyntax("unexpected key name", tk)
+		return yamlerrors.NewSyntax("unexpected key name", tk)
 	}
 	return nil
 }
@@ -1027,7 +1027,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		//
 		// a: b: c
 		//    ^
-		return nil, errors.ErrSyntax("mapping value is not allowed in this context", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("mapping value is not allowed in this context", tk.RawToken())
 	}
 
 	if tk.Column() == keyCol && p.isMapToken(tk) {
@@ -1058,7 +1058,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// opens nothing -- so the property names nothing and the token belongs
 		// nowhere. Read as the property's node it made "k: &a\n1" the mapping
 		// {k: 1}, which no other implementation reads at all.
-		return nil, errors.ErrSyntax("value is not indented past its key", next.RawToken())
+		return nil, yamlerrors.NewSyntax("value is not indented past its key", next.RawToken())
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
@@ -1083,12 +1083,12 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 	if tk.Column() <= keyCol && tk.GroupType() == TokenGroupAnchorName {
 		// key: <value does not defined>
 		// &anchor
-		return nil, errors.ErrSyntax("anchor is not allowed in this context", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("anchor is not allowed in this context", tk.RawToken())
 	}
 	if tk.Column() <= keyCol && tk.Type() == token.TagType {
 		// key: <value does not defined>
 		// !!tag
-		return nil, errors.ErrSyntax("tag is not allowed in this context", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("tag is not allowed in this context", tk.RawToken())
 	}
 
 	if tk.Column() < keyCol {
@@ -1116,7 +1116,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// carries a property or is written after a '?', its first token is the
 		// property or the '?' rather than the key itself, and the column that
 		// token sits at says nothing about where the entry begins.
-		return nil, errors.ErrSyntax("value is not indented past its key", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("value is not indented past its key", tk.RawToken())
 	}
 
 	if tk.Line() == keyLine && tk.GroupType() == TokenGroupAnchorName &&
@@ -1170,7 +1170,7 @@ func (p *Parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
 		//
 		// - &anchor
 		// !!tag
-		return errors.ErrSyntax("tag is not allowed in this context", tagTk)
+		return yamlerrors.NewSyntax("tag is not allowed in this context", tagTk)
 	}
 	return nil
 }
@@ -1243,7 +1243,7 @@ func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 		return nil, err
 	}
 	if _, ok := value.(*ast.AnchorNode); ok {
-		return nil, errors.ErrSyntax("anchors cannot be used consecutively", value.GetToken())
+		return nil, yamlerrors.NewSyntax("anchors cannot be used consecutively", value.GetToken())
 	}
 
 	return value, nil
@@ -1256,7 +1256,7 @@ func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 	}
 	ctx.goNext()
 	if ctx.isTokenNotFound() {
-		return nil, errors.ErrSyntax("could not find anchor value", anchor.GetToken())
+		return nil, yamlerrors.NewSyntax("could not find anchor value", anchor.GetToken())
 	}
 
 	anchorName, err := p.parseScalarValue(ctx, ctx.currentToken())
@@ -1264,7 +1264,7 @@ func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 		return nil, err
 	}
 	if anchorName == nil {
-		return nil, errors.ErrSyntax("unexpected anchor. anchor name is not scalar value", ctx.currentToken().RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected anchor. anchor name is not scalar value", ctx.currentToken().RawToken())
 	}
 	anchor.Name = anchorName
 	return anchor, nil
@@ -1277,7 +1277,7 @@ func (p *Parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 	}
 	ctx.goNext()
 	if ctx.isTokenNotFound() {
-		return nil, errors.ErrSyntax("could not find alias value", alias.GetToken())
+		return nil, yamlerrors.NewSyntax("could not find alias value", alias.GetToken())
 	}
 
 	aliasName, err := p.parseScalarValue(ctx, ctx.currentToken())
@@ -1285,7 +1285,7 @@ func (p *Parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 		return nil, err
 	}
 	if aliasName == nil {
-		return nil, errors.ErrSyntax("unexpected alias. alias name is not scalar value", ctx.currentToken().RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected alias. alias name is not scalar value", ctx.currentToken().RawToken())
 	}
 	alias.Value = aliasName
 	return alias, nil
@@ -1313,7 +1313,7 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 	}
 	str, ok := value.(*ast.StringNode)
 	if !ok {
-		return nil, errors.ErrSyntax("unexpected token. required string token", value.GetToken())
+		return nil, yamlerrors.NewSyntax("unexpected token. required string token", value.GetToken())
 	}
 	node.Value = str
 	return node, nil
@@ -1325,10 +1325,10 @@ func (p *Parser) parseScalarTag(ctx context) (*ast.TagNode, error) {
 		return nil, err
 	}
 	if tag.Value == nil {
-		return nil, errors.ErrSyntax("specified not scalar tag", tag.GetToken())
+		return nil, yamlerrors.NewSyntax("specified not scalar tag", tag.GetToken())
 	}
 	if _, ok := tag.Value.(ast.ScalarNode); !ok {
-		return nil, errors.ErrSyntax("specified not scalar tag", tag.GetToken())
+		return nil, yamlerrors.NewSyntax("specified not scalar tag", tag.GetToken())
 	}
 	return tag, nil
 }
@@ -1338,7 +1338,7 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	tagRawTk := tagTk.RawToken()
 	if handle, named := namedTagHandle(tagRawTk.Value); named {
 		if _, declared := p.tagHandles[handle]; !declared {
-			return nil, errors.ErrSyntax(
+			return nil, yamlerrors.NewSyntax(
 				fmt.Sprintf("tag handle %s is not defined by a TAG directive", handle), tagRawTk)
 		}
 	}
@@ -1414,7 +1414,7 @@ func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (a
 	switch token.ReservedTagKeyword(tagRawTk.Value) {
 	case token.MappingTag, token.SetTag:
 		if !p.isMapToken(tk) {
-			return nil, errors.ErrSyntax("could not find map", tk.RawToken())
+			return nil, yamlerrors.NewSyntax("could not find map", tk.RawToken())
 		}
 		if tk.Type() == token.MappingStartType {
 			return p.parseFlowMap(ctx.withFlow(true))
@@ -1481,7 +1481,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 		var entryTk *Token
 		if tk.Type() == token.CollectEntryType {
 			if isFirst {
-				return nil, errors.ErrSyntax("expected sequence element, but found ','", tk.RawToken())
+				return nil, yamlerrors.NewSyntax("expected sequence element, but found ','", tk.RawToken())
 			}
 			entryTk = tk
 			if err := attachTrailingComment(ctx, entryTk, node.Values); err != nil {
@@ -1492,7 +1492,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 				headComment = mergeComments(headComment, next)
 			}
 		} else if !isFirst {
-			return nil, errors.ErrSyntax("',' or ']' must be specified", tk.RawToken())
+			return nil, yamlerrors.NewSyntax("',' or ']' must be specified", tk.RawToken())
 		}
 
 		if tk := ctx.currentToken(); tk.Type() == token.SequenceEndType {
@@ -1526,7 +1526,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 		isFirst = false
 	}
 	if node.End == nil {
-		return nil, errors.ErrSyntax("sequence end token ']' not found", node.Start)
+		return nil, yamlerrors.NewSyntax("sequence end token ']' not found", node.Start)
 	}
 
 	// set line comment if exists. e.g.) ] # comment
@@ -1630,12 +1630,12 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 	if tk.Column() <= seqCol && tk.GroupType() == TokenGroupAnchorName {
 		// - <value does not defined>
 		// &anchor
-		return nil, errors.ErrSyntax("anchor is not allowed in this sequence context", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("anchor is not allowed in this sequence context", tk.RawToken())
 	}
 	if tk.Column() <= seqCol && tk.Type() == token.TagType {
 		// - <value does not defined>
 		// !!tag
-		return nil, errors.ErrSyntax("tag is not allowed in this sequence context", tk.RawToken())
+		return nil, yamlerrors.NewSyntax("tag is not allowed in this sequence context", tk.RawToken())
 	}
 
 	if tk.Column() < seqCol || (tk.Column() == seqCol && tk.Line() != seqLine) {
@@ -1681,17 +1681,17 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 	switch directive.Name.String() {
 	case "YAML":
 		if g.Len() != 2 {
-			return nil, errors.ErrSyntax("unexpected format YAML directive", g.First().RawToken())
+			return nil, yamlerrors.NewSyntax("unexpected format YAML directive", g.First().RawToken())
 		}
 		valueTk := g.At(1)
 		valueRawTk := valueTk.RawToken()
 		value := valueRawTk.Value
 		ver, exists := yamlVersionMap[value]
 		if !exists {
-			return nil, errors.ErrSyntax(fmt.Sprintf("unknown YAML version %q", value), valueRawTk)
+			return nil, yamlerrors.NewSyntax(fmt.Sprintf("unknown YAML version %q", value), valueRawTk)
 		}
 		if p.yamlVersion != "" {
-			return nil, errors.ErrSyntax("YAML version has already been specified", valueRawTk)
+			return nil, yamlerrors.NewSyntax("YAML version has already been specified", valueRawTk)
 		}
 		p.yamlVersion = ver
 		versionNode, err := newStringNode(ctx, valueTk)
@@ -1701,7 +1701,7 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 		directive.Values = append(directive.Values, versionNode)
 	case "TAG":
 		if g.Len() != 3 {
-			return nil, errors.ErrSyntax("unexpected format TAG directive", g.First().RawToken())
+			return nil, yamlerrors.NewSyntax("unexpected format TAG directive", g.First().RawToken())
 		}
 		tagKey, err := newStringNode(ctx, g.At(1))
 		if err != nil {
@@ -1741,7 +1741,7 @@ func (p *Parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
 	}
 	ctx.goNext()
 	if ctx.isTokenNotFound() {
-		return nil, errors.ErrSyntax("could not find directive value", directive.GetToken())
+		return nil, yamlerrors.NewSyntax("could not find directive value", directive.GetToken())
 	}
 
 	directiveName, err := p.parseScalarValue(ctx, ctx.currentToken())
@@ -1749,7 +1749,7 @@ func (p *Parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
 		return nil, err
 	}
 	if directiveName == nil {
-		return nil, errors.ErrSyntax("unexpected directive. directive name is not scalar value", ctx.currentToken().RawToken())
+		return nil, yamlerrors.NewSyntax("unexpected directive. directive name is not scalar value", ctx.currentToken().RawToken())
 	}
 	directive.Name = directiveName
 	return directive, nil

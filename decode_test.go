@@ -3,6 +3,7 @@ package yaml_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,7 +18,7 @@ import (
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/codec"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -1875,9 +1876,9 @@ c: true
 
 	// TODO: properly check if errors are colored/have source
 	t.Logf("%s", err)
-	t.Logf("%s", yaml.FormatError(err, true, false))
-	t.Logf("%s", yaml.FormatError(err, false, true))
-	t.Logf("%s", yaml.FormatError(err, true, true))
+	t.Logf("%s", yamlerrors.FormatError(err, true, false))
+	t.Logf("%s", yamlerrors.FormatError(err, false, true))
+	t.Logf("%s", yamlerrors.FormatError(err, true, true))
 }
 
 func TestDecoder_InvalidCases(t *testing.T) {
@@ -1894,17 +1895,17 @@ a:
 		t.Fatalf("expected error")
 	}
 
-	if err.Error() != yaml.FormatError(err, false, true) {
+	if err.Error() != yamlerrors.FormatError(err, false, true) {
 		t.Logf("err.Error() = %s", err.Error())
-		t.Logf("yaml.FormatError(err, false, true) = %s", yaml.FormatError(err, false, true))
-		t.Fatal(`err.Error() should match yaml.FormatError(err, false, true)`)
+		t.Logf("yamlerrors.FormatError(err, false, true) = %s", yamlerrors.FormatError(err, false, true))
+		t.Fatal(`err.Error() should match yamlerrors.FormatError(err, false, true)`)
 	}
 
 	// TODO: properly check if errors are colored/have source
 	t.Logf("%s", err)
-	t.Logf("%s", yaml.FormatError(err, true, false))
-	t.Logf("%s", yaml.FormatError(err, false, true))
-	t.Logf("%s", yaml.FormatError(err, true, true))
+	t.Logf("%s", yamlerrors.FormatError(err, true, false))
+	t.Logf("%s", yamlerrors.FormatError(err, false, true))
+	t.Logf("%s", yamlerrors.FormatError(err, true, true))
 }
 
 func TestDecoder_JSONTags(t *testing.T) {
@@ -2444,7 +2445,7 @@ map: &map
 		var buf bytes.Buffer
 		var v bool
 		err := yaml.NewDecoder(&buf).DecodeFromNode(nil, v)
-		if !errors.Is(err, yaml.ErrDecodeRequiredPointerType) {
+		if !errors.Is(err, codec.ErrDecodeRequiredPointerType) {
 			t.Fatalf("unexpected error: %s", err)
 		}
 	})

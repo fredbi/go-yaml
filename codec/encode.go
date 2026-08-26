@@ -3,6 +3,7 @@ package codec
 import (
 	"context"
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,7 +14,7 @@ import (
 	"time"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -915,7 +916,7 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 			if aliasName := sf.AliasName; aliasName != "" {
 				alias, ok := encoded.(*ast.AliasNode)
 				if !ok {
-					return nil, errors.ErrUnexpectedNodeType(encoded.Type(), ast.AliasType, encoded.GetToken())
+					return nil, yamlerrors.NewUnexpectedNodeType(encoded.Type(), ast.AliasType, encoded.GetToken())
 				}
 				got := alias.Value.String()
 				if aliasName != got {

@@ -3,24 +3,7 @@
 
 package codec
 
-import (
-	"errors"
-
-	yamlerrors "github.com/go-openapi/go-yaml/internal/errors"
-)
-
-// The error types a caller matches a failure against. They are declared by
-// internal/errors, which the parser and the scanner raise them from, and named
-// here so that matching on one needs no import of an internal package.
-type (
-	SyntaxError             = yamlerrors.SyntaxError
-	TypeError               = yamlerrors.TypeError
-	OverflowError           = yamlerrors.OverflowError
-	DuplicateKeyError       = yamlerrors.DuplicateKeyError
-	UnknownFieldError       = yamlerrors.UnknownFieldError
-	UnexpectedNodeTypeError = yamlerrors.UnexpectedNodeTypeError
-	Error                   = yamlerrors.Error
-)
+import "errors"
 
 var (
 	// ErrUnknownCommentPositionType reports a Comment whose Position is none of

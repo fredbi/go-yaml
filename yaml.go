@@ -9,12 +9,14 @@
 //
 //   - [codec] encodes and decodes -- [Encoder], [Decoder], the options that
 //     steer them, and the comment types.
-//   - [github.com/go-openapi/go-yaml/ast] is the document as a tree.
+//   - [github.com/go-openapi/go-yaml/ast] holds the document as a tree.
 //   - [github.com/go-openapi/go-yaml/parser] builds that tree from a source,
 //     and [github.com/go-openapi/go-yaml/scanner] hands it the tokens.
+//   - [github.com/go-openapi/go-yaml/errors] declares the failure every one of
+//     them reports, with the position it happened at.
 //
-// Reach for [codec] directly to encode or decode with options, or to work with
-// the comments of a document.
+// Use [codec] directly to encode or decode with options, or to work with the
+// comments of a document.
 package yaml
 
 import (
@@ -91,10 +93,4 @@ func ToJSON(bytes []byte) ([]byte, error) {
 // FromJSON converts a JSON document to the YAML that holds the same values.
 func FromJSON(bytes []byte) ([]byte, error) {
 	return codec.FromJSON(bytes)
-}
-
-// FormatError renders e, drawing the source around it where the error carries
-// one and inclSource asks for it.
-func FormatError(e error, colored, inclSource bool) string {
-	return codec.FormatError(e, colored, inclSource)
 }

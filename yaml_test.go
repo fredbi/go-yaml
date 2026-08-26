@@ -2,6 +2,7 @@ package yaml_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -247,9 +249,9 @@ foo: 2
 	if _, err := parser.ParseBytes([]byte(data), 0); err == nil {
 		t.Fatalf("expected error")
 	} else {
-		yamlErr, ok := err.(yaml.Error)
-		if !ok {
-			t.Fatalf("failed to get yaml.Error from error: %T", err)
+		var yamlErr *yamlerrors.Error
+		if !errors.As(err, &yamlErr) {
+			t.Fatalf("failed to get *yamlerrors.Error from error: %T", err)
 		}
 		expected := `
 [7:1] custom message
@@ -259,7 +261,7 @@ foo: 2
 >  7 | foo: 2
        ^
 `
-		got := "\n" + yaml.FormatErrorWithToken("custom message", yamlErr.GetToken(), []byte(data), false, true)
+		got := "\n" + yamlerrors.FormatErrorAtToken("custom message", yamlErr.GetToken(), []byte(data), false, true)
 		if expected != got {
 			t.Fatalf("unexpected error message:\nexpected:\n%s\nbut got:\n%s", expected, got)
 		}
