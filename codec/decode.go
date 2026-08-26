@@ -468,8 +468,14 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.AliasNode:
 		text := n.Value.String()
 		if _, exists := getAnchorMap(ctx)[text]; exists {
-			// self recursion.
-			return nil, nil
+			// The alias stands inside the node its own anchor names, directly or
+			// through another anchor. That node is not resolved yet, so there is
+			// nothing for the alias to be. Returning nil instead reported a
+			// mapping with a null in it and no error at all.
+			return nil, yamlerrors.NewSyntax(
+				fmt.Sprintf("alias %q names an anchor that is not resolved yet", text),
+				n.Value.GetToken(),
+			)
 		}
 		if v, exists := d.anchorValueMap[text]; exists {
 			if !v.IsValid() {

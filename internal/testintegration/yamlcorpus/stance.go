@@ -30,13 +30,23 @@ var GoYAML = stance.Table{
 		// this library reads.
 		TagKeyNotAScalar: stance.Accepts,
 
-		// Measured: a cycle is read without complaint, and this is the one
-		// entry that is uncomfortable. The document is accepted, so Accepts is
-		// what the verdict says -- but the value that comes back has nil where
-		// the cycle was, which is neither holding the cycle nor refusing it.
-		// See Departures: the verdict is right and the value is not, and this
-		// table can only speak about verdicts.
-		TagCyclicMeaning: stance.Accepts,
+		// Changed 2026-08-27, and it is the entry this table exists for.
+		//
+		// A cycle used to be read without complaint and come back with nil
+		// where the cycle was, which is neither holding the cycle nor refusing
+		// it. The decoder now refuses: an anchor is entered in its books only
+		// once the node it names is resolved, so an alias standing inside that
+		// node has nothing to resolve to and says so.
+		//
+		// Declarable here rather than a defect, because whether a cycle can be
+		// held is the consumer's position and not the language's -- see
+		// TagCyclicMeaning. The parse is unaffected and still accepts the
+		// document, which is what TagAliasRecursive requires; GoYAMLParser
+		// below is the table that scores it.
+		//
+		// libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 both refuse these documents
+		// too. PyYAML 6.0.1 accepts and builds the cycle.
+		TagCyclicMeaning: stance.Refuses,
 
 		// Measured on the tag family. Everything the specification leaves to
 		// the application, this library reads: a local tag, a handle a %TAG
@@ -159,13 +169,6 @@ var Departures = []Departure{
 			"and a string, so they are two keys and the document is valid",
 		Corroborated: "libfyaml 1.0.0a8 keeps both, and merges 1 with !!int 1 -- so its key identity is " +
 			"resolution and not spelling",
-	},
-	{
-		Pattern:  "a sequence holding an alias to itself",
-		Kind:     Value,
-		Observed: "the document is read and the cycle decodes to nil, so &x [ *x ] becomes a one-element list holding nothing",
-		Because: "3.2.1: the representation is a graph and the alias resolves to the node it is inside; " +
-			"a model that cannot hold that has to say so rather than substitute a value the document never had",
 	},
 }
 
