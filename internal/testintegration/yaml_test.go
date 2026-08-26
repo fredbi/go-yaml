@@ -1060,7 +1060,7 @@ func TestRegisterCustomMarshaler(t *testing.T) {
 	type T struct {
 		Foo []byte `yaml:"foo"`
 	}
-	yaml.RegisterCustomMarshaler[T](func(_ T) ([]byte, error) {
+	codec.RegisterCustomMarshaler[T](func(_ T) ([]byte, error) {
 		return []byte(`"override"`), nil
 	})
 	b, err := yaml.Marshal(&T{Foo: []byte("bar")})
@@ -1076,7 +1076,7 @@ func TestRegisterCustomMarshalerContext(t *testing.T) {
 	type T struct {
 		Foo []byte `yaml:"foo"`
 	}
-	yaml.RegisterCustomMarshalerContext[T](func(ctx context.Context, _ T) ([]byte, error) {
+	codec.RegisterCustomMarshalerContext[T](func(ctx context.Context, _ T) ([]byte, error) {
 		if ctx.Value("plop") != uint(42) {
 			t.Fatalf("context value is not correct")
 		}
@@ -1096,7 +1096,7 @@ func TestRegisterCustomUnmarshaler(t *testing.T) {
 	type T struct {
 		Foo []byte `yaml:"foo"`
 	}
-	yaml.RegisterCustomUnmarshaler[T](func(v *T, _ []byte) error {
+	codec.RegisterCustomUnmarshaler[T](func(v *T, _ []byte) error {
 		v.Foo = []byte("override")
 		return nil
 	})
@@ -1113,7 +1113,7 @@ func TestRegisterCustomUnmarshalerContext(t *testing.T) {
 	type T struct {
 		Foo []byte `yaml:"foo"`
 	}
-	yaml.RegisterCustomUnmarshalerContext[T](func(ctx context.Context, v *T, _ []byte) error {
+	codec.RegisterCustomUnmarshalerContext[T](func(ctx context.Context, v *T, _ []byte) error {
 		if ctx.Value("plop") != uint(42) {
 			t.Fatalf("context value is not correct")
 		}

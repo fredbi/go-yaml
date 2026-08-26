@@ -24,20 +24,6 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// The interfaces a type implements to encode or decode itself.
-type (
-	Marshaler                = codec.Marshaler
-	ContextMarshaler         = codec.ContextMarshaler
-	GoYAMLMarshaler          = codec.GoYAMLMarshaler
-	ContextGoYAMLMarshaler   = codec.ContextGoYAMLMarshaler
-	Unmarshaler              = codec.Unmarshaler
-	ContextUnmarshaler       = codec.ContextUnmarshaler
-	GoYAMLUnmarshaler        = codec.GoYAMLUnmarshaler
-	ContextGoYAMLUnmarshaler = codec.ContextGoYAMLUnmarshaler
-	NodeUnmarshaler          = codec.NodeUnmarshaler
-	ContextNodeUnmarshaler   = codec.ContextNodeUnmarshaler
-)
-
 // The types a caller names to hold a document or to steer a conversion.
 type (
 	// Encoder writes YAML documents to a stream.
@@ -111,26 +97,4 @@ func FromJSON(bytes []byte) ([]byte, error) {
 // one and inclSource asks for it.
 func FormatError(e error, colored, inclSource bool) string {
 	return codec.FormatError(e, colored, inclSource)
-}
-
-// RegisterCustomMarshaler registers a function that encodes values of type T,
-// for a type whose own MarshalYAML cannot be defined.
-func RegisterCustomMarshaler[T any](marshaler func(T) ([]byte, error)) {
-	codec.RegisterCustomMarshaler(marshaler)
-}
-
-// RegisterCustomMarshalerContext is [RegisterCustomMarshaler] with a context.
-func RegisterCustomMarshalerContext[T any](marshaler func(context.Context, T) ([]byte, error)) {
-	codec.RegisterCustomMarshalerContext(marshaler)
-}
-
-// RegisterCustomUnmarshaler registers a function that decodes values of type T,
-// for a type whose own UnmarshalYAML cannot be defined.
-func RegisterCustomUnmarshaler[T any](unmarshaler func(*T, []byte) error) {
-	codec.RegisterCustomUnmarshaler(unmarshaler)
-}
-
-// RegisterCustomUnmarshalerContext is [RegisterCustomUnmarshaler] with a context.
-func RegisterCustomUnmarshalerContext[T any](unmarshaler func(context.Context, *T, []byte) error) {
-	codec.RegisterCustomUnmarshalerContext(unmarshaler)
 }
