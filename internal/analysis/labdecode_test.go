@@ -15,6 +15,7 @@ import (
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/lab"
+	"github.com/go-openapi/go-yaml/internal/lab/labparser"
 )
 
 // peakLive reports the high-water mark of the live heap while work runs.
@@ -96,8 +97,16 @@ func TestProgressiveDecodePeak(t *testing.T) {
 			runtime.KeepAlive(v)
 		})
 
-		t.Logf("%-17s %8dK %10dK %10dK %7.1fx",
+		// The floor: what a parse alone peaks at, decoding nothing. No consumer
+		// can do better than this while the parser holds what it holds.
+		parseOnly := peakLive(func() {
+			f, err := labparser.ParseBytes(w.Data, 0)
+			require.NoError(t, err)
+			runtime.KeepAlive(f)
+		})
+
+		t.Logf("%-17s %8dK %10dK %10dK %7.1fx  parse-only floor %dK",
 			w.Name, len(w.Data)/1024, classic/1024, progressive/1024,
-			float64(classic)/float64(progressive))
+			float64(classic)/float64(progressive), parseOnly/1024)
 	}
 }
