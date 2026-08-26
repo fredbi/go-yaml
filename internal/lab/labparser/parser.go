@@ -40,7 +40,6 @@ func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
 	}
 
 	f, err := p.Parse()
-	p.release()
 	if err != nil {
 		// An error drawn under the document needs the document. Parse reads a
 		// token stream and has none, so it is told here, where the text is.
@@ -96,9 +95,6 @@ var yamlVersionMap = map[string]YAMLVersion{
 type Parser struct {
 	tokens []*Token
 	raw    rawTokens
-	// grouper is kept so its scratch slices can be given back once the parse is
-	// done with them. EXPERIMENT (2026-08-27).
-	grouper *grouper
 	// entries holds the entries of every mapping open at this point in the
 	// descent, innermost run last. parseMap takes its run off the end once the
 	// mapping is built.
@@ -225,13 +221,12 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 		raw.add(tk)
 	}
 
-	tks, lineComments, g, err := createGroupedTokens(&raw)
+	tks, lineComments, err := createGroupedTokens(&raw)
 	if err != nil {
 		return nil, err
 	}
 
 	p := &Parser{
-		grouper:      g,
 		tokens:       tks,
 		raw:          raw,
 		lineComments: lineComments,
@@ -245,15 +240,6 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 }
 
 // Parse reads the stream through and returns the file it describes.
-// release gives the grouper's scratch back. Call it once the tree is built and
-// the Parser will not be used again. EXPERIMENT (2026-08-27).
-func (p *Parser) release() {
-	if p.grouper != nil {
-		p.grouper.release()
-		p.grouper = nil
-	}
-}
-
 func (p *Parser) Parse() (*ast.File, error) {
 	return p.parse(p.newContext())
 }

@@ -307,8 +307,6 @@ type grouper struct {
 	lineComments map[*Token]*token.Token
 	// block is how many of each one allocation covers.
 	block int
-	// wrappers is the slab stream handed out, kept so a parse can give it back.
-	wrappers []Token
 }
 
 // setLineComment records that comment closes the line tk stands on.
@@ -350,7 +348,7 @@ func (g *grouper) out(n int) []*Token {
 		buf = &g.passB
 	}
 	if cap(*buf) < n {
-		*buf = borrowBuffer(n)
+		*buf = make([]*Token, 0, n)
 	}
 
 	return (*buf)[:0]
@@ -451,7 +449,7 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // createGroupedTokens reads the tokens of a stream into the groups the parser
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
-func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, *grouper, error) {
+func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
 	// EXPERIMENT (2026-08-27): groupMapKeyValues is gone from this pipeline.
 	// It paired a map-key group with the value standing on its line, and the
@@ -467,23 +465,14 @@ func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, *gr
 								g.attachLineComments(
 									g.stream(raw)))))))))))
 	if g.err != nil {
-		return nil, nil, nil, g.err
+		return nil, nil, g.err
 	}
 
 	tks, err := g.createDocumentTokens(tks, false)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return tks, g.lineComments, &g, nil
-}
-
-// release gives the grouper's scratch slices back. Nothing the parse returns
-// can reach them, so this is safe once the Parser is done with.
-func (g *grouper) release() {
-	redeemWrappers(g.wrappers)
-	redeemBuffer(g.passA)
-	redeemBuffer(g.passB)
-	g.wrappers, g.passA, g.passB = nil, nil, nil
+	return tks, g.lineComments, nil
 }
 
 // newTokens wraps every raw token in the [Token] the grouping passes work on.
@@ -498,8 +487,7 @@ func (g *grouper) release() {
 // own, and the groups built over the first set would not know about them.
 func (g *grouper) stream(raw *rawTokens) iter.Seq[*Token] {
 	return func(yield func(*Token) bool) {
-		block := borrowWrappers(raw.n)
-		g.wrappers = block
+		block := make([]Token, raw.n)
 
 		var i int
 		for _, b := range raw.blocks {
