@@ -55,7 +55,7 @@ func TestMarshalCarriageReturnUnderLiteralStyle(t *testing.T) {
 	const in = "a\r\nb\r\n"
 
 	var out []byte
-	out, err := yaml.MarshalWithOptions(in, codec.UseLiteralStyleIfMultiline(true))
+	out, err := codec.MarshalWithOptions(in, codec.UseLiteralStyleIfMultiline(true))
 	require.NoError(t, err)
 
 	var back string

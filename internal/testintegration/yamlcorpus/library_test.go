@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
 	"github.com/go-openapi/go-yaml/parser"
@@ -24,7 +25,7 @@ import (
 // mistake was made once here before the ledger below was written, which is why
 // it is spelled out rather than left to whoever reads this next.
 func reads(src []byte) error {
-	dec := yaml.NewDecoder(bytes.NewReader(src))
+	dec := codec.NewDecoder(bytes.NewReader(src))
 
 	for {
 		var v any

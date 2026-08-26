@@ -975,7 +975,7 @@ func TestEncoder(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
 			var buf bytes.Buffer
-			enc := yaml.NewEncoder(&buf, test.options...)
+			enc := codec.NewEncoder(&buf, test.options...)
 			if err := enc.Encode(test.value); err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1028,7 +1028,7 @@ func TestEncodeDefinedTypeKeyMap(t *testing.T) {
 
 func TestEncodeWithAnchorAndAlias(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	type T struct {
 		A int
 		B string
@@ -1050,7 +1050,7 @@ func TestEncodeWithAnchorAndAlias(t *testing.T) {
 
 func TestEncodeWithAutoAlias(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	type T struct {
 		I int
 		S string
@@ -1084,7 +1084,7 @@ d: *b
 
 func TestEncodeWithImplicitAnchorAndAlias(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	type T struct {
 		I int
 		S string
@@ -1143,7 +1143,7 @@ func TestEncodeWithMerge(t *testing.T) {
 	doc.Default = defaultPerson
 	doc.People = people
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	if err := enc.Encode(doc); err != nil {
 		t.Fatalf("%+v", err)
 	}
@@ -1183,7 +1183,7 @@ func TestEncodeWithNestedYAML(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		yamlBytesForced, err := yaml.MarshalWithOptions(test.value, codec.UseLiteralStyleIfMultiline(true))
+		yamlBytesForced, err := codec.MarshalWithOptions(test.value, codec.UseLiteralStyleIfMultiline(true))
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
@@ -1200,7 +1200,7 @@ func TestEncodeWithNestedYAML(t *testing.T) {
 		}
 
 		if test.expectDifferent {
-			yamlBytesNotForced, err := yaml.MarshalWithOptions(test.value)
+			yamlBytesNotForced, err := codec.MarshalWithOptions(test.value)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1218,7 +1218,7 @@ func TestEncoder_Inline(t *testing.T) {
 		B string
 	}
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	if err := enc.Encode(struct {
 		*base `yaml:",inline"`
 		C     bool
@@ -1248,7 +1248,7 @@ func TestEncoder_InlineAndConflictKey(t *testing.T) {
 		B string
 	}
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	if err := enc.Encode(struct {
 		*base `yaml:",inline"`
 		A     int // conflict
@@ -1280,7 +1280,7 @@ func TestEncoder_InlineNil(t *testing.T) {
 		B string
 	}
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	if err := enc.Encode(struct {
 		*base `yaml:",inline"`
 		C     bool
@@ -1300,7 +1300,7 @@ c: true
 
 func TestEncoder_Flow(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf, codec.Flow(true))
+	enc := codec.NewEncoder(&buf, codec.Flow(true))
 	var v struct {
 		A int
 		B string
@@ -1335,7 +1335,7 @@ func TestEncoder_FlowRecursive(t *testing.T) {
 		"test": {1, 2, 3},
 	}
 	var buf bytes.Buffer
-	if err := yaml.NewEncoder(&buf).Encode(v); err != nil {
+	if err := codec.NewEncoder(&buf).Encode(v); err != nil {
 		t.Fatalf("%+v", err)
 	}
 	expect := `
@@ -1349,7 +1349,7 @@ m: {test: [1, 2, 3]}
 
 func TestEncoder_JSON(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf, codec.JSON())
+	enc := codec.NewEncoder(&buf, codec.JSON())
 	type st struct {
 		I int8
 		S string
@@ -1450,7 +1450,7 @@ func TestEncoder_MarshalAnchor(t *testing.T) {
 	})
 
 	var buf bytes.Buffer
-	if err := yaml.NewEncoder(&buf, opt).Encode(doc); err != nil {
+	if err := codec.NewEncoder(&buf, opt).Encode(doc); err != nil {
 		t.Fatalf("%+v", err)
 	}
 	expect := `
@@ -1481,7 +1481,7 @@ func (t useJSONMarshalerTest) MarshalJSON() ([]byte, error) {
 }
 
 func TestEncoder_UseJSONMarshaler(t *testing.T) {
-	got, err := yaml.MarshalWithOptions(useJSONMarshalerTest{}, codec.UseJSONMarshaler())
+	got, err := codec.MarshalWithOptions(useJSONMarshalerTest{}, codec.UseJSONMarshaler())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1501,7 +1501,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 		type T struct {
 			Foo string `yaml:"foo"`
 		}
-		b, err := yaml.MarshalWithOptions(&T{Foo: "bar"}, codec.CustomMarshaler[T](func(v T) ([]byte, error) {
+		b, err := codec.MarshalWithOptions(&T{Foo: "bar"}, codec.CustomMarshaler[T](func(v T) ([]byte, error) {
 			return []byte(`"override"`), nil
 		}))
 		if err != nil {
@@ -1515,7 +1515,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 		type T struct {
 			Foo []byte `yaml:"foo"`
 		}
-		b, err := yaml.MarshalWithOptions(&T{Foo: []byte("bar")}, codec.CustomMarshaler[[]byte](func(v []byte) ([]byte, error) {
+		b, err := codec.MarshalWithOptions(&T{Foo: []byte("bar")}, codec.CustomMarshaler[[]byte](func(v []byte) ([]byte, error) {
 			if !bytes.Equal(v, []byte("bar")) {
 				t.Fatalf("failed to get src buffer: %q", v)
 			}
@@ -1533,7 +1533,7 @@ func TestEncoder_CustomMarshaler(t *testing.T) {
 			Foo []byte `yaml:"foo"`
 		}
 		ctx := context.WithValue(context.Background(), "plop", uint(42))
-		b, err := yaml.MarshalContext(ctx, &T{Foo: []byte("bar")}, codec.CustomMarshalerContext[[]byte](func(ctx context.Context, v []byte) ([]byte, error) {
+		b, err := codec.MarshalContext(ctx, &T{Foo: []byte("bar")}, codec.CustomMarshalerContext[[]byte](func(ctx context.Context, v []byte) ([]byte, error) {
 			if !bytes.Equal(v, []byte("bar")) {
 				t.Fatalf("failed to get src buffer: %q", v)
 			}
@@ -1588,7 +1588,7 @@ func TestEncoder_AutoInt(t *testing.T) {
 	} {
 		t.Run(test.desc, func(t *testing.T) {
 			var buf bytes.Buffer
-			enc := yaml.NewEncoder(&buf, codec.AutoInt())
+			enc := codec.NewEncoder(&buf, codec.AutoInt())
 			if err := enc.Encode(test.input); err != nil {
 				t.Fatalf("failed to encode: %s", err)
 			}
@@ -1601,7 +1601,7 @@ func TestEncoder_AutoInt(t *testing.T) {
 
 func TestEncoder_MultipleDocuments(t *testing.T) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := codec.NewEncoder(&buf)
 	if err := enc.Encode(1); err != nil {
 		t.Fatalf("failed to encode: %s", err)
 	}
@@ -1678,7 +1678,7 @@ func TestEncoder_UnmarshallableTypes(t *testing.T) {
 	} {
 		t.Run(test.desc, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := yaml.NewEncoder(&buf).Encode(test.input)
+			err := codec.NewEncoder(&buf).Encode(test.input)
 			if err == nil {
 				t.Errorf("expect error:\n%s\nbut got none\n", test.expectedErr)
 			} else if err.Error() != test.expectedErr {
@@ -1810,7 +1810,7 @@ func (c *marshalContext) MarshalYAML(ctx context.Context) ([]byte, error) {
 
 func Test_MarshalerContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), "k", 1)
-	bytes, err := yaml.MarshalContext(ctx, &marshalContext{})
+	bytes, err := codec.MarshalContext(ctx, &marshalContext{})
 	if err != nil {
 		t.Fatalf("%+v", err)
 	}
@@ -1842,7 +1842,7 @@ func (v SlowMarshaler) MarshalYAML() ([]byte, error) {
 }
 
 func (v FastMarshaler) MarshalYAML() (interface{}, error) {
-	return yaml.MapSlice{
+	return codec.MapSlice{
 		{Key: "tags", Value: []string{"fast-marshaler"}},
 		{Key: "a", Value: v.A},
 		{Key: "b", Value: v.B},
@@ -2020,7 +2020,7 @@ line3`},
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := yaml.MarshalWithOptions(tt.input, tt.indent)
+			b, err := codec.MarshalWithOptions(tt.input, tt.indent)
 			if err != nil {
 				t.Fatalf("failed to marshal yaml: %v", err)
 			}
@@ -2064,17 +2064,17 @@ a:
 type customMapSliceOneItemMarshaler struct{}
 
 func (m *customMapSliceOneItemMarshaler) MarshalYAML() ([]byte, error) {
-	var v yaml.MapSlice
-	v = append(v, yaml.MapItem{Key: "a", Value: "b"})
+	var v codec.MapSlice
+	v = append(v, codec.MapItem{Key: "a", Value: "b"})
 	return yaml.Marshal(v)
 }
 
 type customMapSliceTwoItemMarshaler struct{}
 
 func (m *customMapSliceTwoItemMarshaler) MarshalYAML() ([]byte, error) {
-	var v yaml.MapSlice
-	v = append(v, yaml.MapItem{Key: "a", Value: "b"})
-	v = append(v, yaml.MapItem{Key: "b", Value: "c"})
+	var v codec.MapSlice
+	v = append(v, codec.MapItem{Key: "a", Value: "b"})
+	v = append(v, codec.MapItem{Key: "b", Value: "c"})
 	return yaml.Marshal(v)
 }
 
@@ -2109,7 +2109,7 @@ type Issue174 struct {
 }
 
 func (v Issue174) MarshalYAML() ([]byte, error) {
-	return yaml.MarshalWithOptions(map[string][]int{v.K: v.V}, codec.Flow(true))
+	return codec.MarshalWithOptions(map[string][]int{v.K: v.V}, codec.Flow(true))
 }
 
 func TestIssue174(t *testing.T) {

@@ -49,7 +49,7 @@ b: c
 type marshalTest struct{}
 
 func (t *marshalTest) MarshalYAML() ([]byte, error) {
-	return yaml.Marshal(yaml.MapSlice{
+	return yaml.Marshal(codec.MapSlice{
 		{Key: "a", Value: 1},
 		{Key: "b", Value: "hello"},
 		{Key: "c", Value: true},
@@ -60,7 +60,7 @@ func (t *marshalTest) MarshalYAML() ([]byte, error) {
 type marshalTest2 struct{}
 
 func (t *marshalTest2) MarshalYAML() (interface{}, error) {
-	return yaml.MapSlice{
+	return codec.MapSlice{
 		{Key: "a", Value: 2},
 		{Key: "b", Value: "world"},
 		{Key: "c", Value: true},
@@ -263,7 +263,7 @@ collection:
 		return nil
 	})
 	var buf bytes.Buffer
-	if err := yaml.NewEncoder(&buf, opt).Encode(v); err != nil {
+	if err := codec.NewEncoder(&buf, opt).Encode(v); err != nil {
 		t.Fatalf("%+v", err)
 	}
 	actual := "---\n" + buf.String()
@@ -277,7 +277,7 @@ func TestMapSlice_Map(t *testing.T) {
 a: b
 c: d
 `
-	var v yaml.MapSlice
+	var v codec.MapSlice
 	if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func Test_WithCommentOption(t *testing.T) {
 				X int `yaml:"x"`
 			}{X: 10},
 		}
-		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.WithComment(
 			codec.CommentMap{
 				"$.foo":     []*codec.Comment{codec.LineComment("foo comment")},
 				"$.bar":     []*codec.Comment{codec.LineComment("bar comment")},
@@ -422,7 +422,7 @@ baz:
 				},
 			},
 		}
-		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.WithComment(
 			codec.CommentMap{
 				"$.foo.bar":     []*codec.Comment{codec.HeadComment(" bar head comment"), codec.LineComment(" bar line comment")},
 				"$.foo.bar.baz": []*codec.Comment{codec.LineComment(" baz line comment")},
@@ -457,7 +457,7 @@ foo:
 			}{X: 10},
 		}
 
-		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.WithComment(
 			codec.CommentMap{
 				"$.foo":     []*codec.Comment{codec.HeadComment("foo comment")},
 				"$.bar":     []*codec.Comment{codec.HeadComment("bar comment")},
@@ -500,7 +500,7 @@ baz:
 			}{X: 10},
 		}
 
-		b, err := yaml.MarshalWithOptions(v, codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.WithComment(
 			codec.CommentMap{
 				"$.foo": []*codec.Comment{
 					codec.HeadComment(
@@ -560,7 +560,7 @@ baz:
 			Baz: []int{1, 2},
 		}
 
-		b, err := yaml.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
 			codec.CommentMap{
 				"$.bar.bbb": []*codec.Comment{codec.FootComment("ccc: ddd")},
 				"$.baz[1]":  []*codec.Comment{codec.FootComment("- 3")},
@@ -620,7 +620,7 @@ baz:
 			},
 		}
 
-		b, err := yaml.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
+		b, err := codec.MarshalWithOptions(v, codec.IndentSequence(true), codec.WithComment(
 			codec.CommentMap{
 				"$.foo": []*codec.Comment{
 					codec.HeadComment(" foo head comment", " foo head comment2"),
@@ -948,7 +948,7 @@ hoge:
 			opts = append(opts, tc.options...)
 
 			var v interface{}
-			if err := yaml.UnmarshalWithOptions([]byte(tc.yml), &v, opts...); err != nil {
+			if err := codec.UnmarshalWithOptions([]byte(tc.yml), &v, opts...); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1036,10 +1036,10 @@ a: 1 # line
 			var val any
 			cm := codec.CommentMap{}
 			source := strings.TrimSpace(test.source)
-			if err := yaml.UnmarshalWithOptions([]byte(source), &val, codec.CommentToMap(cm)); err != nil {
+			if err := codec.UnmarshalWithOptions([]byte(source), &val, codec.CommentToMap(cm)); err != nil {
 				t.Fatalf("%+v", err)
 			}
-			marshaled, err := yaml.MarshalWithOptions(val, append(test.encodeOptions, codec.WithComment(cm))...)
+			marshaled, err := codec.MarshalWithOptions(val, append(test.encodeOptions, codec.WithComment(cm))...)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1083,7 +1083,7 @@ func TestRegisterCustomMarshalerContext(t *testing.T) {
 		return []byte(`"override"`), nil
 	})
 	ctx := context.WithValue(context.Background(), "plop", uint(42))
-	b, err := yaml.MarshalContext(ctx, &T{Foo: []byte("bar")})
+	b, err := codec.MarshalContext(ctx, &T{Foo: []byte("bar")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1122,7 +1122,7 @@ func TestRegisterCustomUnmarshalerContext(t *testing.T) {
 	})
 	var v T
 	ctx := context.WithValue(context.Background(), "plop", uint(42))
-	if err := yaml.UnmarshalContext(ctx, []byte(`"foo": "bar"`), &v); err != nil {
+	if err := codec.UnmarshalContext(ctx, []byte(`"foo": "bar"`), &v); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(v.Foo, []byte("override")) {

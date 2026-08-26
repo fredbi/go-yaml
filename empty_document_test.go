@@ -12,14 +12,14 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 // decodeStream reads every document of src.
 func decodeStream(t *testing.T, src string) []any {
 	t.Helper()
 
-	dec := yaml.NewDecoder(bytes.NewBufferString(src))
+	dec := codec.NewDecoder(bytes.NewBufferString(src))
 
 	var out []any
 	for range 32 {

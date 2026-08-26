@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
@@ -262,7 +262,7 @@ func summarize(err error) string {
 // The whole stream, because a decode of one document says nothing about a
 // pattern whose anchor and alias are in different documents.
 func readStream(src []byte) (any, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(src))
+	dec := codec.NewDecoder(bytes.NewReader(src))
 
 	var (
 		first any
