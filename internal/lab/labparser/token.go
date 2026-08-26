@@ -451,16 +451,19 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // more of them.
 func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
 	g := newGrouper(raw.n)
+	// EXPERIMENT (2026-08-27): groupMapKeyValues is gone from this pipeline.
+	// It paired a map-key group with the value standing on its line, and the
+	// parser's descent does that itself now -- see parseMapEntry, which also
+	// took over the one conformance check the pairing carried.
 	tks := g.collect(raw.n, g.groupDirectives(
-		g.groupMapKeyValues(
-			g.groupMapKeysByValue(
-				g.groupExplicitKeys(
-					g.groupAnchorsWithScalarTags(
-						g.groupScalarTags(
-							g.groupAnchors(
-								g.groupBlockScalars(
-									g.attachLineComments(
-										g.stream(raw)))))))))))
+		(g.groupMapKeysByValue(
+			g.groupExplicitKeys(
+				g.groupAnchorsWithScalarTags(
+					g.groupScalarTags(
+						g.groupAnchors(
+							g.groupBlockScalars(
+								g.attachLineComments(
+									g.stream(raw)))))))))))
 	if g.err != nil {
 		return nil, nil, g.err
 	}

@@ -675,6 +675,16 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 		return nil, err
 	}
 
+	// A value taken from the key's own line settles the entry, so nothing
+	// indented under it belongs to this key. The pairing pass used to make that
+	// case its own group and the check ran on the group; without the group the
+	// condition has to be read off the tokens.
+	if valueTk != nil && keyTk.Line() == valueTk.Line() {
+		if err := p.validateMapKeyValueNextToken(ctx, keyTk, ctx.currentToken()); err != nil {
+			return nil, err
+		}
+	}
+
 	return newMappingValueNode(childCtx, keyTk.Group.Last(), nil, key, value)
 }
 
