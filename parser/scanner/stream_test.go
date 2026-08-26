@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-openapi/testify/v2/assert"
 
-	"github.com/go-openapi/go-yaml/scanner"
+	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
 // bom is written as an escape because a byte order mark in Go source is one the

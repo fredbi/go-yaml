@@ -87,11 +87,11 @@ below it.
 | package | what it holds | imports |
 |---|---|---|
 | `token` | a token and its position | — |
-| `scanner` | reads a source into tokens | `token` |
+| `parser/scanner` | reads a source into tokens | `token` |
 | `ast` | the document as a tree | `token` |
 | `printer` | draws a document, or a line of it under an error | `ast` |
 | `errors` | `Error`, the kind it carries, and `FormatError` | `printer` |
-| `parser` | builds a tree from a token stream | `scanner`, `errors` |
+| `parser` | builds a tree from a token stream | `parser/scanner`, `errors` |
 | `codec` | `Encoder`, `Decoder`, the 25 options, `MapSlice`, `RawMessage`, the comment types, the marshaler interfaces | `parser` |
 | `expressions` | `Path` and `PathString`, to navigate a document by path | `codec` |
 | `github.com/go-openapi/go-yaml` | `Marshal`, `Unmarshal`, `ToJSON`, `FromJSON` | `codec` |

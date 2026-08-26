@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/go-yaml/parser"
-	"github.com/go-openapi/go-yaml/scanner"
+	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
 // The stages the parser goes through, so the numbers subtract.

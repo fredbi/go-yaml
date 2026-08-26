@@ -13,7 +13,7 @@
 //     pass an option.
 //   - [github.com/go-openapi/go-yaml/ast] holds the document as a tree.
 //   - [github.com/go-openapi/go-yaml/parser] builds that tree from a source,
-//     and [github.com/go-openapi/go-yaml/scanner] hands it the tokens.
+//     and [github.com/go-openapi/go-yaml/parser/scanner] hands it the tokens.
 //   - [github.com/go-openapi/go-yaml/errors] declares the failure every one of
 //     them reports, with the position it happened at.
 //   - [github.com/go-openapi/go-yaml/expressions] navigates a document by
