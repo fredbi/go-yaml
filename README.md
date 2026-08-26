@@ -68,7 +68,7 @@ README's rationale still applies:
 - higher coverage of the YAML Test Suite
 - errors carry source positions, which makes validation diagnostics possible
 - comments and anchors survive a round trip, so reversible transformation is achievable
-- an API that exposes `Tokenizer` and `Parser`, not only `Encoder`/`Decoder`
+- an API that exposes `Scanner` and `Parser`, not only `Encoder`/`Decoder`
 
 ## Installation
 
@@ -77,6 +77,24 @@ go get github.com/go-openapi/go-yaml
 ```
 
 Requires Go 1.25 or later. We support the two most recent stable Go minor versions.
+
+## Packages
+
+The root package holds `Marshal`, `Unmarshal`, `ToJSON` and `FromJSON` — the four calls that take no option.
+Everything else lives a layer down. The imports run one way: no package in this table imports one listed
+below it.
+
+| package | what it holds | imports |
+|---|---|---|
+| `token` | a token and its position | — |
+| `scanner` | reads a source into tokens | `token` |
+| `ast` | the document as a tree | `token` |
+| `printer` | draws a document, or a line of it under an error | `ast` |
+| `errors` | `Error`, the kind it carries, and `FormatError` | `printer` |
+| `parser` | builds a tree from a token stream | `scanner`, `errors` |
+| `codec` | `Encoder`, `Decoder`, the 25 options, `MapSlice`, `RawMessage`, the comment types, the marshaler interfaces | `parser` |
+| `expressions` | `Path` and `PathString`, to navigate a document by path | `codec` |
+| `github.com/go-openapi/go-yaml` | `Marshal`, `Unmarshal`, `ToJSON`, `FromJSON` | `codec` |
 
 ## Synopsis
 
@@ -133,16 +151,17 @@ if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 For convenience, the `json` tag is also accepted. Note that not all options from the `json` tag have significance
 when parsing YAML documents. If both tags exist, the `yaml` tag takes precedence.
 
-For custom marshal/unmarshaling, implement either the `Bytes` or the `Interface` variant of
-marshaler/unmarshaler. `BytesMarshaler`/`BytesUnmarshaler` behaves like
-[`encoding/json`](https://pkg.go.dev/encoding/json); `InterfaceMarshaler`/`InterfaceUnmarshaler` behaves like
+For custom marshal/unmarshaling, implement one of the two variants declared in
+[`codec`](https://pkg.go.dev/github.com/go-openapi/go-yaml/codec). `codec.Marshaler`/`codec.Unmarshaler` return
+and take the YAML text as `[]byte`, like [`encoding/json`](https://pkg.go.dev/encoding/json);
+`codec.GoYAMLMarshaler`/`codec.GoYAMLUnmarshaler` return and take another Go value, like
 [`gopkg.in/yaml.v2`](https://pkg.go.dev/gopkg.in/yaml.v2).
 
 Semantically both are the same, but they differ in performance. Because indentation matters in YAML, a valid YAML
 fragment returned by a marshaler cannot simply be spliced into the parent container's serialized form — so when
-we receive `[]byte` from a `BytesMarshaler`, we must decode it once to work out how to place it in context. With
-an `InterfaceMarshaler`, that decode is skipped. If you repeatedly marshal complex objects, the latter is always
-better; for a config file read once, the former is easier to write.
+we receive `[]byte` from a `codec.Marshaler`, we must decode it once to work out how to place it in context. With
+a `codec.GoYAMLMarshaler`, that decode is skipped. If you repeatedly marshal complex objects, the latter is
+always better; for a config file read once, the former is easier to write.
 
 ### 2. Reference elements declared in another file
 
@@ -154,12 +173,12 @@ a: &a
   c: hello
 ```
 
-If the `yaml.ReferenceDirs("testdata")` option is passed to `yaml.Decoder`, the decoder looks for anchor
+If the `codec.ReferenceDirs("testdata")` option is passed to `codec.Decoder`, the decoder looks for anchor
 definitions in the YAML files under that directory:
 
 ```go
 buf := bytes.NewBufferString("a: *a\n")
-dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("testdata"))
+dec := codec.NewDecoder(buf, codec.ReferenceDirs("testdata"))
 var v struct {
 	A struct {
 		B int
@@ -290,7 +309,8 @@ people:
 ### 4. Pretty formatted errors
 
 Errors produced during parsing carry the location of the problem in the source document, and can optionally be
-colorized. Use `yaml.FormatError` to control both, which accepts two boolean values.
+colorized. Use `errors.FormatError` from `github.com/go-openapi/go-yaml/errors` to control both, which
+accepts two boolean values.
 
 ### 5. Use YAMLPath
 
@@ -306,7 +326,7 @@ store:
     color: red
     price: 19.95
 `
-path, err := yaml.PathString("$.store.book[*].author")
+path, err := expressions.PathString("$.store.book[*].author")
 if err != nil {
   //...
 }
@@ -327,6 +347,7 @@ import (
   "fmt"
 
   "github.com/go-openapi/go-yaml"
+  "github.com/go-openapi/go-yaml/expressions"
 )
 
 func main() {
@@ -343,7 +364,7 @@ b: "hello"
   }
   if v.A != 2 {
     // output error with YAML source
-    path, err := yaml.PathString("$.a")
+    path, err := expressions.PathString("$.a")
     if err != nil {
       panic(err)
     }
