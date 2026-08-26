@@ -3,6 +3,8 @@
 
 package labparser
 
+import "github.com/go-openapi/go-yaml/ast"
+
 // Option represents parser's option.
 type Option func(p *Parser)
 
@@ -28,5 +30,14 @@ func AllowDuplicateMapKey() Option {
 func OmitNodePaths() Option {
 	return func(p *Parser) {
 		p.omitNodePaths = true
+	}
+}
+
+// OnComplete calls fn with each node as the parser finishes it, in completion
+// order: a node's children are reported before the node. EXPERIMENT
+// (2026-08-27) -- the hook a decoder folding nodes into Go values needs.
+func OnComplete(fn func(ast.Node)) Option {
+	return func(p *Parser) {
+		p.onComplete = fn
 	}
 }

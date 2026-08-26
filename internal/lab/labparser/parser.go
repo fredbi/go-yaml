@@ -95,6 +95,8 @@ var yamlVersionMap = map[string]YAMLVersion{
 type Parser struct {
 	tokens []*Token
 	raw    rawTokens
+	// onComplete is told about each node as it is finished. EXPERIMENT.
+	onComplete func(ast.Node)
 	// entries holds the entries of every mapping open at this point in the
 	// descent, innermost run last. parseMap takes its run off the end once the
 	// mapping is built.
@@ -320,7 +322,34 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	return node, nil
 }
 
+// mappingValue builds a map entry and tells onComplete about it. Every entry
+// the parser makes goes through here, block and flow alike, which is what lets
+// a consumer fold entries without walking the tree. EXPERIMENT (2026-08-27).
+func (p *Parser) mappingValue(ctx context, colon, entry *Token, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
+	n, err := newMappingValueNode(ctx, colon, entry, key, value)
+	if err == nil && p.onComplete != nil {
+		p.onComplete(n)
+	}
+
+	return n, err
+}
+
+// parseToken builds the node tk introduces, and tells onComplete about it.
+//
+// EXPERIMENT (2026-08-27): every node the parser builds returns through here,
+// and it returns complete, so this is the whole post-order hook a consumer
+// folding nodes into values needs. parseMapEntry reports its own entries, which
+// do not come back through here.
 func (p *Parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
+	n, err := p.parseTokenNode(ctx, tk)
+	if err == nil && p.onComplete != nil && n != nil {
+		p.onComplete(n)
+	}
+
+	return n, err
+}
+
+func (p *Parser) parseTokenNode(ctx context, tk *Token) (ast.Node, error) {
 	switch tk.GroupType() {
 	case TokenGroupMapKey, TokenGroupMapKeyValue:
 		return p.parseMap(ctx)
@@ -562,7 +591,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				mapValue, err := newMappingValueNode(ctx, colonTk, entryTk, key, value)
+				mapValue, err := p.mappingValue(ctx, colonTk, entryTk, key, value)
 				if err != nil {
 					return nil, err
 				}
@@ -577,7 +606,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				mapValue, err := newMappingValueNode(ctx, colonTk, entryTk, key, value)
+				mapValue, err := p.mappingValue(ctx, colonTk, entryTk, key, value)
 				if err != nil {
 					return nil, err
 				}
@@ -599,7 +628,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			if err != nil {
 				return nil, err
 			}
-			mapValue, err := newMappingValueNode(ctx, mapKeyTk, entryTk, key, value)
+			mapValue, err := p.mappingValue(ctx, mapKeyTk, entryTk, key, value)
 			if err != nil {
 				return nil, err
 			}
@@ -685,7 +714,7 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 		}
 	}
 
-	return newMappingValueNode(childCtx, keyTk.Group.Last(), nil, key, value)
+	return p.mappingValue(childCtx, keyTk.Group.Last(), nil, key, value)
 }
 
 func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
@@ -811,7 +840,7 @@ func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 	if err != nil {
 		return nil, err
 	}
-	return newMappingValueNode(c, keyGroup.Last(), entryTk, key, value)
+	return p.mappingValue(c, keyGroup.Last(), entryTk, key, value)
 }
 
 // parseMapKeyValueNode parses the key part of a map-key group.
