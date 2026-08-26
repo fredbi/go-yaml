@@ -131,28 +131,12 @@ type Departure struct {
 
 // Departures is what the anchor patterns found, on first contact.
 //
-// Both were found the day the patterns were written, and neither appears
-// anywhere in the four hundred documents of the YAML Test Suite. That is the
-// argument for the patterns in one sentence.
+// None of them appears anywhere in the four hundred documents of the YAML Test
+// Suite. That is the argument for the patterns in one sentence.
+//
+// Two entries left on 2026-08-27, both fixed rather than argued away: a cycle
+// decoding to nil, and an alias resolving to an earlier document's anchor.
 var Departures = []Departure{
-	{
-		Pattern:  "an alias to an anchor in an earlier document",
-		Kind:     Verdict,
-		Observed: `the second document resolves *x to the first document's anchor, and no error is raised`,
-		Because:  "3.2.2.2: anchor names are local to a document, so the alias names nothing and the stream is in error",
-		// ⚠ Contested, and recorded as such rather than quietly kept.
-		//
-		// PyYAML 6.0.1 raises ComposerError on these bytes, which is what this
-		// entry was written on. libfyaml 1.0.0a8 reads the stream and resolves
-		// the alias exactly as this library does. Two conforming
-		// implementations disagree, so one witness is not enough and this is
-		// not yet a defect anybody should act on.
-		//
-		// The remaining doubt is whether libfyaml's binding shares one anchor
-		// table across a stream by its own choice rather than the library's,
-		// which nothing available here can separate.
-		Corroborated: "contested: PyYAML 6.0.1 refuses, libfyaml 1.0.0a8 accepts",
-	},
 	{
 		Pattern:  "a version directive and a tag directive together",
 		Kind:     Verdict,

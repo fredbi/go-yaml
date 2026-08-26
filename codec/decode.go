@@ -37,46 +37,53 @@ type Decoder struct {
 	// It says where to report a validation error about a field the document
 	// left out, there being nothing inside the node to point at, and what
 	// indentation to strip when a node is handed to a custom unmarshaler.
-	entry                ast.Node
-	reader               io.Reader
-	referenceReaders     []io.Reader
-	anchorNodeMap        map[string]ast.Node
-	anchorValueMap       map[string]reflect.Value
-	customUnmarshalerMap map[reflect.Type]func(context.Context, interface{}, []byte) error
-	commentMaps          []CommentMap
-	toCommentMap         CommentMap
-	opts                 []DecodeOption
-	referenceFiles       []string
-	referenceDirs        []string
-	isRecursiveDir       bool
-	isResolvedReference  bool
-	validator            StructValidator
-	disallowUnknownField bool
-	allowedFieldPrefixes []string
-	allowDuplicateMapKey bool
-	useOrderedMap        bool
-	useJSONUnmarshaler   bool
-	parsedFile           *ast.File
-	streamIndex          int
-	decodeDepth          int
+	entry            ast.Node
+	reader           io.Reader
+	referenceReaders []io.Reader
+	anchorNodeMap    map[string]ast.Node
+	anchorNodeMaps   []map[string]ast.Node
+	// referenceAnchorNodeMap holds the anchors published by ReferenceFiles and
+	// ReferenceDirs. Every document of the input starts from these: naming an
+	// anchor across files is what the option is for, where naming one across the
+	// documents of a stream is not.
+	referenceAnchorNodeMap map[string]ast.Node
+	anchorValueMap         map[string]reflect.Value
+	customUnmarshalerMap   map[reflect.Type]func(context.Context, interface{}, []byte) error
+	commentMaps            []CommentMap
+	toCommentMap           CommentMap
+	opts                   []DecodeOption
+	referenceFiles         []string
+	referenceDirs          []string
+	isRecursiveDir         bool
+	isResolvedReference    bool
+	validator              StructValidator
+	disallowUnknownField   bool
+	allowedFieldPrefixes   []string
+	allowDuplicateMapKey   bool
+	useOrderedMap          bool
+	useJSONUnmarshaler     bool
+	parsedFile             *ast.File
+	streamIndex            int
+	decodeDepth            int
 }
 
 // NewDecoder returns a new decoder that reads from r.
 func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
 	return &Decoder{
-		reader:               r,
-		anchorNodeMap:        map[string]ast.Node{},
-		anchorValueMap:       map[string]reflect.Value{},
-		customUnmarshalerMap: map[reflect.Type]func(context.Context, interface{}, []byte) error{},
-		opts:                 opts,
-		referenceReaders:     []io.Reader{},
-		referenceFiles:       []string{},
-		referenceDirs:        []string{},
-		isRecursiveDir:       false,
-		isResolvedReference:  false,
-		disallowUnknownField: false,
-		allowDuplicateMapKey: false,
-		useOrderedMap:        false,
+		reader:                 r,
+		anchorNodeMap:          map[string]ast.Node{},
+		referenceAnchorNodeMap: map[string]ast.Node{},
+		anchorValueMap:         map[string]reflect.Value{},
+		customUnmarshalerMap:   map[reflect.Type]func(context.Context, interface{}, []byte) error{},
+		opts:                   opts,
+		referenceReaders:       []io.Reader{},
+		referenceFiles:         []string{},
+		referenceDirs:          []string{},
+		isRecursiveDir:         false,
+		isResolvedReference:    false,
+		disallowUnknownField:   false,
+		allowDuplicateMapKey:   false,
+		useOrderedMap:          false,
 	}
 }
 
@@ -1946,6 +1953,17 @@ func (d *Decoder) resolveReference(ctx context.Context) error {
 		if _, err := d.parse(ctx, bytes); err != nil {
 			return err
 		}
+
+		// A reference file exists to publish its anchors, so they become the
+		// base every later file and every document of the input starts from.
+		// Its own documents are not the input's, so the bookkeeping the parse
+		// left behind is folded in here rather than indexed by stream position
+		// later.
+		for _, m := range d.anchorNodeMaps {
+			maps.Copy(d.referenceAnchorNodeMap, m)
+		}
+		d.anchorNodeMaps = nil
+		d.commentMaps = nil
 	}
 	d.isResolvedReference = true
 	return nil
@@ -1966,6 +1984,16 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 	}
 	normalizedFile := &ast.File{}
 	for _, doc := range f.Docs {
+		// An anchor belongs to the document it was written in: a stream is a run
+		// of documents, each independent of the rest, so each gets its own books
+		// and an alias naming an anchor from an earlier one has nothing to name.
+		// Kept alongside the documents, as the comment maps are, because this
+		// walk runs over the whole stream and decode reads one document at a
+		// time afterwards.
+		d.anchorNodeMap = make(map[string]ast.Node, len(d.referenceAnchorNodeMap))
+		maps.Copy(d.anchorNodeMap, d.referenceAnchorNodeMap)
+		d.anchorValueMap = make(map[string]reflect.Value)
+
 		// try to decode ast.Node to value and map anchor value to anchorMap
 		v, err := d.nodeToValue(ctx, doc.Body)
 		if err != nil {
@@ -1976,6 +2004,7 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 			cm := CommentMap{}
 			maps.Copy(cm, d.toCommentMap)
 			d.commentMaps = append(d.commentMaps, cm)
+			d.anchorNodeMaps = append(d.anchorNodeMaps, d.anchorNodeMap)
 		}
 		for k := range d.toCommentMap {
 			delete(d.toCommentMap, k)
@@ -2063,6 +2092,7 @@ func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
 	if len(d.commentMaps) > d.streamIndex {
 		maps.Copy(d.toCommentMap, d.commentMaps[d.streamIndex])
 	}
+	d.anchorNodeMap = d.anchorNodeMaps[d.streamIndex]
 	if err := d.decodeValue(ctx, v.Elem(), body); err != nil {
 		return err
 	}
