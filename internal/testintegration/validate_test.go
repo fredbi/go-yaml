@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 
-	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 func TestStructValidator(t *testing.T) {
@@ -210,10 +210,10 @@ map:
 		tc := tc // NOTE: https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
 		t.Run(tc.TestName, func(t *testing.T) {
 			validate := validator.New()
-			dec := yaml.NewDecoder(
+			dec := codec.NewDecoder(
 				strings.NewReader(tc.YAMLContent),
-				yaml.Validator(validate),
-				yaml.Strict(),
+				codec.Validator(validate),
+				codec.Strict(),
 			)
 			err := dec.Decode(tc.Instance)
 			switch {

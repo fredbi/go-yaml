@@ -1,4 +1,7 @@
-package yaml
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package yamlpath
 
 import (
 	"bytes"
@@ -214,24 +217,6 @@ func (p *Path) String() string {
 	return p.node.String()
 }
 
-// Read decode from r and set extracted value by YAMLPath to v.
-func (p *Path) Read(r io.Reader, v interface{}) error {
-	node, err := p.ReadNode(r)
-	if err != nil {
-		return err
-	}
-
-	// The node is decoded as it stands rather than rendered back to YAML and
-	// read again. Rendering loses what the spelling does not carry: a block
-	// scalar written "|" is clipped, so the break ending its last line belongs
-	// to the value, and the node renders without it.
-	if err := NodeToValue(node, v); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // ReadNode create AST from r and extract node by YAMLPath.
 func (p *Path) ReadNode(r io.Reader) (ast.Node, error) {
 	if p.node == nil {
@@ -250,18 +235,6 @@ func (p *Path) ReadNode(r io.Reader) (ast.Node, error) {
 		return nil, err
 	}
 	return node, nil
-}
-
-// Filter filter from target by YAMLPath and set it to v.
-func (p *Path) Filter(target, v interface{}) error {
-	b, err := Marshal(target)
-	if err != nil {
-		return err
-	}
-	if err := p.Read(bytes.NewBuffer(b), v); err != nil {
-		return err
-	}
-	return nil
 }
 
 // FilterFile filter from ast.File by YAMLPath.

@@ -9,21 +9,21 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
-	"github.com/go-openapi/go-yaml/scanner"
+	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
 // maxScanCalls bounds the scanning loop.
 //
 // Scanner.Scan only signals completion with io.EOF, so a caller that keeps
-// calling it after any other error -- which is what lexer.Tokenize does --
-// relies on the scanner always making progress. Nothing enforces that, so the
+// calling it after any other error relies on the scanner always making
+// progress. Nothing enforces that, so the
 // bound turns a hypothetical non-progressing loop into a test failure rather
 // than a fuzzing timeout.
 const maxScanCalls = 1 << 16
 
-// scanAll drives a Scanner to exhaustion, exactly as lexer.Tokenize does, and
-// reports whether it terminated on its own.
+// scanAll drives a Scanner to exhaustion and reports whether it terminated on
+// its own.
 func scanAll(t *testing.T, src string) token.Tokens {
 	t.Helper()
 

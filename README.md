@@ -27,35 +27,39 @@ YAML library currently offers together:
 - **Low-level access** — a token and AST surface with accurate positions, not a `Marshal`/`Unmarshal` facade.
   We drive editor and TUI tooling (syntax colouring, diagnostics, JSON-pointer navigation) over OpenAPI
   documents, so we need to know *where* every construct is, not just what it means.
-- **Streaming, with a bounded memory footprint.** OpenAPI documents get large. Today the whole input is
-  materialised as `[]rune`, every token is retained, and nothing can be emitted before the entire document has
-  been parsed — an AST costs roughly 32× the source.
+- **Streaming, with a bounded memory footprint.** OpenAPI documents get large. At the fork point the whole
+  input was materialised as `[]rune`, every token was retained, and nothing could be emitted before the entire
+  document had been parsed — an AST cost roughly 32× the source. The `[]rune` is gone and a parse now makes
+  84% fewer allocations, but the parser still reads a whole document; streaming is the work in progress.
 - **Conformance** good enough to project YAML onto JSON semantics faithfully, measured against the
   [YAML Test Suite](https://github.com/yaml/yaml-test-suite) rather than asserted.
 
 `goccy/go-yaml` is the only Go YAML library whose architecture *exposes the machinery* to build that on. That is
-why we started from it rather than from anything else. What it does not yet have is the performance and the
-streaming — and getting there means changes to the scanner and the token representation that are too invasive to
-land as drive-by pull requests against a library with a large installed base.
+why we started from it rather than from anything else.
 
-See [`ANALYSIS-go-openapi.md`](./ANALYSIS-go-openapi.md) for the measurements behind all of the above, and
-[`PROPOSALS-go-openapi.md`](./PROPOSALS-go-openapi.md) for the parts we think are worth upstreaming.
+See [`ANALYSIS-go-openapi.md`](./ANALYSIS-go-openapi.md) for the measurements behind all of the above.
 
 ## Is it a hard fork?
 
-**No — a soft fork, and we intend to contribute back.**
+**Yes.** It started as a soft fork and it is no longer one.
 
-- **Fixes that cost upstream nothing, we offer upstream.** Bug fixes, conformance corrections and API-neutral
-  performance work are kept as isolated commits so they can be sent as pull requests. The first of those — a fix
-  for super-linear parsing of wide mappings, worth 24× on a 1.4 MB document with no behaviour change — is
-  described in `PROPOSALS-go-openapi.md` §0.
-- **Architecture is where we diverge.** A byte- and reader-based scanner, zero-copy tokens, and byte-valued
-  source offsets are breaking changes by nature. Those we carry here.
-- **Licensing is unchanged.** This repository stays under `goccy/go-yaml`'s MIT license (see [LICENSE](./LICENSE))
-  and claims no separate copyright. Third-party components are recorded in [NOTICE](./NOTICE).
+We set out to keep every fix that cost upstream nothing as an isolated commit, ready to send as a pull request.
+Four things ended that:
 
-If upstream would rather take the architectural work too, we would be glad to be a testing ground for it rather
-than a permanent fork.
+- **The root API.** 133 exported entries, with `Path` sitting at the top level and the encoder holding a `*Path`.
+  Ours declares four functions. Everything else moved to `codec`, `ast`, `parser`, `errors` and `expressions`.
+- **Comment manipulation wired into the top-level API**, where it belongs to the AST.
+- **The parser materializes the whole document.** The AST cost roughly 32× the source, which makes streaming
+  impossible and the memory churn structural. Fixing it means rewriting the scanner and the token, not tuning.
+- **The parser API only ever addresses a fully parsed document.** There is no shape in it for reading a stream.
+
+Alongside those, the correctness round moved the YAML Test Suite from 88.3% to 100% of scored cases, the whole
+tree was relinted to go-openapi standards, and the wasi playground was removed. Upstream is barely maintained,
+and the distance is now too large for any of this to be retrofitted.
+
+**Licensing is unchanged.** This repository stays under `goccy/go-yaml`'s MIT license (see [LICENSE](./LICENSE))
+and claims no separate copyright. Credit for almost all of the original code belongs upstream. Third-party
+components are recorded in [NOTICE](./NOTICE).
 
 ## Relationship to `go-yaml/yaml`
 
@@ -68,7 +72,7 @@ README's rationale still applies:
 - higher coverage of the YAML Test Suite
 - errors carry source positions, which makes validation diagnostics possible
 - comments and anchors survive a round trip, so reversible transformation is achievable
-- an API that exposes `Tokenizer` and `Parser`, not only `Encoder`/`Decoder`
+- an API that exposes `Scanner` and `Parser`, not only `Encoder`/`Decoder`
 
 ## Installation
 
@@ -77,6 +81,24 @@ go get github.com/go-openapi/go-yaml
 ```
 
 Requires Go 1.25 or later. We support the two most recent stable Go minor versions.
+
+## Packages
+
+The root package holds `Marshal`, `Unmarshal`, `ToJSON` and `FromJSON` — the four calls that take no option.
+Everything else lives a layer down. The imports run one way: no package in this table imports one listed
+below it.
+
+| package | what it holds | imports |
+|---|---|---|
+| `token` | a token and its position | — |
+| `parser/scanner` | reads a source into tokens | `token` |
+| `ast` | the document as a tree | `token` |
+| `printer` | draws a document, or a line of it under an error | `ast` |
+| `errors` | `Error`, the kind it carries, and `FormatError` | `printer` |
+| `parser` | builds a tree from a token stream | `parser/scanner`, `errors` |
+| `codec` | `Encoder`, `Decoder`, the 25 options, `MapSlice`, `RawMessage`, the comment types, the marshaler interfaces | `parser` |
+| `expressions` | `Path` and `PathString`, to navigate a document by path | `codec` |
+| `github.com/go-openapi/go-yaml` | `Marshal`, `Unmarshal`, `ToJSON`, `FromJSON` | `codec` |
 
 ## Synopsis
 
@@ -133,16 +155,17 @@ if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 For convenience, the `json` tag is also accepted. Note that not all options from the `json` tag have significance
 when parsing YAML documents. If both tags exist, the `yaml` tag takes precedence.
 
-For custom marshal/unmarshaling, implement either the `Bytes` or the `Interface` variant of
-marshaler/unmarshaler. `BytesMarshaler`/`BytesUnmarshaler` behaves like
-[`encoding/json`](https://pkg.go.dev/encoding/json); `InterfaceMarshaler`/`InterfaceUnmarshaler` behaves like
+For custom marshal/unmarshaling, implement one of the two variants declared in
+[`codec`](https://pkg.go.dev/github.com/go-openapi/go-yaml/codec). `codec.Marshaler`/`codec.Unmarshaler` return
+and take the YAML text as `[]byte`, like [`encoding/json`](https://pkg.go.dev/encoding/json);
+`codec.GoYAMLMarshaler`/`codec.GoYAMLUnmarshaler` return and take another Go value, like
 [`gopkg.in/yaml.v2`](https://pkg.go.dev/gopkg.in/yaml.v2).
 
 Semantically both are the same, but they differ in performance. Because indentation matters in YAML, a valid YAML
 fragment returned by a marshaler cannot simply be spliced into the parent container's serialized form — so when
-we receive `[]byte` from a `BytesMarshaler`, we must decode it once to work out how to place it in context. With
-an `InterfaceMarshaler`, that decode is skipped. If you repeatedly marshal complex objects, the latter is always
-better; for a config file read once, the former is easier to write.
+we receive `[]byte` from a `codec.Marshaler`, we must decode it once to work out how to place it in context. With
+a `codec.GoYAMLMarshaler`, that decode is skipped. If you repeatedly marshal complex objects, the latter is
+always better; for a config file read once, the former is easier to write.
 
 ### 2. Reference elements declared in another file
 
@@ -154,12 +177,12 @@ a: &a
   c: hello
 ```
 
-If the `yaml.ReferenceDirs("testdata")` option is passed to `yaml.Decoder`, the decoder looks for anchor
+If the `codec.ReferenceDirs("testdata")` option is passed to `codec.Decoder`, the decoder looks for anchor
 definitions in the YAML files under that directory:
 
 ```go
 buf := bytes.NewBufferString("a: *a\n")
-dec := yaml.NewDecoder(buf, yaml.ReferenceDirs("testdata"))
+dec := codec.NewDecoder(buf, codec.ReferenceDirs("testdata"))
 var v struct {
 	A struct {
 		B int
@@ -290,7 +313,8 @@ people:
 ### 4. Pretty formatted errors
 
 Errors produced during parsing carry the location of the problem in the source document, and can optionally be
-colorized. Use `yaml.FormatError` to control both, which accepts two boolean values.
+colorized. Use `errors.FormatError` from `github.com/go-openapi/go-yaml/errors` to control both, which
+accepts two boolean values.
 
 ### 5. Use YAMLPath
 
@@ -306,7 +330,7 @@ store:
     color: red
     price: 19.95
 `
-path, err := yaml.PathString("$.store.book[*].author")
+path, err := expressions.PathString("$.store.book[*].author")
 if err != nil {
   //...
 }
@@ -327,6 +351,7 @@ import (
   "fmt"
 
   "github.com/go-openapi/go-yaml"
+  "github.com/go-openapi/go-yaml/expressions"
 )
 
 func main() {
@@ -343,7 +368,7 @@ b: "hello"
   }
   if v.A != 2 {
     // output error with YAML source
-    path, err := yaml.PathString("$.a")
+    path, err := expressions.PathString("$.a")
     if err != nil {
       panic(err)
     }

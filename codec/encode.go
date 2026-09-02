@@ -1,8 +1,9 @@
-package yaml
+package codec
 
 import (
 	"context"
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -13,7 +14,7 @@ import (
 	"time"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -41,7 +42,7 @@ type Encoder struct {
 	omitEmpty                  bool
 	autoInt                    bool
 	useLiteralStyleIfMultiline bool
-	commentMap                 map[*Path][]*Comment
+	commentMap                 map[nodeFilter][]*Comment
 	written                    bool
 
 	line           int
@@ -139,6 +140,18 @@ func (e *Encoder) EncodeToNodeContext(ctx context.Context, v interface{}) (ast.N
 	return node, nil
 }
 
+// nodeFilter picks one node out of a tree.
+//
+// The encoder writes a comment at the value a [CommentMap] key addresses, and
+// what it needs of that key is this and nothing else: hand it the document,
+// take back the node, or nil where the key addresses nothing here. A YAML path
+// is what the caller writes and [Path] is what resolves one, but the encoder
+// never asks what a path is -- so it does not depend on the query language, and
+// a caller with another way to reach a node can pass that instead.
+type nodeFilter interface {
+	FilterNode(ast.Node) (ast.Node, error)
+}
+
 func (e *Encoder) setCommentByCommentMap(node ast.Node) error {
 	if e.commentMap == nil {
 		return nil
@@ -181,7 +194,7 @@ func (e *Encoder) setCommentByCommentMap(node ast.Node) error {
 func (e *Encoder) setHeadComment(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedHeadPositionType(node)
+		return ast.ErrUnsupportedHeadPositionType(node)
 	}
 	switch p := parent.(type) {
 	case *ast.MappingValueNode:
@@ -205,7 +218,7 @@ func (e *Encoder) setHeadComment(node ast.Node, filtered ast.Node, comment *ast.
 		}
 		p.ValueHeadComments[foundIdx] = comment
 	default:
-		return ErrUnsupportedHeadPositionType(node)
+		return ast.ErrUnsupportedHeadPositionType(node)
 	}
 	return nil
 }
@@ -229,7 +242,7 @@ func (e *Encoder) setLineComment(node ast.Node, filtered ast.Node, comment *ast.
 func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedLinePositionType(node)
+		return ast.ErrUnsupportedLinePositionType(node)
 	}
 	switch p := parent.(type) {
 	case *ast.MappingValueNode:
@@ -241,7 +254,7 @@ func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node
 			return err
 		}
 	default:
-		return ErrUnsupportedLinePositionType(parent)
+		return ast.ErrUnsupportedLinePositionType(parent)
 	}
 	return nil
 }
@@ -249,7 +262,7 @@ func (e *Encoder) setLineCommentToParentMapNode(node ast.Node, filtered ast.Node
 func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.CommentGroupNode) error {
 	parent := ast.Parent(node, filtered)
 	if parent == nil {
-		return ErrUnsupportedFootPositionType(node)
+		return ast.ErrUnsupportedFootPositionType(node)
 	}
 	switch n := parent.(type) {
 	case *ast.MappingValueNode:
@@ -259,7 +272,7 @@ func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.
 	case *ast.SequenceNode:
 		n.FootComment = comment
 	default:
-		return ErrUnsupportedFootPositionType(n)
+		return ast.ErrUnsupportedFootPositionType(n)
 	}
 	return nil
 }
@@ -330,13 +343,13 @@ func (e *Encoder) canEncodeByMarshaler(v reflect.Value) bool {
 	}
 	iface := v.Interface()
 	switch iface.(type) {
-	case BytesMarshalerContext:
+	case ContextMarshaler:
 		return true
-	case BytesMarshaler:
+	case Marshaler:
 		return true
-	case InterfaceMarshalerContext:
+	case ContextGoYAMLMarshaler:
 		return true
-	case InterfaceMarshaler:
+	case GoYAMLMarshaler:
 		return true
 	case time.Time, *time.Time:
 		return true
@@ -365,7 +378,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(BytesMarshalerContext); ok {
+	if marshaler, ok := iface.(ContextMarshaler); ok {
 		doc, err := marshaler.MarshalYAML(ctx)
 		if err != nil {
 			return nil, err
@@ -377,7 +390,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(BytesMarshaler); ok {
+	if marshaler, ok := iface.(Marshaler); ok {
 		doc, err := marshaler.MarshalYAML()
 		if err != nil {
 			return nil, err
@@ -389,7 +402,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return node, nil
 	}
 
-	if marshaler, ok := iface.(InterfaceMarshalerContext); ok {
+	if marshaler, ok := iface.(ContextGoYAMLMarshaler); ok {
 		marshalV, err := marshaler.MarshalYAML(ctx)
 		if err != nil {
 			return nil, err
@@ -397,7 +410,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		return e.encodeValue(ctx, reflect.ValueOf(marshalV), column)
 	}
 
-	if marshaler, ok := iface.(InterfaceMarshaler); ok {
+	if marshaler, ok := iface.(GoYAMLMarshaler); ok {
 		marshalV, err := marshaler.MarshalYAML()
 		if err != nil {
 			return nil, err
@@ -432,7 +445,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 			if err != nil {
 				return nil, err
 			}
-			doc, err := JSONToYAML(jsonBytes)
+			doc, err := FromJSON(jsonBytes)
 			if err != nil {
 				return nil, err
 			}
@@ -444,7 +457,7 @@ func (e *Encoder) encodeByMarshaler(ctx context.Context, v reflect.Value, column
 		}
 	}
 
-	return nil, errors.New("does not implemented Marshaler")
+	return nil, errors.New("does not implemented GoYAMLMarshaler")
 }
 
 func (e *Encoder) encodeValue(ctx context.Context, v reflect.Value, column int) (ast.Node, error) {
@@ -903,7 +916,7 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 			if aliasName := sf.AliasName; aliasName != "" {
 				alias, ok := encoded.(*ast.AliasNode)
 				if !ok {
-					return nil, errors.ErrUnexpectedNodeType(encoded.Type(), ast.AliasType, encoded.GetToken())
+					return nil, yamlerrors.NewUnexpectedNodeType(encoded.Type(), ast.AliasType, encoded.GetToken())
 				}
 				got := alias.Value.String()
 				if aliasName != got {

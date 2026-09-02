@@ -1,4 +1,4 @@
-package yaml
+package codec
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/internal/yamlpath"
 )
 
 // DecodeOption functional option type for Decoder
@@ -95,7 +96,7 @@ func UseOrderedMap() DecodeOption {
 	}
 }
 
-// UseJSONUnmarshaler if neither `BytesUnmarshaler` nor `InterfaceUnmarshaler` is implemented
+// UseJSONUnmarshaler if neither `Unmarshaler` nor `GoYAMLUnmarshaler` is implemented
 // and `UnmashalJSON([]byte)error` is implemented, convert the argument from `YAML` to `JSON` and then call it.
 func UseJSONUnmarshaler() DecodeOption {
 	return func(d *Decoder) error {
@@ -203,7 +204,7 @@ func MarshalAnchor(callback func(*ast.AnchorNode, interface{}) error) EncodeOpti
 	}
 }
 
-// UseJSONMarshaler if neither `BytesMarshaler` nor `InterfaceMarshaler`
+// UseJSONMarshaler if neither `Marshaler` nor `GoYAMLMarshaler`
 // nor `encoding.TextMarshaler` is implemented and `MarshalJSON()([]byte, error)` is implemented,
 // call `MarshalJSON` to convert the returned `JSON` to `YAML` for processing.
 func UseJSONMarshaler() EncodeOption {
@@ -269,12 +270,23 @@ func OmitZero() EncodeOption {
 	}
 }
 
-// CommentPosition type of the position for comment.
+// CommentPosition says where a comment stands relative to the value it belongs
+// to.
+//
+// This is the one thing [ast] does not record. An [ast.CommentGroupNode] holds
+// the text of a run of comments and nothing about its placement: a node has a
+// single comment slot, and which of the three a comment is follows from which
+// node the group was attached to. The parser works the placement out and the
+// tree does not keep it, so a caller reading comments out of a document or
+// writing them into one needs this to say what the tree cannot.
 type CommentPosition int
 
 const (
+	// CommentHeadPosition is a comment on the lines above its value.
 	CommentHeadPosition CommentPosition = CommentPosition(iota)
+	// CommentLinePosition is a comment sharing a line with its value, after it.
 	CommentLinePosition
+	// CommentFootPosition is a comment on the lines below its value.
 	CommentFootPosition
 )
 
@@ -291,7 +303,7 @@ func (p CommentPosition) String() string {
 	}
 }
 
-// LineComment create a one-line comment for CommentMap.
+// LineComment returns a comment to write after its value, on the same line.
 func LineComment(text string) *Comment {
 	return &Comment{
 		Texts:    []string{text},
@@ -299,7 +311,7 @@ func LineComment(text string) *Comment {
 	}
 }
 
-// HeadComment create a multiline comment for CommentMap.
+// HeadComment returns a comment to write above its value, one line per text.
 func HeadComment(texts ...string) *Comment {
 	return &Comment{
 		Texts:    texts,
@@ -307,7 +319,7 @@ func HeadComment(texts ...string) *Comment {
 	}
 }
 
-// FootComment create a multiline comment for CommentMap.
+// FootComment returns a comment to write below its value, one line per text.
 func FootComment(texts ...string) *Comment {
 	return &Comment{
 		Texts:    texts,
@@ -315,21 +327,49 @@ func FootComment(texts ...string) *Comment {
 	}
 }
 
-// Comment raw data for comment.
+// Comment is the text of a comment and where it goes, apart from any document.
+//
+// It carries what [ast.CommentGroupNode] carries -- one line of text per entry
+// in Texts -- plus the [CommentPosition] the tree drops. Build one with
+// [HeadComment], [LineComment] or [FootComment] rather than by hand, so that
+// the texts and the position agree.
+//
+// Nothing here addresses a document. A Comment says what to write and whether
+// it goes above, beside or below; [CommentMap] says which value it belongs to.
 type Comment struct {
-	Texts    []string
+	// Texts is one line of comment per entry, written without the '#'.
+	Texts []string
+	// Position places the comment relative to its value.
 	Position CommentPosition
 }
 
-// CommentMap map of the position of the comment and the comment information.
+// CommentMap holds the comments of a document, against the path of the value
+// each belongs to.
+//
+// A key is a YAML path as [PathString] parses it -- "$.foo.bar", "$.baz[1]".
+// [CommentToMap] fills one in while decoding, taking each key from the node's
+// own path, and [WithComment] reads one while encoding. So a map produced by
+// decoding is a map the encoder can write back.
+//
+// A value may carry more than one comment: a head comment and a line comment
+// stand in different places and are two entries under the same key.
 type CommentMap map[string][]*Comment
 
-// WithComment add a comment using the location and text information given in the CommentMap.
+// WithComment writes the comments cm holds into the document being encoded.
+//
+// Each key is parsed as a YAML path and the comment is written at the value the
+// path addresses. A key addressing no value in the document is passed over
+// rather than reported: a map read from one document may be written to another
+// that does not hold every value.
+//
+// The keys are full path expressions, so "$..a" and "$[*]" parse. Only the
+// first value such a key reaches takes the comment, because a comment goes in
+// one place -- prefer a key that addresses one value.
 func WithComment(cm CommentMap) EncodeOption {
 	return func(e *Encoder) error {
-		commentMap := map[*Path][]*Comment{}
+		commentMap := map[nodeFilter][]*Comment{}
 		for k, v := range cm {
-			path, err := PathString(k)
+			path, err := yamlpath.PathString(k)
 			if err != nil {
 				return err
 			}
@@ -340,7 +380,14 @@ func WithComment(cm CommentMap) EncodeOption {
 	}
 }
 
-// CommentToMap apply the position and content of comments in a YAML document to a CommentMap.
+// CommentToMap collects the comments of the document being decoded into cm.
+//
+// Each comment is filed under the path of the value it belongs to, so the map
+// is one [WithComment] can write back. cm must not be nil; the decoder fills
+// the map the caller keeps rather than returning one.
+//
+// Decoding a document reads its values; this is how the comments come out with
+// them, since a Go value has nowhere to hold a comment.
 func CommentToMap(cm CommentMap) DecodeOption {
 	return func(d *Decoder) error {
 		if cm == nil {

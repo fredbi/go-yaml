@@ -25,7 +25,7 @@ func TestMemoryFootprint(t *testing.T) {
 		f    func() any
 	}{
 		{"[]rune(src)", func() any { return []rune(src) }},
-		{"lexer.Tokenize", func() any { return tokenize(t, src) }},
+		{"scanner.Scanner -> token.Tokens", func() any { return tokenize(t, src) }},
 		{"parser.ParseBytes -> *ast.File", func() any {
 			f, err := parser.ParseBytes([]byte(src), 0)
 			if err != nil {

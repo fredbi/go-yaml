@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -604,7 +604,7 @@ func (g *grouper) groupAnchors(in iter.Seq[*Token]) iter.Seq[*Token] {
 			case name != nil:
 				sameLine := name.Line() == tk.Line()
 				if sameLine && tk.Type() == token.SequenceEntryType {
-					g.fail(errors.ErrSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
+					g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
 
 					return
 				}
@@ -638,9 +638,9 @@ func (g *grouper) groupAnchors(in iter.Seq[*Token]) iter.Seq[*Token] {
 
 		switch {
 		case anchor != nil:
-			g.fail(errors.ErrSyntax("undefined anchor name", anchor.RawToken()))
+			g.fail(yamlerrors.NewSyntax("undefined anchor name", anchor.RawToken()))
 		case alias != nil:
-			g.fail(errors.ErrSyntax("undefined alias name", alias.RawToken()))
+			g.fail(yamlerrors.NewSyntax("undefined alias name", alias.RawToken()))
 		case name != nil:
 			// An anchor with nothing after it names the empty node. The parser
 			// supplies that null; there is nothing to group here.
@@ -728,7 +728,7 @@ func (g *grouper) taggedScalar(tag, next *Token) (*Token, bool) {
 		return g.group2(TokenGroupScalarTag, tag, next), true
 	case token.MergeTag:
 		if next.Type() != token.MergeKeyType {
-			g.fail(errors.ErrSyntax("could not find merge key", next.RawToken()))
+			g.fail(yamlerrors.NewSyntax("could not find merge key", next.RawToken()))
 
 			return nil, false
 		}
@@ -1035,7 +1035,7 @@ func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
 		// ends it.
 		start := flowCollectionStart(w.held[:last+1])
 		if start < 0 {
-			g.fail(errors.ErrSyntax("found an invalid key for this map", tk.RawToken()))
+			g.fail(yamlerrors.NewSyntax("found an invalid key for this map", tk.RawToken()))
 
 			return false
 		}
@@ -1043,7 +1043,7 @@ func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
 		if w.held[start].Line() != key.Line() {
 			// An implicit key has to be a single-line node, so a collection
 			// spanning lines cannot be one.
-			g.fail(errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken()))
+			g.fail(yamlerrors.NewSyntax("map key definition includes an implicit line break", tk.RawToken()))
 
 			return false
 		}
@@ -1051,7 +1051,7 @@ func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
 			// Directly inside a sequence the ':' is part of that one line too.
 			// Inside a mapping it is separation like any other, and may follow
 			// on the next line.
-			g.fail(errors.ErrSyntax("map key definition includes an implicit line break", tk.RawToken()))
+			g.fail(yamlerrors.NewSyntax("map key definition includes an implicit line break", tk.RawToken()))
 
 			return false
 		}
@@ -1063,7 +1063,7 @@ func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
 	}
 
 	if isNotMapKeyType(key) {
-		g.fail(errors.ErrSyntax("found an invalid key for this map", tk.RawToken()))
+		g.fail(yamlerrors.NewSyntax("found an invalid key for this map", tk.RawToken()))
 
 		return false
 	}
@@ -1200,7 +1200,7 @@ func (g *grouper) groupDirectives(in iter.Seq[*Token]) iter.Seq[*Token] {
 					continue
 				}
 				if tk.Type() != token.DocumentHeaderType {
-					g.fail(errors.ErrSyntax("unexpected directive value. document not started", directive.RawToken()))
+					g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", directive.RawToken()))
 
 					return
 				}
@@ -1234,9 +1234,9 @@ func (g *grouper) groupDirectives(in iter.Seq[*Token]) iter.Seq[*Token] {
 
 		switch {
 		case directive != nil && name == nil:
-			g.fail(errors.ErrSyntax("undefined directive value", directive.RawToken()))
+			g.fail(yamlerrors.NewSyntax("undefined directive value", directive.RawToken()))
 		case directive != nil:
-			g.fail(errors.ErrSyntax("unexpected directive value. document not started", directive.RawToken()))
+			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", directive.RawToken()))
 		}
 	}
 }
@@ -1279,11 +1279,11 @@ func (g *grouper) createDocumentTokens(tokens []*Token, opened bool) ([]*Token, 
 			if tokens[i].Line() == tokens[i+1].Line() {
 				switch tokens[i+1].GroupType() {
 				case TokenGroupMapKey, TokenGroupMapKeyValue:
-					return nil, errors.ErrSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
+					return nil, yamlerrors.NewSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
 				}
 				switch tokens[i+1].Type() {
 				case token.SequenceEntryType:
-					return nil, errors.ErrSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
+					return nil, yamlerrors.NewSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
 				}
 			}
 			tks, err := g.createDocumentTokens(tokens[i+1:], true)
@@ -1312,7 +1312,7 @@ func (g *grouper) createDocumentTokens(tokens []*Token, opened bool) ([]*Token, 
 				// a comment may follow it there. On the next line a new
 				// document begins, and it may be a bare one -- a scalar, or a
 				// block scalar as in the spec's own bare-documents example.
-				return nil, errors.ErrSyntax("unexpected end content", tokens[i+1].RawToken())
+				return nil, yamlerrors.NewSyntax("unexpected end content", tokens[i+1].RawToken())
 			}
 
 			tks, err := g.createDocumentTokens(tokens[i+1:], false)

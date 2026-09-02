@@ -10,6 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/expressions"
 )
 
 // TestPathReadAgreesWithUnmarshal checks that reading a value through a path
@@ -41,7 +42,7 @@ func TestPathReadAgreesWithUnmarshal(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			p, err := yaml.PathString("$.a")
+			p, err := expressions.PathString("$.a")
 			require.NoError(t, err)
 
 			var got any
@@ -58,7 +59,7 @@ func TestPathReadAgreesWithUnmarshal(t *testing.T) {
 // TestPathFilterKeepsTheTrailingBreak checks Filter, which marshals its target
 // and reads a path out of the result, so it goes through the same decode.
 func TestPathFilterKeepsTheTrailingBreak(t *testing.T) {
-	p, err := yaml.PathString("$.a")
+	p, err := expressions.PathString("$.a")
 	require.NoError(t, err)
 
 	var got string

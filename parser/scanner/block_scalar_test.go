@@ -9,7 +9,6 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -50,7 +49,7 @@ func TestBlockScalarHeaderEndingTheSource(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := lexer.Tokenize(test.src)
+			got, err := scanTokens(test.src)
 			if test.types[0] == token.InvalidType {
 				require.Error(t, err, "the scanner should refuse this")
 			} else {
@@ -65,7 +64,7 @@ func TestBlockScalarHeaderEndingTheSource(t *testing.T) {
 			}
 
 			// The same document, written with the line break it was missing.
-			withBreak, _ := lexer.Tokenize(test.withBreak)
+			withBreak, _ := scanTokens(test.withBreak)
 			require.NotEmpty(t, withBreak)
 			assert.Equal(t, got[0].Type, withBreak[0].Type, "the trailing break should not change what the header is")
 		})

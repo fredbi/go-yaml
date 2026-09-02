@@ -16,6 +16,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
 )
 
@@ -173,7 +174,7 @@ func decodeAsExpected(t *testing.T, test *yamltestsuite.TestSuite) (err error) {
 		return nil
 	}
 
-	dec := yaml.NewDecoder(bytes.NewReader(test.InYAML))
+	dec := codec.NewDecoder(bytes.NewReader(test.InYAML))
 	for idx := 0; ; idx++ {
 		var v any
 		if err := dec.Decode(&v); err != nil {

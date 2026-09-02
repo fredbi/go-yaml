@@ -3,17 +3,26 @@ package analysis
 import (
 	"testing"
 
-	"github.com/go-openapi/go-yaml/lexer"
+	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
 // tokenize scans src, failing the caller where the scanner refuses it.
+//
+// A scanner hands out one token at a time; collecting them is what a test that
+// compares a whole document needs, and nothing else should.
 func tokenize(tb testing.TB, src string) token.Tokens {
 	tb.Helper()
 
-	tokens, err := lexer.Tokenize(src)
-	if err != nil {
-		tb.Fatalf("Tokenize: %v", err)
+	var s scanner.Scanner
+	s.Init(src)
+
+	var tokens token.Tokens
+	for tk := range s.All() {
+		tokens = append(tokens, tk)
+	}
+	if err := s.Err(); err != nil {
+		tb.Fatalf("scanning %q: %v", src, err)
 	}
 
 	return tokens

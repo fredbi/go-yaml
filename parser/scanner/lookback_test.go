@@ -12,7 +12,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
-	"github.com/go-openapi/go-yaml/scanner"
+	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 

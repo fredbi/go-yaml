@@ -10,7 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/expressions"
 )
 
 // TestPathStringRejectsAnIndexThatNeverCloses checks the paths that used to
@@ -22,10 +22,10 @@ import (
 func TestPathStringRejectsAnIndexThatNeverCloses(t *testing.T) {
 	for _, src := range []string{"$[0", "$[*", "$[12", "$.a[3", "$[", "$.a['b"} {
 		t.Run(src, func(t *testing.T) {
-			p, err := yaml.PathString(src)
+			p, err := expressions.PathString(src)
 			require.Error(t, err)
 			assert.Nil(t, p)
-			assert.ErrorIs(t, err, yaml.ErrInvalidPathString)
+			assert.ErrorIs(t, err, expressions.ErrInvalidPathString)
 		})
 	}
 }
@@ -44,7 +44,7 @@ func TestPathStringReadsKeysThatAreNotASCII(t *testing.T) {
 
 	for expr, want := range tests {
 		t.Run(expr, func(t *testing.T) {
-			p, err := yaml.PathString(expr)
+			p, err := expressions.PathString(expr)
 			require.NoError(t, err)
 
 			var got any

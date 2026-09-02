@@ -1,10 +1,11 @@
-package yaml
+package codec
 
 import (
 	"bytes"
 	"context"
 	"encoding"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -18,7 +19,7 @@ import (
 	"time"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/errors"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/format"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
@@ -28,7 +29,7 @@ import (
 type Decoder struct {
 	// source is the document being decoded, so an error found in it can draw
 	// the lines around itself.
-	source errors.Source
+	source yamlerrors.Source
 	// entry is the node that writes the one being decoded: the "key:" of a
 	// mapping entry, or the "-" of a sequence one. Decoding is depth first, so
 	// each step saves it and puts it back, and the field behaves as a stack.
@@ -413,7 +414,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			}
 			str, ok := v.(string)
 			if !ok {
-				return nil, errors.ErrSyntax(
+				return nil, yamlerrors.NewSyntax(
 					fmt.Sprintf("cannot convert %q to string", fmt.Sprint(v)),
 					n.Value.GetToken(),
 				)
@@ -436,7 +437,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			case "no":
 				return false, nil
 			}
-			return nil, errors.ErrSyntax(fmt.Sprintf("cannot convert %q to boolean", fmt.Sprint(v)), n.Value.GetToken())
+			return nil, yamlerrors.NewSyntax(fmt.Sprintf("cannot convert %q to boolean", fmt.Sprint(v)), n.Value.GetToken())
 		case token.StringTag:
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
@@ -479,7 +480,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		if node, exists := d.anchorNodeMap[text]; exists {
 			return d.nodeToValue(ctx, node)
 		}
-		return nil, errors.ErrSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
+		return nil, yamlerrors.NewSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
 	case *ast.LiteralNode:
 		return n.Value.GetValue(), nil
 	case *ast.MappingKeyNode:
@@ -580,7 +581,7 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 		return d.getMapNode(n.Value, isMerge)
 	case *ast.SequenceNode:
 		if !isMerge {
-			return nil, errors.ErrUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken())
+			return nil, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken())
 		}
 		var mapNodes []ast.MapNode
 		for _, value := range n.Values {
@@ -592,7 +593,7 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 		}
 		return ast.SequenceMergeValue(mapNodes...), nil
 	}
-	return nil, errors.ErrUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken())
+	return nil, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken())
 }
 
 func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
@@ -621,7 +622,7 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 	}
 	arrayNode, ok := node.(ast.ArrayNode)
 	if !ok {
-		return nil, errors.ErrUnexpectedNodeType(node.Type(), ast.SequenceType, node.GetToken())
+		return nil, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.SequenceType, node.GetToken())
 	}
 	return arrayNode, nil
 }
@@ -644,7 +645,7 @@ func (d *Decoder) convertValue(v reflect.Value, typ reflect.Type, src ast.Node) 
 					// else, fall through to the error below
 				}
 			}
-			return reflect.Zero(typ), errors.ErrTypeMismatch(typ, v.Type(), src.GetToken())
+			return reflect.Zero(typ), yamlerrors.NewTypeMismatch(typ, v.Type(), src.GetToken())
 		}
 		return v.Convert(typ), nil
 	}
@@ -661,7 +662,7 @@ func (d *Decoder) convertValue(v reflect.Value, typ reflect.Type, src ast.Node) 
 		strVal = strconv.FormatBool(v.Bool())
 	default:
 		if !v.Type().ConvertibleTo(typ) {
-			return reflect.Zero(typ), errors.ErrTypeMismatch(typ, v.Type(), src.GetToken())
+			return reflect.Zero(typ), yamlerrors.NewTypeMismatch(typ, v.Type(), src.GetToken())
 		}
 		return v.Convert(typ), nil
 	}
@@ -754,12 +755,12 @@ func (d *Decoder) canDecodeByUnmarshaler(dst reflect.Value) bool {
 	}
 	iface := ptrValue.Interface()
 	switch iface.(type) {
-	case BytesUnmarshalerContext,
-		BytesUnmarshaler,
-		InterfaceUnmarshalerContext,
-		InterfaceUnmarshaler,
+	case ContextUnmarshaler,
+		Unmarshaler,
+		ContextGoYAMLUnmarshaler,
+		GoYAMLUnmarshaler,
 		NodeUnmarshaler,
-		NodeUnmarshalerContext,
+		ContextNodeUnmarshaler,
 		*time.Time,
 		*time.Duration,
 		encoding.TextUnmarshaler:
@@ -784,7 +785,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 	}
 	iface := ptrValue.Interface()
 
-	if unmarshaler, ok := iface.(BytesUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextUnmarshaler); ok {
 		b, err := d.unmarshalableDocument(src)
 		if err != nil {
 			return err
@@ -795,7 +796,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(BytesUnmarshaler); ok {
+	if unmarshaler, ok := iface.(Unmarshaler); ok {
 		b, err := d.unmarshalableDocument(src)
 		if err != nil {
 			return err
@@ -806,7 +807,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(InterfaceUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextGoYAMLUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {
@@ -822,7 +823,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(InterfaceUnmarshaler); ok {
+	if unmarshaler, ok := iface.(GoYAMLUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(func(v interface{}) error {
 			rv := reflect.ValueOf(v)
 			if rv.Type().Kind() != reflect.Pointer {
@@ -846,7 +847,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		return nil
 	}
 
-	if unmarshaler, ok := iface.(NodeUnmarshalerContext); ok {
+	if unmarshaler, ok := iface.(ContextNodeUnmarshaler); ok {
 		if err := unmarshaler.UnmarshalYAML(ctx, src); err != nil {
 			return err
 		}
@@ -878,7 +879,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 			if err != nil {
 				return err
 			}
-			jsonBytes, err := YAMLToJSON(b)
+			jsonBytes, err := ToJSON(b)
 			if err != nil {
 				return err
 			}
@@ -890,7 +891,7 @@ func (d *Decoder) decodeByUnmarshaler(ctx context.Context, dst reflect.Value, sr
 		}
 	}
 
-	return errors.New("does not implemented Unmarshaler")
+	return errors.New("does not implemented GoYAMLUnmarshaler")
 }
 
 var (
@@ -999,12 +1000,12 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 					return nil
 				}
 			} else { // couldn't be parsed as float
-				return errors.ErrTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
+				return yamlerrors.NewTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
 			}
 		default:
-			return errors.ErrTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
+			return yamlerrors.NewTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
 		}
-		return errors.ErrOverflow(valueType, fmt.Sprint(v), src.GetToken())
+		return yamlerrors.NewOverflow(valueType, fmt.Sprint(v), src.GetToken())
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		v, err := d.nodeToValue(ctx, src)
 		if err != nil {
@@ -1033,13 +1034,13 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 					return nil
 				}
 			} else { // couldn't be parsed as float
-				return errors.ErrTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
+				return yamlerrors.NewTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
 			}
 
 		default:
-			return errors.ErrTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
+			return yamlerrors.NewTypeMismatch(valueType, reflect.TypeOf(v), src.GetToken())
 		}
-		return errors.ErrOverflow(valueType, fmt.Sprint(v), src.GetToken())
+		return yamlerrors.NewOverflow(valueType, fmt.Sprint(v), src.GetToken())
 	}
 	srcVal, err := d.nodeToValue(ctx, src)
 	if err != nil {
@@ -1070,7 +1071,7 @@ func (d *Decoder) createDecodableValue(typ reflect.Type) reflect.Value {
 func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type, src ast.Node) (reflect.Value, error) {
 	if target.Kind() != reflect.Pointer {
 		if !value.Type().AssignableTo(target) {
-			return reflect.Value{}, errors.ErrTypeMismatch(target, value.Type(), src.GetToken())
+			return reflect.Value{}, yamlerrors.NewTypeMismatch(target, value.Type(), src.GetToken())
 		}
 		return value, nil
 	}
@@ -1087,7 +1088,7 @@ func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type
 		value = value.Addr()
 	}
 	if !value.Type().AssignableTo(target) {
-		return reflect.Value{}, errors.ErrTypeMismatch(target, value.Type(), src.GetToken())
+		return reflect.Value{}, yamlerrors.NewTypeMismatch(target, value.Type(), src.GetToken())
 	}
 	return value, nil
 }
@@ -1245,7 +1246,7 @@ func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, erro
 	}
 	s, ok := v.(string)
 	if !ok {
-		return time.Time{}, errors.ErrTypeMismatch(reflect.TypeOf(time.Time{}), reflect.TypeOf(v), src.GetToken())
+		return time.Time{}, yamlerrors.NewTypeMismatch(reflect.TypeOf(time.Time{}), reflect.TypeOf(v), src.GetToken())
 	}
 	for _, format := range allowedTimestampFormats {
 		t, err := time.Parse(format, s)
@@ -1280,7 +1281,7 @@ func (d *Decoder) castToDuration(ctx context.Context, src ast.Node) (time.Durati
 	}
 	s, ok := v.(string)
 	if !ok {
-		return 0, errors.ErrTypeMismatch(reflect.TypeOf(time.Duration(0)), reflect.TypeOf(v), src.GetToken())
+		return 0, yamlerrors.NewTypeMismatch(reflect.TypeOf(time.Duration(0)), reflect.TypeOf(v), src.GetToken())
 	}
 	t, err := time.ParseDuration(s)
 	if err != nil {
@@ -1413,20 +1414,17 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				if foundErr != nil {
 					continue
 				}
-				var te *errors.TypeError
-				if errors.As(err, &te) {
-					if te.StructFieldName != nil {
-						fieldName := fmt.Sprintf("%s.%s", structType.Name(), *te.StructFieldName)
-						te.StructFieldName = &fieldName
-					} else {
-						fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
-						te.StructFieldName = &fieldName
+				var te *yamlerrors.Error
+				if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
+					leaf := te.StructField()
+					if leaf == "" {
+						leaf = field.Name
 					}
+					te.SetStructField(structType.Name() + "." + leaf)
 					foundErr = te
 					continue
-				} else {
-					foundErr = err
 				}
+				foundErr = err
 				continue
 			}
 			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
@@ -1451,10 +1449,9 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			if foundErr != nil {
 				continue
 			}
-			var te *errors.TypeError
-			if errors.As(err, &te) {
-				fieldName := fmt.Sprintf("%s.%s", structType.Name(), field.Name)
-				te.StructFieldName = &fieldName
+			var te *yamlerrors.Error
+			if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
+				te.SetStructField(structType.Name() + "." + field.Name)
 				foundErr = te
 			} else {
 				foundErr = err
@@ -1479,7 +1476,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 				}
 			}
 			if !ok {
-				return errors.ErrUnknownField(fmt.Sprintf(`unknown field "%s"`, key), node.GetToken())
+				return yamlerrors.NewUnknownField(fmt.Sprintf(`unknown field "%s"`, key), node.GetToken())
 			}
 		}
 	}
@@ -1500,14 +1497,14 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 					}
 					if node, exists := keyToNodeMap[structField.RenderName]; exists {
 						// TODO: to make FieldError message cutomizable
-						return errors.ErrSyntax(
+						return yamlerrors.NewSyntax(
 							fmt.Sprintf("%s", err),
 							validationErrorToken(node, entries[structField.RenderName]),
 						)
 					} else if t := d.missingFieldToken(src); t != nil {
 						// A missing field has no entry of its own, so the error
 						// goes to the mapping that should have held it.
-						return errors.ErrSyntax(fmt.Sprintf("%s", err), t)
+						return yamlerrors.NewSyntax(fmt.Sprintf("%s", err), t)
 					}
 				}
 			}
@@ -1708,7 +1705,7 @@ func (d *Decoder) validateDuplicateKey(keyMap map[string]struct{}, key interface
 	}
 	if !d.allowDuplicateMapKey {
 		if _, exists := keyMap[k]; exists {
-			return errors.ErrDuplicateKey(fmt.Sprintf(`duplicate key "%s"`, k), keyNode.GetToken())
+			return yamlerrors.NewDuplicateKey(fmt.Sprintf(`duplicate key "%s"`, k), keyNode.GetToken())
 		}
 	}
 	keyMap[k] = struct{}{}
@@ -1834,7 +1831,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			continue
 		}
 		if keyType.Kind() != k.Kind() {
-			return errors.ErrSyntax(
+			return yamlerrors.NewSyntax(
 				fmt.Sprintf("cannot convert %q type to %q type", k.Kind(), keyType.Kind()),
 				key.GetToken(),
 			)
@@ -1997,7 +1994,7 @@ func (d *Decoder) decodeInit(ctx context.Context) error {
 	}
 	// Keep the document: an error found while decoding draws the lines around
 	// itself, and only the text can say what those are.
-	d.source = errors.Source{Text: buf.String(), FirstLine: 1}
+	d.source = yamlerrors.Source{Text: buf.String(), FirstLine: 1}
 	file, err := d.parse(ctx, buf.Bytes())
 	if err != nil {
 		return err
@@ -2085,16 +2082,16 @@ func (d *Decoder) DecodeContext(ctx context.Context, v interface{}) error {
 	}
 	if d.isInitialized() {
 		if err := d.decode(ctx, rv); err != nil {
-			return errors.WithSource(err, d.source)
+			return yamlerrors.WithSource(err, d.source)
 		}
 
 		return nil
 	}
 	if err := d.decodeInit(ctx); err != nil {
-		return errors.WithSource(err, d.source)
+		return yamlerrors.WithSource(err, d.source)
 	}
 	if err := d.decode(ctx, rv); err != nil {
-		return errors.WithSource(err, d.source)
+		return yamlerrors.WithSource(err, d.source)
 	}
 	return nil
 }

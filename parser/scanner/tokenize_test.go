@@ -1,11 +1,10 @@
-package lexer_test
+package scanner_test
 
 import (
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -2661,7 +2660,7 @@ a: |
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := lexer.Tokenize(test.src)
+			got, err := scanTokens(test.src)
 			if err == nil {
 				t.Fatal("expected the scanner to refuse this")
 			}

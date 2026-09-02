@@ -9,6 +9,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 // TestMarshalStringHoldingCarriageReturn checks that a string holding a
@@ -54,7 +55,7 @@ func TestMarshalCarriageReturnUnderLiteralStyle(t *testing.T) {
 	const in = "a\r\nb\r\n"
 
 	var out []byte
-	out, err := yaml.MarshalWithOptions(in, yaml.UseLiteralStyleIfMultiline(true))
+	out, err := codec.MarshalWithOptions(in, codec.UseLiteralStyleIfMultiline(true))
 	require.NoError(t, err)
 
 	var back string

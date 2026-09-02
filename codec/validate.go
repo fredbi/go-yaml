@@ -1,4 +1,4 @@
-package yaml
+package codec
 
 // StructValidator need to implement Struct method only
 // ( see https://pkg.go.dev/github.com/go-playground/validator/v10#Validate.Struct )

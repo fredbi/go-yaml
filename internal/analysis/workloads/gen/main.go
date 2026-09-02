@@ -29,6 +29,7 @@ import (
 	v3 "go.yaml.in/yaml/v3"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 // sources are the JSON documents to rewrite, by the subdirectory each sits in.
@@ -83,7 +84,7 @@ func rewrite(from, to string) error {
 	return writeGzip(to, out)
 }
 
-// ordered decodes a JSON document into yaml.MapSlice, so a mapping keeps the
+// ordered decodes a JSON document into codec.MapSlice, so a mapping keeps the
 // order its object had. yaml.Marshal of a map would sort the keys and the
 // documents would stop resembling what they were.
 func ordered(dec *json.Decoder) (any, error) {
@@ -96,7 +97,7 @@ func ordered(dec *json.Decoder) (any, error) {
 	case json.Delim:
 		switch t {
 		case '{':
-			var items yaml.MapSlice
+			var items codec.MapSlice
 			for dec.More() {
 				key, err := dec.Token()
 				if err != nil {
@@ -106,7 +107,7 @@ func ordered(dec *json.Decoder) (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				items = append(items, yaml.MapItem{Key: key.(string), Value: value})
+				items = append(items, codec.MapItem{Key: key.(string), Value: value})
 			}
 			_, err := dec.Token() // the closing brace
 

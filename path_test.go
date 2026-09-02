@@ -9,15 +9,17 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
+	"github.com/go-openapi/go-yaml/expressions"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-func builder() *yaml.PathBuilder { return &yaml.PathBuilder{} }
+func builder() *expressions.PathBuilder { return &expressions.PathBuilder{} }
 
 func TestPathBuilder(t *testing.T) {
 	tests := []struct {
 		expected string
-		path     *yaml.Path
+		path     *expressions.Path
 	}{
 		{
 			expected: `$.a.b[0]`,
@@ -67,7 +69,7 @@ store:
 `
 	tests := []struct {
 		name     string
-		path     *yaml.Path
+		path     *expressions.Path
 		expected interface{}
 	}{
 		{
@@ -164,7 +166,7 @@ store:
 	t.Run("PathString", func(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				path, err := yaml.PathString(test.name)
+				path, err := expressions.PathString(test.name)
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -250,7 +252,7 @@ key2: value2
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, err := yaml.PathString(test.path)
+			path, err := expressions.PathString(test.path)
 			if err != nil {
 				t.Fatalf("unexpected error during path parsing: %+v", err)
 			}
@@ -341,7 +343,7 @@ a.b.c:
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, err := yaml.PathString(test.path)
+			path, err := expressions.PathString(test.path)
 			if test.failure {
 				if err == nil {
 					t.Fatal("expected error")
@@ -378,7 +380,7 @@ func TestPath_Invalid(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		path, err := yaml.PathString(test.path)
+		path, err := expressions.PathString(test.path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +394,7 @@ func TestPath_Invalid(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !yaml.IsNotFoundNodeError(err) {
+			if !expressions.IsNotFoundNodeError(err) {
 				t.Fatalf("unexpected error %s", err)
 			}
 		})
@@ -405,7 +407,7 @@ func TestPath_Invalid(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !yaml.IsNotFoundNodeError(err) {
+			if !expressions.IsNotFoundNodeError(err) {
 				t.Fatalf("unexpected error %s", err)
 			}
 		})
@@ -524,7 +526,7 @@ s:
 		},
 	}
 	for _, test := range tests {
-		path, err := yaml.PathString(test.path)
+		path, err := expressions.PathString(test.path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -611,7 +613,7 @@ a:
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
-			path, err := yaml.PathString(test.path)
+			path, err := expressions.PathString(test.path)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -809,7 +811,7 @@ building:
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
-			path, err := yaml.PathString(test.path)
+			path, err := expressions.PathString(test.path)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -873,7 +875,7 @@ building:
 //
 // The node handed to ReplaceWithNode comes from one of two places, and the
 // cases cover both: parser.ParseBytes builds an *ast.LiteralNode for a "|" or
-// ">" scalar, while yaml.ValueToNode with UseLiteralStyleIfMultiline builds an
+// ">" scalar, while codec.ValueToNode with UseLiteralStyleIfMultiline builds an
 // *ast.StringNode holding the same text.
 //
 // ReplaceWithNode writes the whole file again from the tree rather than
@@ -924,7 +926,7 @@ b:
 			name:     "block scalar from ValueToNode",
 			path:     "$.spec.files[0].content",
 			dst:      filesDocument,
-			newNode:  valueNode("first line\nsecond line\n", yaml.UseLiteralStyleIfMultiline(true)),
+			newNode:  valueNode("first line\nsecond line\n", codec.UseLiteralStyleIfMultiline(true)),
 			expected: "\nspec:\n  files:\n  - path: a.txt\n    content: |\n      first line\n      second line\n  - path: b.txt\n    content: |\n      name: CI\n",
 			steps:    []any{"spec", "files", 0, "content"},
 			decodes:  "first line\nsecond line\n",
@@ -976,7 +978,7 @@ items:
 content: |
    indented3
 `,
-			newNode:  valueNode("AAA\nBBB\n", yaml.UseLiteralStyleIfMultiline(true)),
+			newNode:  valueNode("AAA\nBBB\n", codec.UseLiteralStyleIfMultiline(true)),
 			expected: "\ncontent: |\n  AAA\n  BBB\n",
 			steps:    []any{"content"},
 			decodes:  "AAA\nBBB\n",
@@ -1010,7 +1012,7 @@ content: |
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, err := yaml.PathString(test.path)
+			path, err := expressions.PathString(test.path)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1092,12 +1094,12 @@ spec:
         name: CI
 `
 
-// valueNode builds the replacement with yaml.ValueToNode, which writes a
+// valueNode builds the replacement with codec.ValueToNode, which writes a
 // multiline string as an *ast.StringNode.
-func valueNode(v any, opts ...yaml.EncodeOption) func(*testing.T) ast.Node {
+func valueNode(v any, opts ...codec.EncodeOption) func(*testing.T) ast.Node {
 	return func(t *testing.T) ast.Node {
 		t.Helper()
-		node, err := yaml.ValueToNode(v, opts...)
+		node, err := codec.ValueToNode(v, opts...)
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
@@ -1112,7 +1114,7 @@ func valueNode(v any, opts ...yaml.EncodeOption) func(*testing.T) ast.Node {
 func literalNode(s string) func(*testing.T) ast.Node {
 	return func(t *testing.T) ast.Node {
 		t.Helper()
-		b, err := yaml.MarshalWithOptions(s, yaml.UseLiteralStyleIfMultiline(true))
+		b, err := codec.MarshalWithOptions(s, codec.UseLiteralStyleIfMultiline(true))
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
@@ -1157,7 +1159,7 @@ func TestInvalidPath(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := yaml.PathString(test.path); err == nil {
+			if _, err := expressions.PathString(test.path); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -1178,7 +1180,7 @@ b: "hello"
 	}
 	if v.A != 2 {
 		// output error with YAML source
-		path, err := yaml.PathString("$.a")
+		path, err := expressions.PathString("$.a")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -1206,7 +1208,7 @@ doc:
     - value2
   other: value3
 `
-	path, err := yaml.PathString("$.doc.map[0]")
+	path, err := expressions.PathString("$.doc.map[0]")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1237,7 +1239,7 @@ store:
     color: red
     price: 19.95
 `
-	path, err := yaml.PathString("$.store.book[*].author")
+	path, err := expressions.PathString("$.store.book[*].author")
 	if err != nil {
 		log.Fatal(err)
 	}
