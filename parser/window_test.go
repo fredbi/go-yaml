@@ -108,3 +108,74 @@ func TestPassWindows(t *testing.T) {
 	flowBack.report("'[a,b]:' back to the '[' (tokens)")
 	keyBody.report("'?' forward over its body (tokens)")
 }
+
+// The three helpers below exist for TestPassWindows and for nothing else. They
+// answer "how far back does this pass have to look" over a slice holding the
+// whole stream, which is the measurement a windowed grouper would be sized
+// from. The grouping passes themselves read from an iterator and never index
+// like this.
+
+// explicitKeyEnd returns the index just past the body of the explicit key
+// introduced by the '?' at tokens[i].
+//
+// In block context the body is everything indented deeper than the '?' itself,
+// and nothing else bounds it -- in particular a ':' on the same line does not.
+// "? []: x" has the mapping {[]: x} for its key and no value at all, which is
+// what the test suite records for it, so taking the whole indented run is both
+// simpler and right.
+//
+// A flow collection is not indentation-sensitive, so there the body runs to the
+// punctuation that ends it: its ':', a ',', or the bracket closing the
+// collection it sits in.
+func explicitKeyEnd(tokens []*Token, i int, inFlow bool) int {
+	if inFlow {
+		return explicitFlowKeyEnd(tokens, i)
+	}
+
+	col := tokens[i].Column()
+
+	j := i + 1
+	for ; j < len(tokens); j++ {
+		if tokens[j].Column() <= col {
+			break
+		}
+	}
+
+	return j
+}
+
+func explicitFlowKeyEnd(tokens []*Token, i int) int {
+	var depth int
+
+	j := i + 1
+	for ; j < len(tokens); j++ {
+		switch tokens[j].Type() {
+		case token.MappingStartType, token.SequenceStartType:
+			depth++
+		case token.MappingEndType, token.SequenceEndType:
+			if depth == 0 {
+				return j
+			}
+			depth--
+		case token.MappingValueType, token.CollectEntryType:
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+
+	return j
+}
+
+// keyCandidateIndex finds what would be the key of the ':' at tokens[i],
+// skipping comments -- a comment is never a key, and one may sit between an
+// explicit "?" key and its ':'. It reports -1 when there is nothing before it.
+func keyCandidateIndex(tokens []*Token, i int) int {
+	for j := i - 1; j >= 0; j-- {
+		if tokens[j].Type() != token.CommentType {
+			return j
+		}
+	}
+
+	return -1
+}
