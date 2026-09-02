@@ -45,27 +45,27 @@ func (v *counting) Leave(ast.Node, labparser.Step) {}
 // every chunk behind it reaches the free list. Two chunks stand at the end,
 // whatever the document: the one being read and the one before it.
 //
-// ⚠️ It frees; it does not recycle, and the table is written so that cannot be
-// misread. A chunk counts as recycled when a later Add takes it back off the
-// free list, and every Add happens in New, under the pin, before a walk starts.
-// So the free list only grows: the hit ratio is 0% and the free-list high-water
-// mark climbs to nearly every chunk the document needed.
+// It recycles: the reader fills the tape as the descent asks for tokens, so a
+// chunk the tail passes reaches the free list and the next Add takes it back.
+// golang_source runs 293,142 tokens through 9 chunks and takes 1,137 off the
+// free list, a 99% hit; map_wide runs 150,000 through 3.
 //
-// Read "free high" as idle rather than as a cost, and read it against "saved
-// high", which it complements: anchors_far frees 249 and saves 1, anchors_many
-// frees 0 and saves 218. Neither says anything about recycling, and both add up
-// to the chunks the document needed. What an anchor costs is the saved column
-// alone.
+// Two columns read the other way and are not failures:
 //
-// Recycling that worked would read the other way round -- a free list that
-// stays short and a hit ratio near 100%, with chunks allocated only where a
-// node spans more of them than the tape holds.
-// TestTheTailReleasesWhatIsBehindIt shows that shape on the arena alone: 800
-// tokens through a lag of two chunks takes 4 chunks, recycles 96, and never has
-// more than one chunk waiting.
+//   - free high is how many chunks sat idle at once. flow_wide's 233 is the key
+//     window holding an open flow collection, which may yet close and stand as
+//     a key, so nothing behind it may be given up.
+//   - saved high is what the anchors held. anchors_many keeps 218 chunks in the
+//     stash and anchors_far 1. That is Save doing its job: an anchored node has
+//     to outlive the tail because an alias may name it later in the document.
 //
-// The parser cannot show it until New reads as the parse does. working set is
-// what the walk needed at once, and is what the tape would hold then.
+// A 0% hit with a low free high and a high saved high, as anchors_many has, is
+// the tape holding what it was told to hold. A 0% hit with a high free high, as
+// flow_wide has, is one node spanning more chunks than the tape can reclaim
+// behind. Neither is recycling failing.
+//
+// working set is what the walk needed at once: the chunks live plus the chunks
+// saved.
 func TestWalkLetsTheTapeGo(t *testing.T) {
 	ordinary, err := workloads.All()
 	require.NoError(t, err)

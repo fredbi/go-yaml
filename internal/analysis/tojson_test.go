@@ -30,8 +30,8 @@ func TestToJSONPeak(t *testing.T) {
 	all, err := workloads.All()
 	require.NoError(t, err)
 
-	t.Logf("%-19s %8s %9s %10s %9s %11s %7s %9s",
-		"workload", "source", "json", "parse only", "codec", "progressive", "peak", "floor%")
+	t.Logf("%-19s %8s %9s %10s %9s %11s %7s %7s %7s",
+		"workload", "source", "json", "parse only", "codec", "progressive", "walk", "vs codec", "floor%")
 
 	for _, w := range all {
 		out, err := yaml.ToJSON(w.Data)
@@ -49,6 +49,12 @@ func TestToJSONPeak(t *testing.T) {
 			runtime.KeepAlive(b)
 		})
 
+		walked := peakLiveMax(peakLiveRuns(), func() {
+			b, err := lab.ToJSONWalk(w.Data)
+			require.NoError(t, err)
+			runtime.KeepAlive(b)
+		})
+
 		// What the parse alone stands up, converting nothing. Whatever share of
 		// the progressive peak this is, no consumer can get under it.
 		bare := peakLiveMax(peakLiveRuns(), func() {
@@ -57,11 +63,11 @@ func TestToJSONPeak(t *testing.T) {
 			runtime.KeepAlive(file)
 		})
 
-		t.Logf("%-19s %7dK %8dK %9dK %8dK %10dK %6.2fx %8.0f%%",
+		t.Logf("%-19s %7dK %8dK %9dK %8dK %10dK %6dK %6.2fx %6.0f%%",
 			w.Name, len(w.Data)/1024, len(out)/1024,
-			bare/1024, full/1024, progressive/1024,
-			float64(full)/float64(progressive),
-			100*float64(bare)/float64(progressive))
+			bare/1024, full/1024, progressive/1024, walked/1024,
+			float64(full)/float64(walked),
+			100*float64(bare)/float64(walked))
 	}
 }
 
@@ -80,6 +86,16 @@ func BenchmarkToJSONProgressive(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
 			if _, err := lab.ToJSONProgressive(src); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkToJSONWalk(b *testing.B) {
+	forEachWorkload(b, func(b *testing.B, src []byte) {
+		for b.Loop() {
+			if _, err := lab.ToJSONWalk(src); err != nil {
 				b.Fatal(err)
 			}
 		}

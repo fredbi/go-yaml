@@ -18,6 +18,8 @@ const (
 	KindMapping
 	// KindSequence is a sequence, whose entries are values.
 	KindSequence
+	// KindAnchor is an anchor, which stands around the one node it names.
+	KindAnchor
 )
 
 func (k Kind) String() string {
@@ -26,6 +28,8 @@ func (k Kind) String() string {
 		return "mapping"
 	case KindSequence:
 		return "sequence"
+	case KindAnchor:
+		return "anchor"
 	default:
 		return "none"
 	}
@@ -100,8 +104,12 @@ type walkState struct {
 // documents and not their bodies, which went to v: a body kept here would read
 // whatever was written over it.
 //
-// ⚠️ Anchors are not handled. An alias names a subtree that has to outlive the
-// tail, which wants Save, and nothing calls it yet.
+// An anchor goes over before the node it names and closes after it, with
+// [KindAnchor] as the step's In, so a caller that records what a node writes
+// has the anchor open while the node is written. parseAnchorName pins the tape
+// at the '&' and parseAnchorValue saves the chunks the node covered, so an
+// alias may still read them; releaseDocument gives them back when the document
+// ends.
 func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
 	p.walk = &walkState{visitor: v}
 	defer func() { p.walk = nil }()
@@ -182,6 +190,13 @@ func (p *Parser) enter(ctx context, node ast.Node, in Kind) bool {
 	}
 	if p.walk.skip > 0 {
 		p.walk.skip++
+
+		return true
+	}
+	if p.walk.quiet > 0 {
+		// The node reads its content back through the descent, so nothing
+		// inside it goes over on its own. skip unwinds this in leave.
+		p.walk.skip = 1
 
 		return true
 	}
@@ -274,15 +289,17 @@ func (p *Parser) quiet() func() {
 // readTo tells the arena how far the descent has read, so that it may fill
 // again what stands behind that.
 //
-// Everything below the token the descent stands on has been read and handed
-// over, and a walk keeps none of what it was handed. What the parse still needs
-// from behind it is the column of each open level, which the context carries as
-// a number rather than as a token.
+// The tail follows the outermost run and not the token in hand. A descent
+// standing deep in a document still holds the tokens of every level it is
+// inside -- parseMapEntry reads its key's group again after the value under it
+// has been parsed -- and those sit behind where the innermost run stands. The
+// outermost run moves only when a whole entry of the document is done, which is
+// the last moment any of them is read.
 func (p *Parser) readTo(ctx context) {
-	if p.tokens == nil {
+	if p.tokens == nil || p.body == nil {
 		return
 	}
-	if tk := ctx.currentToken(); tk != nil {
+	if tk := p.body.at(p.body.idx); tk != nil {
 		p.tokens.SetTail(int(tk.Seq()))
 	}
 }
@@ -294,4 +311,23 @@ func (p *Parser) saveHere(from, to int32) {
 		return
 	}
 	p.tokens.Save(int(from), int(to))
+}
+
+// holdRun keeps the chunk holding seq while a construct that began there is
+// read, and returns what gives it back.
+//
+// The descent reads a construct's own tokens again after everything under it:
+// parseMapEntry reads its key's group once the value below it is parsed, and a
+// sequence reads the '-' its entries are lined up against. The tail follows the
+// outermost run and passes those, so the construct says it still wants them.
+//
+// One chunk per level open at once, so what this holds is the depth of the
+// document and not its length.
+func (p *Parser) holdRun(seq int32) func() {
+	if p.walk == nil || p.tokens == nil {
+		return func() {}
+	}
+	p.tokens.Save(int(seq), int(seq))
+
+	return func() { p.tokens.Release(int(seq), int(seq)) }
 }

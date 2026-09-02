@@ -37,14 +37,21 @@ func TestGroupCensus(t *testing.T) {
 
 	var tks []*Token
 	for {
-		doc, err := r.next()
-		if err != nil {
+		if _, ok, err := r.openDocument(); err != nil {
 			t.Fatal(err)
-		}
-		if doc == nil {
+		} else if !ok {
 			break
 		}
-		tks = append(tks, doc)
+		for {
+			tk, ok := r.bodyToken()
+			if !ok {
+				break
+			}
+			tks = append(tks, tk)
+		}
+		if _, err := r.closeDocument(); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	byType := map[TokenGroupType]int{}

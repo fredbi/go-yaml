@@ -124,6 +124,10 @@ type Parser struct {
 	scan scanner.Scanner
 	// reader groups what the scanner reads and hands over a document at a time.
 	reader *reader
+	// body is the run the document's own tokens are drawn from, which is the
+	// outermost of the descent. The tail follows it: every level below holds
+	// tokens at or behind where it stands.
+	body *tokenRef
 
 	// mode is what the options asked of the parse.
 	mode Mode
@@ -157,8 +161,26 @@ func (p *Parser) tokenRefAt(depth int32, g *TokenGroup) *tokenRef {
 	}
 
 	ref := p.refs[depth]
-	ref.tokens, ref.idx = g.Members(&ref.pair), 0
+	ref.tokens, ref.idx, ref.base = g.Members(&ref.pair), 0, 0
 	ref.pull, ref.drained = nil, false
+
+	return ref
+}
+
+// tokenRefFrom returns the reference for a run read at depth from pull, which
+// draws one token at a time and reports false at the run's end.
+//
+// The run is not held: [tokenRef.forget] drops what the parser has read past,
+// so a document read this way costs the window the descent is reading and not
+// the document.
+func (p *Parser) tokenRefFrom(depth int32, pull func() (*Token, bool)) *tokenRef {
+	for int(depth) >= len(p.refs) {
+		p.refs = append(p.refs, new(tokenRef))
+	}
+
+	ref := p.refs[depth]
+	ref.tokens, ref.idx, ref.base = ref.tokens[:0], 0, 0
+	ref.pull, ref.drained = pull, false
 
 	return ref
 }
@@ -328,19 +350,14 @@ func drawUnder(src []byte, err error) error {
 func (p *Parser) parse(ctx context) (*ast.File, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 	for {
-		// Reading only as far as the next document is what lets the tape be
-		// filled again behind the one just parsed.
-		held, err := p.reader.next()
+		// Reading only as far as the descent has asked is what lets the tape be
+		// filled again behind it.
+		doc, ok, err := p.parseDocument(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if held == nil {
+		if !ok {
 			break
-		}
-
-		doc, err := p.parseDocument(ctx, held.Group)
-		if err != nil {
-			return nil, err
 		}
 		file.Docs = append(file.Docs, doc)
 
@@ -352,57 +369,58 @@ func (p *Parser) parse(ctx context) (*ast.File, error) {
 	return file, nil
 }
 
-func (p *Parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.DocumentNode, error) {
-	if docGroup.Len() == 0 {
-		return ast.Document(docGroup.RawToken(), nil), nil
+// parseDocument reads one document, and reports false at the end of the stream.
+//
+// The body is read through the reader rather than out of a group holding the
+// whole document: the "---" is known when the document opens and the "..." only
+// once the body has run out, which is where the group could not be built until
+// the document had been read through.
+func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
+	start, ok, err := p.reader.openDocument()
+	if err != nil || !ok {
+		return nil, false, err
 	}
 
-	var (
-		docPair [2]*Token
-		tokens  = docGroup.Members(&docPair)
-		start   *token.Token
-		end     *token.Token
-	)
-	if docGroup.First().Type() == token.DocumentHeaderType {
-		start = docGroup.First().RawToken()
-		tokens = tokens[1:]
+	// A document holding nothing between its markers has no body. Asking for
+	// the first token is what says so, and it draws no more than that one.
+	var body ast.Node
+
+	bodyCtx := ctx.withPull(p, p.reader.bodyToken)
+	if bodyCtx.currentToken() != nil {
+		body, err = p.parseDocumentBody(bodyCtx)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-	if docGroup.Last().Type() == token.DocumentEndType {
-		end = docGroup.Last().RawToken()
-		tokens = tokens[:len(tokens)-1]
-		defer func() {
-			// clear yaml version value if DocumentEnd token (...) is specified.
-			p.yamlVersion = ""
-		}()
+	if p.reader.err != nil {
+		return nil, false, p.reader.err
 	}
 
-	if len(tokens) == 0 {
-		return ast.Document(docGroup.RawToken(), nil), nil
-	}
-
-	body, err := p.parseDocumentBody(ctx.withGroup(p, newTokenGroup(TokenGroupDocumentBody, tokens)))
+	end, err := p.reader.closeDocument()
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if end != nil {
+		// A "..." closes the scope a %YAML directive opened.
+		p.yamlVersion = ""
 	}
 
 	// A TAG directive defines a handle for the one document that follows it,
-	// and this was that document: what it declared goes out of scope here.
-	// Carrying the definitions on let a later document use a handle it never
-	// declared. A document holding only the directives themselves does not end
-	// their scope -- it is what opens it.
+	// and a document holding only the directives themselves does not end their
+	// scope -- it opens it.
 	if _, directives := body.(*ast.DirectiveNode); !directives {
 		p.clearTagDirectives()
 	}
-	if p.walking() {
-		// The body went to the visitor as it was read, and the tokens under it
-		// have been handed back to be filled again. Keeping it here would hold
-		// a tree of nodes reading whatever was written over them.
-		body = nil
-	}
-	node := ast.Document(start, body)
-	node.End = end
 
-	return node, nil
+	node := ast.Document(start, body)
+	if body != nil {
+		// A document holding nothing keeps no "...": the pass this replaced
+		// read the marker, then returned on the empty body before it hung the
+		// marker on the node. "--- ..." renders as "---".
+		node.End = end
+	}
+
+	return node, true, nil
 }
 
 func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
@@ -450,10 +468,11 @@ func (p *Parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 		p.onComplete(n)
 	}
 
-	// A collection hands itself over as it opens and closes; everything else
-	// goes over here, once, when it is built.
+	// A collection hands itself over as it opens and closes, and so does an
+	// anchor, which stands around the node it names; everything else goes over
+	// here, once, when it is built.
 	switch n.(type) {
-	case *ast.MappingNode, *ast.SequenceNode:
+	case *ast.MappingNode, *ast.SequenceNode, *ast.AnchorNode:
 	default:
 		p.hand(ctx, n)
 	}
@@ -700,10 +719,14 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			if err != nil {
 				return nil, err
 			}
+			p.handKey(ctx, key)
 			ctx := p.valueContext(ctx, key)
 			colonTk := mapKeyTk.Group.Last()
 			if p.isFlowMapDelim(ctx.nextToken()) {
-				value, err := newNullNode(ctx, ctx.insertNullToken(colonTk))
+				// The null stands for a value the document leaves out, and a
+				// writer needs it like any other: "{p: , q: 2}" without it
+				// wrote the key and then the next key.
+				value, err := p.handNull(ctx, ctx.insertNullToken(colonTk))
 				if err != nil {
 					return nil, err
 				}
@@ -736,11 +759,20 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				}
 				return nil, yamlerrors.NewSyntax("could not find flow map content", errTk.RawToken())
 			}
+			// The key is read without going over on its own account: it is a
+			// key, not a value, and parseScalarValue would hand a property
+			// group -- the "&a" of "{&a}" -- over as a value.
+			loud := p.quiet()
 			key, err := p.parseScalarValue(ctx, mapKeyTk)
+			loud()
 			if err != nil {
 				return nil, err
 			}
-			value, err := newNullNode(ctx, ctx.insertNullToken(mapKeyTk))
+			p.handKey(ctx, key)
+
+			// "{p}" leaves the value out, and a writer needs the null that
+			// stands for it as much as it needs the key.
+			value, err := p.handNull(ctx, ctx.insertNullToken(mapKeyTk))
 			if err != nil {
 				return nil, err
 			}
@@ -791,6 +823,10 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 	if keyTk.Group == nil {
 		return nil, yamlerrors.NewSyntax("unexpected map key", keyTk.RawToken())
 	}
+
+	// The entry's own tokens are read again once the value under it is parsed,
+	// and the tail passes them meanwhile.
+	defer p.holdRun(keyTk.Seq())()
 	if keyTk.GroupType() == TokenGroupMapKeyValue {
 		node, err := p.parseMapKeyValue(ctx.withGroup(p, keyTk.Group), keyTk.Group, nil)
 		if err != nil {
@@ -837,6 +873,8 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 }
 
 func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
+	defer p.holdRun(ctx.currentToken().Seq())()
+
 	base := len(p.keyStack)
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
@@ -968,6 +1006,10 @@ func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 	if err != nil {
 		return nil, err
 	}
+	// As in parseMapEntry: the key goes over before its value. This shape holds
+	// key and value in one group, so parseMapEntry returns here before it hands
+	// anything over, and a flow mapping reaches this and nothing else.
+	p.handKey(ctx, key)
 
 	c := p.valueContext(ctx, key)
 	value, err := p.parseToken(c, g.Last())
@@ -1406,6 +1448,15 @@ func startsEntry(tk *Token) bool {
 func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
 	defer p.closeAnchor(ctx)
 
+	// The anchor stands around the node it names, so it goes over before that
+	// node and closes after it. Handing it over afterwards, as a node holding
+	// nothing does, put it beside its own value at the same depth and lost the
+	// nesting: "a: &x 1" read as the two values 1 and &x.
+	if !p.enter(ctx, anchor, KindAnchor) {
+		return nil, nil
+	}
+	defer p.leave(ctx, anchor)
+
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
 		// Built rather than inserted: there is no token here to stand for the
 		// null, and putting one in the stream would leave it to be read again.
@@ -1791,6 +1842,7 @@ func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
 
 func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	seqTk := ctx.currentToken()
+	defer p.holdRun(seqTk.Seq())()
 	seqNode, err := newSequenceNode(ctx, seqTk, false)
 	if err != nil {
 		return nil, err
