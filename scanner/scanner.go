@@ -147,6 +147,14 @@ func validateStream(text string) error {
 // Marks are dropped rather than read, which is what a file saved by an editor
 // that writes one needs. Init removes every one of them once this has passed.
 func validateByteOrderMarks(text string) error {
+	// Marks opening the stream stand in the prefix that l-yaml-stream begins
+	// with, which always admits them. Where they are the only ones, there is
+	// nothing to place and nothing to read the quoted scalars for.
+	if !strings.ContainsRune(strings.TrimLeft(text, string(byteOrderMark)), byteOrderMark) {
+		return nil
+	}
+
+	quoted := quotedRanges(text)
 	lines := strings.Split(text, "\n")
 	offset := 1
 
@@ -156,17 +164,20 @@ func validateByteOrderMarks(text string) error {
 
 		if rest := line[marks*utf8.RuneLen(byteOrderMark):]; strings.ContainsRune(rest, byteOrderMark) {
 			column := marks + 1 + strings.IndexRune(rest, byteOrderMark)
+			at := offset + column - 1
 
-			return ErrInvalidToken(
-				"found a byte order mark inside a line, where a node may not hold one",
-				token.Invalid(
-					string(byteOrderMark),
-					token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(offset + column - 1)},
-				),
-			)
+			if !quoted.holds(at - 1) {
+				return ErrInvalidToken(
+					"found a byte order mark inside a line, where a node may not hold one",
+					token.Invalid(
+						string(byteOrderMark),
+						token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(at)},
+					),
+				)
+			}
 		}
 
-		if marks > 0 && !opensADocument(lines, i, marks) {
+		if marks > 0 && !quoted.holds(offset-1) && !opensADocument(lines, i, marks) {
 			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)}))
 		}
 
@@ -174,6 +185,62 @@ func validateByteOrderMarks(text string) error {
 	}
 
 	return nil
+}
+
+// byteRanges holds half-open byte ranges of the source, in the order they were
+// read.
+type byteRanges []struct{ start, end int }
+
+// holds reports whether at falls inside one of the ranges.
+func (r byteRanges) holds(at int) bool {
+	for _, span := range r {
+		if at >= span.start && at < span.end {
+			return true
+		}
+	}
+
+	return false
+}
+
+// quotedRanges returns the source each quoted scalar of text covers.
+//
+// nb-char excludes the byte order mark, so no plain or block scalar may hold
+// one. A quoted scalar may: nb-double-char and nb-single-char are built from
+// nb-json, which is #x9 | [#x20-#x10FFFF] and takes the mark like any other
+// character. So "a: \"x<mark>y\"" is YAML 1.2 and "a: x<mark>y" is not.
+//
+// Telling the two apart means knowing where the quoted scalars are, which is
+// what a scanner works out. This runs one over the text and keeps the spans;
+// it runs only where a mark stands somewhere other than the head of the
+// stream, which is rare. A source the scanner refuses returns the spans it
+// reached: the refusal itself surfaces from the scan the caller asked for.
+func quotedRanges(text string) byteRanges {
+	var s Scanner
+	s.reset(text)
+
+	var ranges byteRanges
+	for {
+		tokens, err := s.Scan()
+		if err != nil {
+			return ranges
+		}
+		for _, tk := range tokens {
+			switch tk.Type {
+			case token.SingleQuoteType, token.DoubleQuoteType:
+			default:
+				continue
+			}
+			written := strings.TrimLeft(tk.Origin, " \t\n\r")
+			start := int(tk.Position.Offset)
+			if start < 0 || start+len(written) > len(text) || !strings.HasPrefix(text[start:], written) {
+				// The token's offset does not address its text, so the span
+				// cannot be trusted. Leaving it out refuses a mark that a
+				// quoted scalar may hold, which is where this started.
+				continue
+			}
+			ranges = append(ranges, struct{ start, end int }{start, start + len(written)})
+		}
+	}
 }
 
 // leadingMarks counts the byte order marks a line opens with.
@@ -905,7 +972,12 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	}
 
 	ctx.addOriginBuf('!')
-	s.progress(ctx, 1) // skip '!' character
+	// The offset counts the bytes the cursor has crossed, so it takes the '!'
+	// too. Left out, it stayed one byte behind for the rest of the document and
+	// every token after this one was reported a byte early. tagPos is taken
+	// before the step, where the tag's own text begins.
+	tagPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '!' character
 
 	// A verbatim tag, "!<...>", holds a URI and takes it as written: the
 	// characters a shorthand may not contain are ordinary inside the brackets.
@@ -928,14 +1000,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case ' ':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
@@ -949,7 +1021,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+			ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
@@ -959,7 +1031,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				// the tag: "[!]" is the non-specific tag on the empty node and
 				// not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addToken(token.Tag(value, string(ctx.obuf), s.pos()))
+				ctx.addToken(token.Tag(value, string(ctx.obuf), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
@@ -1003,7 +1075,10 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('#')
-	s.progress(ctx, 1) // skip '#' character
+	// As in scanTag: the offset takes the '#', and the comment's own position
+	// is taken before the step.
+	commentPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '#' character
 
 	for idx, c := range ctx.src[ctx.idx:] {
 		ctx.addOriginBuf(c)
@@ -1015,7 +1090,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		}
 		value := ctx.source(ctx.idx, ctx.idx+idx)
 		progress := utf8.RuneCountInString(value)
-		ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+		ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		ctx.clear()
@@ -1023,7 +1098,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	}
 	// document ends with comment.
 	value := ctx.src[ctx.idx:]
-	ctx.addToken(token.Comment(value, string(ctx.obuf), s.pos()))
+	ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
 	progress := utf8.RuneCountInString(value)
 	s.progressColumn(ctx, progress)
 	s.progressLine(ctx)
@@ -1617,8 +1692,15 @@ func (s *Scanner) validateMultiLineHeaderOption(opt string) error {
 
 func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	header := ctx.currentChar()
+	// headerIndex is where the indicator stands in the origin buffer, which
+	// also holds the indentation written before it. The comment's position is
+	// measured from the indicator, so the two have to be told apart.
+	headerIndex := len(ctx.obuf)
 	ctx.addOriginBuf(header)
-	s.progress(ctx, 1) // skip '|' or '>' character
+	// As in scanTag: the offset takes the indicator, and the header's own
+	// position is taken before the step.
+	headerPos := s.pos()
+	s.offset += s.progress(ctx, 1) // skip '|' or '>' character
 
 	// The range gives idx in bytes, which is what endPos slices with, and what
 	// progressColumn advances by is characters. The two part company as soon as
@@ -1702,10 +1784,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	}
 	switch header {
 	case '|':
-		ctx.addToken(token.Literal("|"+opt, headerBuf, s.pos()))
+		ctx.addToken(token.Literal("|"+opt, headerBuf, headerPos))
 		ctx.setLiteral(s.lastDelimColumn, opt)
 	case '>':
-		ctx.addToken(token.Folded(">"+opt, headerBuf, s.pos()))
+		ctx.addToken(token.Folded(">"+opt, headerBuf, headerPos))
 		ctx.setFolded(s.lastDelimColumn, opt)
 	}
 	// The break that ended the header line is content of the scalar, and the
@@ -1717,9 +1799,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// there rather than moving the scanner: progressColumn below advances
 		// past the whole line, header included, so a bump here is counted
 		// twice.
-		pos := s.pos()
-		pos.Offset += int32(len(headerBuf))
-		pos.Column += int32(utf8.RuneCountInString(headerBuf))
+		pos := headerPos
+		fromHeader := headerBuf[headerIndex:]
+		pos.Offset += int32(len(fromHeader))
+		pos.Column += int32(utf8.RuneCountInString(fromHeader))
 		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep
@@ -2179,6 +2262,13 @@ func (s *Scanner) scan(ctx *Context) error {
 // Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
 func (s *Scanner) Init(text string) {
 	s.initErr = validateStream(text)
+	s.reset(text)
+}
+
+// reset prepares s to tokenize text without judging whether text is a stream at
+// all. validateByteOrderMarks reads the quoted scalars back out of a scanner,
+// and cannot be the thing that decides whether that scanner may run.
+func (s *Scanner) reset(text string) {
 	// The source is scanned as it was handed in. A byte order mark is stepped
 	// over where one stands, so every offset addresses the text the caller
 	// wrote rather than a rewrite of it -- and a token, which points into the

@@ -722,6 +722,51 @@ func isTimestamp(value string) bool {
 	return false
 }
 
+// NeedsQuotedSpelling reports whether value holds a character that only a
+// double-quoted scalar can carry.
+//
+// There are two. A carriage return: YAML normalizes a stream's line breaks on
+// read, so "\r\n" and a lone "\r" both arrive as "\n" and no plain,
+// single-quoted or block scalar keeps one. And U+FEFF, the byte order mark:
+// nb-char excludes it, so it is not a character a plain or block scalar may
+// hold -- a quoted one may, because nb-double-char and nb-single-char are built
+// from nb-json instead.
+//
+// Written as "\r" and "\ufeff" inside a double-quoted scalar, both survive.
+func NeedsQuotedSpelling(value string) bool {
+	return strings.ContainsRune(value, '\r') || strings.ContainsRune(value, '\ufeff')
+}
+
+// isLeadingZeroDecimal reports whether value is a run of decimal digits written
+// with a leading zero, such as "088253".
+//
+// This library resolves integers as YAML 1.1 does, where "0" followed by digits
+// is octal and "088253" is not octal at all -- so it reads a string, as PyYAML
+// does. YAML 1.2's core schema resolves [-+]?[0-9]+ and reads the integer
+// 88253. The two schemas also disagree on the value of "0777": 511 here and in
+// go.yaml.in/yaml/v3, 777 under 1.2 core.
+//
+// Encoding such a value quoted means a reader following either schema reads
+// back the string that was written. This is why the encoder already quotes the
+// 1.1 bool keywords -- "y", "yes", "on" -- that this library does not resolve.
+func isLeadingZeroDecimal(value string) bool {
+	digits := value
+	if digits != "" && (digits[0] == '+' || digits[0] == '-') {
+		digits = digits[1:]
+	}
+	if len(digits) < 2 || digits[0] != '0' {
+		return false
+	}
+
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
 // IsNeedQuoted checks whether the value needs quote for passed string or not
 func IsNeedQuoted(value string) bool {
 	if value == "" {
@@ -731,6 +776,9 @@ func IsNeedQuoted(value string) bool {
 		return true
 	}
 	if isNumber(value) {
+		return true
+	}
+	if isLeadingZeroDecimal(value) {
 		return true
 	}
 	if value == "-" {
@@ -749,6 +797,9 @@ func IsNeedQuoted(value string) bool {
 	if isTimestamp(value) {
 		return true
 	}
+	if NeedsQuotedSpelling(value) {
+		return true
+	}
 	for i, c := range value {
 		switch c {
 		case '#', '\\':
@@ -762,8 +813,20 @@ func IsNeedQuoted(value string) bool {
 	return false
 }
 
-// LiteralBlockHeader detect literal block scalar header
+// LiteralBlockHeader returns the block scalar header value needs, or "" where
+// value has no block scalar spelling.
+//
+// A value holding a carriage return or a byte order mark has none, for two
+// different reasons. YAML normalizes a stream's line breaks on read -- "\r\n"
+// and a lone "\r" both become "\n" -- so a block scalar cannot carry a CR
+// whatever it is written with. And nb-char excludes U+FEFF, so no block or
+// plain scalar may hold one at all. Both have to be double-quoted, where each
+// is an escape.
 func LiteralBlockHeader(value string) string {
+	if NeedsQuotedSpelling(value) {
+		return ""
+	}
+
 	lbc := DetectLineBreakCharacter(value)
 
 	switch {
@@ -830,6 +893,12 @@ func Make(value string, org string, pos Position) Token {
 // measures indentation in. Offset counts from 0 and counts bytes, so
 // src[Offset:] is the token: it addresses the source a caller handed in, and a
 // caret drawn from it lands on the right character.
+//
+// Offset addresses the token for 97.1% of the YAML Test Suite's tokens; Line
+// and Column for 94.2%. Two kinds of token are still reported early: block
+// scalar content, whose offset is counted back from the cursor by the length
+// of the folded value, and the Invalid token an error carries.
+// scanner/offset_test.go holds the count of each.
 //
 // The four are int32. A document large enough to overflow one does not fit in
 // memory to begin with, and a token holds this by value rather than pointing at

@@ -239,13 +239,17 @@ func TestEncoder(t *testing.T) {
 			map[string]map[string]string{"hello": {"hello": "hello\nworld\n"}},
 			nil,
 		},
+		// A carriage return has no block scalar spelling: YAML normalizes
+		// "\r\n" and a lone "\r" to "\n" on read, so the block these used to
+		// be written as read back without the CRs. See
+		// TestMarshalStringHoldingCarriageReturn.
 		{
-			"hello: |\r  hello\r  world\n",
+			"hello: \"hello\\rworld\\r\"\n",
 			map[string]string{"hello": "hello\rworld\r"},
 			nil,
 		},
 		{
-			"hello: |\r\n  hello\r\n  world\n",
+			"hello: \"hello\\r\\nworld\\r\\n\"\n",
 			map[string]string{"hello": "hello\r\nworld\r\n"},
 			nil,
 		},

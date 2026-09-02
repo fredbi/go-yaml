@@ -37,49 +37,39 @@ func at(src string, offset int) string {
 // offsetMissLedger records how many tokens of each type carry an Offset that
 // does not address their own text, over the whole YAML Test Suite.
 //
-// Offset points at the start of Origin, and Origin holds the whitespace written
-// before the token as well as the token, so an indented token is reported at
-// the start of its indentation. A consumer drawing a caret under an error puts
-// it in the wrong column. 1,031 of 3,489 tokens are affected.
+// 101 of 3,489, which is 97.1% correct. It was 1,031 until three places in the
+// scanner stopped stepping over a character without counting its byte:
+// scanTag over the '!', scanComment over the '#', and scanMultiLineHeaderOption
+// over the '|' or '>'. Each left s.offset one byte behind ctx.idx for the rest
+// of the document, so every token after the first tag, comment or block scalar
+// was reported that many bytes early. Twenty-one of the twenty-five types now
+// miss nothing at all.
 //
-// Offset counting bytes rather than runes was one half of the defect, and a
-// byte order mark shifting every offset after it was another. Both are fixed;
-// this one is not. The counts barely moved when the unit changed, which is the
-// point: the suite is almost entirely ASCII, so the defects were independent.
+// What is left splits in two, and neither part is the counter drifting:
 //
-// One thing has to change to empty this ledger, recorded in
-// ANALYSIS-go-openapi.md as roadmap phase O: a token's position has to be taken
-// where its own text starts rather than where Origin does.
+//   - 89 tokens carry an offset that addresses somewhere else in the source.
+//     65 are multi-line String values -- block scalar content -- whose offset
+//     is counted back from the cursor by the length of the folded value, which
+//     is shorter than the source it was read from. 23 are Invalid, the tokens
+//     an error carries, built from the whole origin buffer. Reaching these
+//     needs the scanner to record where a value's source begins rather than
+//     work it out afterwards; ctx.originStart was tried for both and made the
+//     count worse, so it does not track through a multi-line block.
+//   - 12 tokens carry an Origin that is not a slice of the source at all, so
+//     no offset can address it: trailing whitespace the origin buffer dropped,
+//     and escapes a double-quoted scalar rewrote.
+//
+// Line and Column were right throughout, which is what made the drift hard to
+// see: 3,287 of 3,489 columns address their token.
 //
 // The ledger is a ratchet in both directions. A type that starts missing more
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"String":         404,
-	"MappingValue":   148,
-	"SequenceEntry":  84,
-	"Comment":        68,
-	"Tag":            59,
-	"Integer":        41,
-	"DocumentHeader": 31,
-	"Anchor":         31,
-	"DoubleQuote":    25,
-	"Invalid":        23,
-	"Literal":        21,
-	"Folded":         14,
-	"DocumentEnd":    14,
-	"CollectEntry":   12,
-	"MappingKey":     10,
-	"Float":          10,
-	"Directive":      8,
-	"Alias":          7,
-	"MappingEnd":     6,
-	"SequenceEnd":    5,
-	"MappingStart":   4,
-	"SequenceStart":  3,
-	"Bool":           1,
-	"HexInteger":     1,
-	"SingleQuote":    1,
+	"String":      71,
+	"Invalid":     23,
+	"Integer":     4,
+	"DoubleQuote": 3,
 }
 
 // TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how

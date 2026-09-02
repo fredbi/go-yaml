@@ -53,38 +53,27 @@ const (
 	// The fixture records the scalar's text and the decoder resolves the tag on
 	// it, so the two sides describe different things rather than disagreeing.
 	reasonTagResolved = "the fixture records the text and the decoder resolves the tag"
+	// The fixture expects a value the specification's own grammar does not
+	// produce, and the implementations agree with the grammar.
+	reasonFixtureDiffersFromSpec = "the fixture expects a value the grammar does not produce"
 )
 
-// The three decoder defects, reduced. Fixing them is not part of this branch;
-// this is the list for whoever picks them up.
+// The two fixtures the decoder does not match, neither of them a defect.
 //
-//  1. An empty document between "---" and "..." is dropped.
+//  1. trailing-line-of-spaces/01 is not a defect. "foo: |\n  x\n   ", which
+//     ends without a line break, decodes to "x\n " here and the fixture's
+//     in.json records "x\n \n". The specification's grammar produces "x\n ":
+//     b-chomped-last(clip) ::= b-as-line-feed | <end-of-stream>, so a literal
+//     scalar running to the end of the stream ends without the break clipping
+//     appends to a line that has one. go.yaml.in/yaml/v3 and PyYAML both read
+//     "x\n " as well, and the sibling fixture 00 -- the same document with a
+//     final break -- decodes to "x\n \n" here and everywhere.
 //
-//     "Document\n---\n# Empty\n...\n%YAML 1.2\n---\nmatches %: 20\n" yields two
-//     values where the suite expects three: "Document", null, and the mapping.
-//     The parser builds four documents from it -- the string, an
-//     *ast.CommentGroupNode holding "# Empty", an *ast.DirectiveNode holding
-//     "%YAML 1.2" on its own, and the mapping -- so the empty document exists
-//     in the tree as a comment group with no body, and the directive is split
-//     off from the document it introduces. Decode skips both. Repairing this
-//     starts in the parser: an empty document needs a document node with an
-//     empty body, and a directive needs to attach to the document that follows
-//     it. spec-example-9-6-stream and spec-example-9-6-stream-1-3 are the same
-//     defect twice.
-//
-//  2. A block scalar whose last line ends the stream loses the break clip
-//     chomping adds.
-//
-//     "foo: |\n  x\n   " decodes to "x\n " where the suite expects "x\n \n".
-//     The same document with a final line break, "foo: |\n  x\n   \n",
-//     decodes correctly, so the content is right and only the break clipping
-//     should append is missing. trailing-line-of-spaces/01.
-//
-// The fourth scored case, construct-binary, is not a defect. "!!binary"
-// resolves to []byte, json.Marshal writes those bytes back as base64 without
-// the line breaks the literal block carried, and the fixture's in.json records
-// the scalar text with its line breaks intact. The decoder is right and the
-// comparison is the wrong one.
+//  2. construct-binary is not a defect either. "!!binary" resolves to []byte,
+//     json.Marshal writes those bytes back as base64 without the line breaks
+//     the literal block carried, and the fixture's in.json records the scalar
+//     text with its line breaks intact. The decoder is right and the
+//     comparison is the wrong one.
 
 // decodeLedger records every case that does not decode to its expected JSON,
 // with why.
@@ -129,12 +118,8 @@ var decodeLedger = map[string]string{
 	"syntax-character-edge-cases/00":                   reasonNoExpectation,
 	"zero-indented-sequences-in-explicit-mapping-keys": reasonNoExpectation,
 
-	// The defects. See the two numbered entries above.
-	"spec-example-9-6-stream":     reasonWrongValue,
-	"spec-example-9-6-stream-1-3": reasonWrongValue,
-	"trailing-line-of-spaces/01":  reasonWrongValue,
-
-	"construct-binary": reasonTagResolved,
+	"trailing-line-of-spaces/01": reasonFixtureDiffersFromSpec,
+	"construct-binary":           reasonTagResolved,
 }
 
 // scoredReasons are the reasons that mean the decoder got something wrong. The

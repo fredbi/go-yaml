@@ -220,9 +220,15 @@ func (p *Path) Read(r io.Reader, v interface{}) error {
 	if err != nil {
 		return err
 	}
-	if err := Unmarshal([]byte(node.String()), v); err != nil {
+
+	// The node is decoded as it stands rather than rendered back to YAML and
+	// read again. Rendering loses what the spelling does not carry: a block
+	// scalar written "|" is clipped, so the break ending its last line belongs
+	// to the value, and the node renders without it.
+	if err := NodeToValue(node, v); err != nil {
 		return err
 	}
+
 	return nil
 }
 

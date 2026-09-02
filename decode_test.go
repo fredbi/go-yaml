@@ -945,15 +945,16 @@ merge:
 			source: "a: b\n...\n",
 			value:  map[string]string{"a": "b"},
 		},
+		// "---" opens a document holding the empty node, which decodes to
+		// null rather than ending the stream. go.yaml.in/yaml/v3 and PyYAML
+		// both read one document here.
 		{
 			source: "%YAML 1.2\n---\n",
 			value:  (*struct{})(nil),
-			eof:    true,
 		},
 		{
 			source: "---\n",
 			value:  (*struct{})(nil),
-			eof:    true,
 		},
 		{
 			source: "...",

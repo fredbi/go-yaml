@@ -465,7 +465,7 @@ func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, err
 		return nil, nil, g.err
 	}
 
-	tks, err := g.createDocumentTokens(tks)
+	tks, err := g.createDocumentTokens(tks, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1241,7 +1241,15 @@ func (g *grouper) groupDirectives(in iter.Seq[*Token]) iter.Seq[*Token] {
 	}
 }
 
-func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
+// createDocumentTokens groups tokens into one group per document.
+//
+// opened says whether a "---" above these tokens has already begun a document.
+// It settles what a "..." standing first among them ends. After a "---" it ends
+// the document that "---" opened, which holds nothing and is a document all the
+// same. At the head of the stream, or after another "...", it ends nothing:
+// l-yaml-stream admits a run of suffixes, and only the first of them closes
+// anything.
+func (g *grouper) createDocumentTokens(tokens []*Token, opened bool) ([]*Token, error) {
 	var ret []*Token
 	for i := 0; i < len(tokens); i++ {
 		tk := tokens[i]
@@ -1259,7 +1267,7 @@ func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 				// nothing. It is a document all the same, and so is everything
 				// after it -- stopping here returned the empty one and dropped
 				// the rest of the stream without a word.
-				rest, err := g.createDocumentTokens(tokens[i+1:])
+				rest, err := g.createDocumentTokens(tokens[i+1:], true)
 				if err != nil {
 					return nil, err
 				}
@@ -1278,7 +1286,7 @@ func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 					return nil, errors.ErrSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
 				}
 			}
-			tks, err := g.createDocumentTokens(tokens[i+1:])
+			tks, err := g.createDocumentTokens(tokens[i+1:], true)
 			if err != nil {
 				return nil, err
 			}
@@ -1290,7 +1298,10 @@ func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 			}
 			return append(ret, g.group1(TokenGroupDocument, tk)), nil
 		case token.DocumentEndType:
-			if i != 0 {
+			if i != 0 || opened {
+				// At i == 0 the group is the "..." alone, which is the whole of
+				// a document holding nothing. The caller prepends the "---"
+				// that opened it.
 				ret = append(ret, g.group(TokenGroupDocument, tokens[0:i+1]))
 			}
 			if i+1 == len(tokens) {
@@ -1304,7 +1315,7 @@ func (g *grouper) createDocumentTokens(tokens []*Token) ([]*Token, error) {
 				return nil, errors.ErrSyntax("unexpected end content", tokens[i+1].RawToken())
 			}
 
-			tks, err := g.createDocumentTokens(tokens[i+1:])
+			tks, err := g.createDocumentTokens(tokens[i+1:], false)
 			if err != nil {
 				return nil, err
 			}
