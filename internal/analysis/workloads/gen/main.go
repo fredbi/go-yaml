@@ -9,6 +9,11 @@
 //
 //	go run ./gen -json ../../../../../core/json/testdata/workloads -out ../testdata
 //
+// Leave -json out to rebuild only commented_swagger, which is written over the
+// stored azure_swagger and needs no checkout of go-openapi/core:
+//
+//	go run ./gen -out testdata
+//
 // The output is byte-deterministic: gzip level 9, no modification time, and the
 // operating system byte set to 255, so rerunning this on another machine
 // produces the same file.
@@ -42,20 +47,24 @@ var sources = map[string]string{
 }
 
 func main() {
-	jsonDir := flag.String("json", "", "the workloads directory of a go-openapi/core checkout")
+	jsonDir := flag.String("json", "", "the workloads directory of a go-openapi/core checkout; leave it out to rebuild only "+commentedName)
 	outDir := flag.String("out", "testdata", "where to write the .yaml.gz files")
 	flag.Parse()
 
-	if *jsonDir == "" {
-		fmt.Fprintln(os.Stderr, "gen: -json is required; see ../SOURCE.md")
-		os.Exit(2)
+	if *jsonDir != "" {
+		for name, sub := range sources {
+			if err := rewrite(filepath.Join(*jsonDir, sub, name+".json.gz"), filepath.Join(*outDir, name+".yaml.gz")); err != nil {
+				fmt.Fprintf(os.Stderr, "gen: %s: %v\n", name, err)
+				os.Exit(1)
+			}
+		}
 	}
 
-	for name, sub := range sources {
-		if err := rewrite(filepath.Join(*jsonDir, sub, name+".json.gz"), filepath.Join(*outDir, name+".yaml.gz")); err != nil {
-			fmt.Fprintf(os.Stderr, "gen: %s: %v\n", name, err)
-			os.Exit(1)
-		}
+	// The commented workload is written over a stored one, so it is rebuilt
+	// whether or not the JSON corpus was rewritten just now.
+	if err := annotate(*outDir); err != nil {
+		fmt.Fprintf(os.Stderr, "gen: %s: %v\n", commentedName, err)
+		os.Exit(1)
 	}
 }
 

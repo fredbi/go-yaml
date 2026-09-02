@@ -13,6 +13,14 @@
 // double-quoted scalars and nothing else. The documents here are laid out the
 // way a person writes YAML: block mappings and sequences, plain scalars, and
 // quotes only where the scalar needs them.
+//
+// None of those five holds a comment, because JSON has none to carry over.
+// commented_swagger is azure_swagger with comments written over it, and it is
+// the only workload that reaches the comment code at all: the scanner drops a
+// comment where the mode does not ask for one, the grouping lifts a line
+// comment out of the token stream, and the parse attaches it to a node
+// afterwards. Measure ParseComments on that one; the other five report what
+// the parser does when there is nothing to attach.
 package workloads
 
 import (

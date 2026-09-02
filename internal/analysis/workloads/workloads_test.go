@@ -21,7 +21,7 @@ import (
 func TestEveryWorkloadParsesAndSettles(t *testing.T) {
 	all, err := workloads.All()
 	require.NoError(t, err)
-	require.Len(t, all, 5)
+	require.Len(t, all, 6)
 
 	for _, workload := range all {
 		t.Run(workload.Name, func(t *testing.T) {
