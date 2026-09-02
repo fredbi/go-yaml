@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package labparser
+package parser
 
 import (
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -266,7 +266,13 @@ func (r *reader) fill() error {
 
 		if tk.Type == token.InvalidType {
 			// A token the scanner refused carries no reason of its own:
-			// Scanner.Err has it.
+			// Scanner.Err has it, and it names the character or the header
+			// option that was wrong. Reporting "found an invalid token"
+			// instead loses that.
+			if scanErr := r.scan.Err(); scanErr != nil {
+				return scanErr
+			}
+
 			return yamlerrors.NewSyntax("found an invalid token", held.RawToken())
 		}
 		r.run = append(r.run, held)

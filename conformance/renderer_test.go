@@ -36,7 +36,7 @@ func TestRendererRoundTrip(t *testing.T) {
 
 	var accepted, stable, unreadable, drifting int
 	for _, test := range tests {
-		file, err := parser.ParseBytes(test.InYAML, parser.ParseComments)
+		file, err := parser.ParseBytes(test.InYAML, parser.Comments())
 		if err != nil {
 			continue
 		}
@@ -44,7 +44,7 @@ func TestRendererRoundTrip(t *testing.T) {
 
 		rendered := renderer.File(file)
 
-		reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+		reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 		switch {
 		case err != nil:
 			unreadable++
@@ -82,12 +82,12 @@ func TestRendererReachesAFixedPoint(t *testing.T) {
 
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(source), 0)
+			file, err := parser.ParseBytes([]byte(source))
 			require.NoError(t, err)
 
 			first := renderer.File(file)
 
-			reread, err := parser.ParseBytes([]byte(first), 0)
+			reread, err := parser.ParseBytes([]byte(first))
 			require.NoError(t, err)
 
 			assert.Equal(t, first, renderer.File(reread), "a second render changed the document")
@@ -98,7 +98,7 @@ func TestRendererReachesAFixedPoint(t *testing.T) {
 // TestRendererIndentWidth covers the option that falls out of laying documents
 // out by depth, which upstream #614 asks for.
 func TestRendererIndentWidth(t *testing.T) {
-	file, err := parser.ParseBytes([]byte("a:\n  b:\n    c: 1\n"), 0)
+	file, err := parser.ParseBytes([]byte("a:\n  b:\n    c: 1\n"))
 	require.NoError(t, err)
 
 	assert.Equal(t, "a:\n  b:\n    c: 1\n", ast.NewRenderer().File(file))
@@ -111,7 +111,7 @@ func TestRendererIndentWidth(t *testing.T) {
 // has always emitted, and yaml.IndentSequence is the option that asks for the
 // other one.
 func TestRendererSequenceIndentation(t *testing.T) {
-	file, err := parser.ParseBytes([]byte("tags:\n- a\n- b\n"), 0)
+	file, err := parser.ParseBytes([]byte("tags:\n- a\n- b\n"))
 	require.NoError(t, err)
 
 	assert.Equal(t, "tags:\n- a\n- b\n", ast.NewRenderer().File(file))
@@ -139,7 +139,7 @@ func TestRendererBlockScalarIndentation(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), 0)
+			file, err := parser.ParseBytes([]byte(test.source))
 			require.NoError(t, err)
 
 			assert.Equal(t, test.want, ast.NewRenderer().File(file))
@@ -166,7 +166,7 @@ func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 
 	for name, source := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(source), parser.Comments())
 			require.NoError(t, err)
 
 			assert.Equal(t, source, ast.NewRenderer().File(file))
@@ -177,7 +177,7 @@ func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 	// occupies them; the second is not a gap, and reading it as one put a stray
 	// blank line after every such entry.
 	t.Run("not for a value spanning lines", func(t *testing.T) {
-		file, err := parser.ParseBytes([]byte("a: 'x\n  y'\nb: 2\n"), parser.ParseComments)
+		file, err := parser.ParseBytes([]byte("a: 'x\n  y'\nb: 2\n"), parser.Comments())
 		require.NoError(t, err)
 
 		assert.NotContains(t, ast.NewRenderer().File(file), "\n\n")
@@ -187,7 +187,7 @@ func TestRendererKeepsAuthoredBlankLines(t *testing.T) {
 	// second is the entry's layout, not a gap above the entry after it.
 	t.Run("not for an entry written under its dash", func(t *testing.T) {
 		for _, source := range []string{"-\n  a\n-\n  b\n", "-\n  a: 1\n-\n  ? b\n"} {
-			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(source), parser.Comments())
 			require.NoError(t, err)
 
 			assert.NotContainsf(t, ast.NewRenderer().File(file), "\n\n",
@@ -247,7 +247,7 @@ func TestRendererFlowCollectionsWithComments(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 
 			assert.Equal(t, test.want, ast.NewRenderer().File(file))
@@ -272,7 +272,7 @@ func TestRendererPlacesKeyComments(t *testing.T) {
 
 	for name, source := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(source), parser.Comments())
 			require.NoError(t, err)
 
 			assert.Equal(t, source, ast.NewRenderer().File(file))

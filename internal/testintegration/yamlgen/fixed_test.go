@@ -30,13 +30,13 @@ import (
 // rather than in single-quoted scalars, and the fix's own tests cover the value
 // position alone.
 func TestFixedSingleQuotedKeyKeepsItsEscaping(t *testing.T) {
-	file, err := parser.ParseBytes([]byte("'a''b': false\n"), parser.ParseComments)
+	file, err := parser.ParseBytes([]byte("'a''b': false\n"), parser.Comments())
 	require.NoError(t, err)
 
 	rendered := file.String()
 	assert.Equal(t, "'a''b': false\n", rendered)
 
-	reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+	reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 	require.NoError(t, err, "the rendered document must still parse")
 	assert.Equal(t, rendered, reread.String(), "and rendering settles")
 }
@@ -113,7 +113,7 @@ func TestFixedBlockScalarsRenderTheirChomping(t *testing.T) {
 
 	for name, src := range sources {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(src), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, src, file.String(), "the document is written back as it was read")
 
@@ -156,13 +156,13 @@ func TestFixedCommentOnASequenceEntryStaysThere(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 
 			rendered := file.String()
 			assert.Equal(t, test.want, rendered)
 
-			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 			require.NoError(t, err, "the rendered document must still parse")
 			assert.Equal(t, rendered, reread.String(), "and rendering settles in one pass")
 		})
@@ -210,7 +210,7 @@ func TestFixedAnchoredEmptyEntryEndsWhereItsLineDoes(t *testing.T) {
 			require.NoError(t, yaml.Unmarshal([]byte(src), &before))
 			assert.Equal(t, values[name], before, "reading is correct")
 
-			file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(src), parser.Comments())
 			require.NoError(t, err)
 			rendered := file.String()
 
@@ -218,7 +218,7 @@ func TestFixedAnchoredEmptyEntryEndsWhereItsLineDoes(t *testing.T) {
 			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
 			assert.Equal(t, before, after, "and rendering keeps it")
 
-			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
 		})
@@ -303,7 +303,7 @@ func TestFixedStatedIndentFollowsTheContent(t *testing.T) {
 			var before any
 			require.NoError(t, yaml.Unmarshal([]byte(test.source), &before))
 
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			rendered := file.String()
 			assert.Equal(t, test.want, rendered)
@@ -312,7 +312,7 @@ func TestFixedStatedIndentFollowsTheContent(t *testing.T) {
 			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
 			assert.Equal(t, before, after, "the value survives the move")
 
-			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
 		})
@@ -366,7 +366,7 @@ func TestFixedKeepChompingKeepsItsBlankLinesWhenFolded(t *testing.T) {
 			var before any
 			require.NoError(t, yaml.Unmarshal([]byte(test.source), &before))
 
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			rendered := file.String()
 			assert.Equal(t, test.want, rendered)
@@ -375,7 +375,7 @@ func TestFixedKeepChompingKeepsItsBlankLinesWhenFolded(t *testing.T) {
 			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
 			assert.Equal(t, before, after, "the value survives being written out")
 
-			reread, err := parser.ParseBytes([]byte(rendered), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
 		})

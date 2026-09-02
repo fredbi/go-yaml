@@ -6,12 +6,12 @@ package parser
 import (
 	"errors"
 	"fmt"
-	"iter"
 	"os"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -23,40 +23,18 @@ const (
 )
 
 // ParseBytes reads src and returns the file it describes.
-func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
-	text := string(src)
-
-	var s scanner.Scanner
-	s.Init(text)
-
-	p, err := New(s.Tokens(), mode, opts...)
-	if scanErr := s.Err(); scanErr != nil {
-		// The scanner stopped first, and says why. New only knows that the
-		// token it was handed was an invalid one.
-		err = scanErr
-	}
-	if err != nil {
-		return nil, yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: text, FirstLine: 1})
-	}
-
-	f, err := p.Parse()
-	if err != nil {
-		// An error drawn under the document needs the document. Parse reads a
-		// token stream and has none, so it is told here, where the text is.
-		return nil, yamlerrors.WithSource(err, yamlerrors.Source{Text: text, FirstLine: 1})
-	}
-
-	return f, nil
+func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
+	return New(opts...).Parse(src)
 }
 
 // ParseFile reads the file named filename and returns the file it describes.
-func ParseFile(filename string, mode Mode, opts ...Option) (*ast.File, error) {
+func ParseFile(filename string, opts ...Option) (*ast.File, error) {
 	src, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := ParseBytes(src, mode, opts...)
+	f, err := ParseBytes(src, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +71,12 @@ var yamlVersionMap = map[string]YAMLVersion{
 }
 
 type Parser struct {
-	tokens []*Token
-	raw    rawTokens
+	// tokens holds every token.Token the tree points at, in chunks it can fill
+	// again once the parse has finished reading them. A full scan pins it and
+	// never lets go, so nothing is recycled and every token stands.
+	tokens *tokenarena.TokenArena[Token]
+	// onComplete is told about each node as it is finished. EXPERIMENT.
+	onComplete func(ast.Node)
 	// entries holds the entries of every mapping open at this point in the
 	// descent, innermost run last. parseMap takes its run off the end once the
 	// mapping is built.
@@ -130,6 +112,29 @@ type Parser struct {
 	// canada_geometry, which is deep sequences and nothing else.
 	seqEntries []pendingEntry
 
+	// walk is where a Walk stands, and nil for a parse that gathers a tree
+	// rather than handing it over.
+	walk *walkState
+
+	// anchorFrom holds where each anchor open at this point in the descent
+	// begins, innermost last. Anchors nest, so it is a stack.
+	anchorFrom []int32
+
+	// scan reads src into tokens, one at a time, as the reader asks.
+	scan scanner.Scanner
+	// reader groups what the scanner reads and hands over a document at a time.
+	reader *reader
+	// body is the run the document's own tokens are drawn from, which is the
+	// outermost of the descent. The tail follows it: every level below holds
+	// tokens at or behind where it stands.
+	body *tokenRef
+
+	// mode is what the options asked of the parse.
+	mode Mode
+
+	// chunkSize is how many tokens one chunk of the token arena holds.
+	chunkSize int
+
 	// arena is where the nodes of the parse in hand come from. It is kept so
 	// that what a tree cost can be read after the parse rather than guessed at
 	// from a heap profile -- see [Parser.ArenaStats].
@@ -156,8 +161,26 @@ func (p *Parser) tokenRefAt(depth int32, g *TokenGroup) *tokenRef {
 	}
 
 	ref := p.refs[depth]
-	ref.tokens, ref.idx = g.Members(&ref.pair), 0
+	ref.tokens, ref.idx, ref.base = g.Members(&ref.pair), 0, 0
 	ref.pull, ref.drained = nil, false
+
+	return ref
+}
+
+// tokenRefFrom returns the reference for a run read at depth from pull, which
+// draws one token at a time and reports false at the run's end.
+//
+// The run is not held: [tokenRef.forget] drops what the parser has read past,
+// so a document read this way costs the window the descent is reading and not
+// the document.
+func (p *Parser) tokenRefFrom(depth int32, pull func() (*Token, bool)) *tokenRef {
+	for int(depth) >= len(p.refs) {
+		p.refs = append(p.refs, new(tokenRef))
+	}
+
+	ref := p.refs[depth]
+	ref.tokens, ref.idx, ref.base = ref.tokens[:0], 0, 0
+	ref.pull, ref.drained = pull, false
 
 	return ref
 }
@@ -215,49 +238,76 @@ func (p *Parser) closeMapping(base int) {
 	p.keyStack = p.keyStack[:base]
 }
 
-// New returns a parser reading the tokens seq hands over.
+// New returns a parser.
 //
-// seq is read to its end here, because grouping looks both ways along the
-// stream: what a ':' belongs to is not settled until the tokens after it have
-// been read. The tokens are held as values in blocks of their own, so what the
-// scanner hands over is copied and the scanner keeps none of it.
-//
-// Where mode does not carry ParseComments, comment tokens are dropped as they
-// arrive and never reach the grouping at all.
-func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) {
-	keepComments := mode&ParseComments != 0
-
-	var raw rawTokens
-	for tk := range seq {
-		if !keepComments && tk.Type == token.CommentType {
-			continue
-		}
-		if tk.Type == token.InvalidType {
-			// A stream handed in rather than scanned here carries no reason:
-			// the scanner reports one, and Scanner.Err returns it.
-			held := raw.add(tk)
-
-			return nil, yamlerrors.NewSyntax("found an invalid token", held)
-		}
-		raw.add(tk)
-	}
-
-	tks, lineComments, err := createGroupedTokens(&raw)
-	if err != nil {
-		return nil, err
-	}
-
-	p := &Parser{
-		tokens:       tks,
-		raw:          raw,
-		lineComments: lineComments,
-		keyIndex:     make(map[mapKeyRef]token.Position),
-	}
+// It reads nothing here: hand it a document with [Parser.Parse] or
+// [Parser.Walk]. How a document becomes tokens is the parser's own business,
+// and a caller made to say would be tied to it.
+func New(opts ...Option) *Parser {
+	p := &Parser{keyIndex: make(map[mapKeyRef]token.Position)}
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	return p, nil
+	return p
+}
+
+// begin sets the parse up to read src, and reads nothing yet.
+//
+// The scanner, the grouping and the descent run at once from here: [parse] asks
+// for a document, the reader scans and groups just enough to hand one over, and
+// the tape may be filled again behind what the descent has passed.
+func (p *Parser) begin(src []byte) {
+	if p.chunkSize == 0 {
+		// Sized from the document, so a short one does not pay for a chunk it
+		// will use a tenth of. A caller passing ChunkSize wins.
+		p.chunkSize = tokenarena.SizeFor(len(src))
+	}
+	p.tokens = tokenarena.New[Token](p.chunkSize)
+
+	// A full scan holds every token it reads. The pin says so once, here, and
+	// [Parser.Walk] is what gives it back.
+	p.tokens.Pin()
+
+	p.scan.Init(string(src))
+
+	// Guessed from the source rather than counted, since counting would mean
+	// reading the document through before parsing any of it. It sizes buffers
+	// and nothing else.
+	estimate := max(len(src)/8, 16)
+	p.reader = newReader(&p.scan, p.tokens, p.chunkSize, estimate, p.mode&ParseComments != 0)
+	p.lineComments = p.reader.g.lineComments
+}
+
+// Tokens returns the arena the last read went into, or nil before one.
+//
+// For measurement: it is how a test finds the sequence number of a token the
+// tree points at.
+func (p *Parser) Tokens() *tokenarena.TokenArena[Token] { return p.tokens }
+
+// GroupingHeld is the most tokens a grouping pass held at once while reading
+// the last document.
+//
+// The grouping runs ahead of the descent and keeps what it cannot yet settle,
+// so the tape has to hold at least this much however far the tail has moved.
+// groupMapKeysByValue is the pass that can hold a lot of it: its window reaches
+// back to the start of any flow collection still open, because that collection
+// may yet close and stand as a key.
+func (p *Parser) GroupingHeld() int {
+	if p.reader == nil {
+		return 0
+	}
+
+	return p.reader.g.heldHigh
+}
+
+// TokenStats reports what holding the tokens of the last parse cost.
+func (p *Parser) TokenStats() tokenarena.Stats {
+	if p.tokens == nil {
+		return tokenarena.Stats{}
+	}
+
+	return p.tokens.Stats()
 }
 
 // ArenaStats reports what the nodes of the last parse cost.
@@ -276,70 +326,101 @@ func (p *Parser) ArenaStats() ast.ArenaStats {
 	return p.arena.Stats()
 }
 
-// Parse reads the stream through and returns the file it describes.
+// Parse reads src through and returns the file it describes.
 //
 // Call it once per parser. A comment is handed to the node that keeps it as the
 // tree is built, and a second call would find none left to hand over.
-func (p *Parser) Parse() (*ast.File, error) {
-	return p.parse(p.newContext())
+func (p *Parser) Parse(src []byte) (*ast.File, error) {
+	p.begin(src)
+
+	file, err := p.parse(p.newContext())
+	if err != nil {
+		return nil, drawUnder(src, err)
+	}
+
+	return file, nil
+}
+
+// drawUnder puts the document under an error read from it, so the message shows
+// the line it came from.
+func drawUnder(src []byte, err error) error {
+	return yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: string(src), FirstLine: 1})
 }
 
 func (p *Parser) parse(ctx context) (*ast.File, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
-	for _, token := range p.tokens {
-		doc, err := p.parseDocument(ctx, token.Group)
+	for {
+		// Reading only as far as the descent has asked is what lets the tape be
+		// filled again behind it.
+		doc, ok, err := p.parseDocument(ctx)
 		if err != nil {
 			return nil, err
 		}
+		if !ok {
+			break
+		}
 		file.Docs = append(file.Docs, doc)
+
+		// An alias names its anchor within one document, so what this one's
+		// anchors and directives saved is finished with here.
+		p.releaseDocument()
 	}
+
 	return file, nil
 }
 
-func (p *Parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.DocumentNode, error) {
-	if docGroup.Len() == 0 {
-		return ast.Document(docGroup.RawToken(), nil), nil
+// parseDocument reads one document, and reports false at the end of the stream.
+//
+// The body is read through the reader rather than out of a group holding the
+// whole document: the "---" is known when the document opens and the "..." only
+// once the body has run out, which is where the group could not be built until
+// the document had been read through.
+func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
+	start, ok, err := p.reader.openDocument()
+	if err != nil || !ok {
+		return nil, false, err
 	}
 
-	var (
-		docPair [2]*Token
-		tokens  = docGroup.Members(&docPair)
-		start   *token.Token
-		end     *token.Token
-	)
-	if docGroup.First().Type() == token.DocumentHeaderType {
-		start = docGroup.First().RawToken()
-		tokens = tokens[1:]
+	// A document holding nothing between its markers has no body. Asking for
+	// the first token is what says so, and it draws no more than that one.
+	var body ast.Node
+
+	bodyCtx := ctx.withPull(p, p.reader.bodyToken)
+	if bodyCtx.currentToken() != nil {
+		body, err = p.parseDocumentBody(bodyCtx)
+		if err != nil {
+			return nil, false, err
+		}
 	}
-	if docGroup.Last().Type() == token.DocumentEndType {
-		end = docGroup.Last().RawToken()
-		tokens = tokens[:len(tokens)-1]
-		defer func() {
-			// clear yaml version value if DocumentEnd token (...) is specified.
-			p.yamlVersion = ""
-		}()
+	if p.reader.err != nil {
+		return nil, false, p.reader.err
 	}
 
-	if len(tokens) == 0 {
-		return ast.Document(docGroup.RawToken(), nil), nil
-	}
-
-	body, err := p.parseDocumentBody(ctx.withGroup(p, newTokenGroup(TokenGroupDocumentBody, tokens)))
+	end, err := p.reader.closeDocument()
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if end != nil {
+		// A "..." closes the scope a %YAML directive opened.
+		p.yamlVersion = ""
 	}
 
 	// A TAG directive defines a handle for the one document that follows it,
-	// and this was that document: what it declared goes out of scope here.
-	// Carrying the definitions on let a later document use a handle it never
-	// declared. A document holding only the directives themselves does not end
-	// their scope -- it is what opens it.
+	// and a document holding only the directives themselves does not end their
+	// scope -- it opens it.
 	if _, directives := body.(*ast.DirectiveNode); !directives {
 		p.clearTagDirectives()
 	}
+
 	node := ast.Document(start, body)
-	node.End = end
-	return node, nil
+	if body != nil {
+		// A document holding nothing keeps no "...": the pass this replaced
+		// read the marker, then returned on the empty body before it hung the
+		// marker on the node. "--- ..." renders as "---".
+		node.End = end
+	}
+
+	return node, true, nil
 }
 
 func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
@@ -360,7 +441,46 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	return node, nil
 }
 
+// mappingValue builds a map entry and tells onComplete about it. Every entry
+// the parser makes goes through here, block and flow alike, which is what lets
+// a consumer fold entries without walking the tree. EXPERIMENT (2026-08-27).
+func (p *Parser) mappingValue(ctx context, colon, entry *Token, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
+	n, err := newMappingValueNode(ctx, colon, entry, key, value)
+	if err == nil && p.onComplete != nil {
+		p.onComplete(n)
+	}
+
+	return n, err
+}
+
+// parseToken builds the node tk introduces, and tells onComplete about it.
+//
+// EXPERIMENT (2026-08-27): every node the parser builds returns through here,
+// and it returns complete, so this is the whole post-order hook a consumer
+// folding nodes into values needs. parseMapEntry reports its own entries, which
+// do not come back through here.
 func (p *Parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
+	n, err := p.parseTokenNode(ctx, tk)
+	if err != nil || n == nil {
+		return n, err
+	}
+	if p.onComplete != nil {
+		p.onComplete(n)
+	}
+
+	// A collection hands itself over as it opens and closes, and so does an
+	// anchor, which stands around the node it names; everything else goes over
+	// here, once, when it is built.
+	switch n.(type) {
+	case *ast.MappingNode, *ast.SequenceNode, *ast.AnchorNode:
+	default:
+		p.hand(ctx, n)
+	}
+
+	return n, err
+}
+
+func (p *Parser) parseTokenNode(ctx context, tk *Token) (ast.Node, error) {
 	switch tk.GroupType() {
 	case TokenGroupMapKey, TokenGroupMapKeyValue:
 		return p.parseMap(ctx)
@@ -537,6 +657,10 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !p.enter(ctx, node, KindMapping) {
+		return node, nil
+	}
+	defer p.leave(ctx, node)
 	ctx.goNext() // skip MappingStart token
 
 	isFirst := true
@@ -595,14 +719,18 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			if err != nil {
 				return nil, err
 			}
+			p.handKey(ctx, key)
 			ctx := p.valueContext(ctx, key)
 			colonTk := mapKeyTk.Group.Last()
 			if p.isFlowMapDelim(ctx.nextToken()) {
-				value, err := newNullNode(ctx, ctx.insertNullToken(colonTk))
+				// The null stands for a value the document leaves out, and a
+				// writer needs it like any other: "{p: , q: 2}" without it
+				// wrote the key and then the next key.
+				value, err := p.handNull(ctx, ctx.insertNullToken(colonTk))
 				if err != nil {
 					return nil, err
 				}
-				mapValue, err := newMappingValueNode(ctx, colonTk, entryTk, key, value)
+				mapValue, err := p.mappingValue(ctx, colonTk, entryTk, key, value)
 				if err != nil {
 					return nil, err
 				}
@@ -617,7 +745,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				mapValue, err := newMappingValueNode(ctx, colonTk, entryTk, key, value)
+				mapValue, err := p.mappingValue(ctx, colonTk, entryTk, key, value)
 				if err != nil {
 					return nil, err
 				}
@@ -631,15 +759,24 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				}
 				return nil, yamlerrors.NewSyntax("could not find flow map content", errTk.RawToken())
 			}
+			// The key is read without going over on its own account: it is a
+			// key, not a value, and parseScalarValue would hand a property
+			// group -- the "&a" of "{&a}" -- over as a value.
+			loud := p.quiet()
 			key, err := p.parseScalarValue(ctx, mapKeyTk)
+			loud()
 			if err != nil {
 				return nil, err
 			}
-			value, err := newNullNode(ctx, ctx.insertNullToken(mapKeyTk))
+			p.handKey(ctx, key)
+
+			// "{p}" leaves the value out, and a writer needs the null that
+			// stands for it as much as it needs the key.
+			value, err := p.handNull(ctx, ctx.insertNullToken(mapKeyTk))
 			if err != nil {
 				return nil, err
 			}
-			mapValue, err := newMappingValueNode(ctx, mapKeyTk, entryTk, key, value)
+			mapValue, err := p.mappingValue(ctx, mapKeyTk, entryTk, key, value)
 			if err != nil {
 				return nil, err
 			}
@@ -686,6 +823,10 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 	if keyTk.Group == nil {
 		return nil, yamlerrors.NewSyntax("unexpected map key", keyTk.RawToken())
 	}
+
+	// The entry's own tokens are read again once the value under it is parsed,
+	// and the tail passes them meanwhile.
+	defer p.holdRun(keyTk.Seq())()
 	if keyTk.GroupType() == TokenGroupMapKeyValue {
 		node, err := p.parseMapKeyValue(ctx.withGroup(p, keyTk.Group), keyTk.Group, nil)
 		if err != nil {
@@ -703,6 +844,9 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 	if err != nil {
 		return nil, err
 	}
+	// The key goes over before its value is parsed: a writer needs it first,
+	// and its token is on the tape now.
+	p.handKey(ctx, key)
 	ctx.goNext()
 
 	valueTk := ctx.currentToken()
@@ -715,10 +859,22 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 		return nil, err
 	}
 
-	return newMappingValueNode(childCtx, keyTk.Group.Last(), nil, key, value)
+	// A value taken from the key's own line settles the entry, so nothing
+	// indented under it belongs to this key. The pairing pass used to make that
+	// case its own group and the check ran on the group; without the group the
+	// condition has to be read off the tokens.
+	if valueTk != nil && keyTk.Line() == valueTk.Line() {
+		if err := p.validateMapKeyValueNextToken(ctx, keyTk, ctx.currentToken()); err != nil {
+			return nil, err
+		}
+	}
+
+	return p.mappingValue(childCtx, keyTk.Group.Last(), nil, key, value)
 }
 
 func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
+	defer p.holdRun(ctx.currentToken().Seq())()
+
 	base := len(p.keyStack)
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
@@ -730,11 +886,26 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	defer func() { p.entries = p.entries[:entryBase] }()
 
 	keyTk := ctx.currentToken()
+
+	// The node is made before its entries, not after, so a walk is handed the
+	// mapping while the token it stands on is still on the tape. Gathering
+	// fills Values at the end; walking leaves it empty and hands each entry
+	// over instead.
+	mapNode := ctx.arena.Mapping(keyTk.RawToken(), false, nil)
+	mapNode.SetPathNode(ctx.path)
+	if !p.enter(ctx, mapNode, KindMapping) {
+		return mapNode, nil
+	}
+
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
 		return nil, err
 	}
-	p.entries = append(p.entries, keyValueNode)
+	// A mapping stands on its first entry's ':', which is only known now. The
+	// walk was handed the key's position instead, which is where a reader would
+	// say the mapping begins.
+	mapNode.Start = keyValueNode.GetToken()
+	p.hold(keyValueNode)
 
 	var tk *Token
 	if ctx.isComment() {
@@ -768,17 +939,17 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 		if err := setHeadComment(cm, entry); err != nil {
 			return nil, err
 		}
-		p.entries = append(p.entries, entry)
+		p.hold(entry)
 		if ctx.isComment() {
 			tk = ctx.nextNotCommentToken()
 		} else {
 			tk = ctx.currentToken()
 		}
 	}
-	mapNode, err := newMappingNode(ctx, keyValueNode.GetToken(), false, p.entries[entryBase:])
-	if err != nil {
-		return nil, err
+	if !p.walking() {
+		mapNode.Values = ctx.arena.MappingRun(p.entries[entryBase:])
 	}
+	defer p.leave(ctx, mapNode)
 
 	if ctx.isComment() {
 		if keyTk.Column() <= ctx.currentToken().Column() {
@@ -835,13 +1006,17 @@ func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 	if err != nil {
 		return nil, err
 	}
+	// As in parseMapEntry: the key goes over before its value. This shape holds
+	// key and value in one group, so parseMapEntry returns here before it hands
+	// anything over, and a flow mapping reaches this and nothing else.
+	p.handKey(ctx, key)
 
 	c := p.valueContext(ctx, key)
 	value, err := p.parseToken(c, g.Last())
 	if err != nil {
 		return nil, err
 	}
-	return newMappingValueNode(c, keyGroup.Last(), entryTk, key, value)
+	return p.mappingValue(c, keyGroup.Last(), entryTk, key, value)
 }
 
 // parseMapKeyValueNode parses the key part of a map-key group.
@@ -1051,7 +1226,7 @@ func (p *Parser) mapKeyText(n ast.Node) string {
 func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) (ast.Node, error) {
 	tk := ctx.currentToken()
 	if tk == nil {
-		return newNullNode(ctx, ctx.addNullValueToken(colonTk))
+		return p.handNull(ctx, ctx.addNullValueToken(colonTk))
 	}
 
 	if ctx.isComment() {
@@ -1074,13 +1249,13 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// ----
 		// key: <value does not defined>
 		// next
-		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
 
 	if ctx.isFlow && closesFlowEntry(tk) {
 		// "[a:]", "[:]" and "[a, :]" -- the punctuation belongs to the
 		// collection the pair is written in, so the pair's value is e-node.
-		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && carriesProperty(tk) &&
@@ -1135,7 +1310,7 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// ----
 		//   key: <value does not defined>
 		// next
-		return newNullNode(ctx, ctx.insertNullToken(colonTk))
+		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
 
 	if isScalarKeyToken(key.GetToken()) && tk.Column() == keyCol && tk.Line() != keyLine &&
@@ -1271,10 +1446,21 @@ func startsEntry(tk *Token) bool {
 // document, and *x resolves to null. Refusing it made an anchor the one thing
 // that could not be attached to an absent value.
 func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
+	defer p.closeAnchor(ctx)
+
+	// The anchor stands around the node it names, so it goes over before that
+	// node and closes after it. Handing it over afterwards, as a node holding
+	// nothing does, put it beside its own value at the same depth and lost the
+	// nesting: "a: &x 1" read as the two values 1 and &x.
+	if !p.enter(ctx, anchor, KindAnchor) {
+		return nil, nil
+	}
+	defer p.leave(ctx, anchor)
+
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
 		// Built rather than inserted: there is no token here to stand for the
 		// null, and putting one in the stream would leave it to be read again.
-		return newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: anchor.GetToken()}))
+		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(anchor.GetToken())))
 	}
 
 	value, err := p.parseToken(ctx, ctx.currentToken())
@@ -1289,6 +1475,11 @@ func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 }
 
 func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
+	// An alias may name this anchor anywhere below it in the document, so what
+	// the anchor covers outlives the tail. How far it runs is not known here,
+	// so the tape is held from the '&' until parseAnchorValue closes the node.
+	p.openAnchor(ctx)
+
 	anchor, err := newAnchorNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -1339,14 +1530,18 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 
 	tk := ctx.currentToken()
 	if tk == nil {
-		value, err := newStringNode(ctx, &Token{Token: token.New("", "", node.Start.Position)})
+		value, err := newStringNode(ctx, newSynthetic(token.New("", "", node.Start.Position)))
 		if err != nil {
 			return nil, err
 		}
 		node.Value = value
 		return node, nil
 	}
+	// The content belongs to the literal and is not a value of its own, so it
+	// does not go over on its own account.
+	loud := p.quiet()
 	value, err := p.parseToken(ctx, tk)
+	loud()
 	if err != nil {
 		return nil, err
 	}
@@ -1396,7 +1591,7 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 			// A secondary tag directive with nothing left to tag. Produce the
 			// same implicit null parseTagValue produces for the primary case,
 			// rather than building a node out of a token that is not there.
-			value, err := newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
+			value, err := newNullNode(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
 			if err != nil {
 				return nil, err
 			}
@@ -1448,7 +1643,7 @@ func namedTagHandle(value string) (string, bool) {
 
 func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (ast.Node, error) {
 	if tk == nil {
-		return newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
+		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
 	}
 	switch token.ReservedTagKeyword(tagRawTk.Value) {
 	case token.MappingTag, token.SetTag:
@@ -1498,6 +1693,11 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !p.enter(ctx, node, KindSequence) {
+		return node, nil
+	}
+	defer p.leave(ctx, node)
+
 	ctx.goNext() // skip SequenceStart token
 
 	isFirst := true
@@ -1576,6 +1776,31 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	return node, nil
 }
 
+// handNull builds the null a missing value stands for and hands it over.
+//
+// A null of this kind is built where the value would have been rather than
+// drawn from a token of its own, so it does not pass through parseToken and
+// would otherwise reach no walk.
+func (p *Parser) handNull(ctx context, tk *Token) (ast.Node, error) {
+	node, err := newNullNode(ctx, tk)
+	if err != nil {
+		return nil, err
+	}
+	p.hand(ctx, node)
+
+	return node, nil
+}
+
+// hold keeps a mapping's entry for the node above it, or drops it where the
+// parse is walking: the key went over before its value and the value announced
+// itself, so the entry holds nothing the caller has not seen.
+func (p *Parser) hold(entry *ast.MappingValueNode) {
+	if p.walking() {
+		return
+	}
+	p.entries = append(p.entries, entry)
+}
+
 // pendingEntry is one entry of a sequence being parsed, held until the sequence
 // closes and its slices can be sized at once.
 type pendingEntry struct {
@@ -1617,10 +1842,16 @@ func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
 
 func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	seqTk := ctx.currentToken()
+	defer p.holdRun(seqTk.Seq())()
 	seqNode, err := newSequenceNode(ctx, seqTk, false)
 	if err != nil {
 		return nil, err
 	}
+
+	if !p.enter(ctx, seqNode, KindSequence) {
+		return seqNode, nil
+	}
+	defer p.leave(ctx, seqNode)
 
 	// The entries are gathered on a stack the parser reuses for every sequence,
 	// so this one's slices are allocated at its own length rather than grown an
@@ -1656,7 +1887,9 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
-	fillSequence(seqNode, p.seqEntries[base:])
+	if !p.walking() {
+		fillSequence(seqNode, p.seqEntries[base:])
+	}
 
 	if ctx.isComment() {
 		if seqTk.Column() <= ctx.currentToken().Column() {
@@ -1674,7 +1907,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error) {
 	tk := ctx.currentToken()
 	if tk == nil {
-		return newNullNode(ctx, ctx.addNullValueToken(seqTk))
+		return p.handNull(ctx, ctx.addNullValueToken(seqTk))
 	}
 
 	if ctx.isComment() {
@@ -1688,7 +1921,7 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// ----
 		// - <value does not defined>
 		// -
-		return newNullNode(ctx, ctx.insertNullToken(seqTk))
+		return p.handNull(ctx, ctx.insertNullToken(seqTk))
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == seqLine && tk.GroupType() == TokenGroupAnchorName &&
@@ -1731,7 +1964,7 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// ----
 		//   - <value does not defined>
 		// next
-		return newNullNode(ctx, ctx.insertNullToken(seqTk))
+		return p.handNull(ctx, ctx.insertNullToken(seqTk))
 	}
 
 	if tk.Line() == seqLine && tk.GroupType() == TokenGroupAnchorName &&
@@ -1796,6 +2029,9 @@ func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 			return nil, err
 		}
 		if tagKey.Value == "!!" {
+			// The directive is hung on every node of the document that uses it,
+			// so its tokens stand for as long as the document does.
+			p.saveHere(g.First().Seq(), g.Last().Seq())
 			p.secondaryTagDirective = directive
 		}
 		if p.tagHandles == nil {

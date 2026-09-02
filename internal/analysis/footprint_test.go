@@ -33,7 +33,7 @@ func TestRetainedFootprint(t *testing.T) {
 		mb := float64(len(src)) / (1 << 20)
 
 		ours := retainedMB(t, func() any {
-			f, err := parser.ParseBytes(src, 0)
+			f, err := parser.ParseBytes(src)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +77,7 @@ func TestRetainedByLayer(t *testing.T) {
 			return held
 		})
 		whole := retainedMB(t, func() any {
-			f, err := parser.ParseBytes([]byte(text), 0)
+			f, err := parser.ParseBytes([]byte(text))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func (c nodeCounter) Visit(node ast.Node) ast.Visitor { *c.n++; return c }
 func countNodes(t *testing.T, src []byte) int {
 	t.Helper()
 
-	f, err := parser.ParseBytes(src, 0)
+	f, err := parser.ParseBytes(src)
 	if err != nil {
 		t.Fatal(err)
 	}

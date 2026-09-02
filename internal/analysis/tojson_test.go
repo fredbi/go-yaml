@@ -12,7 +12,7 @@ import (
 	yaml "github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/lab"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestToJSONPeak measures converting a document to JSON both ways.
@@ -58,7 +58,7 @@ func TestToJSONPeak(t *testing.T) {
 		// What the parse alone stands up, converting nothing. Whatever share of
 		// the progressive peak this is, no consumer can get under it.
 		bare := peakLiveMax(peakLiveRuns(), func() {
-			file, err := labparser.ParseBytes(w.Data)
+			file, err := parser.ParseBytes(w.Data)
 			require.NoError(t, err)
 			runtime.KeepAlive(file)
 		})

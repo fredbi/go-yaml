@@ -68,7 +68,7 @@ func TestCollectionBreadth(t *testing.T) {
 	}
 
 	for _, w := range all {
-		f, err := parser.ParseBytes(w.Data, 0)
+		f, err := parser.ParseBytes(w.Data)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestSlidingPeak(t *testing.T) {
 	}
 
 	for _, w := range all {
-		f, err := parser.ParseBytes(w.Data, 0)
+		f, err := parser.ParseBytes(w.Data)
 		if err != nil {
 			t.Fatal(err)
 		}

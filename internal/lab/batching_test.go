@@ -11,7 +11,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -37,10 +37,10 @@ func TestGroupingSurvivesEveryJoin(t *testing.T) {
 		t.Run("runs of "+strconv.Itoa(runs), func(t *testing.T) {
 			for _, set := range [][]workloads.Workload{all, stress} {
 				for _, w := range set {
-					want, err := parser.ParseBytes(w.Data, 0)
+					want, err := refparser.ParseBytes(w.Data, 0)
 					require.NoError(t, err, w.Name)
 
-					got, err := labparser.ParseBytes(w.Data, labparser.ChunkSize(runs))
+					got, err := parser.ParseBytes(w.Data, parser.ChunkSize(runs))
 					require.NoError(t, err, "%s in runs of %d", w.Name, runs)
 
 					assert.Equal(t, want.String(), got.String(),
@@ -61,10 +61,10 @@ func TestGroupingSurvivesEveryJoinOnSmallDocuments(t *testing.T) {
 		"? [a, b]\n: c\n", "--- a\n--- b\n", "a: 1\n...\nb: 2\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			want, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+			want, err := refparser.ParseBytes([]byte(src), refparser.ParseComments)
 			require.NoError(t, err)
 
-			got, err := labparser.ParseBytes([]byte(src), labparser.ChunkSize(1), labparser.Comments())
+			got, err := parser.ParseBytes([]byte(src), parser.ChunkSize(1), parser.Comments())
 			require.NoError(t, err)
 
 			assert.Equal(t, want.String(), got.String(),

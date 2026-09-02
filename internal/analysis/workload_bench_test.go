@@ -37,7 +37,7 @@ func BenchmarkWorkloadTokenize(b *testing.B) {
 func BenchmarkWorkloadParse(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := parser.ParseBytes(src, 0); err != nil {
+			if _, err := parser.ParseBytes(src); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -47,7 +47,7 @@ func BenchmarkWorkloadParse(b *testing.B) {
 func BenchmarkWorkloadParseWithComments(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := parser.ParseBytes(src, parser.ParseComments); err != nil {
+			if _, err := parser.ParseBytes(src, parser.Comments()); err != nil {
 				b.Fatal(err)
 			}
 		}

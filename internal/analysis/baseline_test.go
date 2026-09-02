@@ -27,7 +27,7 @@ func TestMemoryFootprint(t *testing.T) {
 		{"[]rune(src)", func() any { return []rune(src) }},
 		{"scanner.Scanner -> token.Tokens", func() any { return tokenize(t, src) }},
 		{"parser.ParseBytes -> *ast.File", func() any {
-			f, err := parser.ParseBytes([]byte(src), 0)
+			f, err := parser.ParseBytes([]byte(src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +86,7 @@ func BenchmarkParse(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := parser.ParseBytes([]byte(benchSrc), 0); err != nil {
+		if _, err := parser.ParseBytes([]byte(benchSrc)); err != nil {
 			b.Fatal(err)
 		}
 	}

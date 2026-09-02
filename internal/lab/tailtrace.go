@@ -5,8 +5,8 @@ package lab
 
 import (
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -50,14 +50,14 @@ type TailTrace struct {
 func TraceToJSONTail(src []byte, chunk int) (TailTrace, error) {
 	w := &tailFolder{reach: map[ast.Node]int{}, start: map[ast.Node]int{}}
 
-	p := labparser.New(labparser.ChunkSize(chunk), labparser.OnComplete(w.complete))
+	p := parser.New(parser.ChunkSize(chunk), parser.OnComplete(w.complete))
 	w.tokens = p.Tokens
 
 	if _, err := p.Parse(src); err != nil {
 		return TailTrace{}, err
 	}
 
-	held := make([]*labparser.Token, 0, p.Tokens().Len())
+	held := make([]*parser.Token, 0, p.Tokens().Len())
 	for tk := range p.Tokens().All() {
 		held = append(held, tk)
 	}
@@ -77,8 +77,8 @@ func TraceToJSONTail(src []byte, chunk int) (TailTrace, error) {
 //
 // The parse reads forward, so by the time a node completes the scanner has
 // passed its last token: fill to there, then move the tail.
-func replay(held []*labparser.Token, tail []int, chunk int) tokenarena.Stats {
-	arena := tokenarena.New[labparser.Token](chunk)
+func replay(held []*parser.Token, tail []int, chunk int) tokenarena.Stats {
+	arena := tokenarena.New[parser.Token](chunk)
 
 	var at int
 	for _, reach := range tail {
@@ -99,7 +99,7 @@ func replay(held []*labparser.Token, tail []int, chunk int) tokenarena.Stats {
 // tailFolder records where the tail could stand after each node completes,
 // under both rules.
 type tailFolder struct {
-	tokens func() *tokenarena.TokenArena[labparser.Token]
+	tokens func() *tokenarena.TokenArena[parser.Token]
 	seq    map[*token.Token]int
 	reach  map[ast.Node]int
 	start  map[ast.Node]int
@@ -199,7 +199,7 @@ func (w *tailFolder) seqOf(tk *token.Token) int {
 
 // sequenceOf numbers the tokens an arena holds, so a token the tree points at
 // can be found on the tape.
-func sequenceOf(a *tokenarena.TokenArena[labparser.Token]) map[*token.Token]int {
+func sequenceOf(a *tokenarena.TokenArena[parser.Token]) map[*token.Token]int {
 	out := make(map[*token.Token]int, a.Len())
 
 	var i int

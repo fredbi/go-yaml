@@ -9,7 +9,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
@@ -30,7 +30,7 @@ func TestArenaStats(t *testing.T) {
 		var s scanner.Scanner
 		s.Init(string(w.Data))
 
-		p, err := parser.New(s.Tokens(), 0)
+		p, err := refparser.New(s.Tokens(), 0)
 		require.NoError(t, err)
 
 		_, err = p.Parse()
@@ -68,7 +68,7 @@ func TestArenaStatsAccountForEveryNode(t *testing.T) {
 	var s scanner.Scanner
 	s.Init(string(w.Data))
 
-	p, err := parser.New(s.Tokens(), 0)
+	p, err := refparser.New(s.Tokens(), 0)
 	require.NoError(t, err)
 
 	file, err := p.Parse()

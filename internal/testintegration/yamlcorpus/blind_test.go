@@ -145,7 +145,7 @@ func TestBlindReplay(t *testing.T) {
 
 		report.Scored++
 
-		_, perr := parser.ParseBytes(c.Src, parser.ParseComments)
+		_, perr := parser.ParseBytes(c.Src, parser.Comments())
 
 		if (want == stance.Accept) != (perr == nil) {
 			class := "accepts a document the grammar refuses"

@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // anchored names the documents holding an anchor, whose chunks a walk saves.
@@ -28,7 +28,7 @@ type counting struct {
 	anchorName string
 }
 
-func (v *counting) Enter(node ast.Node, _ labparser.Step) bool {
+func (v *counting) Enter(node ast.Node, _ parser.Step) bool {
 	v.nodes++
 	if anchor, ok := node.(*ast.AnchorNode); ok && v.anchor == nil {
 		v.anchor, v.anchorName = anchor, anchor.GetToken().Value
@@ -37,7 +37,7 @@ func (v *counting) Enter(node ast.Node, _ labparser.Step) bool {
 	return true
 }
 
-func (v *counting) Leave(ast.Node, labparser.Step) {}
+func (v *counting) Leave(ast.Node, parser.Step) {}
 
 // TestWalkLetsTheTapeGo checks a walk hands the tape back as it reads.
 //
@@ -78,7 +78,7 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 
 	for _, set := range [][]workloads.Workload{ordinary, stress} {
 		for _, w := range set {
-			p := labparser.New(labparser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
+			p := parser.New(parser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
 
 			keep := &counting{}
 			_, err := p.Walk(w.Data, keep)

@@ -257,7 +257,7 @@ key2: value2
 				t.Fatalf("unexpected error during path parsing: %+v", err)
 			}
 
-			file, err := parser.ParseBytes([]byte(test.src), 0)
+			file, err := parser.ParseBytes([]byte(test.src))
 			if err != nil {
 				t.Fatalf("failed to parse YAML: %+v", err)
 			}
@@ -354,7 +354,7 @@ a.b.c:
 					t.Fatalf("%+v", err)
 				}
 			}
-			file, err := parser.ParseBytes([]byte(test.src), 0)
+			file, err := parser.ParseBytes([]byte(test.src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -385,7 +385,7 @@ func TestPath_Invalid(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Run("path.Read", func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.src), 0)
+			file, err := parser.ParseBytes([]byte(test.src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -399,7 +399,7 @@ func TestPath_Invalid(t *testing.T) {
 			}
 		})
 		t.Run("path.ReadNode", func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.src), 0)
+			file, err := parser.ParseBytes([]byte(test.src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -531,7 +531,7 @@ s:
 			t.Fatal(err)
 		}
 		t.Run(fmt.Sprintf("path.ReadNode %s path %s", test.name, test.path), func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.src), 0)
+			file, err := parser.ParseBytes([]byte(test.src))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -618,7 +618,7 @@ a:
 				t.Fatalf("%+v", err)
 			}
 			t.Run("FromReader", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -631,11 +631,11 @@ a:
 				}
 			})
 			t.Run("FromFile", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
-				src, err := parser.ParseBytes([]byte(test.src), 0)
+				src, err := parser.ParseBytes([]byte(test.src))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -648,11 +648,11 @@ a:
 				}
 			})
 			t.Run("FromNode", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
-				src, err := parser.ParseBytes([]byte(test.src), 0)
+				src, err := parser.ParseBytes([]byte(test.src))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -816,7 +816,7 @@ building:
 				t.Fatalf("%+v", err)
 			}
 			t.Run("WithReader", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -829,11 +829,11 @@ building:
 				}
 			})
 			t.Run("WithFile", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
-				src, err := parser.ParseBytes([]byte(test.src), 0)
+				src, err := parser.ParseBytes([]byte(test.src))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -846,11 +846,11 @@ building:
 				}
 			})
 			t.Run("WithNode", func(t *testing.T) {
-				file, err := parser.ParseBytes([]byte(test.dst), 0)
+				file, err := parser.ParseBytes([]byte(test.dst))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
-				src, err := parser.ParseBytes([]byte(test.src), 0)
+				src, err := parser.ParseBytes([]byte(test.src))
 				if err != nil {
 					t.Fatalf("%+v", err)
 				}
@@ -1016,7 +1016,7 @@ content: |
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
-			file, err := parser.ParseBytes([]byte(test.dst), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.dst), parser.Comments())
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1030,7 +1030,7 @@ content: |
 
 			// Rendering comes from depth in the tree, so reading the output
 			// back and writing it again has to produce the same text.
-			again, err := parser.ParseBytes([]byte(actual), parser.ParseComments)
+			again, err := parser.ParseBytes([]byte(actual), parser.Comments())
 			if err != nil {
 				t.Fatalf("re-reading the output: %+v", err)
 			}
@@ -1127,7 +1127,7 @@ func literalNode(s string) func(*testing.T) ast.Node {
 func parsedNode(doc string) func(*testing.T) ast.Node {
 	return func(t *testing.T) ast.Node {
 		t.Helper()
-		file, err := parser.ParseBytes([]byte(doc), 0)
+		file, err := parser.ParseBytes([]byte(doc))
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}

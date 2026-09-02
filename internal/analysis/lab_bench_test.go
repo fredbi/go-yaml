@@ -6,7 +6,7 @@ package analysis
 import (
 	"testing"
 
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // The lab parser measured against the production one, on the same workloads.
@@ -27,7 +27,7 @@ import (
 func BenchmarkLabWorkloadParse(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := labparser.ParseBytes(src); err != nil {
+			if _, err := parser.ParseBytes(src); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -37,7 +37,7 @@ func BenchmarkLabWorkloadParse(b *testing.B) {
 func BenchmarkLabWorkloadParseWithComments(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := labparser.ParseBytes(src, labparser.Comments()); err != nil {
+			if _, err := parser.ParseBytes(src, parser.Comments()); err != nil {
 				b.Fatal(err)
 			}
 		}

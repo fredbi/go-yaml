@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package parser
+package refparser
 
 import (
 	"bytes"
@@ -91,7 +91,7 @@ func TestPassWindows(t *testing.T) {
 		return nil
 	})
 	for _, name := range []string{"azure_swagger", "citm_catalog", "golang_source", "twitter_status", "canada_geometry"} {
-		f, err := os.Open("../internal/analysis/workloads/testdata/" + name + ".yaml.gz")
+		f, err := os.Open("../../internal/analysis/workloads/testdata/" + name + ".yaml.gz")
 		if err != nil {
 			t.Skipf("the workloads are not readable from here: %v", err)
 		}

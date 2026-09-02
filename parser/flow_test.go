@@ -36,7 +36,7 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
@@ -53,7 +53,7 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -90,11 +90,11 @@ func TestParseAdjacentValuesInFlow(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -123,11 +123,11 @@ func TestParseFlowCollectionsAsKeys(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -184,13 +184,13 @@ func TestParseFlowComments(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
 			// What is written has to read back, and to the same text again:
 			// the layout it moved to is a layout the parser accepts.
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -258,11 +258,11 @@ func TestParseEmptyNodeInAFlowCollection(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 

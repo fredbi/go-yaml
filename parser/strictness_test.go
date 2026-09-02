@@ -192,10 +192,10 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(test.invalid), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(test.invalid), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", test.invalid)
 
-			_, err = parser.ParseBytes([]byte(test.valid), parser.ParseComments)
+			_, err = parser.ParseBytes([]byte(test.valid), parser.Comments())
 			require.NoErrorf(t, err, "rejected %q", test.valid)
 		})
 	}
@@ -215,7 +215,7 @@ func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
@@ -243,7 +243,7 @@ func TestParseRefusesWhatIsNotAStream(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -259,7 +259,7 @@ func TestParseRefusesWhatIsNotAStream(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
@@ -291,7 +291,7 @@ func TestParseDropsAByteOrderMarkOpeningTheStream(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoErrorf(t, err, "rejected %q", test.source)
 			assert.Equal(t, test.want, file.String())
 		})
@@ -321,7 +321,7 @@ func TestParseTabWhereIndentationBelongs(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -340,7 +340,7 @@ func TestParseTabWhereIndentationBelongs(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
@@ -361,7 +361,7 @@ func TestParseWhitespaceOnlyLines(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
@@ -374,7 +374,7 @@ func TestParseWhitespaceOnlyLines(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -408,7 +408,7 @@ func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -432,7 +432,7 @@ func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}

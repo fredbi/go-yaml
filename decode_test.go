@@ -2390,7 +2390,7 @@ anchor: &map
 map: *map`
 		var buf bytes.Buffer
 		dec := codec.NewDecoder(&buf)
-		f, err := parser.ParseBytes([]byte(str), 0)
+		f, err := parser.ParseBytes([]byte(str))
 		if err != nil {
 			t.Fatalf("failed to parse: %s", err)
 		}
@@ -2413,7 +2413,7 @@ map: &map
   text: hello`)
 		var buf bytes.Buffer
 		dec := codec.NewDecoder(&buf, codec.ReferenceReaders(anchor))
-		f, err := parser.ParseBytes([]byte("map: *map"), 0)
+		f, err := parser.ParseBytes([]byte("map: *map"))
 		if err != nil {
 			t.Fatalf("failed to parse: %s", err)
 		}
@@ -2517,7 +2517,7 @@ unknown: string
 }
 
 func ExampleNodeToValue() {
-	f, err := parser.ParseBytes([]byte("text: node example"), 0)
+	f, err := parser.ParseBytes([]byte("text: node example"))
 	if err != nil {
 		panic(err)
 	}
@@ -3177,7 +3177,7 @@ func TestDecoder_DecodeFromFile(t *testing.T) {
 a: b
 c: d
 `
-	file, err := parser.ParseBytes([]byte(yml), 0)
+	file, err := parser.ParseBytes([]byte(yml))
 	if err != nil {
 		t.Fatal(err)
 	}

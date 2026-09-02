@@ -32,7 +32,7 @@ func TestDecodePrize(t *testing.T) {
 
 	for _, w := range all {
 		tree := retainedBytes(t, func() any {
-			f, err := parser.ParseBytes(w.Data, 0)
+			f, err := parser.ParseBytes(w.Data)
 			require.NoError(t, err)
 
 			return f

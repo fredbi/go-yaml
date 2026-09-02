@@ -52,7 +52,11 @@ type tokenRef struct {
 	// pair is where a group's two members are copied to, so that reading a
 	// group needs no slice of its own. tokens points into it.
 	pair [2]*Token
+	// idx is where the parser stands, counted from the start of the run. base
+	// is where tokens[0] stands, so tokens holds [base, base+len) and idx is
+	// never below base.
 	idx  int
+	base int
 	// pull draws the next token of a stream, where the run is one. It is nil
 	// for a run already in hand, and drained once the stream has ended.
 	pull    func() (*Token, bool)
@@ -62,7 +66,7 @@ type tokenRef struct {
 // at returns the i'th token of the run, drawing from the stream where it has to
 // and where there is one. It returns nil past the end of the run.
 func (r *tokenRef) at(i int) *Token {
-	for r.pull != nil && !r.drained && i >= len(r.tokens) {
+	for r.pull != nil && !r.drained && i >= r.base+len(r.tokens) {
 		tk, ok := r.pull()
 		if !ok {
 			r.drained = true
@@ -72,11 +76,33 @@ func (r *tokenRef) at(i int) *Token {
 		r.tokens = append(r.tokens, tk)
 	}
 
-	if i < len(r.tokens) {
-		return r.tokens[i]
+	if i >= r.base && i-r.base < len(r.tokens) {
+		return r.tokens[i-r.base]
 	}
 
 	return nil
+}
+
+// forget drops what the run holds below idx.
+//
+// A run drawn from a stream would otherwise keep every token it drew, which is
+// the document over again. The parser reads forward from idx and one token
+// ahead at most, so nothing below idx is asked for again -- except by
+// nextNotCommentToken, which reads forward from idx and not back.
+//
+// A run already in hand is left alone: it holds a group's members, which the
+// group owns and this does not.
+func (r *tokenRef) forget() {
+	if r.pull == nil {
+		return
+	}
+
+	drop := r.idx - r.base
+	if drop <= 0 {
+		return
+	}
+	r.tokens = append(r.tokens[:0], r.tokens[drop:]...)
+	r.base = r.idx
 }
 
 // end returns the index just past the run, drawing the rest of the stream where
@@ -92,7 +118,7 @@ func (r *tokenRef) end() int {
 		r.tokens = append(r.tokens, tk)
 	}
 
-	return len(r.tokens)
+	return r.base + len(r.tokens)
 }
 
 func (c context) currentToken() *Token {
@@ -128,6 +154,16 @@ func (c context) isTokenNotFound() bool {
 func (c context) withGroup(p *Parser, g *TokenGroup) context {
 	c.depth++
 	c.tokenRef = p.tokenRefAt(c.depth, g)
+
+	return c
+}
+
+// withPull returns a context reading a run drawn one token at a time, rather
+// than one already in hand.
+func (c context) withPull(p *Parser, pull func() (*Token, bool)) context {
+	c.depth++
+	c.tokenRef = p.tokenRefFrom(c.depth, pull)
+	p.body = c.tokenRef
 
 	return c
 }
@@ -188,9 +224,9 @@ func (c context) withFlowSequence() context {
 
 func (p *Parser) newContext() context {
 	// Sized from the tokens of the stream, not from the documents it holds:
-	// len(p.tokens) is the document count, which is one for most streams and
+	// len(p.documents) is the document count, which is one for most streams and
 	// left every block at its floor of sixteen nodes.
-	p.arena = ast.NewArena(p.raw.n)
+	p.arena = ast.NewArena(p.tokens.Len())
 	ctx := context{arena: p.arena, lineComments: p.lineComments}
 
 	root := p.newPathNode()
@@ -236,6 +272,7 @@ func (c context) goNext() {
 	} else {
 		ref.idx++
 	}
+	ref.forget()
 }
 
 func (c context) next() bool {
@@ -247,9 +284,7 @@ func (c context) next() bool {
 //
 // The token is not put into the run. The descent reads forward from where it
 // stands and never asks for a token again, so the only reader of this one is
-// the node built from it, which holds it directly. Splicing it into the run
-// meant shifting every token after it, which a run drawn from a stream cannot
-// do without moving tokens the tree already points at.
+// the node built from it, which holds it directly.
 func (c context) insertNullToken(tk *Token) *Token {
 	return c.createImplicitNullToken(tk)
 }
@@ -272,7 +307,7 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 	pos.Column++
 	tk := token.New("null", " null", pos)
 	tk.Type = token.ImplicitNullType
-	return &Token{Token: tk}
+	return newSynthetic(tk)
 }
 
 func (c context) addToken(tk *Token) {

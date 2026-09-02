@@ -50,11 +50,11 @@ func TestParseExplicitKeyValues(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -109,11 +109,11 @@ func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 
@@ -131,13 +131,13 @@ func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 // scalar may open with "?" only when a non-space character follows, and an
 // explicit key may not be the value of an entry on the entry's own line.
 func TestParseIndicatorWhereAValueGoes(t *testing.T) {
-	_, err := parser.ParseBytes([]byte("k: ?\n"), 0)
+	_, err := parser.ParseBytes([]byte("k: ?\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mapping value is not allowed in this context")
 
 	// The same characters with anything after the indicator are a plain scalar
 	// and stay one.
-	file, err := parser.ParseBytes([]byte("k: ?a\n"), 0)
+	file, err := parser.ParseBytes([]byte("k: ?a\n"))
 	require.NoError(t, err)
 	assert.Equal(t, "k: ?a\n", file.String())
 }

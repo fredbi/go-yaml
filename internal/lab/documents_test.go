@@ -9,7 +9,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -35,8 +35,8 @@ func TestDocumentBoundaries(t *testing.T) {
 		"%YAML 1.2\n---\na\n---\nb\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			want, wantErr := parser.ParseBytes([]byte(src), parser.ParseComments)
-			got, gotErr := labparser.ParseBytes([]byte(src), labparser.Comments())
+			want, wantErr := refparser.ParseBytes([]byte(src), refparser.ParseComments)
+			got, gotErr := parser.ParseBytes([]byte(src), parser.Comments())
 
 			require.NoError(t, wantErr)
 			require.NoError(t, gotErr)
@@ -58,8 +58,8 @@ func TestDocumentBoundariesRefused(t *testing.T) {
 		"a: 1\n... b\n",
 	} {
 		t.Run(src, func(t *testing.T) {
-			_, wantErr := parser.ParseBytes([]byte(src), 0)
-			_, gotErr := labparser.ParseBytes([]byte(src))
+			_, wantErr := refparser.ParseBytes([]byte(src), 0)
+			_, gotErr := parser.ParseBytes([]byte(src))
 
 			require.Error(t, wantErr, "the parser that ships takes this")
 			require.Error(t, gotErr, "the splitter takes what the parser that ships refuses")
@@ -77,10 +77,10 @@ func TestDocumentBoundariesInRunsOfOne(t *testing.T) {
 		"%YAML 1.2\n---\na: 1", "---\na: 1\n...\n---\nb: 2",
 	} {
 		t.Run(src, func(t *testing.T) {
-			want, err := parser.ParseBytes([]byte(src), 0)
+			want, err := refparser.ParseBytes([]byte(src), 0)
 			require.NoError(t, err)
 
-			got, err := labparser.ParseBytes([]byte(src), labparser.ChunkSize(1))
+			got, err := parser.ParseBytes([]byte(src), parser.ChunkSize(1))
 			require.NoError(t, err)
 
 			assert.Equal(t, len(want.Docs), len(got.Docs))

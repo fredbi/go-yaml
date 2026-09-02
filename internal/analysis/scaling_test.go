@@ -9,7 +9,7 @@ import (
 
 	v3 "go.yaml.in/yaml/v3"
 
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
@@ -17,8 +17,8 @@ import (
 // sibling keys in one mapping.
 //
 // A growth factor near 2 per doubling is linear (correct). Near 4 means quadratic, which is
-// what parser.parseMap does today by recursing once per sibling entry and discarding a whole
-// MappingNode each time (parser/parser.go:490). yaml.v3 is included only as a scale
+// what refparser.parseMap does today by recursing once per sibling entry and discarding a whole
+// MappingNode each time (internal/refparser/parser.go:490). yaml.v3 is included only as a scale
 // reference -- it is linear, so it shows the difference is not inherent to YAML.
 //
 // Reports rather than asserts, so it stays informative on any machine.
@@ -48,7 +48,7 @@ func TestFlatMapScaling(t *testing.T) {
 // TestStageAttribution splits the cost across the three stages a document goes
 // through, so the per-key numbers subtract.
 //
-// scanner.Tokens is the scan alone. parser.New adds copying the tokens into the
+// scanner.Tokens is the scan alone. refparser.New adds copying the tokens into the
 // parser's blocks and grouping them. Parse adds building the tree. The stage
 // that grows its per-key cost is the one to look at; this is how the
 // super-linear parseMap was located, and the split is kept so the next one is
@@ -72,7 +72,7 @@ func TestStageAttribution(t *testing.T) {
 		tg := timeIt(t, func() {
 			var sc scanner.Scanner
 			sc.Init(src)
-			if _, err := parser.New(sc.Tokens(), 0); err != nil {
+			if _, err := refparser.New(sc.Tokens(), 0); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -126,7 +126,7 @@ func TestParseScalesLinearly(t *testing.T) {
 
 func mustParse(t *testing.T, src string) {
 	t.Helper()
-	if _, err := parser.ParseBytes([]byte(src), 0); err != nil {
+	if _, err := refparser.ParseBytes([]byte(src), 0); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 }

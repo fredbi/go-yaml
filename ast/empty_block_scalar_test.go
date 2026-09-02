@@ -41,14 +41,14 @@ func TestEmptyBlockScalarSurvivesRendering(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.src), 0)
+			f, err := parser.ParseBytes([]byte(test.src))
 			require.NoError(t, err)
 
 			rendered := f.String()
 			assert.Equal(t, test.render, rendered)
 
 			// A second cycle changes nothing: the document has settled.
-			again, err := parser.ParseBytes([]byte(rendered), 0)
+			again, err := parser.ParseBytes([]byte(rendered))
 			require.NoError(t, err)
 			assert.Equal(t, rendered, again.String(), "the document should settle after one cycle")
 		})

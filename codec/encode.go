@@ -278,7 +278,7 @@ func (e *Encoder) setFootComment(node ast.Node, filtered ast.Node, comment *ast.
 }
 
 func (e *Encoder) encodeDocument(doc []byte) (ast.Node, error) {
-	f, err := parser.ParseBytes(doc, 0)
+	f, err := parser.ParseBytes(doc)
 	if err != nil {
 		return nil, err
 	}

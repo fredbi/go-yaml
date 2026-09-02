@@ -44,12 +44,12 @@ func TestParseCommentsAroundDirectives(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
 			// The same source has to parse whether or not comments are read.
-			_, err = parser.ParseBytes([]byte(test.source), 0)
+			_, err = parser.ParseBytes([]byte(test.source))
 			assert.NoError(t, err)
 		})
 	}
@@ -67,7 +67,7 @@ func TestParseDirectiveWithoutDocument(t *testing.T) {
 
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}

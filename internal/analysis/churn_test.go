@@ -32,7 +32,7 @@ func TestParseChurn(t *testing.T) {
 	for _, w := range all {
 		allocated, retained := measureParse(t, w.Data)
 
-		f, err := parser.ParseBytes(w.Data, 0)
+		f, err := parser.ParseBytes(w.Data)
 		require.NoError(t, err)
 		nodes, anchors, aliases := countTreeShape(f)
 
@@ -55,7 +55,7 @@ func measureParse(t *testing.T, src []byte) (allocated, retained uint64) {
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 
-	f, err := parser.ParseBytes(src, 0)
+	f, err := parser.ParseBytes(src)
 	require.NoError(t, err)
 
 	runtime.ReadMemStats(&during)

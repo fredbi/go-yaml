@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package labparser
+package refparser
 
 import (
 	"github.com/go-openapi/go-yaml/ast"
@@ -194,35 +194,35 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	)
 	switch token.ReservedTagKeyword(tag.Value) {
 	case token.IntegerTag:
-		tk = newSynthetic(token.New("0", "0", pos))
+		tk = &Token{Token: token.New("0", "0", pos)}
 		n, err := newIntegerNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.FloatTag:
-		tk = newSynthetic(token.New("0", "0", pos))
+		tk = &Token{Token: token.New("0", "0", pos)}
 		n, err := newFloatNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.StringTag, token.BinaryTag, token.TimestampTag:
-		tk = newSynthetic(token.New("", "", pos))
+		tk = &Token{Token: token.New("", "", pos)}
 		n, err := newStringNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.BooleanTag:
-		tk = newSynthetic(token.New("false", "false", pos))
+		tk = &Token{Token: token.New("false", "false", pos)}
 		n, err := newBoolNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.NullTag:
-		tk = newSynthetic(token.New("null", "null", pos))
+		tk = &Token{Token: token.New("null", "null", pos)}
 		n, err := newNullNode(ctx, tk)
 		if err != nil {
 			return nil, err
@@ -231,7 +231,7 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	default:
 		// A tag the core schema does not resolve -- the non-specific "!", or a
 		// local tag -- leaves the empty node unresolved, which is null.
-		tk = newSynthetic(token.New("null", "null", pos))
+		tk = &Token{Token: token.New("null", "null", pos)}
 		n, err := newNullNode(ctx, tk)
 		if err != nil {
 			return nil, err

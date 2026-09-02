@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package labparser
+package parser
 
 import (
 	"os"
 	"sort"
 	"testing"
 
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 

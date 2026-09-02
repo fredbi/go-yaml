@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // ToJSONWalk converts a YAML document to JSON from a walk of the parse.
@@ -30,7 +30,7 @@ import (
 func ToJSONWalk(src []byte) ([]byte, error) {
 	w := &jsonWalker{}
 
-	file, err := labparser.New(labparser.OmitNodePaths()).Walk(src, w)
+	file, err := parser.New(parser.OmitNodePaths()).Walk(src, w)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ type anchorMark struct {
 	at   int
 }
 
-func (w *jsonWalker) Enter(node ast.Node, at labparser.Step) bool {
+func (w *jsonWalker) Enter(node ast.Node, at parser.Step) bool {
 	if w.err != nil {
 		return false
 	}
@@ -99,7 +99,7 @@ func (w *jsonWalker) Enter(node ast.Node, at labparser.Step) bool {
 	return true
 }
 
-func (w *jsonWalker) Leave(node ast.Node, _ labparser.Step) {
+func (w *jsonWalker) Leave(node ast.Node, _ parser.Step) {
 	switch node.(type) {
 	case *ast.MappingNode:
 		w.out = append(w.out, '}')
@@ -128,7 +128,7 @@ func (w *jsonWalker) openAnchor(node *ast.AnchorNode) {
 //
 // The key is a JSON string, and that string is what an alias naming the anchor
 // writes later: "&n x" as a key makes "*n" elsewhere read "x".
-func (w *jsonWalker) anchorKey(node *ast.AnchorNode, at labparser.Step) {
+func (w *jsonWalker) anchorKey(node *ast.AnchorNode, at parser.Step) {
 	name := ""
 	if node.Name != nil && node.Name.GetToken() != nil {
 		name = node.Name.GetToken().Value
@@ -168,7 +168,7 @@ func (w *jsonWalker) closeAnchor() {
 }
 
 // writeAlias writes again what the anchor of the same name wrote.
-func (w *jsonWalker) writeAlias(node *ast.AliasNode, at labparser.Step) {
+func (w *jsonWalker) writeAlias(node *ast.AliasNode, at parser.Step) {
 	name := ""
 	if node.Value != nil && node.Value.GetToken() != nil {
 		name = node.Value.GetToken().Value
@@ -195,16 +195,16 @@ func (w *jsonWalker) writeAlias(node *ast.AliasNode, at labparser.Step) {
 //
 // A mapping hands a key over and then its value, so the step says which this
 // is: a comma before a key that is not the first, and a colon before a value.
-func (w *jsonWalker) separate(at labparser.Step) {
+func (w *jsonWalker) separate(at parser.Step) {
 	switch at.In {
-	case labparser.KindMapping:
+	case parser.KindMapping:
 		switch {
 		case at.Key && at.Index > 0:
 			w.out = append(w.out, ',')
 		case !at.Key:
 			w.out = append(w.out, ':')
 		}
-	case labparser.KindSequence:
+	case parser.KindSequence:
 		if at.Index > 0 {
 			w.out = append(w.out, ',')
 		}
@@ -212,7 +212,7 @@ func (w *jsonWalker) separate(at labparser.Step) {
 }
 
 // scalar writes one value, as a string where it stands as a mapping's key.
-func (w *jsonWalker) scalar(node ast.Node, at labparser.Step) {
+func (w *jsonWalker) scalar(node ast.Node, at parser.Step) {
 	value := scalar(node)
 	if at.Key {
 		w.out = appendString(w.out, fmt.Sprint(value))

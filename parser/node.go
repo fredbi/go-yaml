@@ -194,35 +194,35 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	)
 	switch token.ReservedTagKeyword(tag.Value) {
 	case token.IntegerTag:
-		tk = &Token{Token: token.New("0", "0", pos)}
+		tk = newSynthetic(token.New("0", "0", pos))
 		n, err := newIntegerNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.FloatTag:
-		tk = &Token{Token: token.New("0", "0", pos)}
+		tk = newSynthetic(token.New("0", "0", pos))
 		n, err := newFloatNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.StringTag, token.BinaryTag, token.TimestampTag:
-		tk = &Token{Token: token.New("", "", pos)}
+		tk = newSynthetic(token.New("", "", pos))
 		n, err := newStringNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.BooleanTag:
-		tk = &Token{Token: token.New("false", "false", pos)}
+		tk = newSynthetic(token.New("false", "false", pos))
 		n, err := newBoolNode(ctx, tk)
 		if err != nil {
 			return nil, err
 		}
 		node = n
 	case token.NullTag:
-		tk = &Token{Token: token.New("null", "null", pos)}
+		tk = newSynthetic(token.New("null", "null", pos))
 		n, err := newNullNode(ctx, tk)
 		if err != nil {
 			return nil, err
@@ -231,7 +231,7 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	default:
 		// A tag the core schema does not resolve -- the non-specific "!", or a
 		// local tag -- leaves the empty node unresolved, which is null.
-		tk = &Token{Token: token.New("null", "null", pos)}
+		tk = newSynthetic(token.New("null", "null", pos))
 		n, err := newNullNode(ctx, tk)
 		if err != nil {
 			return nil, err

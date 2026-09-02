@@ -26,14 +26,14 @@ func TestParseBlockScalarAtTheDocumentRoot(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.NoErrorf(t, err, "rejected %q", source)
 		})
 	}
 
 	// Under a key there is a level, and content at column 1 is outside it.
 	t.Run("not under a mapping key", func(t *testing.T) {
-		_, err := parser.ParseBytes([]byte("a: |\nb\n"), parser.ParseComments)
+		_, err := parser.ParseBytes([]byte("a: |\nb\n"), parser.Comments())
 		assert.Error(t, err)
 	})
 }
@@ -64,10 +64,13 @@ func TestParseEmptyDocumentsKeepTheirStream(t *testing.T) {
 			// Without ParseComments the comment is not even a token, which is
 			// how the drop went unnoticed: the shape it needs is two markers
 			// with nothing between them.
-			for _, mode := range []parser.Mode{0, parser.ParseComments} {
-				file, err := parser.ParseBytes([]byte(test.source), mode)
-				require.NoErrorf(t, err, "mode %d", mode)
-				assert.Lenf(t, file.Docs, test.docs, "mode %d: %q", mode, test.source)
+			for _, mode := range []struct {
+				name string
+				opts []parser.Option
+			}{{"plain", nil}, {"comments", []parser.Option{parser.Comments()}}} {
+				file, err := parser.ParseBytes([]byte(test.source), mode.opts...)
+				require.NoErrorf(t, err, "mode %s", mode.name)
+				assert.Lenf(t, file.Docs, test.docs, "mode %s: %q", mode.name, test.source)
 			}
 		})
 	}
@@ -90,7 +93,7 @@ func TestParseDocumentsAfterASuffix(t *testing.T) {
 
 	for name, source := range valid {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(source), parser.Comments())
 			require.NoErrorf(t, err, "rejected %q", source)
 			assert.GreaterOrEqual(t, len(file.Docs), 2, "%q is more than one document", source)
 		})
@@ -104,7 +107,7 @@ func TestParseDocumentsAfterASuffix(t *testing.T) {
 
 	for name, source := range invalid {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			_, err := parser.ParseBytes([]byte(source), parser.Comments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
@@ -145,12 +148,12 @@ func TestParseExplicitKeyComments(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
 			// And it settles: a second cycle adds nothing.
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})

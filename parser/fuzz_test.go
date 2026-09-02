@@ -14,17 +14,17 @@ import (
 // parseModes covers the two settings a caller can choose between. Comments
 // change which tokens reach the parser, so they are a distinct code path rather
 // than a presentation option.
-var parseModes = map[string]parser.Mode{
-	"default":  0,
-	"comments": parser.ParseComments,
+var parseModes = map[string][]parser.Option{
+	"default":  nil,
+	"comments": {parser.Comments()},
 }
 
 func FuzzParserParseBytes(f *testing.F) {
 	addSuiteSeeds(f)
 
 	f.Fuzz(func(t *testing.T, src string) {
-		for name, mode := range parseModes {
-			file, err := parser.ParseBytes([]byte(src), mode)
+		for name, opts := range parseModes {
+			file, err := parser.ParseBytes([]byte(src), opts...)
 			if err != nil {
 				// A rejected document must be rejected, not half-built.
 				assert.Nilf(t, file, "%s: both a file and an error for %q", name, src)
@@ -41,7 +41,7 @@ func FuzzParserParseBytes(f *testing.F) {
 
 			// Parsing is a pure function of its input. The same source and mode
 			// must give the same answer every time.
-			again, err := parser.ParseBytes([]byte(src), mode)
+			again, err := parser.ParseBytes([]byte(src), opts...)
 			require.NoErrorf(t, err, "%s: parse is not stable for %q", name, src)
 			assert.Equalf(t, rendered, again.String(), "%s: rendering is not stable for %q", name, src)
 		}
@@ -58,7 +58,7 @@ func FuzzParserWalk(f *testing.F) {
 	addSuiteSeeds(f)
 
 	f.Fuzz(func(t *testing.T, src string) {
-		file, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+		file, err := parser.ParseBytes([]byte(src), parser.Comments())
 		if err != nil {
 			return
 		}

@@ -163,7 +163,7 @@ v:
 	}
 	for idx, src := range sources {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(src), 0)
+			f, err := parser.ParseBytes([]byte(src))
 			if err != nil {
 				t.Fatalf("parse error: source [%s]: %+v", src, err)
 			}
@@ -177,7 +177,7 @@ func TestParseEmptyDocument(t *testing.T) {
 	// to produce belonged to no content, and reading it back gave a document
 	// that no longer matched the one written.
 	t.Run("empty document", func(t *testing.T) {
-		f, err := parser.ParseBytes([]byte(""), parser.ParseComments)
+		f, err := parser.ParseBytes([]byte(""), parser.Comments())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +189,7 @@ func TestParseEmptyDocument(t *testing.T) {
 	})
 
 	t.Run("empty document with comment (parse comment = off)", func(t *testing.T) {
-		f, err := parser.ParseBytes([]byte("# comment"), 0)
+		f, err := parser.ParseBytes([]byte("# comment"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +201,7 @@ func TestParseEmptyDocument(t *testing.T) {
 	})
 
 	t.Run("empty document with comment (parse comment = on)", func(t *testing.T) {
-		f, err := parser.ParseBytes([]byte("# comment"), parser.ParseComments)
+		f, err := parser.ParseBytes([]byte("# comment"), parser.Comments())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -773,7 +773,7 @@ d: e
 
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.source), 0)
+			f, err := parser.ParseBytes([]byte(test.source))
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1075,7 +1075,7 @@ baz: 1
 
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			f, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1093,7 +1093,7 @@ func TestNewLineChar(t *testing.T) {
 		"cr.yml",
 		"crlf.yml",
 	} {
-		ast, err := parser.ParseFile(filepath.Join("testdata", f), 0)
+		ast, err := parser.ParseFile(filepath.Join("testdata", f))
 		if err != nil {
 			t.Fatalf("%+v", err)
 		}
@@ -1417,7 +1417,7 @@ foo:
 	}
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(test.source), 0)
+			_, err := parser.ParseBytes([]byte(test.source))
 			if err == nil {
 				t.Fatal("cannot catch syntax error")
 			}
@@ -1614,7 +1614,7 @@ a: #commentB
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.yaml), parser.ParseComments)
+			f, err := parser.ParseBytes([]byte(test.yaml), parser.Comments())
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1641,7 +1641,7 @@ foo:
 foo:
   bar: # comment
   baz: 1`
-		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		f, err := parser.ParseBytes([]byte(content), parser.Comments())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1665,7 +1665,7 @@ foo:
   bar:
   # comment
   baz: 1`
-		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		f, err := parser.ParseBytes([]byte(content), parser.Comments())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1683,7 +1683,7 @@ foo:
   bar:
  # comment
 baz: 1`
-		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		f, err := parser.ParseBytes([]byte(content), parser.Comments())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1710,7 +1710,7 @@ foo:
 baz:
   - xxx
 `
-	f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+	f, err := parser.ParseBytes([]byte(content), parser.Comments())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1772,7 +1772,7 @@ multiple:
     c: d
 `
 
-	file, err := parser.ParseBytes([]byte(yml), parser.ParseComments)
+	file, err := parser.ParseBytes([]byte(yml), parser.Comments())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1859,7 +1859,7 @@ foo:
 
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			f, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1902,7 +1902,7 @@ k.l.m.n: moge # commentKLMN
 o#p: hogera # commentOP
 q#.r: hogehoge # commentQR
 `
-	f, err := parser.ParseBytes([]byte(yml), parser.ParseComments)
+	f, err := parser.ParseBytes([]byte(yml), parser.Comments())
 	if err != nil {
 		t.Fatalf("%+v", err)
 	}

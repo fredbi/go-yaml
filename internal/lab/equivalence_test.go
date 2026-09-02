@@ -13,7 +13,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/internal/yamltestsuite"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -30,10 +30,10 @@ func TestLabParserMatchesProduction(t *testing.T) {
 
 	for _, mode := range []struct {
 		name string
-		mode parser.Mode
+		mode refparser.Mode
 	}{
 		{"without comments", 0},
-		{"with comments", parser.ParseComments},
+		{"with comments", refparser.ParseComments},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
@@ -47,16 +47,16 @@ func TestLabParserMatchesProduction(t *testing.T) {
 	}
 }
 
-func assertSameParse(t *testing.T, text string, mode parser.Mode) {
+func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	t.Helper()
 
-	want, wantErr := parser.ParseBytes([]byte(text), mode)
+	want, wantErr := refparser.ParseBytes([]byte(text), mode)
 
-	var opts []labparser.Option
-	if mode&parser.ParseComments != 0 {
-		opts = append(opts, labparser.Comments())
+	var opts []parser.Option
+	if mode&refparser.ParseComments != 0 {
+		opts = append(opts, parser.Comments())
 	}
-	got, gotErr := labparser.ParseBytes([]byte(text), opts...)
+	got, gotErr := parser.ParseBytes([]byte(text), opts...)
 
 	switch {
 	case wantErr != nil && gotErr != nil:

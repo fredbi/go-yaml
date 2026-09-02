@@ -1943,7 +1943,7 @@ func TestIssue356(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(test.in), 0)
+			f, err := parser.ParseBytes([]byte(test.in))
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
@@ -1953,7 +1953,7 @@ func TestIssue356(t *testing.T) {
 			}
 
 			// And it settles: reading the result back gives the same text.
-			again, err := parser.ParseBytes([]byte(got), 0)
+			again, err := parser.ParseBytes([]byte(got))
 			if err != nil {
 				t.Fatalf("reparse: %v", err)
 			}
@@ -2191,7 +2191,7 @@ a: &anc !mytag
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, _ := parser.ParseBytes([]byte(tt.input), 0)
+			res, _ := parser.ParseBytes([]byte(tt.input))
 			result, err := yaml.Marshal(res.Docs[0])
 			if err != nil {
 				t.Fatal(err)

@@ -64,7 +64,7 @@ func TestParseKeys(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), 0)
+			file, err := parser.ParseBytes([]byte(test.source))
 			require.NoError(t, err)
 			require.Len(t, file.Docs, 1)
 
@@ -91,7 +91,7 @@ func TestParseKeysRejected(t *testing.T) {
 
 	for name, source := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), 0)
+			_, err := parser.ParseBytes([]byte(source))
 			assert.Error(t, err)
 		})
 	}

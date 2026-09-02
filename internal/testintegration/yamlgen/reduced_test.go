@@ -42,7 +42,7 @@ func reduced(name, src string, interesting func([]byte) bool) string {
 	beforeErr := yaml.Unmarshal([]byte(small), &before)
 
 	rendered := "<does not parse>"
-	if file, err := parser.ParseBytes([]byte(small), parser.ParseComments); err == nil {
+	if file, err := parser.ParseBytes([]byte(small), parser.Comments()); err == nil {
 		rendered = file.String()
 	}
 

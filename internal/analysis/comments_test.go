@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -70,12 +70,12 @@ func TestCommentCost(t *testing.T) {
 	rows := []struct {
 		label   string
 		data    []byte
-		mode    parser.Mode
+		mode    refparser.Mode
 		against bool
 	}{
 		{"commented, dropped", annotated.Data, 0, false},
-		{"commented, parsed", annotated.Data, parser.ParseComments, true},
-		{"azure_swagger", plain.Data, parser.ParseComments, false},
+		{"commented, parsed", annotated.Data, refparser.ParseComments, true},
+		{"azure_swagger", plain.Data, refparser.ParseComments, false},
 	}
 
 	var base uint64
@@ -83,7 +83,7 @@ func TestCommentCost(t *testing.T) {
 		data, mode := row.data, row.mode
 
 		retained := retainedBytes(t, func() any {
-			file, err := parser.ParseBytes(data, mode)
+			file, err := refparser.ParseBytes(data, mode)
 			require.NoError(t, err)
 
 			return file
@@ -132,7 +132,7 @@ func TestCommentShapes(t *testing.T) {
 	w, err := workloads.ByName("commented_swagger")
 	require.NoError(t, err)
 
-	file, err := parser.ParseBytes(w.Data, parser.ParseComments)
+	file, err := refparser.ParseBytes(w.Data, refparser.ParseComments)
 	require.NoError(t, err)
 
 	var c commentCensus

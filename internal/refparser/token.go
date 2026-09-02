@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package labparser
+package refparser
 
 import (
 	"fmt"
+	"iter"
 	"os"
+	"slices"
 	"strings"
 
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
@@ -62,94 +64,38 @@ func (t TokenGroupType) String() string {
 	return "none"
 }
 
-// Token is one token as the grouping sees it: the token the scanner read, and
-// the group it was joined into where a pass joined it.
-//
-// The scanner's token is held here by value rather than by pointer, so a token
-// of a document is one thing on the tape and not two. The tree points into it
-// with RawToken, which stays good for as long as the chunk it sits in does.
-//
-// A pass turns a token into a group in place, by hanging the group on it. Group
-// therefore answers before raw does: raw is what this token was read as, and
-// Group what it became.
 type Token struct {
-	raw   token.Token
+	Token *token.Token
 	Group *TokenGroup
-	// seq is where this token stands on the tape, counted from the first the
-	// scanner handed over. A walk tells the arena how far the descent has read
-	// with it, and the arena reclaims what is behind that.
-	seq int32
-}
-
-// newSynthetic returns a token holding tk, for a token the parse makes rather
-// than reads: an implicit null, or one standing in for a tag's absent value.
-//
-// It is off the tape, so it outlives whatever the tail does. There are few of
-// them and each is one small allocation.
-func newSynthetic(tk *token.Token) *Token {
-	if tk == nil {
-		return nil
-	}
-
-	return &Token{raw: *tk}
-}
-
-// Raw fills this token in from what the scanner read.
-func (t *Token) Raw(tk token.Token, seq int) {
-	t.raw, t.Group, t.seq = tk, nil, int32(seq)
-}
-
-// Seq returns where this token stands on the tape.
-//
-// A grouping pass turns a token into a group by hanging the group on it and
-// clearing the raw token, so a group token keeps the place the token it was
-// made from held -- which is where the group begins. Its own seq is therefore
-// the answer, and the group is only read where a token was made by the grouping
-// rather than drawn from the stream, which leaves seq at zero.
-func (t *Token) Seq() int32 {
-	if t == nil {
-		return 0
-	}
-	if t.seq > 0 {
-		return t.seq
-	}
-	if t.Group != nil {
-		return t.Group.First().Seq()
-	}
-
-	return 0
 }
 
 func (t *Token) RawToken() *token.Token {
 	if t == nil {
 		return nil
 	}
-	if t.Group != nil {
-		return t.Group.RawToken()
+	if t.Token != nil {
+		return t.Token
 	}
-
-	return &t.raw
+	return t.Group.RawToken()
 }
 
 func (t *Token) Type() token.Type {
 	if t == nil {
 		return 0
 	}
-	if t.Group != nil {
-		return t.Group.TokenType()
+	if t.Token != nil {
+		return t.Token.Type
 	}
-
-	return t.raw.Type
+	return t.Group.TokenType()
 }
 
 func (t *Token) GroupType() TokenGroupType {
 	if t == nil {
 		return TokenGroupNone
 	}
-	if t.Group == nil {
+	if t.Token != nil {
 		return TokenGroupNone
 	}
-
 	return t.Group.Type
 }
 
@@ -157,22 +103,20 @@ func (t *Token) Line() int {
 	if t == nil {
 		return 0
 	}
-	if t.Group != nil {
-		return t.Group.Line()
+	if t.Token != nil {
+		return int(t.Token.Position.Line)
 	}
-
-	return int(t.raw.Position.Line)
+	return t.Group.Line()
 }
 
 func (t *Token) Column() int {
 	if t == nil {
 		return 0
 	}
-	if t.Group != nil {
-		return t.Group.Column()
+	if t.Token != nil {
+		return int(t.Token.Position.Column)
 	}
-
-	return int(t.raw.Position.Column)
+	return t.Group.Column()
 }
 
 func (t *Token) SetGroupType(typ TokenGroupType) {
@@ -184,9 +128,8 @@ func (t *Token) SetGroupType(typ TokenGroupType) {
 
 func (t *Token) Dump() {
 	ctx := new(groupTokenRenderContext)
-	if t.Group == nil {
-		fmt.Fprint(os.Stdout, t.raw.Value)
-
+	if t.Token != nil {
+		fmt.Fprint(os.Stdout, t.Token.Value)
 		return
 	}
 	t.Group.dump(ctx)
@@ -194,9 +137,8 @@ func (t *Token) Dump() {
 }
 
 func (t *Token) dump(ctx *groupTokenRenderContext) {
-	if t.Group == nil {
-		fmt.Fprint(os.Stdout, t.raw.Value)
-
+	if t.Token != nil {
+		fmt.Fprint(os.Stdout, t.Token.Value)
 		return
 	}
 	t.Group.dump(ctx)
@@ -346,49 +288,6 @@ func (g *TokenGroup) TokenType() token.Type {
 // roughly N wrappers, groups and slices, and those three were the largest
 // allocation sites of a parse by count.
 type grouper struct {
-	// The state a pass holds between two tokens lives here rather than in the
-	// pass's own closure, so that a pass may be run over one run of tokens,
-	// stopped, and run again over the next with what it was holding still in
-	// hand. A group straddling the join is then grouped as one.
-	//
-	// ending says the run in hand is the last, so a pass hands over whatever it
-	// still holds. Between two runs it is false and a pass keeps hold.
-	ending bool
-
-	// ⚠️ Only a pass that runs once may keep its state here.
-	// groupMapKeysByValue and groupExplicitKeys re-enter themselves --
-	// groupExplicitKeyBody groups an explicit key's body with a nested run of
-	// the same passes on this grouper -- so a nested run would write over what
-	// the outer one was holding. Their state stays in their own closures until
-	// there is a stack for it, one frame per depth of nesting.
-
-	lineComment *Token // the token whose line a comment may close
-
-	blockHeader *Token         // a "|" or ">", waiting for its content
-	blockType   TokenGroupType // which of the two it is
-
-	anchor *Token // a "&", waiting for its name
-	name   *Token // an anchor name, waiting to see what it names
-	alias  *Token // a "*", waiting for its name
-
-	tag    *Token // a tag, waiting to see what it tags
-	tagged *Token // an anchor name, waiting to see whether a tagged scalar follows
-
-	// explicit is what groupExplicitKeys holds while it reads the body naming
-	// a '?' key, and keys what groupMapKeysByValue holds while it waits to see
-	// whether a ':' follows.
-	explicit explicitKey
-	keys     keyWindow
-
-	keyed *Token // a map key, waiting to see whether its value follows
-
-	// directive is what groupDirectives holds while it reads a '%' line.
-	directive directiveState
-
-	// heldHigh is the most tokens a pass has held at once, which is how far
-	// ahead of the descent the grouping has to keep the tape.
-	heldHigh int
-
 	tokens []Token
 	groups []TokenGroup
 	// passA and passB are the two buffers the grouping passes write into. A
@@ -433,13 +332,9 @@ func (g *grouper) fail(err error) {
 // The result of the last pass is kept, and the groups createDocumentTokens
 // builds address the buffer it read. Nothing may write either buffer after
 // that, so a pass added to createGroupedTokens goes before that one.
-// out returns the buffer the next pass writes into.
-//
-// The passes of one run hand a slice from one to the next, so two buffers go
-// round: a pass reads the one before it and fills the other, and the pass after
-// it fills the first again. What a pass two steps back wrote is finished with
-// by then.
 func (g *grouper) out(n int) []*Token {
+	g.writeB = !g.writeB
+
 	if g.nested > 0 {
 		// A pass running inside another takes a buffer of its own: both of the
 		// grouper's are in hand, one being read and one being filled.
@@ -554,6 +449,65 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // createGroupedTokens reads the tokens of a stream into the groups the parser
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
+func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
+	g := newGrouper(raw.n)
+	tks := g.collect(raw.n, g.groupDirectives(
+		g.groupMapKeyValues(
+			g.groupMapKeysByValue(
+				g.groupExplicitKeys(
+					g.groupAnchorsWithScalarTags(
+						g.groupScalarTags(
+							g.groupAnchors(
+								g.groupBlockScalars(
+									g.attachLineComments(
+										g.stream(raw)))))))))))
+	if g.err != nil {
+		return nil, nil, g.err
+	}
+
+	tks, err := g.createDocumentTokens(tks, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tks, g.lineComments, nil
+}
+
+// newTokens wraps every raw token in the [Token] the grouping passes work on.
+//
+// The wrappers come from one block rather than one allocation each: a stream of
+// N tokens then costs two allocations instead of N+1. They are addressed by
+// pointer either way, and the block lives exactly as long as any token in it.
+// stream yields a Token for each of raw's tokens, wrapping them where they
+// stand. The tokens are not moved, and the wrappers come from one block.
+//
+// Read it once: a second read wraps the same tokens again, in wrappers of its
+// own, and the groups built over the first set would not know about them.
+func (g *grouper) stream(raw *rawTokens) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		block := make([]Token, raw.n)
+
+		var i int
+		for _, b := range raw.blocks {
+			for j := range b {
+				block[i].Token = &b[j]
+				if !yield(&block[i]) {
+					return
+				}
+				i++
+			}
+		}
+	}
+}
+
+// collect reads a stream into a buffer, for the passes that still read a slice.
+func (g *grouper) collect(n int, in iter.Seq[*Token]) []*Token {
+	out := g.out(n)
+	for tk := range in {
+		out = append(out, tk)
+	}
+
+	return out
+}
 
 // attachLineComments attaches the comment closing a token's line to that token, and
 // drops it from the stream.
@@ -561,19 +515,21 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // Nothing is held back. The comment arrives after the token it belongs to, and
 // the attachment is recorded against the token rather than written into it, so
 // the token may already have been handed on.
-func (g *grouper) attachLineComments(in []*Token) []*Token {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if tk.Type() == token.CommentType && g.lineComment != nil && g.lineComment.Line() == tk.Line() {
-			g.setLineComment(g.lineComment, tk.RawToken())
+func (g *grouper) attachLineComments(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var prev *Token
+		for tk := range in {
+			if tk.Type() == token.CommentType && prev != nil && prev.Line() == tk.Line() {
+				g.setLineComment(prev, tk.RawToken())
 
-			continue
+				continue
+			}
+			if !yield(tk) {
+				return
+			}
+			prev = tk
 		}
-		out = append(out, tk)
-		g.lineComment = tk
 	}
-
-	return out
 }
 
 // groupBlockScalars joins a "|" or ">" header with the content that follows it.
@@ -581,36 +537,41 @@ func (g *grouper) attachLineComments(in []*Token) []*Token {
 // One token is held: the header, until the content arrives. A header ending the
 // stream has no content, and the group is the header alone -- which is what
 // "a: |" with nothing after it is.
-func (g *grouper) groupBlockScalars(in []*Token) []*Token {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.blockHeader != nil {
-			// Whatever follows the header is its content, read as it stands: a
-			// second "|" is content, not another header.
-			out = append(out, g.group2(g.blockType, g.blockHeader, tk))
-			g.blockHeader = nil
+func (g *grouper) groupBlockScalars(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			header *Token
+			typ    TokenGroupType
+		)
 
-			continue
+		for tk := range in {
+			if header != nil {
+				// Whatever follows the header is its content, read as it
+				// stands: a second "|" is content, not another header.
+				if !yield(g.group2(typ, header, tk)) {
+					return
+				}
+				header = nil
+
+				continue
+			}
+
+			switch tk.Type() {
+			case token.LiteralType:
+				header, typ = tk, TokenGroupLiteral
+			case token.FoldedType:
+				header, typ = tk, TokenGroupFolded
+			default:
+				if !yield(tk) {
+					return
+				}
+			}
 		}
 
-		switch tk.Type() {
-		case token.LiteralType:
-			g.blockHeader, g.blockType = tk, TokenGroupLiteral
-		case token.FoldedType:
-			g.blockHeader, g.blockType = tk, TokenGroupFolded
-		default:
-			out = append(out, tk)
+		if header != nil {
+			yield(g.group1(typ, header))
 		}
 	}
-
-	// A header ending the stream has no content, so the group is the header
-	// alone. Between two runs it waits for the next one.
-	if g.ending && g.blockHeader != nil {
-		out = append(out, g.group1(g.blockType, g.blockHeader))
-		g.blockHeader = nil
-	}
-
-	return out
 }
 
 // groupAnchors joins "&" with the name after it, that name with what it names,
@@ -619,65 +580,73 @@ func (g *grouper) groupBlockScalars(in []*Token) []*Token {
 // Two tokens are held at the most: the "&" until its name arrives, and then the
 // name group until the token after it says whether the anchor names a scalar on
 // the same line or an empty node.
-func (g *grouper) groupAnchors(in []*Token) []*Token {
-	out := g.out(len(in))
-	for _, tk := range in {
-		switch {
-		case g.alias != nil:
-			out = append(out, g.group2(TokenGroupAlias, g.alias, tk))
-			g.alias = nil
+func (g *grouper) groupAnchors(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			anchor *Token // a "&", waiting for its name
+			name   *Token // an anchor name, waiting to see what it names
+			alias  *Token // a "*", waiting for its name
+		)
 
-			continue
-		case g.anchor != nil:
-			g.name, g.anchor = g.group2(TokenGroupAnchorName, g.anchor, tk), nil
-
-			continue
-		case g.name != nil:
-			sameLine := g.name.Line() == tk.Line()
-			if sameLine && tk.Type() == token.SequenceEntryType {
-				g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
-
-				return out
-			}
-			if sameLine && isScalarType(tk) {
-				out = append(out, g.group2(TokenGroupAnchor, g.name, tk))
-				g.name = nil
+		for tk := range in {
+			switch {
+			case alias != nil:
+				if !yield(g.group2(TokenGroupAlias, alias, tk)) {
+					return
+				}
+				alias = nil
 
 				continue
+			case anchor != nil:
+				name, anchor = g.group2(TokenGroupAnchorName, anchor, tk), nil
+
+				continue
+			case name != nil:
+				sameLine := name.Line() == tk.Line()
+				if sameLine && tk.Type() == token.SequenceEntryType {
+					g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
+
+					return
+				}
+				if sameLine && isScalarType(tk) {
+					if !yield(g.group2(TokenGroupAnchor, name, tk)) {
+						return
+					}
+					name = nil
+
+					continue
+				}
+				// The anchor names the empty node, and tk is read as any other
+				// token would be.
+				if !yield(name) {
+					return
+				}
+				name = nil
 			}
-			// The anchor names the empty node, and tk is read as any other
-			// token would be.
-			out = append(out, g.name)
-			g.name = nil
+
+			switch tk.Type() {
+			case token.AnchorType:
+				anchor = tk
+			case token.AliasType:
+				alias = tk
+			default:
+				if !yield(tk) {
+					return
+				}
+			}
 		}
 
-		switch tk.Type() {
-		case token.AnchorType:
-			g.anchor = tk
-		case token.AliasType:
-			g.alias = tk
-		default:
-			out = append(out, tk)
+		switch {
+		case anchor != nil:
+			g.fail(yamlerrors.NewSyntax("undefined anchor name", anchor.RawToken()))
+		case alias != nil:
+			g.fail(yamlerrors.NewSyntax("undefined alias name", alias.RawToken()))
+		case name != nil:
+			// An anchor with nothing after it names the empty node. The parser
+			// supplies that null; there is nothing to group here.
+			yield(name)
 		}
 	}
-
-	if !g.ending {
-		return out
-	}
-
-	switch {
-	case g.anchor != nil:
-		g.fail(yamlerrors.NewSyntax("undefined anchor name", g.anchor.RawToken()))
-	case g.alias != nil:
-		g.fail(yamlerrors.NewSyntax("undefined alias name", g.alias.RawToken()))
-	case g.name != nil:
-		// An anchor with nothing after it names the empty node. The parser
-		// supplies that null; there is nothing to group here.
-		out = append(out, g.name)
-		g.name = nil
-	}
-
-	return out
 }
 
 // groupScalarTags joins a tag with the scalar it tags.
@@ -686,40 +655,46 @@ func (g *grouper) groupAnchors(in []*Token) []*Token {
 // that one or stands on its own. A tag on its own is left in the stream and the
 // parser reads what it tags from there -- a tag on its own line, or one in
 // front of a collection.
-func (g *grouper) groupScalarTags(in []*Token) []*Token {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.tag != nil {
-			grouped, ok := g.taggedScalar(g.tag, tk)
-			if !ok {
-				return out
+func (g *grouper) groupScalarTags(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var tag *Token // a tag, waiting to see what it tags
+
+		for tk := range in {
+			if tag != nil {
+				grouped, ok := g.taggedScalar(tag, tk)
+				if !ok {
+					return
+				}
+				if grouped != nil {
+					if !yield(grouped) {
+						return
+					}
+					tag = nil
+
+					continue
+				}
+				// The tag stands on its own, and tk is read as any other token
+				// would be -- including as the next tag.
+				if !yield(tag) {
+					return
+				}
+				tag = nil
 			}
-			if grouped != nil {
-				out = append(out, grouped)
-				g.tag = nil
+
+			if tk.Type() == token.TagType {
+				tag = tk
 
 				continue
 			}
-			// The tag stands on its own, and tk is read as any other token
-			// would be -- including as the next tag.
-			out = append(out, g.tag)
-			g.tag = nil
+			if !yield(tk) {
+				return
+			}
 		}
 
-		if tk.Type() == token.TagType {
-			g.tag = tk
-
-			continue
+		if tag != nil {
+			yield(tag)
 		}
-		out = append(out, tk)
 	}
-
-	if g.ending && g.tag != nil {
-		out = append(out, g.tag)
-		g.tag = nil
-	}
-
-	return out
 }
 
 // taggedScalar returns the group joining tag with next, or nil where the tag
@@ -772,58 +747,44 @@ func (g *grouper) taggedScalar(tag, next *Token) (*Token, bool) {
 // only groupScalarTags turns it into the scalar the anchor names. One token is
 // held, the anchor name, until the token after it says whether that is what it
 // names.
-func (g *grouper) groupAnchorsWithScalarTags(in []*Token) []*Token {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.tagged != nil {
-			if g.tagged.Line() == tk.Line() && tk.GroupType() == TokenGroupScalarTag {
-				out = append(out, g.group2(TokenGroupAnchor, g.tagged, tk))
-				g.tagged = nil
+func (g *grouper) groupAnchorsWithScalarTags(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var name *Token // an anchor name, waiting to see whether a tagged scalar follows
+
+		for tk := range in {
+			if name != nil {
+				if name.Line() == tk.Line() && tk.GroupType() == TokenGroupScalarTag {
+					if !yield(g.group2(TokenGroupAnchor, name, tk)) {
+						return
+					}
+					name = nil
+
+					continue
+				}
+				// The anchor names something else, or the empty node, and tk is
+				// read as any other token would be.
+				if !yield(name) {
+					return
+				}
+				name = nil
+			}
+
+			if tk.GroupType() == TokenGroupAnchorName {
+				name = tk
 
 				continue
 			}
-			// The anchor names something else, or the empty node, and tk is
-			// read as any other token would be.
-			out = append(out, g.tagged)
-			g.tagged = nil
+			if !yield(tk) {
+				return
+			}
 		}
 
-		if tk.GroupType() == TokenGroupAnchorName {
-			g.tagged = tk
-
-			continue
+		if name != nil {
+			// An anchor with nothing after it names the empty node. The parser
+			// supplies that null; there is nothing to group here.
+			yield(name)
 		}
-		out = append(out, tk)
 	}
-
-	if g.ending && g.tagged != nil {
-		// An anchor with nothing after it names the empty node. The parser
-		// supplies that null; there is nothing to group here.
-		out = append(out, g.tagged)
-		g.tagged = nil
-	}
-
-	return out
-}
-
-// directiveState is what groupDirectives holds while it reads a '%' line: the
-// '%' itself, the group it makes with its name, and what follows on that line.
-type directiveState struct {
-	head     *Token // a '%', while its name and values are read
-	name     *Token // the '%' joined with its name
-	values   []*Token
-	comments []*Token
-}
-
-// explicitKey is what groupExplicitKeys holds between two tokens: the '?' and
-// the body read so far, with the depths that say where the body ends.
-type explicitKey struct {
-	flowDepth int
-	key       *Token // a '?', while the body naming its key is read
-	keyColumn int
-	keyInFlow bool
-	bodyDepth int
-	body      []*Token
 }
 
 // groupExplicitKeys joins a '?' with the body that names its key.
@@ -832,69 +793,79 @@ type explicitKey struct {
 // the '?' in block context, and the ':' or ',' or bracket that closes the entry
 // in flow context. That is the widest window of the ten passes, and it is the
 // key itself -- the parser is about to read it.
-func (g *grouper) groupExplicitKeys(in []*Token) []*Token {
-	out := g.out(len(in))
-	{
+func (g *grouper) groupExplicitKeys(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			flowDepth int
+			key       *Token // a '?', while the body naming its key is read
+			keyColumn int
+			keyInFlow bool
+			bodyDepth int
+			body      []*Token
+		)
+
 		emit := func() bool {
-			grouped, err := g.groupExplicitKeyBody(g.explicit.body)
+			grouped, err := g.groupExplicitKeyBody(body)
 			if err != nil {
 				g.fail(err)
 
 				return false
 			}
 
-			// A '?' with nothing after it opens an entry whose g.explicit.key is e-node,
+			// A '?' with nothing after it opens an entry whose key is e-node,
 			// which is what "? \n" and "?\n: v\n" are. The group holds the
 			// indicator alone and the parser supplies the null.
-			members := []*Token{g.explicit.key}
+			members := []*Token{key}
 			if len(grouped) == 0 {
-				members = append(members, g.implicitNullKeyToken(g.explicit.key))
+				members = append(members, g.implicitNullKeyToken(key))
 			}
 			members = append(members, grouped...)
 
-			g.explicit.key, g.explicit.body = nil, g.explicit.body[:0]
+			key, body = nil, body[:0]
 
-			out = append(out, g.group(TokenGroupMapKey, members))
-
-			return true
+			return yield(g.group(TokenGroupMapKey, members))
 		}
 
-		for _, tk := range in {
-			if g.explicit.key != nil {
-				if !endsExplicitKeyBody(tk, g.explicit.keyColumn, g.explicit.keyInFlow, &g.explicit.bodyDepth) {
-					g.explicit.body = append(g.explicit.body, tk)
+		for tk := range in {
+			if key != nil {
+				if !endsExplicitKeyBody(tk, keyColumn, keyInFlow, &bodyDepth) {
+					body = append(body, tk)
 
 					continue
 				}
 				if !emit() {
-					return out
+					return
 				}
-				// The token that ended the g.explicit.body is not part of it, and is read
+				// The token that ended the body is not part of it, and is read
 				// as any other token would be.
 			}
 
 			switch tk.Type() {
 			case token.MappingStartType, token.SequenceStartType:
-				g.explicit.flowDepth++
-				out = append(out, tk)
-			case token.MappingEndType, token.SequenceEndType:
-				if g.explicit.flowDepth > 0 {
-					g.explicit.flowDepth--
+				flowDepth++
+				if !yield(tk) {
+					return
 				}
-				out = append(out, tk)
+			case token.MappingEndType, token.SequenceEndType:
+				if flowDepth > 0 {
+					flowDepth--
+				}
+				if !yield(tk) {
+					return
+				}
 			case token.MappingKeyType:
-				g.explicit.key, g.explicit.keyColumn, g.explicit.keyInFlow, g.explicit.bodyDepth = tk, tk.Column(), g.explicit.flowDepth > 0, 0
+				key, keyColumn, keyInFlow, bodyDepth = tk, tk.Column(), flowDepth > 0, 0
 			default:
-				out = append(out, tk)
+				if !yield(tk) {
+					return
+				}
 			}
 		}
 
-		if g.ending && g.explicit.key != nil {
+		if key != nil {
 			emit()
 		}
 	}
-
-	return out
 }
 
 // endsExplicitKeyBody reports whether tk stands past the body of the explicit
@@ -972,17 +943,20 @@ func (w *keyWindow) keepFrom() int {
 }
 
 // release hands on the tokens that can no longer take part in a key.
-// release hands on what the window no longer has to keep, appending it to out.
-func (w *keyWindow) release(out []*Token) []*Token {
+func (w *keyWindow) release(yield func(*Token) bool) bool {
 	keep := w.keepFrom()
-	out = append(out, w.held[:keep]...)
+	for _, tk := range w.held[:keep] {
+		if !yield(tk) {
+			return false
+		}
+	}
 
 	w.held = append(w.held[:0], w.held[keep:]...)
 	for i := range w.openers {
 		w.openers[i] -= keep
 	}
 
-	return out
+	return true
 }
 
 // lastContentIndex is where the last token of the window that is not a comment
@@ -1002,56 +976,41 @@ func lastContentIndex(held []*Token) int {
 // The key is held rather than handed on and rewritten where it stands, which is
 // what the pass did while it read a slice: in a stream the token would be gone
 // by the time its ':' arrived.
-func (g *grouper) groupMapKeysByValue(in []*Token) []*Token {
-	out := g.out(len(in))
+func (g *grouper) groupMapKeysByValue(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var w keyWindow
 
-	// The outer run keeps its window on the grouper, so it survives the end of
-	// one run of tokens and is still holding when the next begins. A nested run
-	// -- groupExplicitKeyBody grouping one explicit key's body -- reads that
-	// body from end to end and takes a window of its own, or it would write
-	// over what the run around it holds.
-	w := &g.keys
-	if g.nested > 0 {
-		w = new(keyWindow)
-	}
+		for tk := range in {
+			switch tk.Type() {
+			case token.MappingStartType, token.SequenceStartType:
+				w.openers = append(w.openers, len(w.held))
+				w.seq = append(w.seq, tk.Type() == token.SequenceStartType)
+				w.held = append(w.held, tk)
+			case token.MappingEndType, token.SequenceEndType:
+				if len(w.openers) > 0 {
+					w.openers = w.openers[:len(w.openers)-1]
+					w.seq = w.seq[:len(w.seq)-1]
+				}
+				w.held = append(w.held, tk)
+			case token.MappingValueType:
+				if !g.keyBefore(&w, tk) {
+					return
+				}
+			default:
+				w.held = append(w.held, tk)
+			}
 
-	for _, tk := range in {
-		switch tk.Type() {
-		case token.MappingStartType, token.SequenceStartType:
-			w.openers = append(w.openers, len(w.held))
-			w.seq = append(w.seq, tk.Type() == token.SequenceStartType)
-			w.held = append(w.held, tk)
-		case token.MappingEndType, token.SequenceEndType:
-			if len(w.openers) > 0 {
-				w.openers = w.openers[:len(w.openers)-1]
-				w.seq = w.seq[:len(w.seq)-1]
+			if !w.release(yield) {
+				return
 			}
-			w.held = append(w.held, tk)
-		case token.MappingValueType:
-			if !g.keyBefore(w, tk) {
-				return out
-			}
-		default:
-			w.held = append(w.held, tk)
 		}
 
-		if len(w.held) > g.heldHigh {
-			g.heldHigh = len(w.held)
+		for _, tk := range w.held {
+			if !yield(tk) {
+				return
+			}
 		}
-		out = w.release(out)
 	}
-
-	// The window holds what a ':' arriving next would need. Between two runs
-	// that ':' may still be coming, so the outer window empties only at the
-	// end; a nested run always ends with its body.
-	if !g.ending && g.nested == 0 {
-		return out
-	}
-
-	out = append(out, w.held...)
-	w.held = w.held[:0]
-
-	return out
 }
 
 // keyBefore reads the key the ':' belongs to out of the window, and puts the
@@ -1113,7 +1072,8 @@ func (g *grouper) keyBefore(w *keyWindow, tk *Token) bool {
 	// that the comments written between it and its ':' keep their place after
 	// it.
 	held := g.token()
-	held.raw, held.Group, held.seq = key.raw, key.Group, key.seq
+	held.Token, held.Group = key.Token, key.Group
+	key.Token = nil
 	key.Group = g.newGroup2(TokenGroupMapKey, held, tk)
 
 	return true
@@ -1149,44 +1109,40 @@ func (w *keyWindow) hasNoKey(last int, tk *Token, inFlow bool) bool {
 // value. A key whose value is on a later line keeps its own group, and the
 // parser reads the value from the stream: "a:\n  b" is a key and a mapping, not
 // a pair.
-func (g *grouper) groupMapKeyValues(in []*Token) []*Token {
-	out := g.out(len(in))
-	{
-		// As in groupMapKeysByValue: the outer run keeps what it holds on the
-		// grouper so it survives the end of a run, and a nested one takes its
-		// own.
-		held := &g.keyed
-		if g.nested > 0 {
-			held = new(*Token)
-		}
+func (g *grouper) groupMapKeyValues(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var key *Token // a map key, waiting to see whether its value follows
 
-		for _, tk := range in {
-			if key := *held; key != nil {
+		for tk := range in {
+			if key != nil {
 				if pair := g.keyedValue(key, tk); pair != nil {
-					out = append(out, pair)
-					*held = nil
+					if !yield(pair) {
+						return
+					}
+					key = nil
 
 					continue
 				}
-				out = append(out, key)
-				*held = nil
+				if !yield(key) {
+					return
+				}
+				key = nil
 			}
 
 			if tk.GroupType() == TokenGroupMapKey {
-				*held = tk
+				key = tk
 
 				continue
 			}
-			out = append(out, tk)
+			if !yield(tk) {
+				return
+			}
 		}
 
-		if (g.ending || g.nested > 0) && *held != nil {
-			out = append(out, *held)
-			*held = nil
+		if key != nil {
+			yield(key)
 		}
 	}
-
-	return out
 }
 
 // keyedValue returns the group joining key with value, or nil where value is
@@ -1217,64 +1173,156 @@ func (g *grouper) keyedValue(key, value *Token) *Token {
 // between belong to neither. They are the reason a perfectly ordinary
 // "%YAML 1.2" with a note above the header was refused whenever comments were
 // being parsed.
-func (g *grouper) groupDirectives(in []*Token) []*Token {
-	out := g.out(len(in))
-	{
-		for _, tk := range in {
-			if g.directive.head != nil {
-				if g.directive.name == nil {
-					g.directive.name = g.group2(TokenGroupDirectiveName, g.directive.head, tk)
+func (g *grouper) groupDirectives(in iter.Seq[*Token]) iter.Seq[*Token] {
+	return func(yield func(*Token) bool) {
+		var (
+			directive *Token // a '%', while its name and values are read
+			name      *Token // the '%' joined with its name
+			values    []*Token
+			comments  []*Token
+		)
+
+		for tk := range in {
+			if directive != nil {
+				if name == nil {
+					name = g.group2(TokenGroupDirectiveName, directive, tk)
 
 					continue
 				}
-				if tk.Line() == g.directive.head.Line() {
-					g.directive.values = append(g.directive.values, tk)
+				if tk.Line() == directive.Line() {
+					values = append(values, tk)
 
 					continue
 				}
 				if tk.Type() == token.CommentType {
-					g.directive.comments = append(g.directive.comments, tk)
+					comments = append(comments, tk)
 
 					continue
 				}
 				if tk.Type() != token.DocumentHeaderType {
-					g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", g.directive.head.RawToken()))
+					g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", directive.RawToken()))
 
-					return out
+					return
 				}
 
-				head := g.directive.name
-				if len(g.directive.values) != 0 {
-					head = g.group(TokenGroupDirective, append([]*Token{g.directive.name}, g.directive.values...))
+				head := name
+				if len(values) != 0 {
+					head = g.group(TokenGroupDirective, append([]*Token{name}, values...))
 				}
-				out = append(out, head)
-				out = append(out, g.directive.comments...)
-				g.directive.head, g.directive.name, g.directive.values, g.directive.comments = nil, nil, nil, nil
-				// The '---' is not part of the g.directive.head, and is read as any
+				if !yield(head) {
+					return
+				}
+				for _, c := range comments {
+					if !yield(c) {
+						return
+					}
+				}
+				directive, name, values, comments = nil, nil, nil, nil
+				// The '---' is not part of the directive, and is read as any
 				// other token would be.
 			}
 
 			if tk.Type() == token.DirectiveType {
-				g.directive.head = tk
+				directive = tk
 
 				continue
 			}
-			out = append(out, tk)
-		}
-
-		if !g.ending {
-			return out
+			if !yield(tk) {
+				return
+			}
 		}
 
 		switch {
-		case g.directive.head != nil && g.directive.name == nil:
-			g.fail(yamlerrors.NewSyntax("undefined directive value", g.directive.head.RawToken()))
-		case g.directive.head != nil:
-			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", g.directive.head.RawToken()))
+		case directive != nil && name == nil:
+			g.fail(yamlerrors.NewSyntax("undefined directive value", directive.RawToken()))
+		case directive != nil:
+			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", directive.RawToken()))
 		}
 	}
+}
 
-	return out
+// createDocumentTokens groups tokens into one group per document.
+//
+// opened says whether a "---" above these tokens has already begun a document.
+// It settles what a "..." standing first among them ends. After a "---" it ends
+// the document that "---" opened, which holds nothing and is a document all the
+// same. At the head of the stream, or after another "...", it ends nothing:
+// l-yaml-stream admits a run of suffixes, and only the first of them closes
+// anything.
+func (g *grouper) createDocumentTokens(tokens []*Token, opened bool) ([]*Token, error) {
+	var ret []*Token
+	for i := 0; i < len(tokens); i++ {
+		tk := tokens[i]
+		switch tk.Type() {
+		case token.DocumentHeaderType:
+			if i != 0 {
+				ret = append(ret, g.group(TokenGroupNone, tokens[:i]))
+			}
+			if i+1 == len(tokens) {
+				// if current token is last token, add DocumentHeader only tokens to ret.
+				return append(ret, g.group1(TokenGroupDocument, tk)), nil
+			}
+			if tokens[i+1].Type() == token.DocumentHeaderType {
+				// One "---" straight after another: this document holds
+				// nothing. It is a document all the same, and so is everything
+				// after it -- stopping here returned the empty one and dropped
+				// the rest of the stream without a word.
+				rest, err := g.createDocumentTokens(tokens[i+1:], true)
+				if err != nil {
+					return nil, err
+				}
+
+				empty := g.group1(TokenGroupDocument, tk)
+
+				return append(append(ret, empty), rest...), nil
+			}
+			if tokens[i].Line() == tokens[i+1].Line() {
+				switch tokens[i+1].GroupType() {
+				case TokenGroupMapKey, TokenGroupMapKeyValue:
+					return nil, yamlerrors.NewSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
+				}
+				switch tokens[i+1].Type() {
+				case token.SequenceEntryType:
+					return nil, yamlerrors.NewSyntax("value cannot be placed after document separator", tokens[i+1].RawToken())
+				}
+			}
+			tks, err := g.createDocumentTokens(tokens[i+1:], true)
+			if err != nil {
+				return nil, err
+			}
+			if len(tks) != 0 {
+				tks[0].SetGroupType(TokenGroupDocument)
+				var pair [2]*Token
+				tks[0].Group.set(TokenGroupDocument, append([]*Token{tk}, tks[0].Group.Members(&pair)...))
+				return append(ret, tks...), nil
+			}
+			return append(ret, g.group1(TokenGroupDocument, tk)), nil
+		case token.DocumentEndType:
+			if i != 0 || opened {
+				// At i == 0 the group is the "..." alone, which is the whole of
+				// a document holding nothing. The caller prepends the "---"
+				// that opened it.
+				ret = append(ret, g.group(TokenGroupDocument, tokens[0:i+1]))
+			}
+			if i+1 == len(tokens) {
+				return ret, nil
+			}
+			if tokens[i].Line() == tokens[i+1].Line() {
+				// "..." ends the document and takes the rest of its line: only
+				// a comment may follow it there. On the next line a new
+				// document begins, and it may be a bare one -- a scalar, or a
+				// block scalar as in the spec's own bare-documents example.
+				return nil, yamlerrors.NewSyntax("unexpected end content", tokens[i+1].RawToken())
+			}
+
+			tks, err := g.createDocumentTokens(tokens[i+1:], false)
+			if err != nil {
+				return nil, err
+			}
+			return append(ret, tks...), nil
+		}
+	}
+	return append(ret, g.group(TokenGroupDocument, tokens)), nil
 }
 
 func isScalarType(tk *Token) bool {
@@ -1316,12 +1364,12 @@ func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
 	g.nested++
 	defer func() { g.nested-- }()
 
-	grouped := g.groupMapKeysByValue(body)
+	grouped := g.collect(len(body), g.groupMapKeysByValue(slices.Values(body)))
 	if g.err != nil {
 		return nil, g.err
 	}
 
-	return g.groupMapKeyValues(grouped), nil
+	return g.collect(len(grouped), g.groupMapKeyValues(slices.Values(grouped))), nil
 }
 
 // keyEndLine reports the line on which a key token ends.
@@ -1423,7 +1471,7 @@ func (g *grouper) implicitNullKeyToken(colon *Token) *Token {
 	tk.Type = token.ImplicitNullType
 
 	wrapped := g.token()
-	wrapped.raw = *tk
+	wrapped.Token = tk
 
 	return wrapped
 }

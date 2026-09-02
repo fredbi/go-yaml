@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -26,8 +26,8 @@ var parsers = []struct {
 	name  string
 	parse func([]byte) (*ast.File, error)
 }{
-	{"parser", func(src []byte) (*ast.File, error) { return parser.ParseBytes(src, 0) }},
-	{"lab", func(src []byte) (*ast.File, error) { return labparser.ParseBytes(src) }},
+	{"parser", func(src []byte) (*ast.File, error) { return refparser.ParseBytes(src, 0) }},
+	{"lab", func(src []byte) (*ast.File, error) { return parser.ParseBytes(src) }},
 }
 
 // TestGCActivity reports what a parse costs the collector.

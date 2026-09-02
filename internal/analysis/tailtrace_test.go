@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/lab"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
 )
 
 // TestToJSONTailTrace reports what the tape would hold for a JSON conversion.

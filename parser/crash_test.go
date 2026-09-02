@@ -33,8 +33,8 @@ func TestParseDoesNotCrash(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			require.NotPanicsf(t, func() {
-				_, _ = parser.ParseBytes([]byte(test.source), 0)
-				_, _ = parser.ParseBytes([]byte(test.source), parser.ParseComments)
+				_, _ = parser.ParseBytes([]byte(test.source))
+				_, _ = parser.ParseBytes([]byte(test.source), parser.Comments())
 			}, "%s: %s", name, test.reason)
 		})
 	}
@@ -43,7 +43,7 @@ func TestParseDoesNotCrash(t *testing.T) {
 // TestParseEmptySourceDocumentToken pins the shape of the AST for an empty
 // source, which is the smallest input that reaches a document with no body.
 func TestParseEmptySourceDocumentToken(t *testing.T) {
-	file, err := parser.ParseBytes(nil, 0)
+	file, err := parser.ParseBytes(nil)
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 1)
 

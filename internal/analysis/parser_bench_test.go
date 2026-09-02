@@ -6,7 +6,7 @@ package analysis
 import (
 	"testing"
 
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
@@ -22,7 +22,7 @@ func BenchmarkParserNew(b *testing.B) {
 		for b.Loop() {
 			var s scanner.Scanner
 			s.Init(text)
-			if _, err := parser.New(s.Tokens(), 0); err != nil {
+			if _, err := refparser.New(s.Tokens(), 0); err != nil {
 				b.Fatal(err)
 			}
 			if err := s.Err(); err != nil {
@@ -38,7 +38,7 @@ func BenchmarkParserParse(b *testing.B) {
 		for b.Loop() {
 			var s scanner.Scanner
 			s.Init(text)
-			p, err := parser.New(s.Tokens(), 0)
+			p, err := refparser.New(s.Tokens(), 0)
 			if err != nil {
 				b.Fatal(err)
 			}

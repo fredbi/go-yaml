@@ -9,8 +9,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestGroupingHolds reports how far ahead of the descent the grouping keeps the
@@ -38,7 +38,7 @@ func TestGroupingHolds(t *testing.T) {
 		for _, w := range set {
 			chunk := tokenarena.SizeFor(len(w.Data))
 
-			p := labparser.New(labparser.ChunkSize(chunk))
+			p := parser.New(parser.ChunkSize(chunk))
 			_, err := p.Parse(w.Data)
 			require.NoError(t, err, w.Name)
 
@@ -68,7 +68,7 @@ func TestGroupingHoldsLittleInBlockStyle(t *testing.T) {
 				continue
 			}
 
-			p := labparser.New()
+			p := parser.New()
 			_, err := p.Parse(w.Data)
 			require.NoError(t, err, w.Name)
 
@@ -97,7 +97,7 @@ func TestAFlowCollectionHoldsToItsClose(t *testing.T) {
 			continue
 		}
 
-		p := labparser.New()
+		p := parser.New()
 		_, err := p.Parse(w.Data)
 		require.NoError(t, err)
 

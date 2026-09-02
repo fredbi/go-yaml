@@ -1970,15 +1970,14 @@ func (d *Decoder) resolveReference(ctx context.Context) error {
 }
 
 func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
-	var parseMode parser.Mode
-	if d.toCommentMap != nil {
-		parseMode = parser.ParseComments
-	}
 	var opts []parser.Option
+	if d.toCommentMap != nil {
+		opts = append(opts, parser.Comments())
+	}
 	if d.allowDuplicateMapKey {
 		opts = append(opts, parser.AllowDuplicateMapKey())
 	}
-	f, err := parser.ParseBytes(bytes, parseMode, opts...)
+	f, err := parser.ParseBytes(bytes, opts...)
 	if err != nil {
 		return nil, err
 	}

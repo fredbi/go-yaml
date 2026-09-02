@@ -246,7 +246,7 @@ foo:
     foo: 3
 foo: 2
 `
-	if _, err := parser.ParseBytes([]byte(data), 0); err == nil {
+	if _, err := parser.ParseBytes([]byte(data)); err == nil {
 		t.Fatalf("expected error")
 	} else {
 		var yamlErr *yamlerrors.Error

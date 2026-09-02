@@ -11,14 +11,14 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestTokenRetention measures how much of the token stream the tree keeps.
 //
-// parser.New drains the whole iter.Seq[token.Token] into rawTokens before
+// refparser.New drains the whole iter.Seq[token.Token] into rawTokens before
 // grouping starts, and rawTokens.add is the largest single allocation site of a
 // parse: 23.3% of allocated bytes on azure_swagger. A parser reading from the
 // stream would copy out whatever the tree ends up pointing at and drop the rest
@@ -37,12 +37,12 @@ func TestTokenRetention(t *testing.T) {
 
 		for _, mode := range []struct {
 			label string
-			mode  parser.Mode
+			mode  refparser.Mode
 		}{
 			{"plain", 0},
-			{"comments", parser.ParseComments},
+			{"comments", refparser.ParseComments},
 		} {
-			f, err := parser.ParseBytes(w.Data, mode.mode)
+			f, err := refparser.ParseBytes(w.Data, mode.mode)
 			require.NoError(t, err)
 
 			kept := retainedTokens(f)
@@ -137,10 +137,10 @@ func TestTokenRetentionSanity(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		src  string
-		mode parser.Mode
+		mode refparser.Mode
 	}{
 		{"comments dropped", "# a\nk: v # b\n# c\n", 0},
-		{"comments kept", "# a\nk: v # b\n# c\n", parser.ParseComments},
+		{"comments kept", "# a\nk: v # b\n# c\n", refparser.ParseComments},
 		{"plain mapping", "a: 1\nb: 2\n", 0},
 		{"flow", "{a: 1, b: [2, 3]}\n", 0},
 		{"anchors and tags", "a: &x !!str v\nb: *x\n", 0},
@@ -148,7 +148,7 @@ func TestTokenRetentionSanity(t *testing.T) {
 		{"block scalar", "a: |\n  one\n  two\n", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f, err := parser.ParseBytes([]byte(tc.src), tc.mode)
+			f, err := refparser.ParseBytes([]byte(tc.src), tc.mode)
 			require.NoError(t, err)
 
 			scanned := countTokens(t, tc.src)

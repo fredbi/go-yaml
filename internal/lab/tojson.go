@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // ToJSONProgressive converts a YAML document to JSON without keeping the tree.
@@ -31,7 +31,7 @@ import (
 func ToJSONProgressive(src []byte) ([]byte, error) {
 	w := &jsonFolder{done: map[ast.Node][]byte{}}
 
-	file, err := labparser.ParseBytes(src, labparser.OmitNodePaths(), labparser.OnComplete(w.complete))
+	file, err := parser.ParseBytes(src, parser.OmitNodePaths(), parser.OnComplete(w.complete))
 	if err != nil {
 		return nil, err
 	}

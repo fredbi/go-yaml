@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // DecodeProgressive reads src into a Go value without keeping the tree.
@@ -29,7 +29,7 @@ import (
 func DecodeProgressive(src []byte) (any, error) {
 	d := &folder{done: map[ast.Node]any{}}
 
-	f, err := labparser.ParseBytes(src, labparser.OnComplete(d.complete))
+	f, err := parser.ParseBytes(src, parser.OnComplete(d.complete))
 	if err != nil {
 		return nil, err
 	}

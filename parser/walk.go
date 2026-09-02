@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package labparser
+package parser
 
 import (
 	"github.com/go-openapi/go-yaml/ast"
@@ -94,6 +94,13 @@ type walkState struct {
 }
 
 // Walk reads src through, handing each node to v as the parse reaches it.
+//
+// ⚠️ The contract is not settled and may change without a deprecation. Three
+// questions are open: [ast.Walk] never reaches SequenceEntryNode, FootComment
+// or ValueHeadComments; parseFootComment writes into an entry the parse had
+// already finished, so the last entry of a block is not handed over until the
+// next non-comment token settles it; and where comments belong in the tree is
+// still being decided. Use [Parser.Parse] where you need a stable API.
 //
 // It does not gather: a collection's entries are handed over one at a time and
 // the collection keeps none of them, so what stands at once is the walk's own

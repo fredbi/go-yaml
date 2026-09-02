@@ -83,7 +83,7 @@ func TestSuiteAcceptance(t *testing.T) {
 		var got verdict
 
 		t.Run(test.Name, func(t *testing.T) {
-			_, err := parser.ParseBytes(test.InYAML, parser.ParseComments)
+			_, err := parser.ParseBytes(test.InYAML, parser.Comments())
 
 			if !test.HasExpectation() {
 				// Parsed anyway, so a panic here still fails the run.

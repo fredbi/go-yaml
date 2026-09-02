@@ -9,8 +9,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
-	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
+	"github.com/go-openapi/go-yaml/internal/tokenarena"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestTokenArenaOnTheCorpus reports what the tape would hold on each document.
@@ -46,9 +46,9 @@ func TestTokenArenaOnTheCorpus(t *testing.T) {
 			size := tokenarena.SizeFor(len(w.Data))
 
 			for _, lag := range []int{64, 1024, 16384} {
-				arena := tokenarena.New[labparser.Token](size)
+				arena := tokenarena.New[parser.Token](size)
 				for i, tk := range tokens {
-					held, _ := arena.Add(labparser.Token{})
+					held, _ := arena.Add(parser.Token{})
 					held.Raw(*tk, i)
 					arena.SetTail(max(0, i-lag))
 				}
@@ -73,9 +73,9 @@ func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 
 	const lag, size = 1024, 128
 
-	arena := tokenarena.New[labparser.Token](size)
+	arena := tokenarena.New[parser.Token](size)
 	for i, tk := range tokens {
-		held, _ := arena.Add(labparser.Token{})
+		held, _ := arena.Add(parser.Token{})
 		held.Raw(*tk, i)
 		arena.SetTail(max(0, i-lag))
 	}
@@ -111,7 +111,7 @@ func TestAFullScanRecyclesNothing(t *testing.T) {
 	t.Logf("%-19s %8s %6s %8s %9s %8s %8s", "workload", "tokens", "chunk", "chunks", "recycled", "live", "held")
 
 	for _, w := range all {
-		p := labparser.New(labparser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
+		p := parser.New(parser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
 
 		_, err := p.Parse(w.Data)
 		require.NoError(t, err)

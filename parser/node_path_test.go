@@ -17,7 +17,7 @@ import (
 func paths(t *testing.T, src string, opts ...parser.Option) []string {
 	t.Helper()
 
-	f, err := parser.ParseBytes([]byte(src), parser.ParseComments, opts...)
+	f, err := parser.ParseBytes([]byte(src), append([]parser.Option{parser.Comments()}, opts...)...)
 	require.NoError(t, err)
 
 	var got []string
@@ -94,9 +94,9 @@ func TestNodePathRendersIndexesPastOneDigit(t *testing.T) {
 func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 	const src = "foo:\n  bar: 1\n  baz:\n    - a\n    - b\n"
 
-	with, err := parser.ParseBytes([]byte(src), parser.ParseComments)
+	with, err := parser.ParseBytes([]byte(src), parser.Comments())
 	require.NoError(t, err)
-	without, err := parser.ParseBytes([]byte(src), parser.ParseComments, parser.OmitNodePaths())
+	without, err := parser.ParseBytes([]byte(src), parser.Comments(), parser.OmitNodePaths())
 	require.NoError(t, err)
 
 	assert.Equal(t, with.String(), without.String(), "the document should render the same either way")
@@ -113,7 +113,7 @@ func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 // TestSetPathOverridesTheRecordedPath checks that a path handed in by a caller
 // reads back exactly, rather than being folded into the trie.
 func TestSetPathOverridesTheRecordedPath(t *testing.T) {
-	f, err := parser.ParseBytes([]byte("foo: 1\n"), 0)
+	f, err := parser.ParseBytes([]byte("foo: 1\n"))
 	require.NoError(t, err)
 
 	node := f.Docs[0].Body

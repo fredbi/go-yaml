@@ -48,12 +48,12 @@ func TestParseTagsOnEmptyScalars(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
 			// And it settles: what was written reads back to the same text.
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -85,7 +85,7 @@ func TestParseEmptyKeysCarryingProperties(t *testing.T) {
 
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(source), parser.Comments())
 			require.NoErrorf(t, err, "rejected %q", source)
 
 			// The entry below the key is a sibling of it, not part of its value.
@@ -119,11 +119,11 @@ func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -156,11 +156,11 @@ func TestParseTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.ParseComments)
+			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.ParseComments)
+			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})

@@ -96,7 +96,7 @@ func TestDuplicateMapKeyIsReportedPerMapping(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(test.src), 0)
+			_, err := parser.ParseBytes([]byte(test.src))
 			if !test.duplicate {
 				require.NoError(t, err)
 
@@ -130,12 +130,12 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 		return b.String()
 	}
 
-	_, err := parser.ParseBytes([]byte(build(-1)), 0)
+	_, err := parser.ParseBytes([]byte(build(-1)))
 	require.NoError(t, err)
 
 	for _, repeat := range []int{0, 3, 17, 100, keys - 1} {
 		t.Run(fmt.Sprintf("repeats key%02d", repeat), func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(build(repeat)), 0)
+			_, err := parser.ParseBytes([]byte(build(repeat)))
 			require.Error(t, err)
 			assert.Contains(t, err.Error(),
 				fmt.Sprintf("mapping key %q already defined at [%d:1]", fmt.Sprintf("key%02d", repeat), repeat+1))
@@ -145,6 +145,6 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 
 // TestDuplicateMapKeyAllowed checks that the option turns the whole check off.
 func TestDuplicateMapKeyAllowed(t *testing.T) {
-	_, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), 0, parser.AllowDuplicateMapKey())
+	_, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.AllowDuplicateMapKey())
 	require.NoError(t, err)
 }

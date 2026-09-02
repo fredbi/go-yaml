@@ -12,7 +12,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab/labparser"
+	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -48,9 +48,9 @@ func TestWriteChurnProfile(t *testing.T) {
 	// experiment can be attributed the same way production is.
 	var f any
 	if os.Getenv("CHURN_PARSER") == "lab" {
-		f, err = labparser.ParseBytes(w.Data)
+		f, err = parser.ParseBytes(w.Data)
 	} else {
-		f, err = parser.ParseBytes(w.Data, 0)
+		f, err = refparser.ParseBytes(w.Data, 0)
 	}
 	require.NoError(t, err)
 

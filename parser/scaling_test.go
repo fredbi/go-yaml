@@ -68,7 +68,7 @@ func bytesPerEntry(t *testing.T, src string, entries int) float64 {
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 
-	_, err := parser.ParseBytes(source, 0)
+	_, err := parser.ParseBytes(source)
 	require.NoError(t, err)
 
 	runtime.ReadMemStats(&after)
