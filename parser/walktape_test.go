@@ -1,17 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package analysis
+package parser
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
-	"github.com/go-openapi/go-yaml/parser"
 )
 
 // anchored names the documents holding an anchor, whose chunks a walk saves.
@@ -28,7 +27,7 @@ type counting struct {
 	anchorName string
 }
 
-func (v *counting) Enter(node ast.Node, _ parser.Step) bool {
+func (v *counting) Enter(node ast.Node, _ Step) bool {
 	v.nodes++
 	if anchor, ok := node.(*ast.AnchorNode); ok && v.anchor == nil {
 		v.anchor, v.anchorName = anchor, anchor.GetToken().Value
@@ -37,7 +36,7 @@ func (v *counting) Enter(node ast.Node, _ parser.Step) bool {
 	return true
 }
 
-func (v *counting) Leave(ast.Node, parser.Step) {}
+func (v *counting) Leave(ast.Node, Step) {}
 
 // TestWalkLetsTheTapeGo checks a walk hands the tape back as it reads.
 //
@@ -67,49 +66,46 @@ func (v *counting) Leave(ast.Node, parser.Step) {}
 // working set is what the walk needed at once: the chunks live plus the chunks
 // saved.
 func TestWalkLetsTheTapeGo(t *testing.T) {
-	ordinary, err := workloads.All()
-	require.NoError(t, err)
-
-	stress, err := workloads.Stress()
-	require.NoError(t, err)
+	ordinary := readCorpus(t, corpusDir)
+	stress := readCorpus(t, filepath.Join(corpusDir, "stress"))
 
 	t.Logf("%-19s %8s %10s %9s %6s %9s %8s %7s %10s",
 		"document", "tokens", "allocated", "recycled", "hit", "free high", "live", "saved high", "working set")
 
-	for _, set := range [][]workloads.Workload{ordinary, stress} {
+	for _, set := range [][]corpusDoc{ordinary, stress} {
 		for _, w := range set {
-			p := parser.New(parser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
+			p := New(ChunkSize(tokenarena.SizeFor(len(w.data))))
 
 			keep := &counting{}
-			_, err := p.Walk(w.Data, keep)
-			require.NoError(t, err, w.Name)
+			_, err := p.Walk(w.data, keep)
+			require.NoError(t, err, w.name)
 
-			stats := p.TokenStats()
+			stats := p.tapeStats()
 
-			if anchored[w.Name] {
+			if anchored[w.name] {
 				// Saved is zero by now: the document ended and what its anchors
 				// saved went back with it. SavedHigh is what they held while it
 				// ran.
 				require.Positive(t, stats.SavedHigh,
-					"%s holds anchors and the walk saved no chunk for them", w.Name)
+					"%s holds anchors and the walk saved no chunk for them", w.name)
 				require.Zero(t, stats.Saved,
-					"%s: the document ended and its saves did not go back", w.Name)
+					"%s: the document ended and its saves did not go back", w.name)
 
 				// What Save promises. It holds trivially while nothing refills
 				// the free list, and becomes a real check the moment tokens
 				// arrive during a walk.
 				require.NotNil(t, keep.anchor)
 				require.Equal(t, keep.anchorName, keep.anchor.GetToken().Value,
-					"%s: the anchor's token was filled again under it", w.Name)
+					"%s: the anchor's token was filled again under it", w.name)
 			}
 
 			require.False(t, stats.Frozen, "the walk kept its pin")
 			require.Equal(t, stats.Allocated, stats.Live+stats.Free+stats.Saved,
-				"%s: chunks went missing", w.Name)
+				"%s: chunks went missing", w.name)
 
 			require.LessOrEqual(t, stats.Live, 3,
 				"%s: a walk left %d chunks live, so something is holding what it was handed",
-				w.Name, stats.Live)
+				w.name, stats.Live)
 
 			// held is the memory the arena has taken and not given back --
 			// every chunk it allocated, free list included. working set is
@@ -119,7 +115,7 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 			hit := 100 * float64(stats.Recycled) / float64(max(stats.Recycled+stats.Allocated, 1))
 
 			t.Logf("%-19s %8d %10d %9d %5.0f%% %9d %8d %7d %9dK",
-				w.Name, stats.Tokens, stats.Allocated, stats.Recycled, hit,
+				w.name, stats.Tokens, stats.Allocated, stats.Recycled, hit,
 				stats.FreeHigh, stats.Live, stats.SavedHigh,
 				(stats.Live+stats.SavedHigh)*stats.ChunkSize*56/1024)
 		}

@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package analysis
+package parser
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
-	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestTokenArenaOnTheCorpus reports what the tape would hold on each document.
@@ -24,15 +25,12 @@ import (
 // allocates one block per 512 tokens and holds every one of them; this holds
 // what the lag needs and fills the rest again. Run with -v for the table.
 func TestTokenArenaOnTheCorpus(t *testing.T) {
-	ordinary, err := workloads.All()
-	require.NoError(t, err)
-
-	stress, err := workloads.Stress()
-	require.NoError(t, err)
+	ordinary := readCorpus(t, corpusDir)
+	stress := readCorpus(t, filepath.Join(corpusDir, "stress"))
 
 	for _, group := range []struct {
 		name string
-		set  []workloads.Workload
+		set  []corpusDoc
 	}{
 		{"corpus", ordinary},
 		{"stress", stress},
@@ -42,20 +40,20 @@ func TestTokenArenaOnTheCorpus(t *testing.T) {
 			"document", "tokens", "chunk", "lag", "allocated", "recycled", "live high", "held")
 
 		for _, w := range group.set {
-			tokens := tokenize(t, string(w.Data))
-			size := tokenarena.SizeFor(len(w.Data))
+			tokens := tokenize(t, string(w.data))
+			size := tokenarena.SizeFor(len(w.data))
 
 			for _, lag := range []int{64, 1024, 16384} {
-				arena := tokenarena.New[parser.Token](size)
+				arena := tokenarena.New[tapeToken](size)
 				for i, tk := range tokens {
-					held, _ := arena.Add(parser.Token{})
+					held, _ := arena.Add(tapeToken{})
 					held.Raw(*tk, i)
 					arena.SetTail(max(0, i-lag))
 				}
 
 				stats := arena.Stats()
 				t.Logf("%-19s %8d %6d %8d %10d %10d %9d %7dK",
-					w.Name, stats.Tokens, stats.ChunkSize, lag,
+					w.name, stats.Tokens, stats.ChunkSize, lag,
 					stats.Allocated, stats.Recycled, stats.LiveHigh, stats.Bytes/1024)
 			}
 		}
@@ -65,17 +63,16 @@ func TestTokenArenaOnTheCorpus(t *testing.T) {
 // TestTokenArenaHoldsTheLagAndNoMore checks the tape's working set follows the
 // lag rather than the document, which is the whole claim.
 func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
-	w, err := workloads.ByName("golang_source")
-	require.NoError(t, err)
+	w := corpusByName(t, "golang_source")
 
-	tokens := tokenize(t, string(w.Data))
+	tokens := tokenize(t, string(w.data))
 	require.Greater(t, len(tokens), 250_000)
 
 	const lag, size = 1024, 128
 
-	arena := tokenarena.New[parser.Token](size)
+	arena := tokenarena.New[tapeToken](size)
 	for i, tk := range tokens {
-		held, _ := arena.Add(parser.Token{})
+		held, _ := arena.Add(tapeToken{})
 		held.Raw(*tk, i)
 		arena.SetTail(max(0, i-lag))
 	}
@@ -105,18 +102,17 @@ func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 // a slice of everything -- and what TestLabParserMatchesProduction then proves
 // over 18,589 documents.
 func TestAFullScanRecyclesNothing(t *testing.T) {
-	all, err := workloads.All()
-	require.NoError(t, err)
+	all := readCorpus(t, corpusDir)
 
 	t.Logf("%-19s %8s %6s %8s %9s %8s %8s", "workload", "tokens", "chunk", "chunks", "recycled", "live", "held")
 
 	for _, w := range all {
-		p := parser.New(parser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
+		p := New(ChunkSize(tokenarena.SizeFor(len(w.data))))
 
-		_, err := p.Parse(w.Data)
+		_, err := p.Parse(w.data)
 		require.NoError(t, err)
 
-		stats := p.TokenStats()
+		stats := p.tapeStats()
 
 		require.True(t, stats.Frozen, "the full scan let its pin go")
 		require.Zero(t, stats.Recycled, "a pinned arena recycled a chunk")
@@ -124,7 +120,40 @@ func TestAFullScanRecyclesNothing(t *testing.T) {
 		require.Zero(t, stats.Free)
 
 		t.Logf("%-19s %8d %6d %8d %9d %8d %7dK",
-			w.Name, stats.Tokens, stats.ChunkSize, stats.Allocated,
+			w.name, stats.Tokens, stats.ChunkSize, stats.Allocated,
 			stats.Recycled, stats.Live, stats.Bytes/1024)
 	}
+}
+
+// tokenize is the scan alone, for the measurements above that fill a tape by
+// hand rather than through a parse.
+func tokenize(tb testing.TB, src string) token.Tokens {
+	tb.Helper()
+
+	var s scanner.Scanner
+	s.Init(src)
+
+	var tokens token.Tokens
+	for tk := range s.All() {
+		tokens = append(tokens, tk)
+	}
+	if err := s.Err(); err != nil {
+		tb.Fatalf("scanning %q: %v", src, err)
+	}
+
+	return tokens
+}
+
+// corpusByName returns one document of the corpus.
+func corpusByName(t *testing.T, name string) corpusDoc {
+	t.Helper()
+
+	for _, w := range readCorpus(t, corpusDir) {
+		if w.name == name {
+			return w
+		}
+	}
+	t.Skipf("%s is not in the corpus", name)
+
+	return corpusDoc{}
 }

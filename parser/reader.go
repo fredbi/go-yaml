@@ -5,8 +5,8 @@ package parser
 
 import (
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -24,13 +24,13 @@ import (
 // says the document has run out, then [reader.closeDocument].
 type reader struct {
 	scan  *scanner.Scanner
-	arena *tokenarena.TokenArena[Token]
+	arena *tokenarena.TokenArena[tapeToken]
 	g     grouper
 
 	// run holds the tokens read and not yet grouped, at most batch of them.
 	// out holds what the grouping made of the last run, from at onward.
-	run   []*Token
-	out   []*Token
+	run   []*tapeToken
+	out   []*tapeToken
 	at    int
 	batch int
 
@@ -44,7 +44,7 @@ type reader struct {
 
 	// afterHeader and afterEnd hold the marker just read, so the token after it
 	// can be held against the line the marker stands on.
-	afterHeader, afterEnd *Token
+	afterHeader, afterEnd *tapeToken
 	// taken says a token was read at all, since an empty stream is one empty
 	// document and a "..." closing nothing is none. ended says the document
 	// being read has run out. tail says the empty document at the end of a
@@ -60,12 +60,12 @@ type reader struct {
 //
 // estimate is how many tokens the document is guessed to hold; it sizes buffers
 // and nothing else.
-func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[Token], batch, estimate int, keepComments bool) *reader {
+func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[tapeToken], batch, estimate int, keepComments bool) *reader {
 	r := &reader{
 		scan:         scan,
 		arena:        arena,
 		g:            newGrouper(estimate),
-		run:          make([]*Token, 0, batch),
+		run:          make([]*tapeToken, 0, batch),
 		batch:        batch,
 		keepComments: keepComments,
 	}
@@ -73,7 +73,7 @@ func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[Token], batch
 		// Taken here rather than where the first comment arrives, so that the
 		// parser may hold the same map from the start. A parse dropping
 		// comments takes none.
-		r.g.lineComments = make(map[*Token]*token.Token)
+		r.g.lineComments = make(map[*tapeToken]*token.Token)
 	}
 
 	return r
@@ -81,7 +81,7 @@ func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[Token], batch
 
 // peek returns the next grouped token without taking it, grouping another run
 // where it has none in hand.
-func (r *reader) peek() (*Token, error) {
+func (r *reader) peek() (*tapeToken, error) {
 	for r.at >= len(r.out) {
 		if r.drained {
 			return nil, nil
@@ -95,7 +95,7 @@ func (r *reader) peek() (*Token, error) {
 }
 
 // take returns the next grouped token and steps past it.
-func (r *reader) take() (*Token, error) {
+func (r *reader) take() (*tapeToken, error) {
 	tk, err := r.peek()
 	if err != nil || tk == nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (r *reader) openDocument() (*token.Token, bool, error) {
 //
 // It is what the descent's run pulls from, so it answers with a token or
 // nothing and keeps a refusal in err for the parse to find.
-func (r *reader) bodyToken() (*Token, bool) {
+func (r *reader) bodyToken() (*tapeToken, bool) {
 	if r.ended || r.err != nil {
 		return nil, false
 	}
@@ -260,7 +260,7 @@ func (r *reader) fill() error {
 			continue
 		}
 
-		held, _ := r.arena.Add(Token{})
+		held, _ := r.arena.Add(tapeToken{})
 		held.Raw(tk, r.seq)
 		r.seq++
 
@@ -301,7 +301,7 @@ func (r *reader) fill() error {
 
 	// out comes from a buffer the next run writes over, so what is left of the
 	// one before is kept and this run put after it.
-	kept := append([]*Token(nil), r.out[r.at:]...)
+	kept := append([]*tapeToken(nil), r.out[r.at:]...)
 	r.out = append(append(r.out[:0], kept...), out...)
 	r.at = 0
 	r.run = r.run[:0]

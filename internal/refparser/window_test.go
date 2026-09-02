@@ -13,7 +13,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/go-openapi/go-yaml/parser/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 

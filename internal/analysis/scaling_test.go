@@ -10,7 +10,7 @@ import (
 	v3 "go.yaml.in/yaml/v3"
 
 	"github.com/go-openapi/go-yaml/internal/refparser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 )
 
 // TestFlatMapScaling is the headline measurement: how parse time grows with the number of

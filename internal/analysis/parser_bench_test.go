@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/go-yaml/internal/refparser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 )
 
 // The stages the parser goes through, so the numbers subtract.

@@ -12,7 +12,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/refparser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 )
 
 // A caller that reads numbers as text -- validating them rather than converting

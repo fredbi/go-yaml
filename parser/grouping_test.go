@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package analysis
+package parser
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
-	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestGroupingHolds reports how far ahead of the descent the grouping keeps the
@@ -26,25 +25,22 @@ import (
 //
 // Run with -v for the table.
 func TestGroupingHolds(t *testing.T) {
-	ordinary, err := workloads.All()
-	require.NoError(t, err)
-
-	stress, err := workloads.Stress()
-	require.NoError(t, err)
+	ordinary := readCorpus(t, corpusDir)
+	stress := readCorpus(t, filepath.Join(corpusDir, "stress"))
 
 	t.Logf("%-19s %8s %7s %10s %12s", "document", "tokens", "chunk", "held", "chunks held")
 
-	for _, set := range [][]workloads.Workload{ordinary, stress} {
+	for _, set := range [][]corpusDoc{ordinary, stress} {
 		for _, w := range set {
-			chunk := tokenarena.SizeFor(len(w.Data))
+			chunk := tokenarena.SizeFor(len(w.data))
 
-			p := parser.New(parser.ChunkSize(chunk))
-			_, err := p.Parse(w.Data)
-			require.NoError(t, err, w.Name)
+			p := New(ChunkSize(chunk))
+			_, err := p.Parse(w.data)
+			require.NoError(t, err, w.name)
 
-			held := p.GroupingHeld()
+			held := p.groupingHeld()
 			t.Logf("%-19s %8d %7d %10d %12d",
-				w.Name, p.TokenStats().Tokens, chunk, held, held/chunk+1)
+				w.name, p.tapeStats().Tokens, chunk, held, held/chunk+1)
 		}
 	}
 }
@@ -56,25 +52,22 @@ func TestGroupingHolds(t *testing.T) {
 // keys, leaves the grouping holding a handful of tokens. Width costs nothing:
 // the pass settles each key as its ':' arrives and hands the rest on.
 func TestGroupingHoldsLittleInBlockStyle(t *testing.T) {
-	all, err := workloads.All()
-	require.NoError(t, err)
+	all := readCorpus(t, corpusDir)
+	wide := readCorpus(t, filepath.Join(corpusDir, "stress"))
 
-	wide, err := workloads.Stress()
-	require.NoError(t, err)
-
-	for _, set := range [][]workloads.Workload{all, wide} {
+	for _, set := range [][]corpusDoc{all, wide} {
 		for _, w := range set {
-			if w.Name == "flow_wide" || w.Name == "flow_long_scalars" || w.Name == "flow_nested" {
+			if w.name == "flow_wide" || w.name == "flow_long_scalars" || w.name == "flow_nested" {
 				continue
 			}
 
-			p := parser.New()
-			_, err := p.Parse(w.Data)
-			require.NoError(t, err, w.Name)
+			p := New()
+			_, err := p.Parse(w.data)
+			require.NoError(t, err, w.name)
 
-			require.LessOrEqual(t, p.GroupingHeld(), 16,
+			require.LessOrEqual(t, p.groupingHeld(), 16,
 				"%s: the grouping held %d tokens, so a flow collection is open somewhere it was not before",
-				w.Name, p.GroupingHeld())
+				w.name, p.groupingHeld())
 		}
 	}
 }
@@ -89,21 +82,18 @@ func TestGroupingHoldsLittleInBlockStyle(t *testing.T) {
 // be a key, and a window that knew as much could hand its tokens on. Nothing
 // reads that yet.
 func TestAFlowCollectionHoldsToItsClose(t *testing.T) {
-	all, err := workloads.Stress()
-	require.NoError(t, err)
-
-	for _, w := range all {
-		if w.Name != "flow_wide" {
+	for _, w := range readCorpus(t, filepath.Join(corpusDir, "stress")) {
+		if w.name != "flow_wide" {
 			continue
 		}
 
-		p := parser.New()
-		_, err := p.Parse(w.Data)
+		p := New()
+		_, err := p.Parse(w.data)
 		require.NoError(t, err)
 
-		require.Greater(t, p.GroupingHeld(), 50_000,
+		require.Greater(t, p.groupingHeld(), 50_000,
 			"the window released inside a flow collection, which would be new")
 		t.Logf("flow_wide: %d tokens, the grouping holds %d of them at once",
-			p.TokenStats().Tokens, p.GroupingHeld())
+			p.tapeStats().Tokens, p.groupingHeld())
 	}
 }

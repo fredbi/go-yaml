@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/refparser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 )
 
 // TestArenaStats reports what the tree of each workload cost, exactly.

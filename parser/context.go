@@ -34,7 +34,7 @@ type context struct {
 	// lineComments holds the comment closing a token's line, against that
 	// token. It is nil where the mode did not ask for comments, and reading a
 	// nil map costs nothing.
-	lineComments map[*Token]*token.Token
+	lineComments map[*tapeToken]*token.Token
 	// keyBase is where the keys of the mapping being parsed start in the
 	// parser's key stack. parseMap and parseFlowMap set it; every entry of
 	// that mapping is parsed under it, and a nested mapping raises it.
@@ -48,10 +48,10 @@ type context struct {
 // ever reads forward from idx, one token ahead at the most, so the tokens
 // before it are never asked for again.
 type tokenRef struct {
-	tokens []*Token
+	tokens []*tapeToken
 	// pair is where a group's two members are copied to, so that reading a
 	// group needs no slice of its own. tokens points into it.
-	pair [2]*Token
+	pair [2]*tapeToken
 	// idx is where the parser stands, counted from the start of the run. base
 	// is where tokens[0] stands, so tokens holds [base, base+len) and idx is
 	// never below base.
@@ -59,13 +59,13 @@ type tokenRef struct {
 	base int
 	// pull draws the next token of a stream, where the run is one. It is nil
 	// for a run already in hand, and drained once the stream has ended.
-	pull    func() (*Token, bool)
+	pull    func() (*tapeToken, bool)
 	drained bool
 }
 
 // at returns the i'th token of the run, drawing from the stream where it has to
 // and where there is one. It returns nil past the end of the run.
-func (r *tokenRef) at(i int) *Token {
+func (r *tokenRef) at(i int) *tapeToken {
 	for r.pull != nil && !r.drained && i >= r.base+len(r.tokens) {
 		tk, ok := r.pull()
 		if !ok {
@@ -121,7 +121,7 @@ func (r *tokenRef) end() int {
 	return r.base + len(r.tokens)
 }
 
-func (c context) currentToken() *Token {
+func (c context) currentToken() *tapeToken {
 	return c.tokenRef.at(c.tokenRef.idx)
 }
 
@@ -129,11 +129,11 @@ func (c context) isComment() bool {
 	return c.currentToken().Type() == token.CommentType
 }
 
-func (c context) nextToken() *Token {
+func (c context) nextToken() *tapeToken {
 	return c.tokenRef.at(c.tokenRef.idx + 1)
 }
 
-func (c context) nextNotCommentToken() *Token {
+func (c context) nextNotCommentToken() *tapeToken {
 	for i := c.tokenRef.idx + 1; ; i++ {
 		tk := c.tokenRef.at(i)
 		if tk == nil {
@@ -151,7 +151,7 @@ func (c context) isTokenNotFound() bool {
 	return c.currentToken() == nil
 }
 
-func (c context) withGroup(p *Parser, g *TokenGroup) context {
+func (c context) withGroup(p *Parser, g *tokenGroup) context {
 	c.depth++
 	c.tokenRef = p.tokenRefAt(c.depth, g)
 
@@ -160,7 +160,7 @@ func (c context) withGroup(p *Parser, g *TokenGroup) context {
 
 // withPull returns a context reading a run drawn one token at a time, rather
 // than one already in hand.
-func (c context) withPull(p *Parser, pull func() (*Token, bool)) context {
+func (c context) withPull(p *Parser, pull func() (*tapeToken, bool)) context {
 	c.depth++
 	c.tokenRef = p.tokenRefFrom(c.depth, pull)
 	p.body = c.tokenRef
@@ -241,7 +241,7 @@ func (p *Parser) newContext() context {
 
 // lineComment returns the comment closing the line tk stands on, or nil where
 // there is none. A stream read without [Comments] has none at all.
-func (c context) lineComment(tk *Token) *token.Token {
+func (c context) lineComment(tk *tapeToken) *token.Token {
 	return c.lineComments[tk]
 }
 
@@ -252,7 +252,7 @@ func (c context) lineComment(tk *Token) *token.Token {
 // reaches that node. Dropping it there releases the token it points at: left in
 // place, every commented token of the document stays reachable until the parse
 // ends, which on an annotated specification is one token in every fifty.
-func (c context) takeLineComment(tk *Token) *token.Token {
+func (c context) takeLineComment(tk *tapeToken) *token.Token {
 	if tk == nil {
 		return nil
 	}
@@ -285,11 +285,11 @@ func (c context) next() bool {
 // The token is not put into the run. The descent reads forward from where it
 // stands and never asks for a token again, so the only reader of this one is
 // the node built from it, which holds it directly.
-func (c context) insertNullToken(tk *Token) *Token {
+func (c context) insertNullToken(tk *tapeToken) *tapeToken {
 	return c.createImplicitNullToken(tk)
 }
 
-func (c context) addNullValueToken(tk *Token) *Token {
+func (c context) addNullValueToken(tk *tapeToken) *tapeToken {
 	nullToken := c.createImplicitNullToken(tk)
 	rawTk := nullToken.RawToken()
 
@@ -302,7 +302,7 @@ func (c context) addNullValueToken(tk *Token) *Token {
 	return nullToken
 }
 
-func (c context) createImplicitNullToken(base *Token) *Token {
+func (c context) createImplicitNullToken(base *tapeToken) *tapeToken {
 	pos := base.RawToken().Position
 	pos.Column++
 	tk := token.New("null", " null", pos)
@@ -310,7 +310,7 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 	return newSynthetic(tk)
 }
 
-func (c context) addToken(tk *Token) {
+func (c context) addToken(tk *tapeToken) {
 	ref := c.tokenRef
 	ref.end() // the token goes after everything the run holds
 	ref.tokens = append(ref.tokens, tk)

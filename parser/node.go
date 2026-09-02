@@ -14,7 +14,7 @@ func newMappingNode(ctx context, tk *token.Token, isFlow bool, values []*ast.Map
 	return node, nil
 }
 
-func newMappingValueNode(ctx context, colonTk, entryTk *Token, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
+func newMappingValueNode(ctx context, colonTk, entryTk *tapeToken, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
 	node := ctx.arena.MappingValue(colonTk.RawToken(), key, value)
 	node.SetPathNode(ctx.path)
 	node.CollectEntry = entryTk.RawToken()
@@ -41,7 +41,7 @@ func newMappingValueNode(ctx context, colonTk, entryTk *Token, key ast.MapKeyNod
 	return node, nil
 }
 
-func newMappingKeyNode(ctx context, tk *Token) (*ast.MappingKeyNode, error) {
+func newMappingKeyNode(ctx context, tk *tapeToken) (*ast.MappingKeyNode, error) {
 	node := ast.MappingKey(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -50,7 +50,7 @@ func newMappingKeyNode(ctx context, tk *Token) (*ast.MappingKeyNode, error) {
 	return node, nil
 }
 
-func newAnchorNode(ctx context, tk *Token) (*ast.AnchorNode, error) {
+func newAnchorNode(ctx context, tk *tapeToken) (*ast.AnchorNode, error) {
 	node := ast.Anchor(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -59,7 +59,7 @@ func newAnchorNode(ctx context, tk *Token) (*ast.AnchorNode, error) {
 	return node, nil
 }
 
-func newAliasNode(ctx context, tk *Token) (*ast.AliasNode, error) {
+func newAliasNode(ctx context, tk *tapeToken) (*ast.AliasNode, error) {
 	node := ast.Alias(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -68,7 +68,7 @@ func newAliasNode(ctx context, tk *Token) (*ast.AliasNode, error) {
 	return node, nil
 }
 
-func newDirectiveNode(ctx context, tk *Token) (*ast.DirectiveNode, error) {
+func newDirectiveNode(ctx context, tk *tapeToken) (*ast.DirectiveNode, error) {
 	node := ast.Directive(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -77,7 +77,7 @@ func newDirectiveNode(ctx context, tk *Token) (*ast.DirectiveNode, error) {
 	return node, nil
 }
 
-func newMergeKeyNode(ctx context, tk *Token) (*ast.MergeKeyNode, error) {
+func newMergeKeyNode(ctx context, tk *tapeToken) (*ast.MergeKeyNode, error) {
 	node := ast.MergeKey(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -86,7 +86,7 @@ func newMergeKeyNode(ctx context, tk *Token) (*ast.MergeKeyNode, error) {
 	return node, nil
 }
 
-func newNullNode(ctx context, tk *Token) (*ast.NullNode, error) {
+func newNullNode(ctx context, tk *tapeToken) (*ast.NullNode, error) {
 	node := ctx.arena.Null(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -95,7 +95,7 @@ func newNullNode(ctx context, tk *Token) (*ast.NullNode, error) {
 	return node, nil
 }
 
-func newBoolNode(ctx context, tk *Token) (*ast.BoolNode, error) {
+func newBoolNode(ctx context, tk *tapeToken) (*ast.BoolNode, error) {
 	node := ctx.arena.Bool(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -104,7 +104,7 @@ func newBoolNode(ctx context, tk *Token) (*ast.BoolNode, error) {
 	return node, nil
 }
 
-func newIntegerNode(ctx context, tk *Token) (*ast.IntegerNode, error) {
+func newIntegerNode(ctx context, tk *tapeToken) (*ast.IntegerNode, error) {
 	node := ctx.arena.Integer(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -113,7 +113,7 @@ func newIntegerNode(ctx context, tk *Token) (*ast.IntegerNode, error) {
 	return node, nil
 }
 
-func newFloatNode(ctx context, tk *Token) (*ast.FloatNode, error) {
+func newFloatNode(ctx context, tk *tapeToken) (*ast.FloatNode, error) {
 	node := ctx.arena.Float(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -122,7 +122,7 @@ func newFloatNode(ctx context, tk *Token) (*ast.FloatNode, error) {
 	return node, nil
 }
 
-func newInfinityNode(ctx context, tk *Token) (*ast.InfinityNode, error) {
+func newInfinityNode(ctx context, tk *tapeToken) (*ast.InfinityNode, error) {
 	node := ast.Infinity(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -131,7 +131,7 @@ func newInfinityNode(ctx context, tk *Token) (*ast.InfinityNode, error) {
 	return node, nil
 }
 
-func newNanNode(ctx context, tk *Token) (*ast.NanNode, error) {
+func newNanNode(ctx context, tk *tapeToken) (*ast.NanNode, error) {
 	node := ast.Nan(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -140,7 +140,7 @@ func newNanNode(ctx context, tk *Token) (*ast.NanNode, error) {
 	return node, nil
 }
 
-func newStringNode(ctx context, tk *Token) (*ast.StringNode, error) {
+func newStringNode(ctx context, tk *tapeToken) (*ast.StringNode, error) {
 	node := ctx.arena.String(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -149,7 +149,7 @@ func newStringNode(ctx context, tk *Token) (*ast.StringNode, error) {
 	return node, nil
 }
 
-func newLiteralNode(ctx context, tk *Token) (*ast.LiteralNode, error) {
+func newLiteralNode(ctx context, tk *tapeToken) (*ast.LiteralNode, error) {
 	node := ast.Literal(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -158,7 +158,7 @@ func newLiteralNode(ctx context, tk *Token) (*ast.LiteralNode, error) {
 	return node, nil
 }
 
-func newTagNode(ctx context, tk *Token) (*ast.TagNode, error) {
+func newTagNode(ctx context, tk *tapeToken) (*ast.TagNode, error) {
 	node := ast.Tag(tk.RawToken())
 	node.SetPathNode(ctx.path)
 	if err := setLineComment(ctx, node, tk); err != nil {
@@ -167,7 +167,7 @@ func newTagNode(ctx context, tk *Token) (*ast.TagNode, error) {
 	return node, nil
 }
 
-func newSequenceNode(ctx context, tk *Token, isFlow bool) (*ast.SequenceNode, error) {
+func newSequenceNode(ctx context, tk *tapeToken, isFlow bool) (*ast.SequenceNode, error) {
 	node := ctx.arena.Sequence(tk.RawToken(), isFlow)
 	node.SetPathNode(ctx.path)
 	if isFlow {
@@ -189,7 +189,7 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	pos.Column++
 
 	var (
-		tk   *Token
+		tk   *tapeToken
 		node ast.ScalarNode
 	)
 	switch token.ReservedTagKeyword(tag.Value) {
@@ -241,7 +241,7 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 	return node, nil
 }
 
-func setLineComment(ctx context, node ast.Node, tk *Token) error {
+func setLineComment(ctx context, node ast.Node, tk *tapeToken) error {
 	lineComment := ctx.takeLineComment(tk)
 	if lineComment == nil {
 		return nil

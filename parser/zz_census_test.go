@@ -8,8 +8,8 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
 // TestGroupCensus counts what the grouper builds, by kind.
@@ -30,12 +30,12 @@ func TestGroupCensus(t *testing.T) {
 	var s scanner.Scanner
 	s.Init(string(src))
 
-	raw := tokenarena.New[Token](tokenarena.SizeFor(len(src)))
+	raw := tokenarena.New[tapeToken](tokenarena.SizeFor(len(src)))
 	raw.Pin()
 
 	r := newReader(&s, raw, tokenarena.MaxChunk, len(src)/8, false)
 
-	var tks []*Token
+	var tks []*tapeToken
 	for {
 		if _, ok, err := r.openDocument(); err != nil {
 			t.Fatal(err)
@@ -54,13 +54,13 @@ func TestGroupCensus(t *testing.T) {
 		}
 	}
 
-	byType := map[TokenGroupType]int{}
-	members := map[TokenGroupType]int{}
+	byType := map[tokenGroupType]int{}
+	members := map[tokenGroupType]int{}
 	var groups, wrappers int
 
-	var walk func(tk *Token)
-	seen := map[*TokenGroup]bool{}
-	walk = func(tk *Token) {
+	var walk func(tk *tapeToken)
+	seen := map[*tokenGroup]bool{}
+	walk = func(tk *tapeToken) {
 		if tk == nil {
 			return
 		}
@@ -73,7 +73,7 @@ func TestGroupCensus(t *testing.T) {
 		groups++
 		byType[g.Type]++
 
-		var pair [2]*Token
+		var pair [2]*tapeToken
 		ms := g.Members(&pair)
 		members[g.Type] += len(ms)
 		for _, m := range ms {
@@ -84,7 +84,7 @@ func TestGroupCensus(t *testing.T) {
 		walk(tk)
 	}
 
-	kinds := make([]TokenGroupType, 0, len(byType))
+	kinds := make([]tokenGroupType, 0, len(byType))
 	for k := range byType {
 		kinds = append(kinds, k)
 	}

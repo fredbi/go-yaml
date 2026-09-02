@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
+	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/parser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
