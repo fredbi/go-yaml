@@ -286,7 +286,7 @@ func (p *Printer) setupErrorTokenFormat(annotateLine int, isColored bool) {
 func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, isColored bool) string {
 	const context = 3
 
-	lines := strings.Split(src, "\n")
+	lines := splitLines(src)
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		// A document ending in a line break has no line after it.
 		lines = lines[:n-1]
@@ -304,8 +304,9 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 		return ""
 	}
 	// A window opening on blank lines shows nothing of the document. Start it
-	// where the text does.
-	for from < errLine && strings.TrimSpace(lines[from-firstLine]) == "" {
+	// where the text does. The index is checked as well as errLine: a token
+	// carrying a line past the end of the text would otherwise walk off it.
+	for from < errLine && from-firstLine < len(lines) && strings.TrimSpace(lines[from-firstLine]) == "" {
 		from++
 	}
 	p.setupErrorTokenFormat(errLine, isColored)
@@ -313,7 +314,7 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 	var out strings.Builder
 	prefixLen := len(fmt.Sprintf("  %2d | ", errLine))
 	for num := from; num <= to; num++ {
-		line := strings.TrimSuffix(lines[num-firstLine], "\r")
+		line := lines[num-firstLine]
 		if num == to {
 			// Trailing space on the last line of the window draws nothing and
 			// leaves the caret hanging past the text.
@@ -338,4 +339,32 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 	}
 
 	return strings.TrimSuffix(out.String(), "\n")
+}
+
+// splitLines cuts src where the scanner counts a line break: "\r\n", "\r" or
+// "\n".
+//
+// Splitting on "\n" alone gives fewer lines than the scanner counted, so a
+// token's Position.Line points past the end of the result and the window drawn
+// around it reads a line that is not there. "\r\r\r\r0\n " is five lines to the
+// scanner and two to strings.Split.
+func splitLines(src string) []string {
+	lines := make([]string, 0, strings.Count(src, "\n")+strings.Count(src, "\r")+1)
+
+	var start int
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '\n':
+			lines = append(lines, src[start:i])
+			start = i + 1
+		case '\r':
+			lines = append(lines, src[start:i])
+			if i+1 < len(src) && src[i+1] == '\n' {
+				i++
+			}
+			start = i + 1
+		}
+	}
+
+	return append(lines, src[start:])
 }
