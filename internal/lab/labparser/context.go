@@ -208,6 +208,26 @@ func (c context) lineComment(tk *Token) *token.Token {
 	return c.lineComments[tk]
 }
 
+// takeLineComment returns the comment closing the line tk stands on and drops
+// it from the index.
+//
+// A comment goes to one node, so the index needs it only until the parse
+// reaches that node. Dropping it there releases the token it points at: left in
+// place, every commented token of the document stays reachable until the parse
+// ends, which on an annotated specification is one token in every fifty.
+func (c context) takeLineComment(tk *Token) *token.Token {
+	if tk == nil {
+		return nil
+	}
+
+	comment := c.lineComments[tk]
+	if comment != nil {
+		delete(c.lineComments, tk)
+	}
+
+	return comment
+}
+
 func (c context) goNext() {
 	ref := c.tokenRef
 	if ref.at(ref.idx+1) == nil {
@@ -221,12 +241,14 @@ func (c context) next() bool {
 	return c.tokenRef.at(c.tokenRef.idx) != nil
 }
 
+// insertNullToken returns the implicit null a mapping or sequence entry written
+// without a value stands for.
+//
+// The token is not put into the run. The descent reads forward from where it
+// stands and never asks for a token again, so the only reader of this one is
+// the node built from it, which holds it directly.
 func (c context) insertNullToken(tk *Token) *Token {
-	nullToken := c.createImplicitNullToken(tk)
-	c.insertToken(nullToken)
-	c.goNext()
-
-	return nullToken
+	return c.createImplicitNullToken(tk)
 }
 
 func (c context) addNullValueToken(tk *Token) *Token {
@@ -248,23 +270,6 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 	tk := token.New("null", " null", pos)
 	tk.Type = token.ImplicitNullType
 	return &Token{Token: tk}
-}
-
-func (c context) insertToken(tk *Token) {
-	ref := c.tokenRef
-	ref.at(ref.idx) // draw enough of a stream to know where idx stands
-	idx := ref.idx
-	if len(ref.tokens) < idx {
-		return
-	}
-	if len(ref.tokens) == idx {
-		ref.tokens = append(ref.tokens, tk)
-
-		return
-	}
-
-	ref.tokens = append(ref.tokens[:idx+1], ref.tokens[idx:]...)
-	ref.tokens[idx] = tk
 }
 
 func (c context) addToken(tk *Token) {

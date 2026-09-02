@@ -114,7 +114,13 @@ type Parser struct {
 	// them on the way out, so the two grow once to the deepest, widest point
 	// of the document and allocate nothing after that.
 	keyStack []mapKeyRef
-	keyIndex map[mapKeyRef]ast.MapKeyNode
+	// keyIndex records where each of those keys was first written. It keeps the
+	// position and not the node it came from: a node holds the token it was
+	// built from, and a token kept here outlives the entry that carried it, so
+	// every key of every open mapping would stay reachable until that mapping
+	// closed. A mapping of 5,000 keys held 5,000 tokens spread over the whole
+	// document; it now holds 5,000 positions of 16 bytes and no token at all.
+	keyIndex map[mapKeyRef]token.Position
 
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
@@ -169,18 +175,20 @@ type mapKeyRef struct {
 	text string
 }
 
-// recordMapKey records key under text among the keys of the mapping that
-// starts at base, and returns the key already recorded there, or nil when the
-// mapping has not used text yet.
-func (p *Parser) recordMapKey(base int, text string, key ast.MapKeyNode) ast.MapKeyNode {
+// recordMapKey records that the mapping starting at base uses text as a key,
+// written at pos.
+//
+// It returns where text was first written, and whether the mapping had already
+// used it.
+func (p *Parser) recordMapKey(base int, text string, pos token.Position) (token.Position, bool) {
 	ref := mapKeyRef{base: base, text: text}
-	if prev, exists := p.keyIndex[ref]; exists {
-		return prev
+	if prev, defined := p.keyIndex[ref]; defined {
+		return prev, true
 	}
-	p.keyIndex[ref] = key
+	p.keyIndex[ref] = pos
 	p.keyStack = append(p.keyStack, ref)
 
-	return nil
+	return token.Position{}, false
 }
 
 // closeMapping drops the keys of the mapping that started at base.
@@ -230,7 +238,7 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 		tokens:       tks,
 		raw:          raw,
 		lineComments: lineComments,
-		keyIndex:     make(map[mapKeyRef]ast.MapKeyNode),
+		keyIndex:     make(map[mapKeyRef]token.Position),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -240,6 +248,9 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 }
 
 // Parse reads the stream through and returns the file it describes.
+//
+// Call it once per parser. A comment is handed to the node that keeps it as the
+// tree is built, and a second call would find none left to hand over.
 func (p *Parser) Parse() (*ast.File, error) {
 	return p.parse(p.newContext())
 }
@@ -470,7 +481,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 // reached a sequence entry node that nothing renders, or -- in a mapping -- the
 // entry after the comma, one place further on than it was written.
 func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error {
-	if entryTk == nil || ctx.lineComment(entryTk) == nil || len(values) == 0 {
+	if entryTk == nil || len(values) == 0 || ctx.lineComment(entryTk) == nil {
 		return nil
 	}
 
@@ -482,7 +493,7 @@ func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error
 	if target.GetComment() != nil {
 		return nil
 	}
-	comment := ast.CommentGroup([]*token.Token{ctx.lineComment(entryTk)})
+	comment := ast.CommentGroup([]*token.Token{ctx.takeLineComment(entryTk)})
 	comment.SetPathNode(ctx.path)
 
 	return target.SetComment(comment)
@@ -888,8 +899,7 @@ func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string, colonTk *Token) error {
 	tk := key.GetToken()
 	if !p.allowDuplicateMapKey {
-		if n := p.recordMapKey(ctx.keyBase, keyText, key); n != nil {
-			pos := n.GetToken().Position
+		if pos, defined := p.recordMapKey(ctx.keyBase, keyText, tk.Position); defined {
 			return yamlerrors.NewSyntax(
 				fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
 				tk,

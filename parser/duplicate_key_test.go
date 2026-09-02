@@ -111,6 +111,10 @@ func TestDuplicateMapKeyIsReportedPerMapping(t *testing.T) {
 // TestDuplicateMapKeyIsFoundPastTheScanLimit checks the index a large mapping
 // switches to. A mapping of a handful of keys compares them in a slice; the
 // repeated key here sits beyond that point, and beyond it in both directions.
+//
+// The position the error reports is checked with it. The index keeps where a
+// key was written rather than the node it was written on, so the line and
+// column are the only thing left to get wrong.
 func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 	const keys = 200
 
@@ -133,7 +137,8 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 		t.Run(fmt.Sprintf("repeats key%02d", repeat), func(t *testing.T) {
 			_, err := parser.ParseBytes([]byte(build(repeat)), 0)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), fmt.Sprintf("mapping key \"key%02d\" already defined", repeat))
+			assert.Contains(t, err.Error(),
+				fmt.Sprintf("mapping key %q already defined at [%d:1]", fmt.Sprintf("key%02d", repeat), repeat+1))
 		})
 	}
 }

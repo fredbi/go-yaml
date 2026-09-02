@@ -238,21 +238,18 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 		}
 		node = n
 	}
-	ctx.insertToken(tk)
-	ctx.goNext()
 	return node, nil
 }
 
 func setLineComment(ctx context, node ast.Node, tk *Token) error {
-	if tk == nil || ctx.lineComment(tk) == nil {
+	lineComment := ctx.takeLineComment(tk)
+	if lineComment == nil {
 		return nil
 	}
-	comment := ast.CommentGroup([]*token.Token{ctx.lineComment(tk)})
+	comment := ast.CommentGroup([]*token.Token{lineComment})
 	comment.SetPathNode(ctx.path)
-	if err := node.SetComment(comment); err != nil {
-		return err
-	}
-	return nil
+
+	return node.SetComment(comment)
 }
 
 func setHeadComment(cm *ast.CommentGroupNode, value ast.Node) error {
