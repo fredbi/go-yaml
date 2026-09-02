@@ -66,6 +66,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "gen: %s: %v\n", commentedName, err)
 		os.Exit(1)
 	}
+
+	if err := stress(filepath.Join(*outDir, "stress")); err != nil {
+		fmt.Fprintf(os.Stderr, "gen: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // rewrite reads one gzipped JSON document and writes the YAML beside it.

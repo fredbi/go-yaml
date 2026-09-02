@@ -24,6 +24,38 @@ import (
 // measures allocation rate rather than liveness. /gc/heap/live:bytes is the
 // live heap as of the last collection, and turning the collector up to run
 // almost continuously makes that a fair reading of the peak. Slow on purpose.
+// peakLiveMax is the largest peak seen over several runs of the same work.
+//
+// The largest and not the average, because peakLive can only miss the peak, not
+// invent one: /gc/heap/live:bytes moves when a cycle ends, so a run reports the
+// largest live figure a collection happened to catch. One run reports where the
+// collections fell. Taking the largest of several converges on where the peak
+// actually was.
+//
+// Read one run and it lies by tens of percent in either direction. A 24% saving
+// from sizing the node arena small was read off single runs and turned out,
+// once it was repeated, to be nothing at all.
+func peakLiveMax(runs int, work func()) uint64 {
+	var most uint64
+	for range runs {
+		most = max(most, peakLive(work))
+	}
+
+	return most
+}
+
+// peakLiveRuns is how many runs a reported peak is taken over. Five holds the
+// smaller workloads to a couple of percent between runs and keeps the tables
+// that use it inside half a minute; -short takes one and reports a figure worth
+// nothing, which is what -short is for.
+func peakLiveRuns() int {
+	if testing.Short() {
+		return 1
+	}
+
+	return 5
+}
+
 func peakLive(work func()) uint64 {
 	old := debug.SetGCPercent(1)
 	defer debug.SetGCPercent(old)

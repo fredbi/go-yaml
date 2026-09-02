@@ -124,6 +124,14 @@ type Parser struct {
 	// document; it now holds 5,000 positions of 16 bytes and no token at all.
 	keyIndex map[mapKeyRef]token.Position
 
+	// seqEntries holds the entries of every sequence open at this point in the
+	// descent, innermost last. A sequence fills its slices from its own run
+	// when it closes, each at the length it ends up with, rather than growing
+	// three of them an entry at a time. That growth was 96-99% of everything
+	// runtime.growslice copied during a parse -- 1,385K of 1,389K on
+	// canada_geometry, which is deep sequences and nothing else.
+	seqEntries []pendingEntry
+
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
 	pathSlab []ast.PathNode
@@ -1586,6 +1594,45 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	return node, nil
 }
 
+// pendingEntry is one entry of a sequence being parsed, held until the sequence
+// closes and its slices can be sized at once.
+type pendingEntry struct {
+	value       ast.Node
+	entry       *ast.SequenceEntryNode
+	headComment *ast.CommentGroupNode
+}
+
+// fillSequence gives node the entries it was built from, each slice allocated
+// once at the length it ends up with.
+//
+// ValueHeadComments is left empty where no entry carried a head comment, which
+// is every sequence of a document written without them. Readers already meet a
+// short one -- a flow sequence only ever grew it as far as its last commented
+// entry.
+func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
+	if len(entries) == 0 {
+		return
+	}
+
+	node.Values = make([]ast.Node, len(entries))
+	node.Entries = make([]*ast.SequenceEntryNode, len(entries))
+
+	var commented bool
+	for i, held := range entries {
+		node.Values[i] = held.value
+		node.Entries[i] = held.entry
+		commented = commented || held.headComment != nil
+	}
+	if !commented {
+		return
+	}
+
+	node.ValueHeadComments = make([]*ast.CommentGroupNode, len(entries))
+	for i, held := range entries {
+		node.ValueHeadComments[i] = held.headComment
+	}
+}
+
 func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	seqTk := ctx.currentToken()
 	seqNode, err := newSequenceNode(ctx, seqTk, false)
@@ -1593,13 +1640,19 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		return nil, err
 	}
 
+	// The entries are gathered on a stack the parser reuses for every sequence,
+	// so this one's slices are allocated at its own length rather than grown an
+	// entry at a time. base is where this sequence's run starts.
+	base := len(p.seqEntries)
+	defer func() { p.seqEntries = p.seqEntries[:base] }()
+
 	tk := seqTk
 	for tk.Type() == token.SequenceEntryType && tk.Column() == seqTk.Column() {
 		seqTk := tk
 		headComment := p.parseHeadComment(ctx)
 		ctx.goNext() // skip sequence entry token
 
-		ctx := ctx.withIndex(p, uint(len(seqNode.Values)))
+		ctx := ctx.withIndex(p, uint(len(p.seqEntries)-base))
 		value, err := p.parseSequenceValue(ctx, seqTk)
 		if err != nil {
 			return nil, err
@@ -1609,9 +1662,11 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			return nil, err
 		}
 		seqEntry.SetPathNode(ctx.path)
-		seqNode.ValueHeadComments = append(seqNode.ValueHeadComments, headComment)
-		seqNode.Values = append(seqNode.Values, value)
-		seqNode.Entries = append(seqNode.Entries, seqEntry)
+		p.seqEntries = append(p.seqEntries, pendingEntry{
+			value:       value,
+			entry:       seqEntry,
+			headComment: headComment,
+		})
 
 		if ctx.isComment() {
 			tk = ctx.nextNotCommentToken()
@@ -1619,6 +1674,8 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
+	fillSequence(seqNode, p.seqEntries[base:])
+
 	if ctx.isComment() {
 		if seqTk.Column() <= ctx.currentToken().Column() {
 			// If the comment is in the same or deeper column as the last element column in sequence value,

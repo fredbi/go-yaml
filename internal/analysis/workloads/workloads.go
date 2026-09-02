@@ -37,6 +37,14 @@ import (
 //go:embed testdata/*.yaml.gz
 var corpus embed.FS
 
+// stressCorpus holds the documents built to strain a parser rather than to
+// resemble one anybody wrote. They are kept out of [All] on purpose: a geomean
+// over the corpus is meant to say what an ordinary document costs, and a
+// fifty-thousand-key mapping in that average would stop it saying so.
+//
+//go:embed testdata/stress/*.yaml.gz
+var stressCorpus embed.FS
+
 // Workload is one document, named by the file it came from.
 type Workload struct {
 	Name string
@@ -45,7 +53,12 @@ type Workload struct {
 
 // All returns every workload, decompressed, ordered by name.
 func All() ([]Workload, error) {
-	entries, err := corpus.ReadDir("testdata")
+	return readDir(corpus, "testdata")
+}
+
+// readDir reads every gzipped document standing directly under dir.
+func readDir(fsys embed.FS, dir string) ([]Workload, error) {
+	entries, err := fsys.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +70,7 @@ func All() ([]Workload, error) {
 			continue
 		}
 
-		data, err := read(path.Join("testdata", name))
+		data, err := readGzipped(fsys, path.Join(dir, name))
 		if err != nil {
 			return nil, fmt.Errorf("loading workload %s: %w", name, err)
 		}
@@ -73,6 +86,17 @@ func All() ([]Workload, error) {
 	return out, nil
 }
 
+// Stress returns every stress document, decompressed, ordered by name.
+//
+// Each strains one thing a token store that reclaims behind the parse finds
+// hard: a flow collection spanning many blocks, an anchor referred to a
+// document away, anchors nested inside anchors, a level wider than any a person
+// writes, and runs of comments long enough that reading past them is itself the
+// cost. See SOURCE.md for what each one holds.
+func Stress() ([]Workload, error) {
+	return readDir(stressCorpus, "testdata/stress")
+}
+
 // ByName returns one workload.
 func ByName(name string) (Workload, error) {
 	data, err := read(path.Join("testdata", name+".yaml.gz"))
@@ -84,7 +108,11 @@ func ByName(name string) (Workload, error) {
 }
 
 func read(name string) ([]byte, error) {
-	raw, err := corpus.ReadFile(name)
+	return readGzipped(corpus, name)
+}
+
+func readGzipped(fsys embed.FS, name string) ([]byte, error) {
+	raw, err := fsys.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}

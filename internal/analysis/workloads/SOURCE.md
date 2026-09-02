@@ -109,6 +109,57 @@ Comments were checked to change nothing else: `gen` decodes both documents with
 parser the corpus exists to measure -- and compares. It refuses to store a file
 that fails.
 
+## The stress documents
+
+`testdata/stress/` holds eight documents built to be difficult rather than to resemble
+anything anybody wrote. `workloads.Stress()` returns them; `workloads.All()` does not, on
+purpose — a geomean over the corpus is meant to say what an ordinary document costs, and a
+fifty-thousand-key mapping in that average would stop it saying so.
+
+They exist because the ordinary corpus cannot size a token store that reclaims behind the
+parse. Not one of the five holds an anchor or a flow collection, and the widest level in any
+of them is 1,789 entries against 293,142 tokens. They would make any store look good.
+
+| document | bytes | tokens | widest map | widest seq | depth | anchors | peak | × source |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `flow_wide` | 270,007 | 60,003 | 1 | **30,000** | 4 | 0 | 11.2 MB | 43× |
+| `flow_nested` | 75,190 | 72,900 | 300 | 1 | **123** | 0 | 14.5 MB | **197×** |
+| `flow_long_scalars` | 466,810 | 2,403 | 1 | 1,200 | 4 | 0 | 1.7 MB | 4× |
+| `anchors_far` | 262,940 | 64,014 | 8,002 | 0 | 6 | 1 | 14.4 MB | 56× |
+| `anchors_many` | 226,890 | 56,000 | 8,000 | 0 | 6 | **4,000** | 12.4 MB | 56× |
+| `anchors_nested` | 74,182 | 23,200 | 1,600 | 2 | 11 | 2,400 | 5.0 MB | 69× |
+| `map_wide` | 1,150,000 | 150,000 | **50,000** | 0 | 3 | 0 | 36.6 MB | 33× |
+| `comments_dense` | 1,161,001 | 18,183 | 61 | 0 | 3 | 0 | 4.8 MB | 4× |
+
+Read with `ParseComments` throughout, since `comments_dense` is about comments and a mode
+that drops them at the door measures a different document.
+
+What each one is for:
+
+- **`flow_wide`** — one flow sequence of 30,000 members, 60,003 tokens in a single collection
+  that does not close until the last of them. A store reclaiming behind the parse has nothing
+  to reclaim until the document ends.
+- **`flow_nested`** — flow collections 120 deep. Every open level holds a token for its column,
+  and this is the deepest the descent's stack of token references is asked to grow. At 197× the
+  source it is the worst ratio in either corpus.
+- **`flow_long_scalars`** — 466 kB in 2,403 tokens, 194 bytes a token. A store sized in tokens is
+  blind to this document; one sized in bytes is blind to `flow_nested`.
+- **`anchors_far`** — the anchor is the first entry and the alias is the last, so what the anchor
+  covers has to be held for the length of the document.
+- **`anchors_many`** — 4,000 anchors spread evenly, each aliased straight after. The friendly
+  case: nothing needs holding for long, and a store that holds it anyway has the wrong rule.
+- **`anchors_nested`** — anchors inside anchored subtrees, four deep, referred to from inside and
+  outside. A store marking blocks with a flag cannot read this; it needs a count of the anchors
+  still open.
+- **`map_wide`** — one mapping of 50,000 keys. The parse gathers a level's entries before it
+  builds the node above them, so here the widest level is the whole document.
+- **`comments_dense`** — runs of 300 comment lines between entries. The descent looks past a
+  comment to the token after it and the look is not bounded.
+
+Built by `gen/stress.go`, deterministically and from nothing, so `go run ./gen -out testdata`
+rewrites them byte for byte. `TestEveryStressDocumentParsesAndSettles` holds them to the same
+round trip the ordinary corpus is held to.
+
 ## The gzip container
 
 Written at level 9 with no modification time and the operating system byte set to
