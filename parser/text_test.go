@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
 // SPDX-License-Identifier: Apache-2.0
 
-package parser2_test
+package parser_test
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/scanner"
 )
 
@@ -44,7 +44,7 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 
 	var s scanner.Scanner
 	s.Init(src)
-	p, err := parser2.New(s.Tokens(), 0)
+	p, err := parser.New(s.Tokens(), 0)
 	require.NoError(t, err)
 	require.NoError(t, s.Err())
 

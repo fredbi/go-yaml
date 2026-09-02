@@ -43,20 +43,10 @@ func BenchmarkParseBytesWithComments(b *testing.B) {
 	})
 }
 
-// BenchmarkParseTokens separates parsing from tokenizing, so that a change to
-// one is not read as a change to the other.
-func BenchmarkParseTokens(b *testing.B) {
-	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
-		tokens := mustTokens(b, string(src))
-		b.ResetTimer()
-
-		for b.Loop() {
-			if _, err := parser.Parse(tokens, 0); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
+// Parsing and tokenizing are measured apart in internal/analysis, over the
+// workloads: BenchmarkScanTokens is the scan, BenchmarkParserNew adds the
+// grouping, and BenchmarkParserParse adds the tree. parser.New reads an
+// iterator rather than a slice, so there is no token slice to parse twice.
 
 // BenchmarkRender measures turning an AST back into text, which is half of the
 // round trip and is not otherwise covered.

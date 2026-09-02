@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -27,13 +27,13 @@ func TestRetainedFootprint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("%-16s %9s  %28s  %28s", "workload", "source", "parser2 *ast.File", "yaml.v3 *yaml.Node")
+	t.Logf("%-16s %9s  %28s  %28s", "workload", "source", "parser *ast.File", "yaml.v3 *yaml.Node")
 	for _, w := range all {
 		src := w.Data
 		mb := float64(len(src)) / (1 << 20)
 
 		ours := retainedMB(t, func() any {
-			f, err := parser2.ParseBytes(src, 0)
+			f, err := parser.ParseBytes(src, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +77,7 @@ func TestRetainedByLayer(t *testing.T) {
 			return held
 		})
 		whole := retainedMB(t, func() any {
-			f, err := parser2.ParseBytes([]byte(text), 0)
+			f, err := parser.ParseBytes([]byte(text), 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func (c nodeCounter) Visit(node ast.Node) ast.Visitor { *c.n++; return c }
 func countNodes(t *testing.T, src []byte) int {
 	t.Helper()
 
-	f, err := parser2.ParseBytes(src, 0)
+	f, err := parser.ParseBytes(src, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

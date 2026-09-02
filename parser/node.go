@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package parser
 
 import (
@@ -5,8 +8,8 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-func newMappingNode(ctx context, tk *Token, isFlow bool, values ...*ast.MappingValueNode) (*ast.MappingNode, error) {
-	node := ctx.arena.Mapping(tk.RawToken(), isFlow, values)
+func newMappingNode(ctx context, tk *token.Token, isFlow bool, values []*ast.MappingValueNode) (*ast.MappingNode, error) {
+	node := ctx.arena.Mapping(tk, isFlow, values)
 	node.SetPathNode(ctx.path)
 	return node, nil
 }
@@ -241,10 +244,10 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 }
 
 func setLineComment(ctx context, node ast.Node, tk *Token) error {
-	if tk == nil || tk.LineComment == nil {
+	if tk == nil || ctx.lineComment(tk) == nil {
 		return nil
 	}
-	comment := ast.CommentGroup([]*token.Token{tk.LineComment})
+	comment := ast.CommentGroup([]*token.Token{ctx.lineComment(tk)})
 	comment.SetPathNode(ctx.path)
 	if err := node.SetComment(comment); err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	v3 "go.yaml.in/yaml/v3"
 
 	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/scanner"
 )
 
 // TestFlatMapScaling is the headline measurement: how parse time grows with the number of
@@ -44,36 +45,47 @@ func TestFlatMapScaling(t *testing.T) {
 	t.Log("See ANALYSIS-go-openapi.md §3.")
 }
 
-// TestStageAttribution locates the quadratic term. Tokenizing and grouping are ~linear; the
-// parse step is not, which is what points at parseMap rather than at the scanner.
+// TestStageAttribution splits the cost across the three stages a document goes
+// through, so the per-key numbers subtract.
+//
+// scanner.Tokens is the scan alone. parser.New adds copying the tokens into the
+// parser's blocks and grouping them. Parse adds building the tree. The stage
+// that grows its per-key cost is the one to look at; this is how the
+// super-linear parseMap was located, and the split is kept so the next one is
+// found the same way.
 func TestStageAttribution(t *testing.T) {
 	t.Logf("%-8s %-24s %-24s %s  (time, and per key)",
-		"keys", "Tokenize", "CreateGroupedTokens", "Parse(tokens)")
+		"keys", "Scan", "New (scan+group)", "Parse (+tree)")
 
 	for _, n := range []int{1000, 2000, 4000, 8000, 16000} {
 		src := flatMap(n)
-		toks := tokenize(t, src)
 
-		tt := timeIt(t, func() { tokenize(t, src) })
+		ts := timeIt(t, func() {
+			var sc scanner.Scanner
+			sc.Init(src)
+			for range sc.Tokens() { //nolint:revive // draining the stream is the measurement
+			}
+			if err := sc.Err(); err != nil {
+				t.Fatal(err)
+			}
+		})
 		tg := timeIt(t, func() {
-			if _, err := parser.CreateGroupedTokens(toks); err != nil {
+			var sc scanner.Scanner
+			sc.Init(src)
+			if _, err := parser.New(sc.Tokens(), 0); err != nil {
 				t.Fatal(err)
 			}
 		})
-		tp := timeIt(t, func() {
-			if _, err := parser.Parse(toks, 0); err != nil {
-				t.Fatal(err)
-			}
-		})
+		tp := timeIt(t, func() { mustParse(t, src) })
 
 		t.Logf("%-8d %-13v %-10s %-13v %-10s %-13v %s", n,
-			tt.Round(time.Microsecond), perKey(tt, n),
+			ts.Round(time.Microsecond), perKey(ts, n),
 			tg.Round(time.Microsecond), perKey(tg, n),
 			tp.Round(time.Microsecond), perKey(tp, n))
 	}
 
 	t.Log("")
-	t.Log("Tokenize and grouping hold their per-key cost; Parse does not.")
+	t.Log("Scanning and grouping hold their per-key cost; watch Parse for the one that does not.")
 }
 
 // TestWideDocumentCost states the practical consequence: how long a realistically-sized wide

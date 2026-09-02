@@ -6,23 +6,23 @@ package analysis
 import (
 	"testing"
 
-	"github.com/go-openapi/go-yaml/parser2"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/scanner"
 )
 
-// The stages parser2 goes through, so the numbers subtract.
+// The stages the parser goes through, so the numbers subtract.
 //
-// BenchmarkScanTokens is the scan alone. Parser2New adds copying the tokens
-// into the parser's blocks and grouping them. Parser2Parse adds building the
+// BenchmarkScanTokens is the scan alone. ParserNew adds copying the tokens
+// into the parser's blocks and grouping them. ParserParse adds building the
 // tree.
 
-func BenchmarkParser2New(b *testing.B) {
+func BenchmarkParserNew(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
 			s.Init(text)
-			if _, err := parser2.New(s.Tokens(), 0); err != nil {
+			if _, err := parser.New(s.Tokens(), 0); err != nil {
 				b.Fatal(err)
 			}
 			if err := s.Err(); err != nil {
@@ -32,13 +32,13 @@ func BenchmarkParser2New(b *testing.B) {
 	})
 }
 
-func BenchmarkParser2Parse(b *testing.B) {
+func BenchmarkParserParse(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
 			s.Init(text)
-			p, err := parser2.New(s.Tokens(), 0)
+			p, err := parser.New(s.Tokens(), 0)
 			if err != nil {
 				b.Fatal(err)
 			}

@@ -1,14 +1,17 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package parser
 
 import (
 	stderrors "errors"
 	"fmt"
+	"iter"
 	"os"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/errors"
-	"github.com/go-openapi/go-yaml/lexer"
 	"github.com/go-openapi/go-yaml/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -19,20 +22,45 @@ const (
 	ParseComments Mode = 1 << iota // parse comments and add them to AST
 )
 
-// ParseBytes parse from byte slice, and returns ast.File
-func ParseBytes(bytes []byte, mode Mode, opts ...Option) (*ast.File, error) {
-	src := string(bytes)
-	tokens, err := lexer.Tokenize(src)
+// ParseBytes reads src and returns the file it describes.
+func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
+	text := string(src)
+
+	var s scanner.Scanner
+	s.Init(text)
+
+	p, err := New(s.Tokens(), mode, opts...)
+	if scanErr := s.Err(); scanErr != nil {
+		// The scanner stopped first, and says why. New only knows that the
+		// token it was handed was an invalid one.
+		err = scanErr
+	}
 	if err != nil {
-		return nil, errors.WithSource(asSyntaxError(err), errors.Source{Text: src, FirstLine: 1})
+		return nil, errors.WithSource(asSyntaxError(err), errors.Source{Text: text, FirstLine: 1})
 	}
 
-	f, err := Parse(tokens, mode, opts...)
+	f, err := p.Parse()
 	if err != nil {
-		// An error drawn under the document needs the document. Parse takes a
+		// An error drawn under the document needs the document. Parse reads a
 		// token stream and has none, so it is told here, where the text is.
-		return nil, errors.WithSource(err, errors.Source{Text: src, FirstLine: 1})
+		return nil, errors.WithSource(err, errors.Source{Text: text, FirstLine: 1})
 	}
+
+	return f, nil
+}
+
+// ParseFile reads the file named filename and returns the file it describes.
+func ParseFile(filename string, mode Mode, opts ...Option) (*ast.File, error) {
+	src, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := ParseBytes(src, mode, opts...)
+	if err != nil {
+		return nil, err
+	}
+	f.Name = filename
 
 	return f, nil
 }
@@ -46,39 +74,6 @@ func asSyntaxError(err error) error {
 	}
 
 	return err
-}
-
-// Parse parse from token instances, and returns ast.File
-func Parse(tokens token.Tokens, mode Mode, opts ...Option) (*ast.File, error) {
-	if tk := tokens.InvalidToken(); tk != nil {
-		// A stream handed in rather than scanned here carries no reason: the
-		// scanner reports one, and Tokenize returns it. Use ParseBytes to have
-		// both.
-		return nil, errors.ErrSyntax("found an invalid token", tk)
-	}
-	p, err := newParser(tokens, mode, opts)
-	if err != nil {
-		return nil, err
-	}
-	f, err := p.parse(p.newContext())
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
-}
-
-// Parse parse from filename, and returns ast.File
-func ParseFile(filename string, mode Mode, opts ...Option) (*ast.File, error) {
-	file, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	f, err := ParseBytes(file, mode, opts...)
-	if err != nil {
-		return nil, err
-	}
-	f.Name = filename
-	return f, nil
 }
 
 type YAMLVersion string
@@ -97,8 +92,16 @@ var yamlVersionMap = map[string]YAMLVersion{
 	"1.3": YAML13,
 }
 
-type parser struct {
-	tokens                []*Token
+type Parser struct {
+	tokens []*Token
+	raw    rawTokens
+	// entries holds the entries of every mapping open at this point in the
+	// descent, innermost run last. parseMap takes its run off the end once the
+	// mapping is built.
+	entries []*ast.MappingValueNode
+	// lineComments holds the comment closing a token's line, against that
+	// token. It is nil where the mode did not ask for comments.
+	lineComments          map[*Token]*token.Token
 	yamlVersion           YAMLVersion
 	allowDuplicateMapKey  bool
 	omitNodePaths         bool
@@ -116,22 +119,26 @@ type parser struct {
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
 	pathSlab []ast.PathNode
-	// refSlab hands out the tokenRef every step into a token group needs.
-	refSlab []tokenRef
+	// refs holds one token reference per depth of the descent. They are held by
+	// pointer, so growing the slice leaves the ones in hand where they are.
+	refs []*tokenRef
 }
 
-// refBlockSize is how many token references one allocation covers.
-const refBlockSize = 128
-
-// newTokenRef returns a reference positioned at the start of tokens.
-func (p *parser) newTokenRef(tokens []*Token) *tokenRef {
-	if len(p.refSlab) == 0 {
-		p.refSlab = make([]tokenRef, refBlockSize)
+// tokenRefAt returns the reference for a group read at depth, positioned at the
+// start of tokens.
+//
+// The parse is depth first, so one group at most is being read at each depth at
+// any moment: the reference for a depth is set again for the next group read
+// there rather than another being taken. A document nested N deep costs N
+// references however many groups it holds.
+func (p *Parser) tokenRefAt(depth int32, g *TokenGroup) *tokenRef {
+	for int(depth) >= len(p.refs) {
+		p.refs = append(p.refs, new(tokenRef))
 	}
-	ref := &p.refSlab[0]
-	p.refSlab = p.refSlab[1:]
 
-	ref.tokens, ref.size, ref.idx = tokens, len(tokens), 0
+	ref := p.refs[depth]
+	ref.tokens, ref.idx = g.Members(&ref.pair), 0
+	ref.pull, ref.drained = nil, false
 
 	return ref
 }
@@ -142,7 +149,7 @@ const pathSlabSize = 512
 
 // newPathNode returns the next unused step of the path trie, or nil when
 // [OmitNodePaths] has turned path recording off.
-func (p *parser) newPathNode() *ast.PathNode {
+func (p *Parser) newPathNode() *ast.PathNode {
 	if p.omitNodePaths {
 		return nil
 	}
@@ -165,7 +172,7 @@ type mapKeyRef struct {
 // recordMapKey records key under text among the keys of the mapping that
 // starts at base, and returns the key already recorded there, or nil when the
 // mapping has not used text yet.
-func (p *parser) recordMapKey(base int, text string, key ast.MapKeyNode) ast.MapKeyNode {
+func (p *Parser) recordMapKey(base int, text string, key ast.MapKeyNode) ast.MapKeyNode {
 	ref := mapKeyRef{base: base, text: text}
 	if prev, exists := p.keyIndex[ref]; exists {
 		return prev
@@ -180,42 +187,64 @@ func (p *parser) recordMapKey(base int, text string, key ast.MapKeyNode) ast.Map
 //
 // Mappings close in the order they open, so the keys of the one closing are
 // always those above its base.
-func (p *parser) closeMapping(base int) {
+func (p *Parser) closeMapping(base int) {
 	for _, ref := range p.keyStack[base:] {
 		delete(p.keyIndex, ref)
 	}
 	p.keyStack = p.keyStack[:base]
 }
 
-func newParser(tokens token.Tokens, mode Mode, opts []Option) (*parser, error) {
-	filteredTokens := []*token.Token{}
-	if mode&ParseComments != 0 {
-		filteredTokens = tokens
-	} else {
-		for _, tk := range tokens {
-			if tk.Type == token.CommentType {
-				continue
-			}
-			// keep prev/next reference between tokens containing comments
-			// https://github.com/go-openapi/go-yaml/issues/254
-			filteredTokens = append(filteredTokens, tk)
+// New returns a parser reading the tokens seq hands over.
+//
+// seq is read to its end here, because grouping looks both ways along the
+// stream: what a ':' belongs to is not settled until the tokens after it have
+// been read. The tokens are held as values in blocks of their own, so what the
+// scanner hands over is copied and the scanner keeps none of it.
+//
+// Where mode does not carry ParseComments, comment tokens are dropped as they
+// arrive and never reach the grouping at all.
+func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) {
+	keepComments := mode&ParseComments != 0
+
+	var raw rawTokens
+	for tk := range seq {
+		if !keepComments && tk.Type == token.CommentType {
+			continue
 		}
+		if tk.Type == token.InvalidType {
+			// A stream handed in rather than scanned here carries no reason:
+			// the scanner reports one, and Scanner.Err returns it.
+			held := raw.add(tk)
+
+			return nil, errors.ErrSyntax("found an invalid token", held)
+		}
+		raw.add(tk)
 	}
-	tks, err := CreateGroupedTokens(token.Tokens(filteredTokens))
+
+	tks, lineComments, err := createGroupedTokens(&raw)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{
-		tokens:   tks,
-		keyIndex: make(map[mapKeyRef]ast.MapKeyNode),
+
+	p := &Parser{
+		tokens:       tks,
+		raw:          raw,
+		lineComments: lineComments,
+		keyIndex:     make(map[mapKeyRef]ast.MapKeyNode),
 	}
 	for _, opt := range opts {
 		opt(p)
 	}
+
 	return p, nil
 }
 
-func (p *parser) parse(ctx context) (*ast.File, error) {
+// Parse reads the stream through and returns the file it describes.
+func (p *Parser) Parse() (*ast.File, error) {
+	return p.parse(p.newContext())
+}
+
+func (p *Parser) parse(ctx context) (*ast.File, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 	for _, token := range p.tokens {
 		doc, err := p.parseDocument(ctx, token.Group)
@@ -227,15 +256,16 @@ func (p *parser) parse(ctx context) (*ast.File, error) {
 	return file, nil
 }
 
-func (p *parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.DocumentNode, error) {
-	if len(docGroup.Tokens) == 0 {
+func (p *Parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.DocumentNode, error) {
+	if docGroup.Len() == 0 {
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
 
 	var (
-		tokens = docGroup.Tokens
-		start  *token.Token
-		end    *token.Token
+		docPair [2]*Token
+		tokens  = docGroup.Members(&docPair)
+		start   *token.Token
+		end     *token.Token
 	)
 	if docGroup.First().Type() == token.DocumentHeaderType {
 		start = docGroup.First().RawToken()
@@ -254,10 +284,7 @@ func (p *parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.Document
 		return ast.Document(docGroup.RawToken(), nil), nil
 	}
 
-	body, err := p.parseDocumentBody(ctx.withGroup(p, &TokenGroup{
-		Type:   TokenGroupDocumentBody,
-		Tokens: tokens,
-	}))
+	body, err := p.parseDocumentBody(ctx.withGroup(p, newTokenGroup(TokenGroupDocumentBody, tokens)))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +302,7 @@ func (p *parser) parseDocument(ctx context, docGroup *TokenGroup) (*ast.Document
 	return node, nil
 }
 
-func (p *parser) parseDocumentBody(ctx context) (ast.Node, error) {
+func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	node, err := p.parseToken(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -293,7 +320,7 @@ func (p *parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	return node, nil
 }
 
-func (p *parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
+func (p *Parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 	switch tk.GroupType() {
 	case TokenGroupMapKey, TokenGroupMapKeyValue:
 		return p.parseMap(ctx)
@@ -382,7 +409,7 @@ func (p *parser) parseToken(ctx context, tk *Token) (ast.Node, error) {
 	return node, nil
 }
 
-func (p *parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error) {
+func (p *Parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error) {
 	if tk.Group != nil {
 		switch tk.GroupType() {
 		case TokenGroupAnchor:
@@ -443,7 +470,7 @@ func (p *parser) parseScalarValue(ctx context, tk *Token) (ast.ScalarNode, error
 // reached a sequence entry node that nothing renders, or -- in a mapping -- the
 // entry after the comma, one place further on than it was written.
 func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error {
-	if entryTk == nil || entryTk.LineComment == nil || len(values) == 0 {
+	if entryTk == nil || ctx.lineComment(entryTk) == nil || len(values) == 0 {
 		return nil
 	}
 
@@ -455,18 +482,18 @@ func attachTrailingComment(ctx context, entryTk *Token, values []ast.Node) error
 	if target.GetComment() != nil {
 		return nil
 	}
-	comment := ast.CommentGroup([]*token.Token{entryTk.LineComment})
+	comment := ast.CommentGroup([]*token.Token{ctx.lineComment(entryTk)})
 	comment.SetPathNode(ctx.path)
 
 	return target.SetComment(comment)
 }
 
-func (p *parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
+func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	base := len(p.keyStack)
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
 
-	node, err := newMappingNode(ctx, ctx.currentToken(), true)
+	node, err := newMappingNode(ctx, ctx.currentToken().RawToken(), true, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +632,7 @@ func (p *parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	return node, nil
 }
 
-func (p *parser) isFlowMapDelim(tk *Token) bool {
+func (p *Parser) isFlowMapDelim(tk *Token) bool {
 	return tk.Type() == token.MappingEndType || tk.Type() == token.CollectEntryType
 }
 
@@ -615,7 +642,7 @@ func (p *parser) isFlowMapDelim(tk *Token) bool {
 // recurse once per sibling, building a whole MappingNode at every level and discarding it to
 // keep only .Values -- which made a mapping of N keys cost N recursions and slice
 // concatenations summing to O(N^2).
-func (p *parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode, error) {
+func (p *Parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode, error) {
 	if keyTk.Group == nil {
 		return nil, errors.ErrSyntax("unexpected map key", keyTk.RawToken())
 	}
@@ -651,20 +678,24 @@ func (p *parser) parseMapEntry(ctx context, keyTk *Token) (*ast.MappingValueNode
 	return newMappingValueNode(childCtx, keyTk.Group.Last(), nil, key, value)
 }
 
-func (p *parser) parseMap(ctx context) (*ast.MappingNode, error) {
+func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	base := len(p.keyStack)
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
+
+	// The entries are gathered on a stack the parser reuses for every mapping,
+	// so a mapping's Values is allocated once, at its own length, rather than
+	// grown an entry at a time. entryBase is where this mapping's run starts.
+	entryBase := len(p.entries)
+	defer func() { p.entries = p.entries[:entryBase] }()
 
 	keyTk := ctx.currentToken()
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
 		return nil, err
 	}
-	mapNode, err := newMappingNode(ctx, &Token{Token: keyValueNode.GetToken()}, false, keyValueNode)
-	if err != nil {
-		return nil, err
-	}
+	p.entries = append(p.entries, keyValueNode)
+
 	var tk *Token
 	if ctx.isComment() {
 		tk = ctx.nextNotCommentToken()
@@ -697,13 +728,18 @@ func (p *parser) parseMap(ctx context) (*ast.MappingNode, error) {
 		if err := setHeadComment(cm, entry); err != nil {
 			return nil, err
 		}
-		mapNode.Values = append(mapNode.Values, entry)
+		p.entries = append(p.entries, entry)
 		if ctx.isComment() {
 			tk = ctx.nextNotCommentToken()
 		} else {
 			tk = ctx.currentToken()
 		}
 	}
+	mapNode, err := newMappingNode(ctx, keyValueNode.GetToken(), false, p.entries[entryBase:])
+	if err != nil {
+		return nil, err
+	}
+
 	if ctx.isComment() {
 		if keyTk.Column() <= ctx.currentToken().Column() {
 			// If the comment is in the same or deeper column as the last element column in map value,
@@ -721,7 +757,7 @@ func (p *parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	return mapNode, nil
 }
 
-func (p *parser) validateMapKeyValueNextToken(ctx context, keyTk, tk *Token) error {
+func (p *Parser) validateMapKeyValueNextToken(ctx context, keyTk, tk *Token) error {
 	if tk == nil {
 		return nil
 	}
@@ -739,7 +775,7 @@ func (p *parser) validateMapKeyValueNextToken(ctx context, keyTk, tk *Token) err
 	return errors.ErrSyntax("value is not allowed in this context. map key-value is pre-defined", tk.RawToken())
 }
 
-func (p *parser) isMapToken(tk *Token) bool {
+func (p *Parser) isMapToken(tk *Token) bool {
 	if tk.Group == nil {
 		return tk.Type() == token.MappingStartType || tk.Type() == token.MappingEndType
 	}
@@ -747,7 +783,7 @@ func (p *parser) isMapToken(tk *Token) bool {
 	return g.Type == TokenGroupMapKey || g.Type == TokenGroupMapKeyValue
 }
 
-func (p *parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*ast.MappingValueNode, error) {
+func (p *Parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*ast.MappingValueNode, error) {
 	if g.Type != TokenGroupMapKeyValue {
 		return nil, errors.ErrSyntax("unexpected map key-value pair", g.RawToken())
 	}
@@ -773,15 +809,15 @@ func (p *parser) parseMapKeyValue(ctx context, g *TokenGroup, entryTk *Token) (*
 // A key is usually a single scalar token, and that path is kept: it is every
 // ordinary document. A key spanning more tokens is a flow collection used as a
 // key, which has to be parsed as a node like any other.
-func (p *parser) parseMapKeyValueNode(ctx context, g *TokenGroup) (ast.Node, error) {
-	if len(g.Tokens) <= 2 {
+func (p *Parser) parseMapKeyValueNode(ctx context, g *TokenGroup) (ast.Node, error) {
+	if g.Len() <= 2 {
 		return p.parseScalarValue(ctx, g.First())
 	}
 
 	return p.parseToken(ctx, g.First())
 }
 
-func (p *parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error) {
+func (p *Parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error) {
 	if g.Type != TokenGroupMapKey {
 		return nil, errors.ErrSyntax("unexpected map key", g.RawToken())
 	}
@@ -849,7 +885,7 @@ func (p *parser) parseMapKey(ctx context, g *TokenGroup) (ast.MapKeyNode, error)
 // keyText is the key as mapKeyText reads it. Two entries of one mapping repeat
 // a key when their texts are equal, so the check needs the text and not the
 // path built from it.
-func (p *parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string, colonTk *Token) error {
+func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string, colonTk *Token) error {
 	tk := key.GetToken()
 	if !p.allowDuplicateMapKey {
 		if n := p.recordMapKey(ctx.keyBase, keyText, key); n != nil {
@@ -909,25 +945,25 @@ func carriesProperty(tk *Token) bool {
 	return tk.GroupType() == TokenGroupAnchorName || tk.Type() == token.TagType
 }
 
-func (p *parser) removeLeftWhiteSpace(src string) string {
+func (p *Parser) removeLeftWhiteSpace(src string) string {
 	// CR or LF or CRLF
 	return strings.TrimLeftFunc(src, func(r rune) bool {
 		return r == ' ' || r == '\r' || r == '\n'
 	})
 }
 
-func (p *parser) removeRightWhiteSpace(src string) string {
+func (p *Parser) removeRightWhiteSpace(src string) string {
 	// CR or LF or CRLF
 	return strings.TrimRightFunc(src, func(r rune) bool {
 		return r == ' ' || r == '\r' || r == '\n'
 	})
 }
 
-func (p *parser) existsNewLineCharacter(src string) bool {
+func (p *Parser) existsNewLineCharacter(src string) bool {
 	return p.newLineCharacterNum(src) > 0
 }
 
-func (p *parser) newLineCharacterNum(src string) int {
+func (p *Parser) newLineCharacterNum(src string) int {
 	var num int
 	for i := 0; i < len(src); i++ {
 		switch src[i] {
@@ -949,14 +985,14 @@ func (p *parser) newLineCharacterNum(src string) int {
 // so read it back rather than build the same string a second time. A flow
 // collection used as a key is the one case with no path: it is given one here,
 // the same way it was before.
-func (p *parser) valueContext(ctx context, key ast.MapKeyNode) context {
+func (p *Parser) valueContext(ctx context, key ast.MapKeyNode) context {
 	if path := key.GetPathNode(); path != nil {
 		return ctx.withPath(path)
 	}
 	return ctx.withChild(p, p.mapKeyText(key))
 }
 
-func (p *parser) mapKeyText(n ast.Node) string {
+func (p *Parser) mapKeyText(n ast.Node) string {
 	if n == nil {
 		return ""
 	}
@@ -973,7 +1009,7 @@ func (p *parser) mapKeyText(n ast.Node) string {
 	return n.GetToken().Value
 }
 
-func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) (ast.Node, error) {
+func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) (ast.Node, error) {
 	tk := ctx.currentToken()
 	if tk == nil {
 		return newNullNode(ctx, ctx.addNullValueToken(colonTk))
@@ -1035,10 +1071,7 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// A comment may stand between the two. It belongs to the entry below
 		// and says nothing about where this one ends, so what follows the
 		// anchor is looked for past it.
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1092,10 +1125,7 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 		// ----
 		//   key: &anchor
 		// next
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1114,7 +1144,7 @@ func (p *parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *Token) 
 	return value, nil
 }
 
-func (p *parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
+func (p *Parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
 	anchor, ok := value.(*ast.AnchorNode)
 	if !ok {
 		return nil
@@ -1145,7 +1175,7 @@ func (p *parser) validateAnchorValueInMapOrSeq(value ast.Node, col int) error {
 	return nil
 }
 
-func (p *parser) parseAnchor(ctx context, g *TokenGroup) (*ast.AnchorNode, error) {
+func (p *Parser) parseAnchor(ctx context, g *TokenGroup) (*ast.AnchorNode, error) {
 	anchorNameGroup := g.First().Group
 	anchor, err := p.parseAnchorName(ctx.withGroup(p, anchorNameGroup))
 	if err != nil {
@@ -1201,7 +1231,7 @@ func startsEntry(tk *Token) bool {
 // An anchor with nothing after it names the empty node: "a: &x" is a valid
 // document, and *x resolves to null. Refusing it made an anchor the one thing
 // that could not be attached to an absent value.
-func (p *parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
+func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
 		// Built rather than inserted: there is no token here to stand for the
 		// null, and putting one in the stream would leave it to be read again.
@@ -1219,7 +1249,7 @@ func (p *parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 	return value, nil
 }
 
-func (p *parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
+func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 	anchor, err := newAnchorNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -1240,7 +1270,7 @@ func (p *parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 	return anchor, nil
 }
 
-func (p *parser) parseAlias(ctx context) (*ast.AliasNode, error) {
+func (p *Parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 	alias, err := newAliasNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -1261,7 +1291,7 @@ func (p *parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 	return alias, nil
 }
 
-func (p *parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
+func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 	node, err := newLiteralNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -1289,7 +1319,7 @@ func (p *parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 	return node, nil
 }
 
-func (p *parser) parseScalarTag(ctx context) (*ast.TagNode, error) {
+func (p *Parser) parseScalarTag(ctx context) (*ast.TagNode, error) {
 	tag, err := p.parseTag(ctx)
 	if err != nil {
 		return nil, err
@@ -1303,7 +1333,7 @@ func (p *parser) parseScalarTag(ctx context) (*ast.TagNode, error) {
 	return tag, nil
 }
 
-func (p *parser) parseTag(ctx context) (*ast.TagNode, error) {
+func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	tagTk := ctx.currentToken()
 	tagRawTk := tagTk.RawToken()
 	if handle, named := namedTagHandle(tagRawTk.Value); named {
@@ -1354,7 +1384,7 @@ func (p *parser) parseTag(ctx context) (*ast.TagNode, error) {
 	return node, nil
 }
 
-func (p *parser) clearTagDirectives() {
+func (p *Parser) clearTagDirectives() {
 	p.tagHandles = nil
 	p.secondaryTagDirective = nil
 }
@@ -1377,7 +1407,7 @@ func namedTagHandle(value string) (string, bool) {
 	return "!" + name + "!", true
 }
 
-func (p *parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (ast.Node, error) {
+func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (ast.Node, error) {
 	if tk == nil {
 		return newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
 	}
@@ -1424,7 +1454,7 @@ func (p *parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (a
 	return p.parseToken(ctx, tk)
 }
 
-func (p *parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
+func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	node, err := newSequenceNode(ctx, ctx.currentToken(), true)
 	if err != nil {
 		return nil, err
@@ -1486,7 +1516,7 @@ func (p *parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
 			node.ValueHeadComments[len(node.Values)-1] = headComment
 		}
-		seqEntry := ast.SequenceEntry(entryTk.RawToken(), value, headComment)
+		seqEntry := ctx.arena.SequenceEntry(entryTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
 			return nil, err
 		}
@@ -1507,7 +1537,7 @@ func (p *parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	return node, nil
 }
 
-func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
+func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	seqTk := ctx.currentToken()
 	seqNode, err := newSequenceNode(ctx, seqTk, false)
 	if err != nil {
@@ -1525,7 +1555,7 @@ func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		seqEntry := ast.SequenceEntry(seqTk.RawToken(), value, headComment)
+		seqEntry := ctx.arena.SequenceEntry(seqTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, seqTk); err != nil {
 			return nil, err
 		}
@@ -1553,7 +1583,7 @@ func (p *parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	return seqNode, nil
 }
 
-func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error) {
+func (p *Parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error) {
 	tk := ctx.currentToken()
 	if tk == nil {
 		return newNullNode(ctx, ctx.addNullValueToken(seqTk))
@@ -1588,10 +1618,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// A comment may stand between the two. It belongs to what comes after
 		// and says nothing about where this entry ends, so what follows the
 		// anchor is looked for past it.
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1625,10 +1652,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 		// ----
 		//   - &anchor
 		// next
-		group := &TokenGroup{
-			Type:   TokenGroupAnchor,
-			Tokens: []*Token{tk, ctx.createImplicitNullToken(tk)},
-		}
+		group := newTokenGroup(TokenGroupAnchor, []*Token{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
@@ -1647,7 +1671,7 @@ func (p *parser) parseSequenceValue(ctx context, seqTk *Token) (ast.Node, error)
 	return value, nil
 }
 
-func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode, error) {
+func (p *Parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode, error) {
 	directiveNameGroup := g.First().Group
 	directive, err := p.parseDirectiveName(ctx.withGroup(p, directiveNameGroup))
 	if err != nil {
@@ -1656,10 +1680,10 @@ func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 
 	switch directive.Name.String() {
 	case "YAML":
-		if len(g.Tokens) != 2 {
+		if g.Len() != 2 {
 			return nil, errors.ErrSyntax("unexpected format YAML directive", g.First().RawToken())
 		}
-		valueTk := g.Tokens[1]
+		valueTk := g.At(1)
 		valueRawTk := valueTk.RawToken()
 		value := valueRawTk.Value
 		ver, exists := yamlVersionMap[value]
@@ -1676,10 +1700,10 @@ func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 		}
 		directive.Values = append(directive.Values, versionNode)
 	case "TAG":
-		if len(g.Tokens) != 3 {
+		if g.Len() != 3 {
 			return nil, errors.ErrSyntax("unexpected format TAG directive", g.First().RawToken())
 		}
-		tagKey, err := newStringNode(ctx, g.Tokens[1])
+		tagKey, err := newStringNode(ctx, g.At(1))
 		if err != nil {
 			return nil, err
 		}
@@ -1690,14 +1714,15 @@ func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 			p.tagHandles = make(map[string]struct{})
 		}
 		p.tagHandles[tagKey.Value] = struct{}{}
-		tagValue, err := newStringNode(ctx, g.Tokens[2])
+		tagValue, err := newStringNode(ctx, g.At(2))
 		if err != nil {
 			return nil, err
 		}
 		directive.Values = append(directive.Values, tagKey, tagValue)
 	default:
-		if len(g.Tokens) > 1 {
-			for _, tk := range g.Tokens[1:] {
+		if g.Len() > 1 {
+			for i := 1; i < g.Len(); i++ {
+				tk := g.At(i)
 				value, err := newStringNode(ctx, tk)
 				if err != nil {
 					return nil, err
@@ -1709,7 +1734,7 @@ func (p *parser) parseDirective(ctx context, g *TokenGroup) (*ast.DirectiveNode,
 	return directive, nil
 }
 
-func (p *parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
+func (p *Parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
 	directive, err := newDirectiveNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
@@ -1730,7 +1755,7 @@ func (p *parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
 	return directive, nil
 }
 
-func (p *parser) parseComment(ctx context) (ast.Node, error) {
+func (p *Parser) parseComment(ctx context) (ast.Node, error) {
 	cm := p.parseHeadComment(ctx)
 	if ctx.isTokenNotFound() {
 		return cm, nil
@@ -1776,7 +1801,7 @@ func growHeadComments(comments []*ast.CommentGroupNode, size int) []*ast.Comment
 	return comments
 }
 
-func (p *parser) parseHeadComment(ctx context) *ast.CommentGroupNode {
+func (p *Parser) parseHeadComment(ctx context) *ast.CommentGroupNode {
 	tks := []*token.Token{}
 	for ctx.isComment() {
 		tks = append(tks, ctx.currentToken().RawToken())
@@ -1788,7 +1813,7 @@ func (p *parser) parseHeadComment(ctx context) *ast.CommentGroupNode {
 	return ast.CommentGroup(tks)
 }
 
-func (p *parser) parseFootComment(ctx context, col int) *ast.CommentGroupNode {
+func (p *Parser) parseFootComment(ctx context, col int) *ast.CommentGroupNode {
 	tks := []*token.Token{}
 	for ctx.isComment() && col <= ctx.currentToken().Column() {
 		tks = append(tks, ctx.currentToken().RawToken())

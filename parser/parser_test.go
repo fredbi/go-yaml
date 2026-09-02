@@ -163,7 +163,7 @@ v:
 	}
 	for idx, src := range sources {
 		t.Run(strconv.Itoa(idx), func(t *testing.T) {
-			f, err := parser.Parse(tokenize(t, src), 0)
+			f, err := parser.ParseBytes([]byte(src), 0)
 			if err != nil {
 				t.Fatalf("parse error: source [%s]: %+v", src, err)
 			}
@@ -773,8 +773,7 @@ d: e
 
 	for _, test := range tests {
 		t.Run(test.source, func(t *testing.T) {
-			tokens := tokenize(t, test.source)
-			f, err := parser.Parse(tokens, 0)
+			f, err := parser.ParseBytes([]byte(test.source), 0)
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -788,7 +787,6 @@ d: e
 			}
 			expect := fmt.Sprintf("\n%+v", f)
 			if test.expect != expect {
-				tokens.Dump()
 				t.Fatalf("unexpected output: [%s] != [%s]", test.expect, expect)
 			}
 		})
