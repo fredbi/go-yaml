@@ -12,7 +12,6 @@ import (
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
 	"github.com/go-openapi/go-yaml/internal/lab/labparser"
 	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
 // anchored names the documents holding an anchor, whose chunks a walk saves.
@@ -79,14 +78,10 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 
 	for _, set := range [][]workloads.Workload{ordinary, stress} {
 		for _, w := range set {
-			var s scanner.Scanner
-			s.Init(string(w.Data))
-
-			p, err := labparser.New(s.Tokens(), 0, labparser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
-			require.NoError(t, err)
+			p := labparser.New(labparser.ChunkSize(tokenarena.SizeFor(len(w.Data))))
 
 			keep := &counting{}
-			_, err = p.Walk(keep)
+			_, err := p.Walk(w.Data, keep)
 			require.NoError(t, err, w.Name)
 
 			stats := p.TokenStats()

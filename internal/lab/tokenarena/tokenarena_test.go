@@ -17,13 +17,13 @@ import (
 
 // add puts n tokens in, numbered so each is told apart, and returns where they
 // went.
-func add(a *tokenarena.TokenArena, n int) []*token.Token {
+func add(a *tokenarena.TokenArena[token.Token], n int) []*token.Token {
 	return addFrom(a, 0, n)
 }
 
 // addFrom is add with the numbering carried on from a previous run, for a test
 // adding in several goes and checking each of them separately.
-func addFrom(a *tokenarena.TokenArena, from, n int) []*token.Token {
+func addFrom(a *tokenarena.TokenArena[token.Token], from, n int) []*token.Token {
 	out := make([]*token.Token, 0, n)
 	for i := range n {
 		held, _ := a.Add(token.Token{Value: fmt.Sprintf("t%d", from+i)})
@@ -37,7 +37,7 @@ func addFrom(a *tokenarena.TokenArena, from, n int) []*token.Token {
 // chunk is written by index and never grows, so an address handed out stays
 // good however many tokens follow it.
 func TestATokenStaysWhereItWasPut(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	held := add(a, 40)
 
 	for i, tk := range held {
@@ -48,7 +48,7 @@ func TestATokenStaysWhereItWasPut(t *testing.T) {
 // TestNothingIsRecycledUntilTheTailMoves checks the arena holds everything
 // while the parser says it is still reading.
 func TestNothingIsRecycledUntilTheTailMoves(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	add(a, 40)
 
 	stats := a.Stats()
@@ -63,7 +63,7 @@ func TestNothingIsRecycledUntilTheTailMoves(t *testing.T) {
 func TestTheTailReleasesWhatIsBehindIt(t *testing.T) {
 	const chunk, tokens = 8, 800
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 	for i := range tokens {
 		a.Add(token.Token{Value: "x"})
 		// The parse finishes with a token two chunks after reading it.
@@ -87,7 +87,7 @@ func TestTheTailReleasesWhatIsBehindIt(t *testing.T) {
 func TestPinFreezesRecyclingAndUnpinLetsItThrough(t *testing.T) {
 	const chunk = 4
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 	held := add(a, 400)
 
 	a.Pin()
@@ -110,7 +110,7 @@ func TestPinFreezesRecyclingAndUnpinLetsItThrough(t *testing.T) {
 // TestPinsCount checks two callers may freeze the tape and it moves again when
 // the last of them lets go.
 func TestPinsCount(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	add(a, 40)
 
 	a.Pin()
@@ -129,7 +129,7 @@ func TestPinsCount(t *testing.T) {
 // TestAFullScanIsAPinThatIsNeverGivenBack checks the mode the parser has today
 // falls out of the same mechanism.
 func TestAFullScanIsAPinThatIsNeverGivenBack(t *testing.T) {
-	a := tokenarena.New(8)
+	a := tokenarena.New[token.Token](8)
 	a.Pin()
 
 	held := add(a, 800)
@@ -153,7 +153,7 @@ func TestAFullScanIsAPinThatIsNeverGivenBack(t *testing.T) {
 func TestSaveKeepsEveryChunkOfARunPastTheTail(t *testing.T) {
 	const chunk, span = 4, 200
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 
 	// Read the node with the tape frozen, then save its run and let go.
 	a.Pin()
@@ -187,7 +187,7 @@ func TestSaveKeepsEveryChunkOfARunPastTheTail(t *testing.T) {
 func TestReleaseGivesASavedRunBack(t *testing.T) {
 	const chunk, span = 4, 40
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 	a.Pin()
 	add(a, span)
 	a.Save(0, span-1)
@@ -212,7 +212,7 @@ func TestReleaseGivesASavedRunBack(t *testing.T) {
 func TestSavesCountPerChunk(t *testing.T) {
 	const chunk = 8
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 	a.Pin()
 	held := add(a, chunk) // one chunk, two runs inside it
 	a.Save(0, 3)
@@ -234,7 +234,7 @@ func TestSavesCountPerChunk(t *testing.T) {
 
 // TestReleaseAllGivesEverySaveBack checks the document boundary.
 func TestReleaseAllGivesEverySaveBack(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	a.Pin()
 	add(a, 40)
 	a.Save(0, 19)
@@ -261,7 +261,7 @@ func TestReleaseAllGivesEverySaveBack(t *testing.T) {
 func TestGenerationCatchesAStaleRead(t *testing.T) {
 	const chunk = 4
 
-	a := tokenarena.New(chunk)
+	a := tokenarena.New[token.Token](chunk)
 	stale, seq := a.Add(token.Token{Value: "gone"})
 
 	was, ok := a.Generation(seq)
@@ -290,7 +290,7 @@ func TestGenerationCatchesAStaleRead(t *testing.T) {
 func TestAChunkIsAllocatedOnceAndNeverGrows(t *testing.T) {
 	for _, size := range []int{1, 2, 7, 64} {
 		t.Run(strconv.Itoa(size), func(t *testing.T) {
-			a := tokenarena.New(size)
+			a := tokenarena.New[token.Token](size)
 			held := add(a, size*7+3)
 
 			for i, tk := range held {
@@ -319,7 +319,7 @@ func TestSizeFor(t *testing.T) {
 // TestResetGivesTheMemoryBack checks that recycling holds chunks for reuse and
 // Reset is what lets them go.
 func TestResetGivesTheMemoryBack(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	add(a, 400)
 	a.SetTail(400)
 
@@ -338,7 +338,7 @@ func TestResetGivesTheMemoryBack(t *testing.T) {
 // TestAllYieldsEveryTokenInOrder checks the walk a full scan reads the stream
 // through.
 func TestAllYieldsEveryTokenInOrder(t *testing.T) {
-	a := tokenarena.New(4)
+	a := tokenarena.New[token.Token](4)
 	a.Pin()
 	add(a, 41)
 

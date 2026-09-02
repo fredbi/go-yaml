@@ -8,6 +8,14 @@ import "github.com/go-openapi/go-yaml/ast"
 // Option represents parser's option.
 type Option func(p *Parser)
 
+// Comments keeps the comments a document holds. They are dropped by default,
+// before the grouping ever sees them.
+func Comments() Option {
+	return func(p *Parser) {
+		p.mode |= ParseComments
+	}
+}
+
 // AllowDuplicateMapKey allow the use of keys with the same name in the same map,
 // but by default, this is not permitted.
 func AllowDuplicateMapKey() Option {

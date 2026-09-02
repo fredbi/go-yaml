@@ -7,7 +7,6 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/lab/labparser"
 	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -51,26 +50,14 @@ type TailTrace struct {
 func TraceToJSONTail(src []byte, chunk int) (TailTrace, error) {
 	w := &tailFolder{reach: map[ast.Node]int{}, start: map[ast.Node]int{}}
 
-	var s scanner.Scanner
-	s.Init(string(src))
+	p := labparser.New(labparser.ChunkSize(chunk), labparser.OnComplete(w.complete))
+	w.tokens = p.Tokens
 
-	p, err := labparser.New(s.Tokens(), 0, labparser.ChunkSize(chunk), labparser.OnComplete(w.complete))
-	if err != nil {
-		return TailTrace{}, err
-	}
-	if err := s.Err(); err != nil {
+	if _, err := p.Parse(src); err != nil {
 		return TailTrace{}, err
 	}
 
-	// New has drained the stream, so the tape is full and every token has its
-	// place on it. complete only fires below, during the parse.
-	w.seq = sequenceOf(p.Tokens())
-
-	if _, err := p.Parse(); err != nil {
-		return TailTrace{}, err
-	}
-
-	held := make([]*token.Token, 0, p.Tokens().Len())
+	held := make([]*labparser.Token, 0, p.Tokens().Len())
 	for tk := range p.Tokens().All() {
 		held = append(held, tk)
 	}
@@ -90,8 +77,8 @@ func TraceToJSONTail(src []byte, chunk int) (TailTrace, error) {
 //
 // The parse reads forward, so by the time a node completes the scanner has
 // passed its last token: fill to there, then move the tail.
-func replay(held []*token.Token, tail []int, chunk int) tokenarena.Stats {
-	arena := tokenarena.New(chunk)
+func replay(held []*labparser.Token, tail []int, chunk int) tokenarena.Stats {
+	arena := tokenarena.New[labparser.Token](chunk)
 
 	var at int
 	for _, reach := range tail {
@@ -112,9 +99,10 @@ func replay(held []*token.Token, tail []int, chunk int) tokenarena.Stats {
 // tailFolder records where the tail could stand after each node completes,
 // under both rules.
 type tailFolder struct {
-	seq   map[*token.Token]int
-	reach map[ast.Node]int
-	start map[ast.Node]int
+	tokens func() *tokenarena.TokenArena[labparser.Token]
+	seq    map[*token.Token]int
+	reach  map[ast.Node]int
+	start  map[ast.Node]int
 
 	// waiting holds the nodes completed and not yet claimed, oldest first, and
 	// oldest is how far into it the claimed ones reach. at gives a node's place
@@ -200,18 +188,23 @@ func (w *tailFolder) seqOf(tk *token.Token) int {
 	if tk == nil {
 		return 0
 	}
+	if w.seq == nil {
+		// The first node has finished, so the read is over and the tape holds
+		// every token. Numbering them before that would find an empty arena.
+		w.seq = sequenceOf(w.tokens())
+	}
 
 	return w.seq[tk]
 }
 
 // sequenceOf numbers the tokens an arena holds, so a token the tree points at
 // can be found on the tape.
-func sequenceOf(a *tokenarena.TokenArena) map[*token.Token]int {
+func sequenceOf(a *tokenarena.TokenArena[labparser.Token]) map[*token.Token]int {
 	out := make(map[*token.Token]int, a.Len())
 
 	var i int
 	for tk := range a.All() {
-		out[tk] = i
+		out[tk.RawToken()] = i
 		i++
 	}
 

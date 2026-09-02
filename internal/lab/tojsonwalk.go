@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/lab/labparser"
-	"github.com/go-openapi/go-yaml/parser/scanner"
 )
 
 // ToJSONWalk converts a YAML document to JSON from a walk of the parse.
@@ -22,19 +21,9 @@ import (
 // It reads mappings, sequences and scalars. An anchor, an alias or a tag is
 // refused rather than half-handled.
 func ToJSONWalk(src []byte) ([]byte, error) {
-	var s scanner.Scanner
-	s.Init(string(src))
-
-	p, err := labparser.New(s.Tokens(), 0)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Err(); err != nil {
-		return nil, err
-	}
-
 	w := &jsonWalker{}
-	file, err := p.Walk(w)
+
+	file, err := labparser.New().Walk(src, w)
 	if err != nil {
 		return nil, err
 	}

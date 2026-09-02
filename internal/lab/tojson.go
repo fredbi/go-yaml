@@ -31,7 +31,7 @@ import (
 func ToJSONProgressive(src []byte) ([]byte, error) {
 	w := &jsonFolder{done: map[ast.Node][]byte{}}
 
-	file, err := labparser.ParseBytes(src, 0, labparser.OnComplete(w.complete))
+	file, err := labparser.ParseBytes(src, labparser.OnComplete(w.complete))
 	if err != nil {
 		return nil, err
 	}

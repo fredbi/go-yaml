@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
-	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestGroupCensus counts what the grouper builds, by kind.
@@ -31,24 +30,21 @@ func TestGroupCensus(t *testing.T) {
 	var s scanner.Scanner
 	s.Init(string(src))
 
-	raw := tokenarena.New(tokenarena.SizeFor(len(src)))
+	raw := tokenarena.New[Token](tokenarena.SizeFor(len(src)))
 	raw.Pin()
 
-	var rawN int
-	for tk := range s.Tokens() {
-		if tk.Type == token.CommentType {
-			continue
-		}
-		raw.Add(tk)
-		rawN++
-	}
-	if err := s.Err(); err != nil {
-		t.Fatal(err)
-	}
+	r := newReader(&s, raw, tokenarena.MaxChunk, len(src)/8, false)
 
-	tks, _, err := createGroupedTokens(raw)
-	if err != nil {
-		t.Fatal(err)
+	var tks []*Token
+	for {
+		doc, err := r.next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc == nil {
+			break
+		}
+		tks = append(tks, doc)
 	}
 
 	byType := map[TokenGroupType]int{}
@@ -87,7 +83,7 @@ func TestGroupCensus(t *testing.T) {
 	}
 	sort.Slice(kinds, func(i, j int) bool { return byType[kinds[i]] > byType[kinds[j]] })
 
-	t.Logf("%s: %d raw tokens -> %d groups, %d wrappers reachable", path, rawN, groups, wrappers)
+	t.Logf("%s: %d raw tokens -> %d groups, %d wrappers reachable", path, raw.Len(), groups, wrappers)
 	t.Logf("%-24s %8s %8s %10s %10s", "group", "count", "%", "members", "bytes(32B)")
 	for _, k := range kinds {
 		t.Logf("%-24s %8d %7.1f%% %10d %9dK",
@@ -96,5 +92,5 @@ func TestGroupCensus(t *testing.T) {
 	t.Logf("%-24s %8d %7.1f%% %10s %9dK", "TOTAL", groups, 100.0, "",
 		groups*32/1024)
 	t.Logf("wrappers: %d x 16B = %dK  (raw slab %d x 16B = %dK)",
-		wrappers, wrappers*16/1024, rawN, rawN*16/1024)
+		wrappers, wrappers*16/1024, raw.Len(), raw.Len()*16/1024)
 }

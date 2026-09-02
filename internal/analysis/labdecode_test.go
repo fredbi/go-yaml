@@ -132,7 +132,7 @@ func TestProgressiveDecodePeak(t *testing.T) {
 		// The floor: what a parse alone peaks at, decoding nothing. No consumer
 		// can do better than this while the parser holds what it holds.
 		parseOnly := peakLive(func() {
-			f, err := labparser.ParseBytes(w.Data, 0)
+			f, err := labparser.ParseBytes(w.Data)
 			require.NoError(t, err)
 			runtime.KeepAlive(f)
 		})

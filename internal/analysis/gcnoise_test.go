@@ -27,7 +27,7 @@ var parsers = []struct {
 	parse func([]byte) (*ast.File, error)
 }{
 	{"parser", func(src []byte) (*ast.File, error) { return parser.ParseBytes(src, 0) }},
-	{"lab", func(src []byte) (*ast.File, error) { return labparser.ParseBytes(src, 0) }},
+	{"lab", func(src []byte) (*ast.File, error) { return labparser.ParseBytes(src) }},
 }
 
 // TestGCActivity reports what a parse costs the collector.

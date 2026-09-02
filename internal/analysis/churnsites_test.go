@@ -48,7 +48,7 @@ func TestWriteChurnProfile(t *testing.T) {
 	// experiment can be attributed the same way production is.
 	var f any
 	if os.Getenv("CHURN_PARSER") == "lab" {
-		f, err = labparser.ParseBytes(w.Data, 0)
+		f, err = labparser.ParseBytes(w.Data)
 	} else {
 		f, err = parser.ParseBytes(w.Data, 0)
 	}

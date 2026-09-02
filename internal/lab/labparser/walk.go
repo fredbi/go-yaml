@@ -89,7 +89,7 @@ type walkState struct {
 	err error
 }
 
-// Walk reads the stream through, handing each node to v as the parse reaches it.
+// Walk reads src through, handing each node to v as the parse reaches it.
 //
 // It does not gather: a collection's entries are handed over one at a time and
 // the collection keeps none of them, so what stands at once is the walk's own
@@ -102,11 +102,13 @@ type walkState struct {
 //
 // ⚠️ Anchors are not handled. An alias names a subtree that has to outlive the
 // tail, which wants Save, and nothing calls it yet.
-func (p *Parser) Walk(v Visitor) (*ast.File, error) {
+func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
 	p.walk = &walkState{visitor: v}
 	defer func() { p.walk = nil }()
 
-	// New pinned the tape, which is what a full scan wants. A walk keeps
+	p.begin(src)
+
+	// begin pinned the tape, which is what a full scan wants. A walk keeps
 	// nothing it is handed, so the pin goes and the tail moves as the descent
 	// reads.
 	p.tokens.Unpin()
@@ -114,7 +116,7 @@ func (p *Parser) Walk(v Visitor) (*ast.File, error) {
 
 	file, err := p.parse(p.newContext())
 	if err != nil {
-		return nil, err
+		return nil, drawUnder(src, err)
 	}
 	if p.walk.err != nil {
 		return nil, p.walk.err

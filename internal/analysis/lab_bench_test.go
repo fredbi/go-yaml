@@ -27,7 +27,7 @@ import (
 func BenchmarkLabWorkloadParse(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := labparser.ParseBytes(src, 0); err != nil {
+			if _, err := labparser.ParseBytes(src); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -37,7 +37,7 @@ func BenchmarkLabWorkloadParse(b *testing.B) {
 func BenchmarkLabWorkloadParseWithComments(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := labparser.ParseBytes(src, labparser.ParseComments); err != nil {
+			if _, err := labparser.ParseBytes(src, labparser.Comments()); err != nil {
 				b.Fatal(err)
 			}
 		}

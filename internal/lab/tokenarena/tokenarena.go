@@ -51,8 +51,7 @@ package tokenarena
 
 import (
 	"iter"
-
-	"github.com/go-openapi/go-yaml/token"
+	"unsafe"
 )
 
 // Chunk sizes, in tokens.
@@ -79,8 +78,8 @@ func SizeFor(n int) int {
 }
 
 // Chunk holds a run of tokens at addresses that do not move.
-type Chunk struct {
-	next, prev *Chunk
+type Chunk[T any] struct {
+	next, prev *Chunk[T]
 
 	// base is the sequence number of buf[0].
 	base int
@@ -96,30 +95,30 @@ type Chunk struct {
 
 	// buf is allocated once and written by index. It never grows, which is what
 	// keeps the addresses handed out of it valid.
-	buf []token.Token
+	buf []T
 }
 
 // Base returns the sequence number of this chunk's first token.
-func (c *Chunk) Base() int { return c.base }
+func (c *Chunk[T]) Base() int { return c.base }
 
 // Len returns how many tokens this chunk holds.
-func (c *Chunk) Len() int { return c.pos }
+func (c *Chunk[T]) Len() int { return c.pos }
 
 // Generation returns how many times this chunk has been filled.
-func (c *Chunk) Generation() int { return c.generation }
+func (c *Chunk[T]) Generation() int { return c.generation }
 
 // list is a doubly linked list of chunks.
 //
 // Doubly linked because a chunk is moved out of the middle of the tape when it
 // is pinned, and a singly linked list cannot do that without walking to it.
-type list struct {
-	head, tail *Chunk
+type list[T any] struct {
+	head, tail *Chunk[T]
 	n          int
 }
 
-func (l *list) len() int { return l.n }
+func (l *list[T]) len() int { return l.n }
 
-func (l *list) pushBack(c *Chunk) {
+func (l *list[T]) pushBack(c *Chunk[T]) {
 	c.next, c.prev = nil, l.tail
 	if l.tail != nil {
 		l.tail.next = c
@@ -130,7 +129,7 @@ func (l *list) pushBack(c *Chunk) {
 	l.n++
 }
 
-func (l *list) remove(c *Chunk) {
+func (l *list[T]) remove(c *Chunk[T]) {
 	switch {
 	case c.prev != nil:
 		c.prev.next = c.next
@@ -150,7 +149,7 @@ func (l *list) remove(c *Chunk) {
 }
 
 // holds reports whether c is on this list.
-func (l *list) holds(c *Chunk) bool {
+func (l *list[T]) holds(c *Chunk[T]) bool {
 	for at := l.head; at != nil; at = at.next {
 		if at == c {
 			return true
@@ -160,7 +159,7 @@ func (l *list) holds(c *Chunk) bool {
 	return false
 }
 
-func (l *list) popFront() *Chunk {
+func (l *list[T]) popFront() *Chunk[T] {
 	c := l.head
 	if c == nil {
 		return nil
@@ -173,7 +172,7 @@ func (l *list) popFront() *Chunk {
 // TokenArena holds the tokens of one parse.
 //
 // The zero value is not usable; take one from [New].
-type TokenArena struct {
+type TokenArena[T any] struct {
 	chunkSize int
 
 	// live holds the chunks the parse is reading and writing, oldest first.
@@ -184,10 +183,10 @@ type TokenArena struct {
 	// walks live from the front and stops at the first chunk it may not take.
 	// Leaving saved chunks in the way would lengthen that walk every time it
 	// ran, and anchors_many holds four thousand anchors.
-	live, free, saved list
+	live, free, saved list[T]
 
 	// head is the chunk being written to.
-	head *Chunk
+	head *Chunk[T]
 	// next is the sequence number the next token added will take.
 	next int
 	// tail is the sequence number below which the parse is finished reading.
@@ -200,8 +199,8 @@ type TokenArena struct {
 }
 
 // New returns an arena whose chunks hold size tokens each.
-func New(size int) *TokenArena {
-	return &TokenArena{chunkSize: max(size, 1)}
+func New[T any](size int) *TokenArena[T] {
+	return &TokenArena[T]{chunkSize: max(size, 1)}
 }
 
 // Add copies tk into the arena and returns where it now stands, along with its
@@ -210,13 +209,13 @@ func New(size int) *TokenArena {
 // The address is valid for the life of the arena. What it holds is valid until
 // the chunk it sits in is recycled, which happens once the tail has passed it
 // and nothing has pinned it.
-func (a *TokenArena) Add(tk token.Token) (*token.Token, int) {
+func (a *TokenArena[T]) Add(v T) (*T, int) {
 	if a.head == nil || a.head.pos == len(a.head.buf) {
 		a.grow()
 	}
 
 	held := &a.head.buf[a.head.pos]
-	*held = tk
+	*held = v
 	a.head.pos++
 
 	seq := a.next
@@ -228,11 +227,11 @@ func (a *TokenArena) Add(tk token.Token) (*token.Token, int) {
 
 // grow puts a fresh chunk at the head of the tape, reusing one where the free
 // list has it.
-func (a *TokenArena) grow() {
+func (a *TokenArena[T]) grow() {
 	c := a.free.popFront()
 	switch c {
 	case nil:
-		c = &Chunk{buf: make([]token.Token, a.chunkSize)}
+		c = &Chunk[T]{buf: make([]T, a.chunkSize)}
 		a.stats.Allocated++
 	default:
 		clear(c.buf)
@@ -244,7 +243,7 @@ func (a *TokenArena) grow() {
 	a.live.pushBack(c)
 	a.head = c
 
-	a.stats.observe(a)
+	observe(&a.stats, a)
 }
 
 // SetTail records that the parse has finished reading every token below seq,
@@ -253,7 +252,7 @@ func (a *TokenArena) grow() {
 // Only the parser knows this. The arena holds and reuses; it never decides what
 // is finished with. The tail is recorded whether or not a pin is held, so
 // unpinning reclaims everything the tail passed while it was frozen.
-func (a *TokenArena) SetTail(seq int) {
+func (a *TokenArena[T]) SetTail(seq int) {
 	if seq > a.tail {
 		a.tail = seq
 	}
@@ -262,7 +261,7 @@ func (a *TokenArena) SetTail(seq int) {
 
 // sweep moves the chunks the tail has passed off the live list, to be filled
 // again or to be kept where a Save asked for it.
-func (a *TokenArena) sweep() {
+func (a *TokenArena[T]) sweep() {
 	if a.frozen > 0 {
 		return
 	}
@@ -285,7 +284,7 @@ func (a *TokenArena) sweep() {
 		c = next
 	}
 
-	a.stats.observe(a)
+	observe(&a.stats, a)
 }
 
 // Pin freezes recycling where the tail now stands.
@@ -296,13 +295,13 @@ func (a *TokenArena) sweep() {
 //
 // A parse that pins before reading anything and never unpins holds the whole
 // document, which is what a full scan is.
-func (a *TokenArena) Pin() {
+func (a *TokenArena[T]) Pin() {
 	a.frozen++
 	a.stats.Pins++
 }
 
 // Unpin gives back one Pin, and lets the tail through to where it reached.
-func (a *TokenArena) Unpin() {
+func (a *TokenArena[T]) Unpin() {
 	if a.frozen == 0 {
 		return
 	}
@@ -311,7 +310,7 @@ func (a *TokenArena) Unpin() {
 }
 
 // Frozen reports whether recycling is held by a pin.
-func (a *TokenArena) Frozen() bool { return a.frozen > 0 }
+func (a *TokenArena[T]) Frozen() bool { return a.frozen > 0 }
 
 // Save keeps every chunk holding a token in [from, to] out of recycling until
 // Release, and returns how many chunks that is.
@@ -322,14 +321,14 @@ func (a *TokenArena) Frozen() bool { return a.frozen > 0 }
 // It walks the chunks in hand. Save the run when the node that needs it is
 // complete, while the tail has not yet passed its start -- hold the tail with
 // Pin while the node is read, and Save and Unpin when it closes.
-func (a *TokenArena) Save(from, to int) int {
+func (a *TokenArena[T]) Save(from, to int) int {
 	var n int
-	a.eachChunkIn(from, to, func(c *Chunk) {
+	a.eachChunkIn(from, to, func(c *Chunk[T]) {
 		c.saves++
 		n++
 	})
 	a.stats.Saves++
-	a.stats.observe(a)
+	observe(&a.stats, a)
 
 	return n
 }
@@ -339,9 +338,9 @@ func (a *TokenArena) Save(from, to int) int {
 //
 // A chunk saved twice is kept until the second release. One the tail has
 // already passed joins the free list as its last save leaves it.
-func (a *TokenArena) Release(from, to int) int {
+func (a *TokenArena[T]) Release(from, to int) int {
 	var n int
-	a.eachChunkIn(from, to, func(c *Chunk) {
+	a.eachChunkIn(from, to, func(c *Chunk[T]) {
 		if c.saves == 0 {
 			return
 		}
@@ -364,7 +363,7 @@ func (a *TokenArena) Release(from, to int) int {
 // A document boundary is where this belongs: an alias names its anchor within
 // one document, so what that document's anchors saved is finished with when the
 // document is. Call it only where nothing holds those tokens any more.
-func (a *TokenArena) ReleaseAll() {
+func (a *TokenArena[T]) ReleaseAll() {
 	for c := a.saved.popFront(); c != nil; c = a.saved.popFront() {
 		c.saves = 0
 		a.free.pushBack(c)
@@ -375,8 +374,8 @@ func (a *TokenArena) ReleaseAll() {
 }
 
 // eachChunkIn calls do for every chunk in hand holding a token in [from, to].
-func (a *TokenArena) eachChunkIn(from, to int, do func(*Chunk)) {
-	for _, l := range []*list{&a.live, &a.saved} {
+func (a *TokenArena[T]) eachChunkIn(from, to int, do func(*Chunk[T])) {
+	for _, l := range []*list[T]{&a.live, &a.saved} {
 		for c := l.head; c != nil; {
 			next := c.next
 			if c.pos > 0 && from < c.base+c.pos && to >= c.base {
@@ -389,8 +388,8 @@ func (a *TokenArena) eachChunkIn(from, to int, do func(*Chunk)) {
 
 // chunkOf returns the chunk holding seq, wherever it stands, or nil where none
 // does any more.
-func (a *TokenArena) chunkOf(seq int) *Chunk {
-	for _, l := range []*list{&a.live, &a.saved} {
+func (a *TokenArena[T]) chunkOf(seq int) *Chunk[T] {
+	for _, l := range []*list[T]{&a.live, &a.saved} {
 		for c := l.head; c != nil; c = c.next {
 			if seq >= c.base && seq < c.base+c.pos {
 				return c
@@ -402,15 +401,15 @@ func (a *TokenArena) chunkOf(seq int) *Chunk {
 }
 
 // Len returns how many tokens have been added.
-func (a *TokenArena) Len() int { return a.stats.Tokens }
+func (a *TokenArena[T]) Len() int { return a.stats.Tokens }
 
 // All yields every token the arena still holds, in the order they were added.
 //
 // It walks the live chunks, so it yields what has not been recycled or saved
 // away. Under a pin held for the whole parse nothing leaves the live list and
 // this is the whole stream, which is what a full scan reads.
-func (a *TokenArena) All() iter.Seq[*token.Token] {
-	return func(yield func(*token.Token) bool) {
+func (a *TokenArena[T]) All() iter.Seq[*T] {
+	return func(yield func(*T) bool) {
 		for c := a.live.head; c != nil; c = c.next {
 			for i := range c.pos {
 				if !yield(&c.buf[i]) {
@@ -427,7 +426,7 @@ func (a *TokenArena) All() iter.Seq[*token.Token] {
 // The parser does not read tokens this way -- it holds the addresses [Add] gave
 // it -- so this is for tests, and for a caller that wants to be told rather
 // than to read stale data.
-func (a *TokenArena) At(seq int) *token.Token {
+func (a *TokenArena[T]) At(seq int) *T {
 	c := a.chunkOf(seq)
 	if c == nil {
 		return nil
@@ -441,7 +440,7 @@ func (a *TokenArena) At(seq int) *token.Token {
 //
 // A caller holding a token from generation g may check it is still reading what
 // it was given. The lab does; the parser does not, and pays nothing for it.
-func (a *TokenArena) Generation(seq int) (int, bool) {
+func (a *TokenArena[T]) Generation(seq int) (int, bool) {
 	c := a.chunkOf(seq)
 	if c == nil {
 		return 0, false
@@ -454,12 +453,12 @@ func (a *TokenArena) Generation(seq int) (int, bool) {
 //
 // Recycling hands chunks back to the arena and not to the collector, so this is
 // the only thing that gives the memory up.
-func (a *TokenArena) Reset() {
-	*a = TokenArena{chunkSize: a.chunkSize}
+func (a *TokenArena[T]) Reset() {
+	*a = TokenArena[T]{chunkSize: a.chunkSize}
 }
 
 // Stats reports what this arena has done.
-func (a *TokenArena) Stats() Stats {
+func (a *TokenArena[T]) Stats() Stats {
 	out := a.stats
 	out.ChunkSize = a.chunkSize
 	out.Live, out.Free, out.Saved = a.live.len(), a.free.len(), a.saved.len()
@@ -469,13 +468,10 @@ func (a *TokenArena) Stats() Stats {
 			out.Saved++
 		}
 	}
-	out.Bytes = (out.Allocated) * a.chunkSize * int(tokenSize)
+	out.Bytes = out.Allocated * a.chunkSize * int(unsafe.Sizeof(*new(T)))
 
 	return out
 }
-
-// tokenSize is what one token costs in a chunk.
-const tokenSize = 56
 
 // Stats is what an arena has held and what holding it cost.
 type Stats struct {
@@ -504,7 +500,7 @@ type Stats struct {
 }
 
 // observe records the high-water marks.
-func (s *Stats) observe(a *TokenArena) {
+func observe[T any](s *Stats, a *TokenArena[T]) {
 	s.LiveHigh = max(s.LiveHigh, a.live.len())
 	s.FreeHigh = max(s.FreeHigh, a.free.len())
 	s.SavedHigh = max(s.SavedHigh, a.saved.len())

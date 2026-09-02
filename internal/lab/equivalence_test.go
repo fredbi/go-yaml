@@ -51,7 +51,12 @@ func assertSameParse(t *testing.T, text string, mode parser.Mode) {
 	t.Helper()
 
 	want, wantErr := parser.ParseBytes([]byte(text), mode)
-	got, gotErr := labparser.ParseBytes([]byte(text), labparser.Mode(mode))
+
+	var opts []labparser.Option
+	if mode&parser.ParseComments != 0 {
+		opts = append(opts, labparser.Comments())
+	}
+	got, gotErr := labparser.ParseBytes([]byte(text), opts...)
 
 	switch {
 	case wantErr != nil && gotErr != nil:

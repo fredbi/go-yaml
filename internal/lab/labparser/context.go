@@ -270,7 +270,7 @@ func (c context) createImplicitNullToken(base *Token) *Token {
 	pos.Column++
 	tk := token.New("null", " null", pos)
 	tk.Type = token.ImplicitNullType
-	return &Token{Token: tk}
+	return newSynthetic(tk)
 }
 
 func (c context) addToken(tk *Token) {

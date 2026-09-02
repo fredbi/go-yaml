@@ -52,7 +52,7 @@ func TestToJSONPeak(t *testing.T) {
 		// What the parse alone stands up, converting nothing. Whatever share of
 		// the progressive peak this is, no consumer can get under it.
 		bare := peakLiveMax(peakLiveRuns(), func() {
-			file, err := labparser.ParseBytes(w.Data, 0)
+			file, err := labparser.ParseBytes(w.Data)
 			require.NoError(t, err)
 			runtime.KeepAlive(file)
 		})

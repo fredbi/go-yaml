@@ -6,7 +6,6 @@ package labparser
 import (
 	"errors"
 	"fmt"
-	"iter"
 	"os"
 	"strings"
 
@@ -24,43 +23,18 @@ const (
 )
 
 // ParseBytes reads src and returns the file it describes.
-func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
-	text := string(src)
-
-	var s scanner.Scanner
-	s.Init(text)
-
-	// The chunk size is set from the document, so a short one does not pay for
-	// a chunk it will use a tenth of. A caller passing ChunkSize of its own
-	// wins, since options are applied after this.
-	p, err := New(s.Tokens(), mode, append([]Option{ChunkSize(tokenarena.SizeFor(len(src)))}, opts...)...)
-	if scanErr := s.Err(); scanErr != nil {
-		// The scanner stopped first, and says why. New only knows that the
-		// token it was handed was an invalid one.
-		err = scanErr
-	}
-	if err != nil {
-		return nil, yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: text, FirstLine: 1})
-	}
-
-	f, err := p.Parse()
-	if err != nil {
-		// An error drawn under the document needs the document. Parse reads a
-		// token stream and has none, so it is told here, where the text is.
-		return nil, yamlerrors.WithSource(err, yamlerrors.Source{Text: text, FirstLine: 1})
-	}
-
-	return f, nil
+func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
+	return New(opts...).Parse(src)
 }
 
 // ParseFile reads the file named filename and returns the file it describes.
-func ParseFile(filename string, mode Mode, opts ...Option) (*ast.File, error) {
+func ParseFile(filename string, opts ...Option) (*ast.File, error) {
 	src, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := ParseBytes(src, mode, opts...)
+	f, err := ParseBytes(src, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,14 +71,10 @@ var yamlVersionMap = map[string]YAMLVersion{
 }
 
 type Parser struct {
-	// documents holds one grouped token per document of the stream. It was
-	// called tokens, which read as the stream itself.
-	documents []*Token
-
 	// tokens holds every token.Token the tree points at, in chunks it can fill
 	// again once the parse has finished reading them. A full scan pins it and
 	// never lets go, so nothing is recycled and every token stands.
-	tokens *tokenarena.TokenArena
+	tokens *tokenarena.TokenArena[Token]
 	// onComplete is told about each node as it is finished. EXPERIMENT.
 	onComplete func(ast.Node)
 	// entries holds the entries of every mapping open at this point in the
@@ -149,6 +119,14 @@ type Parser struct {
 	// anchorFrom holds where each anchor open at this point in the descent
 	// begins, innermost last. Anchors nest, so it is a stack.
 	anchorFrom []int32
+
+	// scan reads src into tokens, one at a time, as the reader asks.
+	scan scanner.Scanner
+	// reader groups what the scanner reads and hands over a document at a time.
+	reader *reader
+
+	// mode is what the options asked of the parse.
+	mode Mode
 
 	// chunkSize is how many tokens one chunk of the token arena holds.
 	chunkSize int
@@ -238,62 +216,68 @@ func (p *Parser) closeMapping(base int) {
 	p.keyStack = p.keyStack[:base]
 }
 
-// New returns a parser reading the tokens seq hands over.
+// New returns a parser.
 //
-// seq is read to its end here, because grouping looks both ways along the
-// stream: what a ':' belongs to is not settled until the tokens after it have
-// been read. The tokens are held as values in blocks of their own, so what the
-// scanner hands over is copied and the scanner keeps none of it.
-//
-// Where mode does not carry ParseComments, comment tokens are dropped as they
-// arrive and never reach the grouping at all.
-func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) {
-	keepComments := mode&ParseComments != 0
-
+// It reads nothing here: hand it a document with [Parser.Parse] or
+// [Parser.Walk]. How a document becomes tokens is the parser's own business,
+// and a caller made to say would be tied to it.
+func New(opts ...Option) *Parser {
 	p := &Parser{keyIndex: make(map[mapKeyRef]token.Position)}
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	if p.chunkSize == 0 {
-		p.chunkSize = tokenarena.MaxChunk
-	}
-	p.tokens = tokenarena.New(p.chunkSize)
-
-	// A full scan holds every token it reads. The pin says so once, here, and
-	// is never given back: the tail may be set as the descent goes and nothing
-	// is reclaimed until something lets go, which nothing does.
-	p.tokens.Pin()
-
-	for tk := range seq {
-		if !keepComments && tk.Type == token.CommentType {
-			continue
-		}
-		if tk.Type == token.InvalidType {
-			// A stream handed in rather than scanned here carries no reason:
-			// the scanner reports one, and Scanner.Err returns it.
-			held, _ := p.tokens.Add(tk)
-
-			return nil, yamlerrors.NewSyntax("found an invalid token", held)
-		}
-		p.tokens.Add(tk)
-	}
-
-	documents, lineComments, err := createGroupedTokens(p.tokens)
-	if err != nil {
-		return nil, err
-	}
-	p.documents, p.lineComments = documents, lineComments
-
-	return p, nil
+	return p
 }
 
-// Tokens returns the arena the last parse read through, or nil before Parse has
-// run.
+// begin sets the parse up to read src, and reads nothing yet.
+//
+// The scanner, the grouping and the descent run at once from here: [parse] asks
+// for a document, the reader scans and groups just enough to hand one over, and
+// the tape may be filled again behind what the descent has passed.
+func (p *Parser) begin(src []byte) {
+	if p.chunkSize == 0 {
+		// Sized from the document, so a short one does not pay for a chunk it
+		// will use a tenth of. A caller passing ChunkSize wins.
+		p.chunkSize = tokenarena.SizeFor(len(src))
+	}
+	p.tokens = tokenarena.New[Token](p.chunkSize)
+
+	// A full scan holds every token it reads. The pin says so once, here, and
+	// [Parser.Walk] is what gives it back.
+	p.tokens.Pin()
+
+	p.scan.Init(string(src))
+
+	// Guessed from the source rather than counted, since counting would mean
+	// reading the document through before parsing any of it. It sizes buffers
+	// and nothing else.
+	estimate := max(len(src)/8, 16)
+	p.reader = newReader(&p.scan, p.tokens, p.chunkSize, estimate, p.mode&ParseComments != 0)
+	p.lineComments = p.reader.g.lineComments
+}
+
+// Tokens returns the arena the last read went into, or nil before one.
 //
 // For measurement: it is how a test finds the sequence number of a token the
 // tree points at.
-func (p *Parser) Tokens() *tokenarena.TokenArena { return p.tokens }
+func (p *Parser) Tokens() *tokenarena.TokenArena[Token] { return p.tokens }
+
+// GroupingHeld is the most tokens a grouping pass held at once while reading
+// the last document.
+//
+// The grouping runs ahead of the descent and keeps what it cannot yet settle,
+// so the tape has to hold at least this much however far the tail has moved.
+// groupMapKeysByValue is the pass that can hold a lot of it: its window reaches
+// back to the start of any flow collection still open, because that collection
+// may yet close and stand as a key.
+func (p *Parser) GroupingHeld() int {
+	if p.reader == nil {
+		return 0
+	}
+
+	return p.reader.g.heldHigh
+}
 
 // TokenStats reports what holding the tokens of the last parse cost.
 func (p *Parser) TokenStats() tokenarena.Stats {
@@ -320,18 +304,41 @@ func (p *Parser) ArenaStats() ast.ArenaStats {
 	return p.arena.Stats()
 }
 
-// Parse reads the stream through and returns the file it describes.
+// Parse reads src through and returns the file it describes.
 //
 // Call it once per parser. A comment is handed to the node that keeps it as the
 // tree is built, and a second call would find none left to hand over.
-func (p *Parser) Parse() (*ast.File, error) {
-	return p.parse(p.newContext())
+func (p *Parser) Parse(src []byte) (*ast.File, error) {
+	p.begin(src)
+
+	file, err := p.parse(p.newContext())
+	if err != nil {
+		return nil, drawUnder(src, err)
+	}
+
+	return file, nil
+}
+
+// drawUnder puts the document under an error read from it, so the message shows
+// the line it came from.
+func drawUnder(src []byte, err error) error {
+	return yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: string(src), FirstLine: 1})
 }
 
 func (p *Parser) parse(ctx context) (*ast.File, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
-	for _, token := range p.documents {
-		doc, err := p.parseDocument(ctx, token.Group)
+	for {
+		// Reading only as far as the next document is what lets the tape be
+		// filled again behind the one just parsed.
+		held, err := p.reader.next()
+		if err != nil {
+			return nil, err
+		}
+		if held == nil {
+			break
+		}
+
+		doc, err := p.parseDocument(ctx, held.Group)
 		if err != nil {
 			return nil, err
 		}
@@ -1402,7 +1409,7 @@ func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
 		// Built rather than inserted: there is no token here to stand for the
 		// null, and putting one in the stream would leave it to be read again.
-		return p.handNull(ctx, ctx.createImplicitNullToken(&Token{Token: anchor.GetToken()}))
+		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(anchor.GetToken())))
 	}
 
 	value, err := p.parseToken(ctx, ctx.currentToken())
@@ -1472,7 +1479,7 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 
 	tk := ctx.currentToken()
 	if tk == nil {
-		value, err := newStringNode(ctx, &Token{Token: token.New("", "", node.Start.Position)})
+		value, err := newStringNode(ctx, newSynthetic(token.New("", "", node.Start.Position)))
 		if err != nil {
 			return nil, err
 		}
@@ -1533,7 +1540,7 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 			// A secondary tag directive with nothing left to tag. Produce the
 			// same implicit null parseTagValue produces for the primary case,
 			// rather than building a node out of a token that is not there.
-			value, err := newNullNode(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
+			value, err := newNullNode(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
 			if err != nil {
 				return nil, err
 			}
@@ -1585,7 +1592,7 @@ func namedTagHandle(value string) (string, bool) {
 
 func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *Token) (ast.Node, error) {
 	if tk == nil {
-		return p.handNull(ctx, ctx.createImplicitNullToken(&Token{Token: tagRawTk}))
+		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
 	}
 	switch token.ReservedTagKeyword(tagRawTk.Value) {
 	case token.MappingTag, token.SetTag:
