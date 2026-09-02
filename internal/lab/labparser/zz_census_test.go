@@ -8,6 +8,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -30,20 +31,22 @@ func TestGroupCensus(t *testing.T) {
 	var s scanner.Scanner
 	s.Init(string(src))
 
-	var raw rawTokens
+	raw := tokenarena.New(tokenarena.SizeFor(len(src)))
+	raw.Pin()
+
 	var rawN int
 	for tk := range s.Tokens() {
 		if tk.Type == token.CommentType {
 			continue
 		}
-		raw.add(tk)
+		raw.Add(tk)
 		rawN++
 	}
 	if err := s.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	tks, _, err := createGroupedTokens(&raw)
+	tks, _, err := createGroupedTokens(raw)
 	if err != nil {
 		t.Fatal(err)
 	}

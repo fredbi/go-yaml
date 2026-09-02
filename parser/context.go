@@ -190,7 +190,8 @@ func (p *Parser) newContext() context {
 	// Sized from the tokens of the stream, not from the documents it holds:
 	// len(p.tokens) is the document count, which is one for most streams and
 	// left every block at its floor of sixteen nodes.
-	ctx := context{arena: ast.NewArena(p.raw.n), lineComments: p.lineComments}
+	p.arena = ast.NewArena(p.raw.n)
+	ctx := context{arena: p.arena, lineComments: p.lineComments}
 
 	root := p.newPathNode()
 	if root == nil {

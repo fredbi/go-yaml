@@ -41,3 +41,13 @@ func OnComplete(fn func(ast.Node)) Option {
 		p.onComplete = fn
 	}
 }
+
+// ChunkSize sets how many tokens one chunk of the token arena holds.
+//
+// Left unset it is [tokenarena.MaxChunk]. [ParseBytes] sizes it from the length
+// of the document instead, with [tokenarena.SizeFor].
+func ChunkSize(size int) Option {
+	return func(p *Parser) {
+		p.chunkSize = size
+	}
+}

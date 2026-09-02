@@ -130,6 +130,11 @@ type Parser struct {
 	// canada_geometry, which is deep sequences and nothing else.
 	seqEntries []pendingEntry
 
+	// arena is where the nodes of the parse in hand come from. It is kept so
+	// that what a tree cost can be read after the parse rather than guessed at
+	// from a heap profile -- see [Parser.ArenaStats].
+	arena *ast.Arena
+
 	// pathSlab hands out path trie nodes in blocks, so a document of N keys
 	// costs N/pathSlabSize allocations rather than N.
 	pathSlab []ast.PathNode
@@ -253,6 +258,22 @@ func New(seq iter.Seq[token.Token], mode Mode, opts ...Option) (*Parser, error) 
 	}
 
 	return p, nil
+}
+
+// ArenaStats reports what the nodes of the last parse cost.
+//
+// It is the zero [ast.ArenaStats] before Parse has run. The figures are counted
+// as the parse hands nodes out, so they are exact and attributed to the node
+// type -- which a heap profile is not, the nodes of one type coming from a
+// generic block that a stack names by its instantiation.
+//
+// Comment nodes are not among them: [ast.CommentGroup] allocates its own.
+func (p *Parser) ArenaStats() ast.ArenaStats {
+	if p.arena == nil {
+		return ast.ArenaStats{}
+	}
+
+	return p.arena.Stats()
 }
 
 // Parse reads the stream through and returns the file it describes.

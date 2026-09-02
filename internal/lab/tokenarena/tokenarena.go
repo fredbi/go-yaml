@@ -1,0 +1,511 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+// Package tokenarena holds the tokens of a parse in chunks it can reuse.
+//
+// EXPERIMENT (2026-08-30). Nothing here ships. The store the parser uses today
+// only grows: every token scanned stands until the parse ends, which is 34% of
+// what a parse of azure_swagger retains and the floor no progressive consumer
+// has got under.
+//
+// # The tape
+//
+// Tokens are held in chunks of a fixed size, in a list read front to back. The
+// parser says how far it has finished reading -- the tail -- and every chunk
+// entirely behind the tail goes on the free list to be filled again. Chunks are
+// never handed back to the collector while the arena lives, so a parse of any
+// length costs the chunks its widest moment needed and no more.
+//
+// # What a pointer means here
+//
+// [TokenArena.Add] returns the address of a token inside a chunk, and that
+// address stays valid for as long as the arena does. What it points at does
+// not: once the chunk is recycled the address reads whatever was written there
+// next. Reading a token the parse has finished with is a bug in the caller and
+// this package will not report it -- see [TokenArena.Generation] for the check
+// the lab runs and the parser does not.
+//
+// # Two ways to hold what the tail has passed
+//
+// They are not the same mechanism at different scales. One works on the arena
+// and one works on chunks.
+//
+// [TokenArena.Pin] freezes recycling. The tail goes on being set and nothing is
+// reclaimed until the matching [TokenArena.Unpin], which lets the tail through
+// to where it had reached. It says nothing about which chunks matter; it says
+// not yet. A parse that pins before it starts and never unpins is the full
+// scan, holding everything, which is the mode the parser has today. A parse
+// that pins when a path search first matches records from there on.
+//
+// [TokenArena.Save] keeps the chunks holding one run of tokens, whatever the
+// tail does, until [TokenArena.Release] gives them back. A node spanning
+// several chunks saves all of them. Saves are counted per chunk, so two nodes
+// sharing a chunk both have to release it. Anchors use this, and so does a
+// parent held while its children are read: each child is forgotten as it goes
+// and the parent released after the last of them.
+//
+// Save and Release walk the chunks in hand rather than consulting an index. A
+// parse saves once per anchor and once per open level, which is rare enough
+// that a walk costs less than the map that would avoid it.
+package tokenarena
+
+import (
+	"iter"
+
+	"github.com/go-openapi/go-yaml/token"
+)
+
+// Chunk sizes, in tokens.
+const (
+	// MinChunk is small enough that a document of a few lines pays little for
+	// the one chunk it needs.
+	MinChunk = 32
+	// MaxChunk bounds a chunk at 14 kB of tokens, so a document's first
+	// allocation is never large and the tail moves in fine steps.
+	MaxChunk = 256
+	// bytesPerToken is what a token costs in source, near enough. The corpus
+	// runs from 6.0 to 15.3 and the stress documents from 1.0 to 194.3, so this
+	// sizes the common case and is wrong for the extremes either way.
+	bytesPerToken = 8
+)
+
+// SizeFor returns the chunk size to use for a document of n bytes.
+//
+// A chunk holds a quarter of what the document is guessed to need, held between
+// [MinChunk] and [MaxChunk]: a short document does not pay for a chunk it will
+// use a tenth of, and a long one takes more chunks rather than one large one.
+func SizeFor(n int) int {
+	return min(max(n/bytesPerToken/4, MinChunk), MaxChunk)
+}
+
+// Chunk holds a run of tokens at addresses that do not move.
+type Chunk struct {
+	next, prev *Chunk
+
+	// base is the sequence number of buf[0].
+	base int
+	// pos is how many of buf have been handed out.
+	pos int
+	// saves counts the runs saved that fall in this chunk. Above zero it is
+	// never recycled, whatever the tail says.
+	saves int
+	// generation counts how many times this chunk has been filled. The lab
+	// reads it to catch a token read after the chunk was reused; the parser
+	// does not read it at all.
+	generation int
+
+	// buf is allocated once and written by index. It never grows, which is what
+	// keeps the addresses handed out of it valid.
+	buf []token.Token
+}
+
+// Base returns the sequence number of this chunk's first token.
+func (c *Chunk) Base() int { return c.base }
+
+// Len returns how many tokens this chunk holds.
+func (c *Chunk) Len() int { return c.pos }
+
+// Generation returns how many times this chunk has been filled.
+func (c *Chunk) Generation() int { return c.generation }
+
+// list is a doubly linked list of chunks.
+//
+// Doubly linked because a chunk is moved out of the middle of the tape when it
+// is pinned, and a singly linked list cannot do that without walking to it.
+type list struct {
+	head, tail *Chunk
+	n          int
+}
+
+func (l *list) len() int { return l.n }
+
+func (l *list) pushBack(c *Chunk) {
+	c.next, c.prev = nil, l.tail
+	if l.tail != nil {
+		l.tail.next = c
+	} else {
+		l.head = c
+	}
+	l.tail = c
+	l.n++
+}
+
+func (l *list) remove(c *Chunk) {
+	switch {
+	case c.prev != nil:
+		c.prev.next = c.next
+	default:
+		l.head = c.next
+	}
+
+	switch {
+	case c.next != nil:
+		c.next.prev = c.prev
+	default:
+		l.tail = c.prev
+	}
+
+	c.next, c.prev = nil, nil
+	l.n--
+}
+
+// holds reports whether c is on this list.
+func (l *list) holds(c *Chunk) bool {
+	for at := l.head; at != nil; at = at.next {
+		if at == c {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (l *list) popFront() *Chunk {
+	c := l.head
+	if c == nil {
+		return nil
+	}
+	l.remove(c)
+
+	return c
+}
+
+// TokenArena holds the tokens of one parse.
+//
+// The zero value is not usable; take one from [New].
+type TokenArena struct {
+	chunkSize int
+
+	// live holds the chunks the parse is reading and writing, oldest first.
+	// free holds chunks entirely behind the tail, ready to be filled again.
+	// saved holds chunks the tail has passed that a Save is keeping.
+	//
+	// saved is a list of its own rather than a mark on live, because the sweep
+	// walks live from the front and stops at the first chunk it may not take.
+	// Leaving saved chunks in the way would lengthen that walk every time it
+	// ran, and anchors_many holds four thousand anchors.
+	live, free, saved list
+
+	// head is the chunk being written to.
+	head *Chunk
+	// next is the sequence number the next token added will take.
+	next int
+	// tail is the sequence number below which the parse is finished reading.
+	// It is recorded whatever frozen says; only the sweeping stops.
+	tail int
+	// frozen counts the pins held. Above zero, nothing is recycled.
+	frozen int
+
+	stats Stats
+}
+
+// New returns an arena whose chunks hold size tokens each.
+func New(size int) *TokenArena {
+	return &TokenArena{chunkSize: max(size, 1)}
+}
+
+// Add copies tk into the arena and returns where it now stands, along with its
+// sequence number.
+//
+// The address is valid for the life of the arena. What it holds is valid until
+// the chunk it sits in is recycled, which happens once the tail has passed it
+// and nothing has pinned it.
+func (a *TokenArena) Add(tk token.Token) (*token.Token, int) {
+	if a.head == nil || a.head.pos == len(a.head.buf) {
+		a.grow()
+	}
+
+	held := &a.head.buf[a.head.pos]
+	*held = tk
+	a.head.pos++
+
+	seq := a.next
+	a.next++
+	a.stats.Tokens++
+
+	return held, seq
+}
+
+// grow puts a fresh chunk at the head of the tape, reusing one where the free
+// list has it.
+func (a *TokenArena) grow() {
+	c := a.free.popFront()
+	switch c {
+	case nil:
+		c = &Chunk{buf: make([]token.Token, a.chunkSize)}
+		a.stats.Allocated++
+	default:
+		clear(c.buf)
+		c.generation++
+		a.stats.Recycled++
+	}
+
+	c.base, c.pos, c.saves = a.next, 0, 0
+	a.live.pushBack(c)
+	a.head = c
+
+	a.stats.observe(a)
+}
+
+// SetTail records that the parse has finished reading every token below seq,
+// and recycles what that releases.
+//
+// Only the parser knows this. The arena holds and reuses; it never decides what
+// is finished with. The tail is recorded whether or not a pin is held, so
+// unpinning reclaims everything the tail passed while it was frozen.
+func (a *TokenArena) SetTail(seq int) {
+	if seq > a.tail {
+		a.tail = seq
+	}
+	a.sweep()
+}
+
+// sweep moves the chunks the tail has passed off the live list, to be filled
+// again or to be kept where a Save asked for it.
+func (a *TokenArena) sweep() {
+	if a.frozen > 0 {
+		return
+	}
+
+	for c := a.live.head; c != nil; {
+		next := c.next
+		// The chunk being written to stays whatever the tail says, and a chunk
+		// holding anything at or above the tail is still being read.
+		if c == a.head || c.base+c.pos > a.tail {
+			break
+		}
+
+		a.live.remove(c)
+		switch {
+		case c.saves > 0:
+			a.saved.pushBack(c)
+		default:
+			a.free.pushBack(c)
+		}
+		c = next
+	}
+
+	a.stats.observe(a)
+}
+
+// Pin freezes recycling where the tail now stands.
+//
+// The tail goes on being set; nothing is reclaimed until the matching Unpin.
+// Pins count, so two callers may freeze and the tape moves again when the last
+// of them lets go.
+//
+// A parse that pins before reading anything and never unpins holds the whole
+// document, which is what a full scan is.
+func (a *TokenArena) Pin() {
+	a.frozen++
+	a.stats.Pins++
+}
+
+// Unpin gives back one Pin, and lets the tail through to where it reached.
+func (a *TokenArena) Unpin() {
+	if a.frozen == 0 {
+		return
+	}
+	a.frozen--
+	a.sweep()
+}
+
+// Frozen reports whether recycling is held by a pin.
+func (a *TokenArena) Frozen() bool { return a.frozen > 0 }
+
+// Save keeps every chunk holding a token in [from, to] out of recycling until
+// Release, and returns how many chunks that is.
+//
+// A node whose tokens run over several chunks saves all of them. Saves count
+// per chunk, so a chunk holding two saved runs is kept until both release it.
+//
+// It walks the chunks in hand. Save the run when the node that needs it is
+// complete, while the tail has not yet passed its start -- hold the tail with
+// Pin while the node is read, and Save and Unpin when it closes.
+func (a *TokenArena) Save(from, to int) int {
+	var n int
+	a.eachChunkIn(from, to, func(c *Chunk) {
+		c.saves++
+		n++
+	})
+	a.stats.Saves++
+	a.stats.observe(a)
+
+	return n
+}
+
+// Release gives back one Save of the chunks holding [from, to], and returns how
+// many chunks it let go of altogether.
+//
+// A chunk saved twice is kept until the second release. One the tail has
+// already passed joins the free list as its last save leaves it.
+func (a *TokenArena) Release(from, to int) int {
+	var n int
+	a.eachChunkIn(from, to, func(c *Chunk) {
+		if c.saves == 0 {
+			return
+		}
+		c.saves--
+		if c.saves > 0 {
+			return
+		}
+		if a.saved.holds(c) {
+			a.saved.remove(c)
+			a.free.pushBack(c)
+			n++
+		}
+	})
+
+	return n
+}
+
+// ReleaseAll gives back every save at once.
+//
+// A document boundary is where this belongs: an alias names its anchor within
+// one document, so what that document's anchors saved is finished with when the
+// document is. Call it only where nothing holds those tokens any more.
+func (a *TokenArena) ReleaseAll() {
+	for c := a.saved.popFront(); c != nil; c = a.saved.popFront() {
+		c.saves = 0
+		a.free.pushBack(c)
+	}
+	for c := a.live.head; c != nil; c = c.next {
+		c.saves = 0
+	}
+}
+
+// eachChunkIn calls do for every chunk in hand holding a token in [from, to].
+func (a *TokenArena) eachChunkIn(from, to int, do func(*Chunk)) {
+	for _, l := range []*list{&a.live, &a.saved} {
+		for c := l.head; c != nil; {
+			next := c.next
+			if c.pos > 0 && from < c.base+c.pos && to >= c.base {
+				do(c)
+			}
+			c = next
+		}
+	}
+}
+
+// chunkOf returns the chunk holding seq, wherever it stands, or nil where none
+// does any more.
+func (a *TokenArena) chunkOf(seq int) *Chunk {
+	for _, l := range []*list{&a.live, &a.saved} {
+		for c := l.head; c != nil; c = c.next {
+			if seq >= c.base && seq < c.base+c.pos {
+				return c
+			}
+		}
+	}
+
+	return nil
+}
+
+// Len returns how many tokens have been added.
+func (a *TokenArena) Len() int { return a.stats.Tokens }
+
+// All yields every token the arena still holds, in the order they were added.
+//
+// It walks the live chunks, so it yields what has not been recycled or saved
+// away. Under a pin held for the whole parse nothing leaves the live list and
+// this is the whole stream, which is what a full scan reads.
+func (a *TokenArena) All() iter.Seq[*token.Token] {
+	return func(yield func(*token.Token) bool) {
+		for c := a.live.head; c != nil; c = c.next {
+			for i := range c.pos {
+				if !yield(&c.buf[i]) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// At returns the token seq stands at, or nil where the chunk holding it has
+// been recycled.
+//
+// The parser does not read tokens this way -- it holds the addresses [Add] gave
+// it -- so this is for tests, and for a caller that wants to be told rather
+// than to read stale data.
+func (a *TokenArena) At(seq int) *token.Token {
+	c := a.chunkOf(seq)
+	if c == nil {
+		return nil
+	}
+
+	return &c.buf[seq-c.base]
+}
+
+// Generation returns how many times the chunk holding seq has been filled, and
+// false where no live chunk holds it.
+//
+// A caller holding a token from generation g may check it is still reading what
+// it was given. The lab does; the parser does not, and pays nothing for it.
+func (a *TokenArena) Generation(seq int) (int, bool) {
+	c := a.chunkOf(seq)
+	if c == nil {
+		return 0, false
+	}
+
+	return c.generation, true
+}
+
+// Reset empties the arena, letting the collector take every chunk.
+//
+// Recycling hands chunks back to the arena and not to the collector, so this is
+// the only thing that gives the memory up.
+func (a *TokenArena) Reset() {
+	*a = TokenArena{chunkSize: a.chunkSize}
+}
+
+// Stats reports what this arena has done.
+func (a *TokenArena) Stats() Stats {
+	out := a.stats
+	out.ChunkSize = a.chunkSize
+	out.Live, out.Free, out.Saved = a.live.len(), a.free.len(), a.saved.len()
+	out.Frozen = a.frozen > 0
+	for c := a.live.head; c != nil; c = c.next {
+		if c.saves > 0 {
+			out.Saved++
+		}
+	}
+	out.Bytes = (out.Allocated) * a.chunkSize * int(tokenSize)
+
+	return out
+}
+
+// tokenSize is what one token costs in a chunk.
+const tokenSize = 56
+
+// Stats is what an arena has held and what holding it cost.
+type Stats struct {
+	// Tokens is how many were added.
+	Tokens int
+	// ChunkSize is how many tokens one chunk holds.
+	ChunkSize int
+	// Allocated is how many chunks were taken from the collector, and Recycled
+	// how many were filled again from the free list. The second against the
+	// sum is how well the tape is reclaiming.
+	Allocated int
+	Recycled  int
+	// Bytes is what the allocated chunks cost. Recycling one does not add to
+	// it, which is the point of the whole thing.
+	Bytes int
+	// Live, Free and Saved are the lists as they stand now. Saved counts the
+	// chunks a Save is keeping, wherever they are.
+	Live, Free, Saved int
+	// LiveHigh, FreeHigh and SavedHigh are the most each has held. LiveHigh is
+	// what the parse needed to read at once, and SavedHigh what its saves cost.
+	LiveHigh, FreeHigh, SavedHigh int
+	// Pins counts the freezes taken and Saves the runs saved.
+	Pins, Saves int
+	// Frozen says a pin is held now, so nothing is being recycled.
+	Frozen bool
+}
+
+// observe records the high-water marks.
+func (s *Stats) observe(a *TokenArena) {
+	s.LiveHigh = max(s.LiveHigh, a.live.len())
+	s.FreeHigh = max(s.FreeHigh, a.free.len())
+	s.SavedHigh = max(s.SavedHigh, a.saved.len())
+}

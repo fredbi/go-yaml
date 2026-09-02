@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/internal/lab/tokenarena"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -67,6 +68,31 @@ func (t TokenGroupType) String() string {
 type Token struct {
 	Token *token.Token
 	Group *TokenGroup
+	// seq is where this token stands on the tape, counted from the first the
+	// scanner handed over. A walk tells the arena how far the descent has read
+	// with it, and the arena reclaims what is behind that.
+	seq int32
+}
+
+// Seq returns where this token stands on the tape.
+//
+// A grouping pass turns a token into a group by hanging the group on it and
+// clearing the raw token, so a group token keeps the place the token it was
+// made from held -- which is where the group begins. Its own seq is therefore
+// the answer, and the group is only read where a token was made by the grouping
+// rather than drawn from the stream, which leaves seq at zero.
+func (t *Token) Seq() int32 {
+	if t == nil {
+		return 0
+	}
+	if t.seq > 0 {
+		return t.seq
+	}
+	if t.Group != nil {
+		return t.Group.First().Seq()
+	}
+
+	return 0
 }
 
 func (t *Token) RawToken() *token.Token {
@@ -449,13 +475,13 @@ func (g *grouper) group2(typ TokenGroupType, a, b *Token) *Token {
 // createGroupedTokens reads the tokens of a stream into the groups the parser
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
-func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, error) {
-	g := newGrouper(raw.n)
+func createGroupedTokens(raw *tokenarena.TokenArena) ([]*Token, map[*Token]*token.Token, error) {
+	g := newGrouper(raw.Len())
 	// EXPERIMENT (2026-08-27): groupMapKeyValues is gone from this pipeline.
 	// It paired a map-key group with the value standing on its line, and the
 	// parser's descent does that itself now -- see parseMapEntry, which also
 	// took over the one conformance check the pairing carried.
-	tks := g.collect(raw.n, g.groupDirectives(
+	tks := g.collect(raw.Len(), g.groupDirectives(
 		(g.groupMapKeysByValue(
 			g.groupExplicitKeys(
 				g.groupAnchorsWithScalarTags(
@@ -485,19 +511,17 @@ func createGroupedTokens(raw *rawTokens) ([]*Token, map[*Token]*token.Token, err
 //
 // Read it once: a second read wraps the same tokens again, in wrappers of its
 // own, and the groups built over the first set would not know about them.
-func (g *grouper) stream(raw *rawTokens) iter.Seq[*Token] {
+func (g *grouper) stream(raw *tokenarena.TokenArena) iter.Seq[*Token] {
 	return func(yield func(*Token) bool) {
-		block := make([]Token, raw.n)
+		block := make([]Token, raw.Len())
 
 		var i int
-		for _, b := range raw.blocks {
-			for j := range b {
-				block[i].Token = &b[j]
-				if !yield(&block[i]) {
-					return
-				}
-				i++
+		for held := range raw.All() {
+			block[i].Token, block[i].seq = held, int32(i)
+			if !yield(&block[i]) {
+				return
 			}
+			i++
 		}
 	}
 }
