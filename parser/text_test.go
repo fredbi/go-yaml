@@ -28,18 +28,22 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 		"quoted: \"needs a copy\"\n" +
 		"block: |\n  first\n  second\n"
 
-	// ParseBytes scans a string built from the slice it is handed, so a scalar
-	// the scanner did not rewrite windows into that string and not into the
-	// caller's bytes. What is checked here is that it is a window at all: every
-	// scalar carried through unchanged aliases one buffer no larger than the
-	// document, and a scalar that had to be rewritten sits outside it.
+	// ParseBytes does not copy the document: it reads the caller's bytes
+	// through nocopy.String, so a scalar the scanner carried through unchanged
+	// is a window into that very slice. This is what says the copy is gone --
+	// it fails the moment a parse allocates a string of its own.
 	data := []byte(src)
-	addr := func(b []byte) uintptr {
+	base := uintptr(unsafe.Pointer(&data[0]))
+	indexIn := func(b []byte) int {
 		if len(b) == 0 {
-			return 0
+			return -1
+		}
+		p := uintptr(unsafe.Pointer(&b[0]))
+		if p < base || p >= base+uintptr(len(data)) {
+			return -1
 		}
 
-		return uintptr(unsafe.Pointer(&b[0]))
+		return int(p - base)
 	}
 
 	f, err := parser.New().Parse(data)
@@ -50,14 +54,14 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 	require.True(t, ok)
 
 	text := make(map[string]string)
-	at := make(map[string]uintptr)
+	inSource := make(map[string]bool)
 	for _, v := range body.Values {
 		scalar, ok := v.Value.(ast.ScalarNode)
 		require.Truef(t, ok, "%s is not a scalar", v.Key.String())
 
 		key := v.Key.String()
 		text[key] = scalar.Text()
-		at[key] = addr(scalar.Bytes())
+		inSource[key] = indexIn(scalar.Bytes()) >= 0
 
 		assert.Equalf(t, scalar.Text(), string(scalar.Bytes()),
 			"%s: Bytes and Text disagree", key)
@@ -73,27 +77,13 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 	assert.Equal(t, "needs a copy", text["quoted"])
 	assert.Equal(t, "first\nsecond\n", text["block"])
 
-	// The document's own bytes, for everything the scanner did not have to
-	// rewrite: all of them fall inside one buffer the size of the document.
-	carried := []string{"int", "float", "hex", "bool", "inf", "null", "plain"}
-	var low, high uintptr
-	for _, key := range carried {
-		require.NotZerof(t, at[key], "%s: %q has no bytes at all", key, text[key])
-		if low == 0 || at[key] < low {
-			low = at[key]
-		}
-		if at[key] > high {
-			high = at[key]
-		}
+	// The caller's own bytes, for everything the scanner did not have to
+	// rewrite.
+	for _, key := range []string{"int", "float", "hex", "bool", "inf", "null", "plain"} {
+		assert.Truef(t, inSource[key], "%s: %q should be a window into the caller's slice", key, text[key])
 	}
-	assert.Lessf(t, high-low, uintptr(len(data)),
-		"the scalars carried through span %d bytes for a %d-byte document, so they were copied one by one",
-		high-low, len(data))
-
 	// A quoted scalar loses its quotes and a block scalar its layout, so both
-	// have to be copies, standing outside the run the others share.
-	for _, key := range []string{"quoted", "block"} {
-		outside := at[key] < low || at[key] > high
-		assert.Truef(t, outside, "%s: a rewritten scalar cannot be the document's own bytes", key)
-	}
+	// have to be copies.
+	assert.False(t, inSource["quoted"], "a quoted scalar cannot be the caller's own bytes")
+	assert.False(t, inSource["block"], "a block scalar cannot be the caller's own bytes")
 }

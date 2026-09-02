@@ -35,6 +35,7 @@ import (
 	"reflect"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/printer"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -225,7 +226,7 @@ func FormatError(err error, colored, inclSource bool) string {
 func FormatErrorAtToken(msg string, tk *token.Token, source []byte, colored, inclSource bool) string {
 	var src Source
 	if len(source) > 0 {
-		src = Source{Text: string(source), FirstLine: 1}
+		src = Source{Text: nocopy.String(source), FirstLine: 1}
 	}
 
 	return formatError(msg, tk, src, colored, inclSource)

@@ -21,6 +21,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/format"
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -2012,6 +2013,40 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 	return normalizedFile, nil
 }
 
+// readAll returns everything r holds, without copying it where r already has
+// it in one piece.
+//
+// Unmarshal wraps the caller's slice in a bytes.Buffer, so copying it into
+// another buffer and then calling String on that made three copies of the
+// document before the parse began. The parser keeps windows into what it is
+// given, so handing it the caller's own bytes costs nothing and holds nothing
+// twice.
+//
+// A reader that is not backed by a slice still has to be read into one. That
+// buffer grows by doubling, so what it hands back may have spare capacity, and
+// the tree pins the whole block; the alternative is a copy the size of the
+// document, which is what this exists to avoid.
+func readAll(r io.Reader) ([]byte, error) {
+	switch b := r.(type) {
+	case *bytes.Buffer:
+		return b.Bytes(), nil
+	case *bytes.Reader:
+		src := make([]byte, b.Len())
+		if _, err := io.ReadFull(b, src); err != nil {
+			return nil, err
+		}
+
+		return src, nil
+	}
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 func (d *Decoder) isInitialized() bool {
 	return d.parsedFile != nil
 }
@@ -2022,14 +2057,15 @@ func (d *Decoder) decodeInit(ctx context.Context) error {
 			return err
 		}
 	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, d.reader); err != nil {
+	src, err := readAll(d.reader)
+	if err != nil {
 		return err
 	}
 	// Keep the document: an error found while decoding draws the lines around
-	// itself, and only the text can say what those are.
-	d.source = yamlerrors.Source{Text: buf.String(), FirstLine: 1}
-	file, err := d.parse(ctx, buf.Bytes())
+	// itself, and only the text can say what those are. It shares the bytes
+	// the tree was built from rather than copying them again.
+	d.source = yamlerrors.Source{Text: nocopy.String(src), FirstLine: 1}
+	file, err := d.parse(ctx, src)
 	if err != nil {
 		return err
 	}

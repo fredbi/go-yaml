@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/printer"
 )
@@ -364,7 +365,7 @@ func (p *Path) AnnotateSource(source []byte, colored bool) ([]byte, error) {
 	}
 	var pp printer.Printer
 
-	return []byte(pp.PrintErrorSource(string(source), 1, node.GetToken(), colored)), nil
+	return []byte(pp.PrintErrorSource(nocopy.String(source), 1, node.GetToken(), colored)), nil
 }
 
 // PathBuilder represent builder for YAMLPath.

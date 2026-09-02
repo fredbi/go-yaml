@@ -11,18 +11,27 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
 	"github.com/go-openapi/go-yaml/parser/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
 
-type Mode uint
+// mode carries the settings an Option turns on. It is not part of the API:
+// callers say what they want with [Comments] and the rest.
+type mode uint
 
 const (
-	ParseComments Mode = 1 << iota // parse comments and add them to AST
+	parseComments mode = 1 << iota // keep comments and put them in the tree
 )
 
 // ParseBytes reads src and returns the file it describes.
+//
+// src is not copied. The tree keeps windows into it -- every scalar the scanner
+// carried through unchanged is a slice of these very bytes -- so src must not
+// be written to while the returned file is in use. Copying the document was
+// costing an allocation the size of the document on every parse, held for as
+// long as the tree.
 func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
 	return New(opts...).Parse(src)
 }
@@ -130,7 +139,7 @@ type Parser struct {
 	body *tokenRef
 
 	// mode is what the options asked of the parse.
-	mode Mode
+	mode mode
 
 	// chunkSize is how many tokens one chunk of the token arena holds.
 	chunkSize int
@@ -269,13 +278,13 @@ func (p *Parser) begin(src []byte) {
 	// [Parser.Walk] is what gives it back.
 	p.tokens.Pin()
 
-	p.scan.Init(string(src))
+	p.scan.Init(nocopy.String(src))
 
 	// Guessed from the source rather than counted, since counting would mean
 	// reading the document through before parsing any of it. It sizes buffers
 	// and nothing else.
 	estimate := max(len(src)/8, 16)
-	p.reader = newReader(&p.scan, p.tokens, p.chunkSize, estimate, p.mode&ParseComments != 0)
+	p.reader = newReader(&p.scan, p.tokens, p.chunkSize, estimate, p.mode&parseComments != 0)
 	p.lineComments = p.reader.g.lineComments
 }
 
@@ -328,6 +337,9 @@ func (p *Parser) ArenaStats() ast.ArenaStats {
 
 // Parse reads src through and returns the file it describes.
 //
+// src is not copied and the tree keeps windows into it, so do not write to src
+// while the returned file is in use. See [ParseBytes].
+//
 // Call it once per parser. A comment is handed to the node that keeps it as the
 // tree is built, and a second call would find none left to hand over.
 func (p *Parser) Parse(src []byte) (*ast.File, error) {
@@ -344,7 +356,7 @@ func (p *Parser) Parse(src []byte) (*ast.File, error) {
 // drawUnder puts the document under an error read from it, so the message shows
 // the line it came from.
 func drawUnder(src []byte, err error) error {
-	return yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: string(src), FirstLine: 1})
+	return yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: nocopy.String(src), FirstLine: 1})
 }
 
 func (p *Parser) parse(ctx context) (*ast.File, error) {
