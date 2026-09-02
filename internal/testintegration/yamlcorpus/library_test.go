@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	yaml "github.com/go-openapi/go-yaml"
@@ -110,32 +111,39 @@ func TestEveryPatternParses(t *testing.T) {
 	}
 }
 
-// TestTheValueDeparturesAreStillThere measures the ones a verdict cannot see.
+// TestTheCycleIsRefusedRatherThanNilled holds the fix that closed the one
+// departure a verdict could not see.
 //
-// A cycle is read without complaint and comes back with nil where the cycle
-// was. The verdict is right -- the document is valid and the library accepts it
-// -- and the value is wrong, so no corpus of accept-or-refuse will ever find
-// this. It is measured directly instead, and the measurement is the only thing
-// standing between the ledger and fiction.
-func TestTheValueDeparturesAreStillThere(t *testing.T) {
-	var v any
-	if err := yaml.Unmarshal([]byte("recursive: &x [ *x ]\n"), &v); err != nil {
-		t.Fatalf("the cycle is now refused, so the ledger entry is stale: %v", err)
+// A cycle used to be read without complaint and come back with nil where the
+// cycle was: the verdict was right -- the document is valid and the parser
+// still accepts it -- and the value was wrong, so no corpus of accept-or-refuse
+// would ever have found it. It was measured directly, and the measurement is
+// what made the fix possible.
+//
+// The decoder now refuses, which is a position rather than a reading of the
+// specification: the representation is a graph and the alias does resolve, but a
+// Go value built by this decoder cannot hold the cycle, and saying so beats
+// substituting a value the document never had. libfyaml 1.0.0b1 and
+// go.yaml.in/yaml/v3 refuse it too; PyYAML 6.0.1 accepts and builds the cycle.
+// Declared as TagCyclicMeaning: stance.Refuses.
+func TestTheCycleIsRefusedRatherThanNilled(t *testing.T) {
+	for _, src := range []string{
+		"recursive: &x [ *x ]\n",
+		"recursive: &x { self: *x }\n",
+	} {
+		var v any
+		err := yaml.Unmarshal([]byte(src), &v)
+		if err == nil {
+			t.Errorf("%s: the cycle decoded to %#v, and it should be refused", src, v)
+			continue
+		}
+		if !strings.Contains(err.Error(), "names an anchor that is not resolved yet") {
+			t.Errorf("%s: refused for the wrong reason: %v", src, err)
+		}
 	}
 
-	top, ok := v.(map[string]any)
-	if !ok {
-		t.Fatalf("decoded to %T, and the ledger describes a mapping", v)
-	}
-
-	seq, ok := top["recursive"].([]any)
-	if !ok || len(seq) != 1 {
-		t.Fatalf("decoded to %#v, and the ledger describes a one-element sequence", top["recursive"])
-	}
-
-	if seq[0] != nil {
-		t.Errorf("the cycle decodes to %#v, and the ledger says nil -- the entry needs rewriting", seq[0])
-	}
+	// The parse is unaffected: refusing to build a value is not refusing the
+	// document, and TestEveryPatternParses above holds that for every pattern.
 }
 
 // TestEveryDepartureNamesAShape keeps the ledger anchored to something that can

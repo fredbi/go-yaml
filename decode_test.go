@@ -1105,17 +1105,6 @@ merge:
 			value:  struct{ B []int }{[]int{1, 2}},
 		},
 		{
-			source: "key1: &anchor\n  subkey: *anchor\nkey2: *anchor\n",
-			value: map[string]any{
-				"key1": map[string]any{
-					"subkey": nil,
-				},
-				"key2": map[string]any{
-					"subkey": nil,
-				},
-			},
-		},
-		{
 			source: `{a: &a c, *a : b}`,
 			value:  map[string]string{"a": "c", "c": "b"},
 		},
@@ -4076,19 +4065,22 @@ service: &service
 		}
 	})
 
-	t.Run("self recursion still detected", func(t *testing.T) {
-		// Ensure the fix doesn't break legitimate self-recursion detection
+	t.Run("self recursion is refused", func(t *testing.T) {
+		// An alias standing inside the node its own anchor names has nothing to
+		// resolve to. It used to decode to nil, which reported a mapping with a
+		// null in it and no error at all; libfyaml and go.yaml.in/yaml/v3 both
+		// refuse the document.
 		yml := `
 a: &a
   self: *a
 `
 		var result map[string]any
-		if err := yaml.Unmarshal([]byte(yml), &result); err != nil {
-			t.Fatalf("failed to decode: %v", err)
+		err := yaml.Unmarshal([]byte(yml), &result)
+		if err == nil {
+			t.Fatalf("a self-recursive alias should be refused, decoded to: %v", result)
 		}
-		a, _ := result["a"].(map[string]any)
-		if a["self"] != nil {
-			t.Fatalf("self-recursive alias should be nil, got: %v", a["self"])
+		if !strings.Contains(err.Error(), `alias "a" names an anchor that is not resolved yet`) {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 }
