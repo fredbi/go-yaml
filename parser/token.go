@@ -391,11 +391,10 @@ type grouper struct {
 
 	tokens []tapeToken
 	groups []tokenGroup
-	// passA and passB are the two buffers the grouping passes write into. A
-	// pass reads one and writes the other, so the nine of them cost two
-	// allocations between them rather than one apiece.
-	passA, passB []*tapeToken
-	writeB       bool
+	// grouped is what the stages hand out, reused from one run to the next.
+	// One buffer suffices now that a token walks the stages rather than each
+	// stage walking the run: nothing reads what an earlier stage wrote.
+	grouped []*tapeToken
 	// nested counts the passes running inside another pass.
 	nested int
 	// err is the first refusal a pass reported. A pass that fails stops
@@ -435,28 +434,20 @@ func (g *grouper) fail(err error) {
 // that, so a pass added to createGroupedTokens goes before that one.
 // out returns the buffer the next pass writes into.
 //
-// The passes of one run hand a slice from one to the next, so two buffers go
-// round: a pass reads the one before it and fills the other, and the pass after
-// it fills the first again. What a pass two steps back wrote is finished with
-// by then.
+// out returns the buffer the stages hand into, sized for a run of n tokens.
+//
+// The nested grouping of an explicit key's body takes one of its own: the
+// grouper's is in hand, being filled by the run around it.
 func (g *grouper) out(n int) []*tapeToken {
 	if g.nested > 0 {
-		// A pass running inside another takes a buffer of its own: both of the
-		// grouper's are in hand, one being read and one being filled.
 		return make([]*tapeToken, 0, n)
 	}
 
-	g.writeB = !g.writeB
-
-	buf := &g.passA
-	if g.writeB {
-		buf = &g.passB
-	}
-	if cap(*buf) < n {
-		*buf = make([]*tapeToken, 0, n)
+	if cap(g.grouped) < n {
+		g.grouped = make([]*tapeToken, 0, n)
 	}
 
-	return (*buf)[:0]
+	return g.grouped[:0]
 }
 
 const (
@@ -936,74 +927,6 @@ func (g *grouper) keyedValue(key, value *tapeToken) *tapeToken {
 	}
 
 	return g.group2(TokenGroupMapKeyValue, key, value)
-}
-
-// groupDirectives joins a '%' with its name and the values written after it on
-// its line.
-//
-// The window is that line and the comment lines that may follow it: a directive
-// has to be followed by the '---' that opens the document, and the comments in
-// between belong to neither. They are the reason a perfectly ordinary
-// "%YAML 1.2" with a note above the header was refused whenever comments were
-// being parsed.
-func (g *grouper) groupDirectives(in []*tapeToken) []*tapeToken {
-	out := g.out(len(in))
-	{
-		for _, tk := range in {
-			if g.directive.head != nil {
-				if g.directive.name == nil {
-					g.directive.name = g.group2(TokenGroupDirectiveName, g.directive.head, tk)
-
-					continue
-				}
-				if tk.Line() == g.directive.head.Line() {
-					g.directive.values = append(g.directive.values, tk)
-
-					continue
-				}
-				if tk.Type() == token.CommentType {
-					g.directive.comments = append(g.directive.comments, tk)
-
-					continue
-				}
-				if tk.Type() != token.DocumentHeaderType {
-					g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", g.directive.head.RawToken()))
-
-					return out
-				}
-
-				head := g.directive.name
-				if len(g.directive.values) != 0 {
-					head = g.group(TokenGroupDirective, append([]*tapeToken{g.directive.name}, g.directive.values...))
-				}
-				out = append(out, head)
-				out = append(out, g.directive.comments...)
-				g.directive.head, g.directive.name, g.directive.values, g.directive.comments = nil, nil, nil, nil
-				// The '---' is not part of the g.directive.head, and is read as any
-				// other token would be.
-			}
-
-			if tk.Type() == token.DirectiveType {
-				g.directive.head = tk
-
-				continue
-			}
-			out = append(out, tk)
-		}
-
-		if !g.ending {
-			return out
-		}
-
-		switch {
-		case g.directive.head != nil && g.directive.name == nil:
-			g.fail(yamlerrors.NewSyntax("undefined directive value", g.directive.head.RawToken()))
-		case g.directive.head != nil:
-			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", g.directive.head.RawToken()))
-		}
-	}
-
-	return out
 }
 
 func isScalarType(tk *tapeToken) bool {

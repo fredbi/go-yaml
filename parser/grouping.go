@@ -62,6 +62,7 @@ func init() {
 		stageAnchorsWithScalarTags,
 		stageExplicitKeys,
 		stageMapKeysByValue,
+		stageDirectives,
 	}
 	flushers = []flusher{
 		nil,
@@ -71,6 +72,7 @@ func init() {
 		flushAnchorsWithScalarTags,
 		flushExplicitKeys,
 		flushMapKeysByValue,
+		flushDirectives,
 	}
 }
 
@@ -119,7 +121,7 @@ func (g *grouper) settled() bool {
 	return g.blockHeader == nil &&
 		g.anchor == nil && g.name == nil && g.alias == nil &&
 		g.tag == nil && g.tagged == nil &&
-		g.explicit.key == nil
+		g.explicit.key == nil && g.directive.head == nil
 }
 
 // readByAStage says which token types a stage reads. Every other type walks the
@@ -509,4 +511,72 @@ func stageNameAt(i int) string {
 
 	return runtime.FuncForPC(reflect.ValueOf(stages[i]).Pointer()).Name()[strings.LastIndex(
 		runtime.FuncForPC(reflect.ValueOf(stages[i]).Pointer()).Name(), ".")+1:]
+}
+
+// stageDirectives joins a '%' with the name and values on its line, and holds
+// the comments written under it until the '---' that ends the directives.
+func stageDirectives(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	d := &g.directive
+	if d.head != nil {
+		switch {
+		case d.name == nil:
+			d.name = g.group2(TokenGroupDirectiveName, d.head, tk)
+
+			return out
+		case tk.Line() == d.head.Line():
+			d.values = append(d.values, tk)
+
+			return out
+		case tk.Type() == token.CommentType:
+			d.comments = append(d.comments, tk)
+
+			return out
+		case tk.Type() != token.DocumentHeaderType:
+			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", d.head.RawToken()))
+
+			return out
+		}
+
+		out = g.emitDirective(at, out)
+		// The '---' is not part of the directive, and is read as any other
+		// token would be.
+	}
+
+	if tk.Type() == token.DirectiveType {
+		d.head = tk
+
+		return out
+	}
+
+	return g.pass(at, tk, out)
+}
+
+// emitDirective hands on the directive and the comments written under it.
+func (g *grouper) emitDirective(at int, out []*tapeToken) []*tapeToken {
+	d := &g.directive
+
+	head := d.name
+	if len(d.values) != 0 {
+		head = g.group(TokenGroupDirective, append([]*tapeToken{d.name}, d.values...))
+	}
+	out = g.pass(at, head, out)
+	for _, comment := range d.comments {
+		out = g.pass(at, comment, out)
+	}
+	d.head, d.name, d.values, d.comments = nil, nil, nil, nil
+
+	return out
+}
+
+// flushDirectives refuses a directive the stream ended on: a directive names
+// what follows it, and nothing does.
+func flushDirectives(g *grouper, _ int, out []*tapeToken) []*tapeToken {
+	switch d := &g.directive; {
+	case d.head != nil && d.name == nil:
+		g.fail(yamlerrors.NewSyntax("undefined directive value", d.head.RawToken()))
+	case d.head != nil:
+		g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", d.head.RawToken()))
+	}
+
+	return out
 }

@@ -287,17 +287,17 @@ func (r *reader) fill() error {
 	// Each pass reads what the one before it left and hands on what it made of
 	// it, keeping on the grouper what it cannot settle yet, so a group
 	// straddling the join between two runs is grouped as one.
-	// The first two stages read one token at a time, the rest still take the
-	// run whole. What the machine hands out is the run the passes then read.
-	machine := g.out(len(r.run))
+	// Each token walks the grouping on its own. What the stages settle comes
+	// out in order, and what they are still holding stays with them until the
+	// run after this one, or until finish empties them at the end of the
+	// stream.
+	out := g.out(len(r.run))
 	for _, tk := range r.run {
-		machine = g.feed(tk, machine)
+		out = g.feed(tk, out)
 	}
 	if g.ending {
-		machine = g.finish(machine)
+		out = g.finish(out)
 	}
-
-	out := g.groupDirectives(machine)
 	if g.err != nil {
 		return g.err
 	}
