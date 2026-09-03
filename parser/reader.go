@@ -297,9 +297,7 @@ func (r *reader) fill() error {
 		machine = g.finish(machine)
 	}
 
-	out := g.groupExplicitKeys(machine)
-	out = g.groupMapKeysByValue(out)
-	out = g.groupDirectives(out)
+	out := g.groupDirectives(machine)
 	if g.err != nil {
 		return g.err
 	}

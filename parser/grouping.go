@@ -4,6 +4,10 @@
 package parser
 
 import (
+	"reflect"
+	"runtime"
+	"strings"
+
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -56,6 +60,8 @@ func init() {
 		stageAnchors,
 		stageScalarTags,
 		stageAnchorsWithScalarTags,
+		stageExplicitKeys,
+		stageMapKeysByValue,
 	}
 	flushers = []flusher{
 		nil,
@@ -63,6 +69,8 @@ func init() {
 		flushAnchors,
 		flushScalarTags,
 		flushAnchorsWithScalarTags,
+		flushExplicitKeys,
+		flushMapKeysByValue,
 	}
 }
 
@@ -80,11 +88,25 @@ func (g *grouper) feed(tk *tapeToken, out []*tapeToken) []*tapeToken {
 		// still owes it that note.
 		g.lineComment = tk
 
-		return append(out, tk)
+		return g.pass(alwaysLooking-1, tk, out)
 	}
 
 	return g.pass(-1, tk, out)
 }
+
+// alwaysLooking is the first stage that has to see every token whatever its
+// type, and so where the short way rejoins the chain.
+//
+// stageExplicitKeys counts the flow collections open around it, and
+// stageMapKeysByValue holds a window of everything a ':' arriving next might
+// make a key of. A token either of them never sees is a bracket uncounted or a
+// token missing from that window. The five stages before them hold one token at
+// a time and read a type apiece, so they can be skipped where none is holding
+// and none reads this one.
+//
+// ⚠️ It is an index into stages, and stages is built in init: adding a stage
+// before these two moves it.
+const alwaysLooking = 5
 
 // settled reports whether every stage has handed on what it was holding. Where
 // one is still waiting the token has to walk the chain, whatever its type: it
@@ -96,7 +118,8 @@ func (g *grouper) feed(tk *tapeToken, out []*tapeToken) []*tapeToken {
 func (g *grouper) settled() bool {
 	return g.blockHeader == nil &&
 		g.anchor == nil && g.name == nil && g.alias == nil &&
-		g.tag == nil && g.tagged == nil
+		g.tag == nil && g.tagged == nil &&
+		g.explicit.key == nil
 }
 
 // readByAStage says which token types a stage reads. Every other type walks the
@@ -328,4 +351,162 @@ func flushAnchorsWithScalarTags(g *grouper, at int, out []*tapeToken) []*tapeTok
 	g.tagged = nil
 
 	return g.pass(at, held, out)
+}
+
+// stageExplicitKeys joins a '?' with the body naming its key.
+//
+// The body is read to its end and grouped on its own, which is the one place
+// the grouping re-enters itself: a body may hold a mapping, and a mapping's
+// keys are found by the stage after this one.
+func stageExplicitKeys(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	if g.explicit.key != nil {
+		if !endsExplicitKeyBody(tk, g.explicit.keyColumn, g.explicit.keyInFlow, &g.explicit.bodyDepth) {
+			g.explicit.body = append(g.explicit.body, tk)
+
+			return out
+		}
+
+		var ok bool
+		if out, ok = g.emitExplicitKey(at, out); !ok {
+			return out
+		}
+		// The token that ended the body is not part of it, and is read as any
+		// other token would be.
+	}
+
+	switch tk.Type() {
+	case token.MappingStartType, token.SequenceStartType:
+		g.explicit.flowDepth++
+
+		return g.pass(at, tk, out)
+	case token.MappingEndType, token.SequenceEndType:
+		if g.explicit.flowDepth > 0 {
+			g.explicit.flowDepth--
+		}
+
+		return g.pass(at, tk, out)
+	case token.MappingKeyType:
+		g.explicit.key, g.explicit.keyColumn = tk, tk.Column()
+		g.explicit.keyInFlow, g.explicit.bodyDepth = g.explicit.flowDepth > 0, 0
+
+		return out
+	default:
+		return g.pass(at, tk, out)
+	}
+}
+
+// emitExplicitKey groups the '?' with the body read for it and hands it on.
+func (g *grouper) emitExplicitKey(at int, out []*tapeToken) ([]*tapeToken, bool) {
+	grouped, err := g.groupExplicitKeyBody(g.explicit.body)
+	if err != nil {
+		g.fail(err)
+
+		return out, false
+	}
+
+	// A '?' with nothing after it opens an entry whose key is the empty node,
+	// which is what a lone '?' on its line, and a '?' whose ':' is on the next
+	// one, are. The group holds the indicator alone and the parser supplies the
+	// null.
+	members := []*tapeToken{g.explicit.key}
+	if len(grouped) == 0 {
+		members = append(members, g.implicitNullKeyToken(g.explicit.key))
+	}
+	members = append(members, grouped...)
+
+	g.explicit.key, g.explicit.body = nil, g.explicit.body[:0]
+
+	return g.pass(at, g.group(TokenGroupMapKey, members), out), true
+}
+
+// flushExplicitKeys groups a '?' whose body ran to the end of the stream.
+func flushExplicitKeys(g *grouper, at int, out []*tapeToken) []*tapeToken {
+	if g.explicit.key == nil {
+		return out
+	}
+
+	out, _ = g.emitExplicitKey(at, out)
+
+	return out
+}
+
+// stageMapKeysByValue joins a key with the ':' that follows it.
+//
+// It holds a window rather than a token: everything a ':' arriving next might
+// make a key of. What may be handed on is handed on after every token, which is
+// keyWindow.release, and what may not is what a flow collection still open
+// reaches back over.
+func stageMapKeysByValue(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	w := &g.keys
+
+	switch tk.Type() {
+	case token.MappingStartType, token.SequenceStartType:
+		w.openers = append(w.openers, len(w.held))
+		w.seq = append(w.seq, tk.Type() == token.SequenceStartType)
+		w.held = append(w.held, tk)
+	case token.MappingEndType, token.SequenceEndType:
+		if len(w.openers) > 0 {
+			w.openers = w.openers[:len(w.openers)-1]
+			w.seq = w.seq[:len(w.seq)-1]
+		}
+		w.held = append(w.held, tk)
+	case token.MappingValueType:
+		if !g.keyBefore(w, tk) {
+			return out
+		}
+	default:
+		w.held = append(w.held, tk)
+	}
+
+	if len(w.held) > g.heldHigh {
+		g.heldHigh = len(w.held)
+	}
+
+	return g.releaseWindow(at, w, out)
+}
+
+// releaseWindow hands on what the window no longer needs to keep.
+func (g *grouper) releaseWindow(at int, w *keyWindow, out []*tapeToken) []*tapeToken {
+	keep := w.keepFrom()
+	if keep == 0 {
+		// Nothing may be handed on: a flow collection is open and may yet close
+		// and stand as a key. Copying the window onto itself and taking zero
+		// off every opener is what that used to cost, once per token, which
+		// made a document of nothing but "[" quadratic in its own length.
+		return out
+	}
+
+	for _, held := range w.held[:keep] {
+		out = g.pass(at, held, out)
+	}
+
+	w.held = append(w.held[:0], w.held[keep:]...)
+	for i := range w.openers {
+		w.openers[i] -= keep
+	}
+
+	return out
+}
+
+// flushMapKeysByValue hands on the window: no ':' is coming to make a key of
+// any of it.
+func flushMapKeysByValue(g *grouper, at int, out []*tapeToken) []*tapeToken {
+	w := &g.keys
+	for _, held := range w.held {
+		out = g.pass(at, held, out)
+	}
+	w.held = w.held[:0]
+
+	return out
+}
+
+// stageNameAt names the stage at i, for the test that pins alwaysLooking to the
+// chain it indexes.
+func stageNameAt(i int) string {
+	if i < 0 || i >= len(stages) {
+		return ""
+	}
+
+	return runtime.FuncForPC(reflect.ValueOf(stages[i]).Pointer()).Name()[strings.LastIndex(
+		runtime.FuncForPC(reflect.ValueOf(stages[i]).Pointer()).Name(), ".")+1:]
 }
