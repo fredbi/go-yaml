@@ -2686,8 +2686,8 @@ func TestTokenOffset(t *testing.T) {
 		if tokens[4].Value != "1.2.3" {
 			t.Fatalf("unexpected value. got %q", tokens[4].Value)
 		}
-		if tokens[4].Position.Offset != 21 {
-			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset)
+		if tokens[4].Position.Offset() != 21 {
+			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
 		}
 	})
 	t.Run("lf", func(t *testing.T) {
@@ -2699,11 +2699,11 @@ func TestTokenOffset(t *testing.T) {
 		if tokens[4].Value != "1.2.3" {
 			t.Fatalf("unexpected value. got %q", tokens[4].Value)
 		}
-		if tokens[4].Position.Offset != 20 {
-			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset)
+		if tokens[4].Position.Offset() != 20 {
+			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
 		}
-		if !strings.HasPrefix(content[tokens[4].Position.Offset:], "1.2.3") {
-			t.Fatalf("offset %d does not address the token", tokens[4].Position.Offset)
+		if !strings.HasPrefix(content[tokens[4].Position.Offset():], "1.2.3") {
+			t.Fatalf("offset %d does not address the token", tokens[4].Position.Offset())
 		}
 	})
 }

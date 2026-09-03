@@ -258,11 +258,11 @@ func (f *Formatter) origin(tk *token.Token) string {
 	if tk == nil {
 		return ""
 	}
-	if f.existsComment || tk.CommentBreaksAbove == 0 {
+	if f.existsComment || tk.CommentBreaksAbove() == 0 {
 		return tk.Origin
 	}
 
-	return strings.Repeat("\n", int(tk.CommentBreaksAbove)) + tk.Origin
+	return strings.Repeat("\n", int(tk.CommentBreaksAbove())) + tk.Origin
 }
 
 func (f *Formatter) formatDocument(n *ast.DocumentNode) string {
@@ -390,7 +390,7 @@ func (f *Formatter) formatAlias(n *ast.AliasNode) string {
 			if strings.Contains(formatted, "\n") {
 				// If the first character is not a newline, the first line should be output without indentation.
 				isIgnoredFirstLine := !strings.HasPrefix(formatted, "\n")
-				formatted = f.addIndentSpace(int(n.GetToken().Position.IndentNum), formatted, isIgnoredFirstLine)
+				formatted = f.addIndentSpace(int(n.GetToken().Position.IndentNum()), formatted, isIgnoredFirstLine)
 			}
 			return formatted
 		}

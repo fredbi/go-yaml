@@ -60,9 +60,9 @@ c: 2
 
 	require.Len(t, second, len(first))
 	for i := range first {
-		assert.Equalf(t, first[i].BlankLineAbove, second[i].BlankLineAbove,
+		assert.Equalf(t, first[i].BlankLineAbove(), second[i].BlankLineAbove(),
 			"token %d (%s %q): BlankLineAbove differs on the second Init", i, first[i].Type, first[i].Value)
-		assert.Equalf(t, first[i].CommentBreaksAbove, second[i].CommentBreaksAbove,
+		assert.Equalf(t, first[i].CommentBreaksAbove(), second[i].CommentBreaksAbove(),
 			"token %d (%s %q): CommentBreaksAbove differs on the second Init", i, first[i].Type, first[i].Value)
 	}
 
@@ -70,10 +70,10 @@ c: 2
 	// compares nothing.
 	var blanks, breaks int
 	for _, tk := range first {
-		if tk.BlankLineAbove {
+		if tk.BlankLineAbove() {
 			blanks++
 		}
-		if tk.CommentBreaksAbove > 0 {
+		if tk.CommentBreaksAbove() > 0 {
 			breaks++
 		}
 	}

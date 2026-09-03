@@ -806,7 +806,7 @@ func (n *StringNode) String() string {
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
 		lbc := token.DetectLineBreakCharacter(n.Value)
 		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
-		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
+		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum()))
 		values := []string{}
 		for _, v := range strings.Split(n.Value, lbc) {
 			values = append(values, fmt.Sprintf("%s%s%s", space, indent, v))
@@ -840,7 +840,7 @@ func (n *StringNode) stringWithoutComment() string {
 		// It works mostly, but inconsistencies occur if line break characters are mixed.
 		lbc := token.DetectLineBreakCharacter(n.Value)
 		space := strings.Repeat(" ", int(n.Token.Position.Column)-1)
-		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum))
+		indent := strings.Repeat(" ", int(n.Token.Position.IndentNum()))
 		values := []string{}
 		for _, v := range strings.Split(n.Value, lbc) {
 			values = append(values, fmt.Sprintf("%s%s%s", space, indent, v))
@@ -1925,7 +1925,7 @@ func (n *CommentGroupNode) StringWithSpace(col int) string {
 	space := strings.Repeat(" ", col)
 	for _, comment := range n.Comments {
 		space := space
-		if comment.Token.BlankLineAbove {
+		if comment.Token.BlankLineAbove() {
 			space = fmt.Sprintf("%s%s", "\n", space)
 		}
 		values = append(values, space+comment.String())

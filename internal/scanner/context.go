@@ -666,10 +666,10 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		return token.Token{}, false
 	}
 	origin := c.text(c.obuf, c.originStart)
-	// pos.Offset is where the value starts in the source. The cursor is not:
+	// pos.Offset() is where the value starts in the source. The cursor is not:
 	// a plain scalar is cut only once the scanner knows it did not run on to
 	// the next line, by which time the cursor stands well past it.
-	value := c.text(source, int(pos.Offset))
+	value := c.text(source, int(pos.Offset()))
 
 	var tk token.Token
 	if c.isMultiLine() {

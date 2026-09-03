@@ -22,7 +22,7 @@ func sourceText(origin string) string {
 
 // at returns the source from offset onwards.
 //
-// Token.Position.Offset is a 0-based byte index into the source as it was
+// Token.Position.Offset() is a 0-based byte index into the source as it was
 // handed in, byte order marks included: the scanner steps over a mark rather
 // than deleting it. This is the one place the test encodes what an Offset
 // means.
@@ -90,7 +90,7 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 				continue
 			}
 			total++
-			if !strings.HasPrefix(at(src, int(tk.Position.Offset)), want) {
+			if !strings.HasPrefix(at(src, int(tk.Position.Offset())), want) {
 				missed[tk.Type.String()]++
 			}
 		}

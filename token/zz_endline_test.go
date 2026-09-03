@@ -30,9 +30,9 @@ func TestEndLineMatchesCountingTheOrigin(t *testing.T) {
 
 		for tk := range s.All() {
 			want := tk.Position.Line + int32(strings.Count(strings.Trim(tk.Origin, " \r\n"), "\n"))
-			require.Equalf(t, want, tk.EndLine,
+			require.Equalf(t, want, tk.EndLine(),
 				"%s at line %d: Origin %q", tk.Type, tk.Position.Line, tk.Origin)
-			require.GreaterOrEqualf(t, tk.EndLine, tk.Position.Line,
+			require.GreaterOrEqualf(t, tk.EndLine(), tk.Position.Line,
 				"%s ends before it starts", tk.Type)
 		}
 		require.NoError(t, s.Err())
@@ -50,7 +50,7 @@ func TestEndLineCountsCarriageReturns(t *testing.T) {
 		{"a\n\nb", 2}, {"\n\na\n\n", 0}, {"  a  ", 0}, {"a\r\n\r\nb", 2},
 	} {
 		tk := token.New("v", test.org, token.Position{Line: 10, Column: 1})
-		require.Equalf(t, 10+test.want, tk.EndLine, "org %q", test.org)
+		require.Equalf(t, 10+test.want, tk.EndLine(), "org %q", test.org)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestSyntheticTokensEndWhereTheyStart(t *testing.T) {
 	tk := token.New("null", " null", token.Position{Line: 7, Column: 3})
 	tk.Type = token.ImplicitNullType
 
-	require.Equal(t, int32(7), tk.EndLine)
-	require.Equal(t, tk.Position.Line, tk.EndLine)
+	require.Equal(t, int32(7), tk.EndLine())
+	require.Equal(t, tk.Position.Line, tk.EndLine())
 }
 
 func handwritten() []string {

@@ -1337,7 +1337,7 @@ func keyEndLine(tk *tapeToken) int {
 		return tk.Line()
 	}
 
-	return int(raw.EndLine)
+	return int(raw.EndLine())
 }
 
 // closesFlowCollection reports whether tk ends a flow collection.

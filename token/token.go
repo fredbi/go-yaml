@@ -857,7 +857,7 @@ func Make(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 
 	if typ, ok := reservedKeywordTypes[value]; ok {
@@ -905,15 +905,47 @@ func Make(value string, org string, pos Position) Token {
 // memory to begin with, and a token holds this by value rather than pointing at
 // it, so its width is the token's width.
 type Position struct {
-	Line      int32
-	Column    int32
-	Offset    int32
-	IndentNum int32
+	Line   int32
+	Column int32
+	// where packs Offset in its low 32 bits and IndentNum in its high 32,
+	// which keeps a token inside the nine registers an argument or a result
+	// may use: Go counts a struct's fields rather than its words, so four
+	// int32 here cost four registers and two of them cost one.
+	//
+	// Read them with [Position.Offset] and [Position.IndentNum].
+	where uint64
+}
+
+// Offset is the byte the token starts at, counting from 0, so that src[Offset:]
+// is the token.
+func (p Position) Offset() int32 { return int32(p.where & 0xFFFFFFFF) }
+
+// IndentNum is the number of spaces the line the token stands on is indented
+// by.
+func (p Position) IndentNum() int32 { return int32(p.where >> 32) }
+
+// SetOffset records the byte the token starts at.
+func (p *Position) SetOffset(offset int32) {
+	p.where = p.where&^0xFFFFFFFF | uint64(uint32(offset))
+}
+
+// SetIndentNum records how far the token's line is indented.
+func (p *Position) SetIndentNum(indent int32) {
+	p.where = p.where&0xFFFFFFFF | uint64(uint32(indent))<<32
+}
+
+// At builds a position, which the packed fields keep a literal from doing.
+func At(line, column, offset, indentNum int32) Position {
+	return Position{
+		Line:   line,
+		Column: column,
+		where:  uint64(uint32(offset)) | uint64(uint32(indentNum))<<32,
+	}
 }
 
 // String position to text
 func (p *Position) String() string {
-	return fmt.Sprintf("[line:%d,column:%d,offset:%d]", p.Line, p.Column, p.Offset)
+	return fmt.Sprintf("[line:%d,column:%d,offset:%d]", p.Line, p.Column, p.Offset())
 }
 
 // Token type for token
@@ -929,30 +961,22 @@ type Token struct {
 	Origin string
 	// Position is where the token stands in the source.
 	Position Position
-	// CommentBreaksAbove counts the line breaks taken up by the comments
-	// written immediately above this token. A document rendered without those
-	// comments still has to leave the lines they stood on, or what was written
-	// under them runs into what was written before.
-	CommentBreaksAbove int32
-	// EndLine is the line the token's text ends on, counting from 1 as
-	// [Position.Line] does. A token written on one line ends on the line it
-	// starts on, so EndLine equals Position.Line for all but block scalars,
-	// multi-line quoted scalars and comments.
+	// spans packs three numbers that would otherwise take a register each:
+	// the line the token ends on, the line breaks its comments take up, and
+	// whether a blank line stands above it. Read them with [Token.EndLine()],
+	// [Token.CommentBreaksAbove()] and [Token.BlankLineAbove()].
 	//
-	// It is what a reader wants when it asks how far a token reaches, and it is
-	// settled here rather than counted again from [Token.Origin] at every site
-	// that asks. Leading and trailing whitespace does not count: those breaks
-	// belong to the gap around the token, not to the token.
+	// A token crosses a function boundary in registers only if it decomposes
+	// into nine or fewer of them, and Go counts fields rather than words: three
+	// small numbers cost three registers written plainly and one packed. The
+	// scanner hands a token back on every call, so what that costs is paid
+	// hundreds of thousands of times for a document.
 	//
-	// A token the parser makes up for a value the document leaves out ends
-	// where it starts, having no text in the document at all.
-	EndLine int32
+	// Layout, from the low bit: EndLine in 32, CommentBreaksAbove in 31,
+	// BlankLineAbove in 1.
+	spans uint64
 	// Type is a token type.
 	Type Type
-	// BlankLineAbove records that the author left an empty line above this
-	// token. The renderer writes one back where it finds one, which is how a
-	// document keeps the spacing it was written with.
-	BlankLineAbove bool
 }
 
 // TextBytes returns s as bytes without copying it.
@@ -1002,7 +1026,7 @@ func (t *Token) Clone() *Token {
 func (t *Token) Dump() {
 	fmt.Printf(
 		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [ORG]:%q [POS(line:column:offset)]: %d:%d:%d\n",
-		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.Offset,
+		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.Offset(),
 	)
 }
 
@@ -1051,7 +1075,7 @@ func MakeString(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1062,7 +1086,7 @@ func SequenceEntry(org string, pos Position) *Token {
 		Value:    string(SequenceEntryCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1073,7 +1097,7 @@ func MappingKey(pos Position) *Token {
 		Value:    string(MappingKeyCharacter),
 		Origin:   string(MappingKeyCharacter),
 		Position: pos,
-		EndLine:  pos.Line,
+		spans:    uint64(pos.Line),
 	}
 }
 
@@ -1084,7 +1108,7 @@ func MappingValue(pos Position) *Token {
 		Value:    string(MappingValueCharacter),
 		Origin:   string(MappingValueCharacter),
 		Position: pos,
-		EndLine:  pos.Line,
+		spans:    uint64(pos.Line),
 	}
 }
 
@@ -1095,7 +1119,7 @@ func CollectEntry(org string, pos Position) *Token {
 		Value:    string(CollectEntryCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1106,7 +1130,7 @@ func SequenceStart(org string, pos Position) *Token {
 		Value:    string(SequenceStartCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1117,7 +1141,7 @@ func SequenceEnd(org string, pos Position) *Token {
 		Value:    string(SequenceEndCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1128,7 +1152,7 @@ func MappingStart(org string, pos Position) *Token {
 		Value:    string(MappingStartCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1139,7 +1163,7 @@ func MappingEnd(org string, pos Position) *Token {
 		Value:    string(MappingEndCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1150,7 +1174,7 @@ func Comment(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1161,7 +1185,7 @@ func Anchor(org string, pos Position) *Token {
 		Value:    string(AnchorCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1172,7 +1196,7 @@ func Alias(org string, pos Position) *Token {
 		Value:    string(AliasCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1183,7 +1207,7 @@ func Tag(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1194,7 +1218,7 @@ func Literal(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1205,7 +1229,7 @@ func Folded(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1216,7 +1240,7 @@ func SingleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1227,7 +1251,7 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1238,7 +1262,7 @@ func Directive(org string, pos Position) *Token {
 		Value:    string(DirectiveCharacter),
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1249,7 +1273,7 @@ func Space(pos Position) *Token {
 		Value:    string(SpaceCharacter),
 		Origin:   string(SpaceCharacter),
 		Position: pos,
-		EndLine:  pos.Line,
+		spans:    uint64(pos.Line),
 	}
 }
 
@@ -1260,7 +1284,7 @@ func MergeKey(org string, pos Position) *Token {
 		Value:    "<<",
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1271,7 +1295,7 @@ func DocumentHeader(org string, pos Position) *Token {
 		Value:    "---",
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1282,7 +1306,7 @@ func DocumentEnd(org string, pos Position) *Token {
 		Value:    "...",
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1296,7 +1320,7 @@ func Invalid(org string, pos Position) *Token {
 		Value:    org,
 		Origin:   org,
 		Position: pos,
-		EndLine:  pos.Line + int32(breaksIn(org)),
+		spans:    uint64(pos.Line + int32(breaksIn(org))),
 	}
 }
 
@@ -1337,4 +1361,62 @@ func breaksIn(org string) int {
 	}
 
 	return n
+}
+
+// The token's packed spans. EndLine takes the low 32 bits, CommentBreaksAbove
+// the next 31, and BlankLineAbove the top one.
+const (
+	endLineBits    = 32
+	commentBits    = 31
+	endLineMask    = 1<<endLineBits - 1
+	commentMask    = 1<<commentBits - 1
+	commentShift   = endLineBits
+	blankLineShift = endLineBits + commentBits
+)
+
+// EndLine is the line the token's text ends on, counting from 1 as
+// [Position.Line] does. A token written on one line ends on the line it starts
+// on, so EndLine equals Position.Line for all but block scalars, multi-line
+// quoted scalars and comments.
+//
+// It is what a reader wants when it asks how far a token reaches, and it is
+// settled where the token is built rather than counted again from
+// [Token.Origin] at every site that asks. Leading and trailing whitespace does
+// not count: those breaks belong to the gap around the token, not to the token.
+//
+// A token the parser makes up for a value the document leaves out ends where it
+// starts, having no text in the document at all.
+func (t Token) EndLine() int32 { return int32(t.spans & endLineMask) }
+
+// CommentBreaksAbove counts the line breaks taken up by the comments written
+// immediately above this token. A document rendered without those comments
+// still has to leave the lines they stood on, or what was written under them
+// runs into what was written before.
+func (t Token) CommentBreaksAbove() int32 {
+	return int32(t.spans >> commentShift & commentMask)
+}
+
+// BlankLineAbove reports whether the author left an empty line above this
+// token. The renderer writes one back where it finds one, which is how a
+// document keeps the spacing it was written with.
+func (t Token) BlankLineAbove() bool { return t.spans>>blankLineShift != 0 }
+
+// SetEndLine records the line the token's text ends on.
+func (t *Token) SetEndLine(line int32) {
+	t.spans = t.spans&^endLineMask | uint64(line)&endLineMask
+}
+
+// SetCommentBreaksAbove records the line breaks the comments above this token
+// take up.
+func (t *Token) SetCommentBreaksAbove(n int32) {
+	t.spans = t.spans&^(commentMask<<commentShift) | uint64(n)&commentMask<<commentShift
+}
+
+// SetBlankLineAbove records that the author left an empty line above this
+// token.
+func (t *Token) SetBlankLineAbove(blank bool) {
+	t.spans &^= 1 << blankLineShift
+	if blank {
+		t.spans |= 1 << blankLineShift
+	}
 }

@@ -113,12 +113,12 @@ func validateStream(text string) error {
 			// Either a byte that is not text, or a U+FFFD the author wrote:
 			// only the width tells them apart.
 			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
-				return ErrInvalidToken("found a byte that is part of no character", token.Invalid(text[i:i+1], token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)}))
+				return ErrInvalidToken("found a byte that is part of no character", token.Invalid(text[i:i+1], token.At(int32((line)), int32((column)), int32(offset), 0)))
 			}
 		}
 
 		if !printable(r) {
-			return ErrInvalidToken(fmt.Sprintf("found character %q that a YAML stream may not hold", r), token.Invalid(string(r), token.Position{Line: int32((line)), Column: int32((column)), Offset: int32(offset)}))
+			return ErrInvalidToken(fmt.Sprintf("found character %q that a YAML stream may not hold", r), token.Invalid(string(r), token.At(int32((line)), int32((column)), int32(offset), 0)))
 		}
 
 		offset++
@@ -171,14 +171,14 @@ func validateByteOrderMarks(text string) error {
 					"found a byte order mark inside a line, where a node may not hold one",
 					token.Invalid(
 						string(byteOrderMark),
-						token.Position{Line: int32(i + 1), Column: int32(column), Offset: int32(at)},
+						token.At(int32(i+1), int32(column), int32(at), 0),
 					),
 				)
 			}
 		}
 
 		if marks > 0 && !quoted.holds(offset-1) && !opensADocument(lines, i, marks) {
-			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.Position{Line: int32((i + 1)), Column: int32((1)), Offset: int32(offset)}))
+			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.At(int32((i+1)), int32((1)), int32(offset), 0)))
 		}
 
 		offset += len(raw) + 1
@@ -231,7 +231,7 @@ func quotedRanges(text string) byteRanges {
 				continue
 			}
 			written := strings.TrimLeft(tk.Origin, " \t\n\r")
-			start := int(tk.Position.Offset)
+			start := int(tk.Position.Offset())
 			if start < 0 || start+len(written) > len(text) || !strings.HasPrefix(text[start:], written) {
 				// The token's offset does not address its text, so the span
 				// cannot be trusted. Leaving it out refuses a mark that a
@@ -330,12 +330,7 @@ func printable(r rune) bool {
 func (s *Scanner) pos() token.Position {
 	s.lastIndentLevel = s.indentLevel
 
-	return token.Position{
-		Line:      int32((s.line)),
-		Column:    int32((s.column)),
-		Offset:    int32((s.offset)),
-		IndentNum: int32((s.indentNum)),
-	}
+	return token.At(int32(s.line), int32(s.column), int32(s.offset), int32(s.indentNum))
 }
 
 func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
@@ -366,12 +361,9 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	}
 	s.lastIndentLevel = level
 
-	return ctx.bufferedToken(token.Position{
-		Line:      int32((line)),
-		Column:    int32((column)),
-		Offset:    int32((s.offset - len(ctx.buf))),
-		IndentNum: int32((s.indentNum)),
-	})
+	return ctx.bufferedToken(token.At(
+		int32(line), int32(column), int32(s.offset-len(ctx.buf)), int32(s.indentNum),
+	))
 }
 
 // progressColumn advances by num characters. The column counts characters and
@@ -1207,7 +1199,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 		buffered := ctx.bufferedSrc()
 		s.savedPos = s.pos()
 		s.savedPos.Column -= int32(utf8.RuneCount(buffered))
-		s.savedPos.Offset -= int32(len(buffered))
+		s.savedPos.SetOffset(s.savedPos.Offset() - int32(len(buffered)))
 		s.hasSavedPos = true
 	}
 
@@ -1811,7 +1803,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// twice.
 		pos := headerPos
 		fromHeader := headerBuf[headerIndex:]
-		pos.Offset += int32(len(fromHeader))
+		pos.SetOffset(pos.Offset() + int32(len(fromHeader)))
 		pos.Column += int32(utf8.RuneCountInString(fromHeader))
 		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}

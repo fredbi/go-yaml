@@ -102,7 +102,7 @@ func (d *dumper) Visit(n ast.Node) ast.Visitor {
 
 	pos := "<no token>"
 	if tk := n.GetToken(); tk != nil {
-		pos = fmt.Sprintf("%d:%d+%d %q", tk.Position.Line, tk.Position.Column, tk.Position.Offset, tk.Value)
+		pos = fmt.Sprintf("%d:%d+%d %q", tk.Position.Line, tk.Position.Column, tk.Position.Offset(), tk.Value)
 	}
 	fmt.Fprintf(d.out, "%*s%s %s\n", d.depth*2, "", n.Type(), pos)
 

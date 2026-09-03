@@ -57,7 +57,7 @@ func TestMemoryFootprint(t *testing.T) {
 
 	t.Log("")
 	t.Log("[]rune is 4x because the scanner indexes runes, not bytes -- which is also why")
-	t.Log("token.Position.Offset is a rune index. See ANALYSIS-go-openapi.md §6.")
+	t.Log("token.Position.Offset() is a rune index. See ANALYSIS-go-openapi.md §6.")
 }
 
 // retained measures live heap with the value still reachable.

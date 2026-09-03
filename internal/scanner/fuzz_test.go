@@ -65,10 +65,10 @@ func assertTokenInvariants(t *testing.T, tokens token.Tokens, src string) {
 			"token %d (%v) has line %d for %q", i, tk.Type, tk.Position.Line, src)
 		// Offset is a 0-based byte index into the source, so 0 is the first
 		// byte and anything below it addresses nothing.
-		assert.GreaterOrEqualf(t, int(tk.Position.Offset), 0,
-			"token %d (%v) has offset %d for %q", i, tk.Type, tk.Position.Offset, src)
-		assert.LessOrEqualf(t, int(tk.Position.Offset), len(src),
-			"token %d (%v) has offset %d past the end of %q", i, tk.Type, tk.Position.Offset, src)
+		assert.GreaterOrEqualf(t, int(tk.Position.Offset()), 0,
+			"token %d (%v) has offset %d for %q", i, tk.Type, tk.Position.Offset(), src)
+		assert.LessOrEqualf(t, int(tk.Position.Offset()), len(src),
+			"token %d (%v) has offset %d past the end of %q", i, tk.Type, tk.Position.Offset(), src)
 	}
 }
 

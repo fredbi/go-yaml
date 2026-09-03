@@ -1113,7 +1113,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		// and a line break before the ':' is ordinary separation, so
 		// "{foo\n: bar}" is as legal as "{foo: bar}".
 		if ctx.inFlowSequence && isScalarKeyToken(tk) {
-			if int(tk.EndLine) != colonTk.Line() {
+			if int(tk.EndLine()) != colonTk.Line() {
 				return yamlerrors.NewSyntax("map key definition includes an implicit line break", tk)
 			}
 		}

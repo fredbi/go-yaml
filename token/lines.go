@@ -35,7 +35,7 @@ type Lookback struct {
 	commentBreaks int32
 }
 
-// Derive sets tk.BlankLineAbove and tk.CommentBreaksAbove from the tokens l has
+// Derive sets tk.BlankLineAbove() and tk.CommentBreaksAbove() from the tokens l has
 // read, then reads tk itself.
 //
 // The first token of a stream keeps the zero values: nothing stands above it.
@@ -44,8 +44,8 @@ func (l *Lookback) Derive(tk *Token) {
 		return
 	}
 	if l.hasPrev {
-		tk.BlankLineAbove = l.blankLineAbove(tk)
-		tk.CommentBreaksAbove = l.commentBreaksAbove(tk)
+		tk.SetBlankLineAbove(l.blankLineAbove(tk))
+		tk.SetCommentBreaksAbove(l.commentBreaksAbove(tk))
 	}
 	l.read(tk)
 }
@@ -164,7 +164,7 @@ func linesSpannedBy(tk *Token, isContent bool, lbc string) int {
 	// EndLine is that count, settled where the token was built: the breaks
 	// inside the token, with the whitespace around it left to whatever it
 	// separates.
-	return int(tk.EndLine - tk.Position.Line)
+	return int(tk.EndLine() - tk.Position.Line)
 }
 
 // normalizeNewLineChars reads CR LF and CR as one line break each.
