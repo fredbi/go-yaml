@@ -24,8 +24,11 @@
 //
 // [Style.Break] writes the same document with LF, with CRLF and with a lone
 // carriage return. It is one [strings.ReplaceAll] at the end of [Emit], it
-// crosses every other axis for free, and it opened both entries in [Ledger] on
-// the run it was added. Reach for that shape of axis first.
+// crosses every other axis for free, and it opened two [Ledger] entries on the
+// run it was added. [Style.PropertyOrder] is the same shape of thing -- YAML
+// lets a node's anchor and tag come in either order, so writing the tag first
+// costs one swap -- and it opened three more. Reach for that shape of axis
+// first.
 //
 // [Depth] and [DeepDocument] are the other direction: documents with no [Value]
 // behind them at all, nested past anything a person would write. Their point is

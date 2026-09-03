@@ -115,6 +115,29 @@ func (b Break) String() string {
 	}
 }
 
+// PropertyOrder is which of a node's two properties is written first.
+//
+// YAML 1.2 lets an anchor and a tag appear in either order and means the same
+// thing by both, so this is presentation. It is also the axis that found the
+// `!!seq &a1` refusal: nothing in the test suite writes a collection tag ahead
+// of an anchor.
+type PropertyOrder int
+
+const (
+	// AnchorFirst writes `&a1 !!str x`.
+	AnchorFirst PropertyOrder = iota
+	// TagFirst writes `!!str &a1 x`.
+	TagFirst
+)
+
+func (o PropertyOrder) String() string {
+	if o == TagFirst {
+		return " tag-first"
+	}
+
+	return ""
+}
+
 // Style is one way of writing a document down.
 //
 // These are the axes along which two documents can look completely different
@@ -174,6 +197,11 @@ type Style struct {
 	Comments Commenting
 	// Break is the line break every line of the document ends with.
 	Break Break
+	// PropertyOrder is whether a node's anchor or its tag comes first.
+	PropertyOrder PropertyOrder
+	// PropertyLine puts a node's properties on a line of their own, above the
+	// node they belong to, wherever block context allows it.
+	PropertyLine bool
 }
 
 // flowAt reports whether a node at this depth is written in flow style.
@@ -223,9 +251,14 @@ func (s Style) String() string {
 		markers = " ---"
 	}
 
+	props := s.PropertyOrder.String()
+	if s.PropertyLine {
+		props += " props-above"
+	}
+
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
-		s.Break.String()
+		s.Break.String() + props
 }
 
 // Styles generates a presentation.
@@ -258,7 +291,9 @@ func Styles() *rapid.Generator[Style] {
 			// b-carriage-return buckets an LF-only corpus never touches, so
 			// spending a third of the draws on each raises matched coverage
 			// rather than diluting it.
-			Break: rapid.SampledFrom([]Break{BreakLF, BreakCRLF, BreakCR}).Draw(t, "break"),
+			Break:         rapid.SampledFrom([]Break{BreakLF, BreakCRLF, BreakCR}).Draw(t, "break"),
+			PropertyOrder: PropertyOrder(rapid.IntRange(0, 1).Draw(t, "proporder")),
+			PropertyLine:  rapid.Bool().Draw(t, "propline"),
 		}
 	})
 }

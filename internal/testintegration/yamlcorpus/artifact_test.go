@@ -205,11 +205,12 @@ func TestTheCorpusReachesMostOfTheGrammar(t *testing.T) {
 		t.Errorf("the corpus enters %d of %d buckets", reached, total)
 	}
 
-	// What is left out is one coherent list rather than a scatter, which is
-	// what a work list should look like. Nine of the thirteen are tags, which
-	// the emitter does not write; one is a %YAML directive, which it does not
-	// write either; one is an explicit key; one is the keep chomping indicator,
-	// which Style has no axis for. Four gaps, not thirteen.
+	// Nothing is left out any more, so this logs nothing. It used to name
+	// thirteen productions nothing entered -- nine of them tags, which the
+	// emitter did not write until yamlgen.Tagged, one a %YAML directive, one an
+	// explicit key and one the keep chomping indicator -- and the enumerated
+	// shapes in yamlcorpus closed the rest. Kept because a narrowed generator
+	// shows up here first.
 	if missing := cover.Missing(reach); len(missing) > 0 {
 		t.Logf("never entered (%d):\n  %s", len(missing), strings.Join(missing, "\n  "))
 	}

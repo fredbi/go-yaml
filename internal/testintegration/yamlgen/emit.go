@@ -47,15 +47,33 @@ type emitter struct {
 	// comments numbers the comments as they are written, so that a test can
 	// check the same set came back rather than merely counting them.
 	comments int
-	// folded counts the folded block scalars written, and openEntries the block
-	// entries whose `-` or `key:` is the whole line -- an empty node, or a
-	// nested collection starting below.
-	//
-	// Both are there for [Ledger] predicates, and neither is worth re-deriving
-	// outside the emitter: whether it reaches for `>` depends on Style.Folded,
-	// on canFolded and on the node being in block context, and a predicate that
-	// reimplemented the three would drift from the emitter it describes.
-	folded, openEntries int
+
+	// The rest is here for [Ledger] predicates, and none of it is worth
+	// re-deriving outside the emitter: whether it reaches for `>` depends on
+	// Style.Folded, on canFolded and on the node being in block context, and a
+	// predicate that reimplemented the three would drift from the emitter it
+	// describes.
+
+	// folded counts the folded block scalars written.
+	folded int
+	// openEntries counts the block entries whose value does not start on the
+	// entry's own line -- an empty node, or a collection beginning below.
+	openEntries int
+	// strTaggedRespelt counts the `!!str` scalars written plain whose spelling
+	// this library does not give back.
+	strTaggedRespelt int
+	// taggedLineEnds counts the nodes whose tag is the last thing on its line.
+	taggedLineEnds int
+	// propertyLines counts the nodes whose properties went on a line of their
+	// own.
+	propertyLines int
+	// collectionTagAnchors counts the nodes written with `!!seq` or `!!map` in
+	// front of an anchor, emptyTagAnchors those written with any tag in front
+	// of an anchor and nothing after it, and taggedAnchorNames names every
+	// anchor that had a tag written before it.
+	collectionTagAnchors int
+	emptyTagAnchors      int
+	taggedAnchorNames    []string
 }
 
 // comment returns the next comment body. Comments are numbered rather than
@@ -100,27 +118,126 @@ func (e *emitter) root(v Value) {
 	e.block(v, 0, 0)
 }
 
+// props are the anchor and the tag written in front of a node.
+//
+// YAML calls them node properties and lets them appear in either order, so
+// which one is written first is [Style.PropertyOrder] and neither changes what
+// the document means. Peeling them off in one place is what keeps the three
+// positions a node can occupy -- inline, at the head of a block, after a `-` or
+// a `key:` -- from each growing their own copy of the rules.
+type props struct {
+	anchor string
+	tag    string
+}
+
+// strip peels the properties off v and returns the node they decorate.
+//
+// Either nesting order is accepted, because the two generators that put them
+// there run independently: withAliases wraps first and withTags wraps the
+// result, so a tagged anchored node arrives as Anchored{Tagged{...}}.
+func strip(v Value) (props, Value) {
+	var p props
+
+	for {
+		switch n := v.(type) {
+		case Anchored:
+			p.anchor = n.Name
+			v = n.V
+		case Tagged:
+			p.tag = n.Tag
+			v = n.V
+		default:
+			return p, v
+		}
+	}
+}
+
+func (p props) none() bool { return p.anchor == "" && p.tag == "" }
+
+// propText writes the properties, and records the ones written tag first.
+//
+// A tag written before an anchor is dropped, so what a [Ledger] entry needs is
+// which anchors were written that way -- and, separately, the two tags that
+// make the parse fail outright rather than merely losing the tag.
+func (e *emitter) propText(p props) string {
+	if p.anchor != "" && p.tag != "" && e.st.PropertyOrder == TagFirst {
+		e.taggedAnchorNames = append(e.taggedAnchorNames, p.anchor)
+
+		if p.tag == TagSeq || p.tag == TagMap {
+			e.collectionTagAnchors++
+		}
+	}
+
+	return p.text(e.st)
+}
+
+// countEmptyTagAnchor records a tag written ahead of an anchor on a node with
+// nothing after it, which is the shape that swallows the rest of the document.
+func (e *emitter) countEmptyTagAnchor(p props) {
+	if p.anchor != "" && p.tag != "" && e.st.PropertyOrder == TagFirst {
+		e.emptyTagAnchors++
+	}
+}
+
+// text writes the properties in the order the style asks for.
+func (p props) text(st Style) string {
+	anchor := ""
+	if p.anchor != "" {
+		anchor = "&" + p.anchor
+	}
+
+	parts := []string{anchor, p.tag}
+	if st.PropertyOrder == TagFirst {
+		parts[0], parts[1] = parts[1], parts[0]
+	}
+
+	out := parts[0]
+	if out != "" && parts[1] != "" {
+		out += " "
+	}
+
+	return out + parts[1]
+}
+
 // inline returns v written on one line, when it can be.
 //
 // Collections qualify in flow style, and when they are empty: an empty block
 // collection has no spelling, so `[]` and `{}` are the only way to write one.
 func (e *emitter) inline(v Value, flow bool) (string, bool) {
+	return e.inlineWith(v, flow, "")
+}
+
+// inlineWith is inline, told which tag the node carries.
+//
+// Only one tag changes how the node is written. `!!str` says the scalar is a
+// string whatever it looks like, so `!!str null` is a plain scalar meaning the
+// text "null" -- and without the tag the same three letters are the empty
+// value, which is why canPlain refuses them untagged.
+func (e *emitter) inlineWith(v Value, flow bool, tag string) (string, bool) {
 	switch n := v.(type) {
 	case Alias:
 		// An alias is always one token, wherever it stands.
 		return "*" + n.Name, true
-	case Anchored:
-		inner, ok := e.inline(n.V, flow)
+	case Anchored, Tagged:
+		p, node := strip(v)
+
+		inner, ok := e.inlineWith(node, flow, p.tag)
 		if !ok {
 			return "", false
 		}
 		if inner == "" {
-			// An anchored empty node is the anchor and nothing else; a space
-			// after it would be trailing whitespace with no content behind it.
-			return "&" + n.Name, true
+			// A property on an empty node is the property and nothing else; a
+			// space after it would be trailing whitespace with no content
+			// behind it.
+			if p.tag != "" {
+				e.taggedLineEnds++
+			}
+			e.countEmptyTagAnchor(p)
+
+			return e.propText(p), true
 		}
 
-		return "&" + n.Name + " " + inner, true
+		return e.propText(p) + " " + inner, true
 	case Seq:
 		if flow || len(n.Items) == 0 {
 			return e.flowSeq(n), true
@@ -139,7 +256,7 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 			return "", false
 		}
 
-		return e.scalarString(n.V, flow), true
+		return e.scalarString(n.V, flow, tag == TagStr), true
 	default:
 		return e.simpleScalar(v, flow), true
 	}
@@ -152,14 +269,17 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 // parts company from it otherwise, which is why both are carried.
 func (e *emitter) block(v Value, indent, depth int) {
 	switch n := v.(type) {
-	case Anchored:
-		// A block scalar takes its anchor in front of the header, where the
-		// header still ends the line. A block collection cannot: its first line
-		// belongs to its first entry, so the anchor takes a line of its own.
-		e.pad(indent)
-		e.buf.WriteString("&" + n.Name)
+	case Anchored, Tagged:
+		p, node := strip(v)
 
-		if s, ok := n.V.(Str); ok && e.blockScalar(s.V) {
+		// A block scalar takes its properties in front of the header, where the
+		// header still ends the line. A block collection cannot: its first line
+		// belongs to its first entry, so the properties take a line of their
+		// own.
+		e.pad(indent)
+		e.buf.WriteString(e.propText(p))
+
+		if s, ok := node.(Str); ok && e.blockScalar(s.V) {
 			e.buf.WriteString(" ")
 			e.literal(s.V, indent+e.st.Indent, e.st.Indent+1)
 
@@ -167,7 +287,7 @@ func (e *emitter) block(v Value, indent, depth int) {
 		}
 
 		e.buf.WriteString("\n")
-		e.block(n.V, indent, depth)
+		e.block(node, indent, depth)
 	case Seq:
 		for _, item := range n.Items {
 			e.headComment(indent)
@@ -204,26 +324,49 @@ func (e *emitter) block(v Value, indent, depth int) {
 func (e *emitter) child(v Value, indent, depth int) {
 	flow := e.st.flowAt(depth + 1)
 
-	// An anchor stays on the line that introduced the entry, whatever the value
-	// turns out to need: `k: &a` then the collection below it, or `k: &a |`
-	// then the scalar's content.
-	anchor := ""
-	if a, ok := v.(Anchored); ok {
-		anchor = " &" + a.Name
-		v = a.V
+	// The properties stay on the line that introduced the entry, whatever the
+	// value turns out to need: `k: &a !!seq` then the collection below it, or
+	// `k: &a !!str |` then the scalar's content.
+	//
+	// Style.PropertyLine is the other placement, and it only works in block
+	// context: a property on its own line above a value that is written on the
+	// entry's own line would be a property with nothing after it.
+	p, node := strip(v)
+	v = node
+
+	head := ""
+	if !p.none() {
+		head = " " + e.propText(p)
 	}
 
 	if s, ok := v.(Str); ok && !flow && e.blockScalar(s.V) {
-		e.buf.WriteString(anchor)
+		e.buf.WriteString(head)
 		e.buf.WriteString(" ")
 		e.literal(s.V, indent+e.st.Indent, e.st.Indent)
 
 		return
 	}
 
-	e.buf.WriteString(anchor)
+	// Properties above the value, on a line of their own, when the value is
+	// going to occupy lines of its own anyway.
+	if e.st.PropertyLine && !p.none() && !flow {
+		if _, ok := e.inlineWith(v, flow, p.tag); !ok {
+			e.openEntries++
+			e.propertyLines++
+			e.lineComment()
+			e.buf.WriteString("\n")
+			e.pad(indent + e.st.Indent)
+			e.buf.WriteString(e.propText(p))
+			e.buf.WriteString("\n")
+			e.block(v, indent+e.st.Indent, depth+1)
 
-	if inline, ok := e.inline(v, flow); ok {
+			return
+		}
+	}
+
+	e.buf.WriteString(head)
+
+	if inline, ok := e.inlineWith(v, flow, p.tag); ok {
 		// An empty node is written as nothing at all, so the separating space
 		// would be the only thing on the line after the `-` or the `key:` --
 		// trailing whitespace, and invisible in any failure it caused.
@@ -231,6 +374,10 @@ func (e *emitter) child(v Value, indent, depth int) {
 			e.buf.WriteString(" ")
 		} else {
 			e.openEntries++
+			if p.tag != "" {
+				e.taggedLineEnds++
+			}
+			e.countEmptyTagAnchor(p)
 		}
 		e.buf.WriteString(inline)
 		e.lineComment()
@@ -242,6 +389,9 @@ func (e *emitter) child(v Value, indent, depth int) {
 	// A comment may sit on the line that introduces a nested block, where the
 	// value itself has not been written yet.
 	e.openEntries++
+	if p.tag != "" {
+		e.taggedLineEnds++
+	}
 	e.lineComment()
 	e.buf.WriteString("\n")
 	e.block(v, indent+e.st.Indent, depth+1)
@@ -362,7 +512,7 @@ func (e *emitter) flowMap(n Map) string {
 }
 
 func (e *emitter) keyIn(k string, flow bool) string {
-	return e.scalarString(k, flow)
+	return e.scalarString(k, flow, false)
 }
 
 // simpleScalar writes the scalars whose spelling has no interesting choices
@@ -394,7 +544,7 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 
 		return s
 	case Str:
-		return e.scalarString(n.V, flow)
+		return e.scalarString(n.V, flow, false)
 	default:
 		panic(fmt.Sprintf("yamlgen: unknown value %T", v))
 	}
@@ -402,10 +552,14 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 
 // scalarString writes a string in the quoting the style asks for, falling back
 // to double quotes, which can express anything.
-func (e *emitter) scalarString(s string, flow bool) string {
+func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 	switch e.st.Quoting {
 	case QuotePlain:
-		if canPlain(s) {
+		if canPlain(s, strTagged) {
+			if _, respelt := respeltUnderStrTag[s]; respelt && strTagged {
+				e.strTaggedRespelt++
+			}
+
 			return s
 		}
 
@@ -440,11 +594,31 @@ var resolving = map[string]struct{}{
 	"false": {}, "False": {}, "FALSE": {},
 }
 
-func canPlain(s string) bool {
+// respeltUnderStrTag are the plain spellings this library gives back
+// differently once `!!str` is written in front of them: the null spellings come
+// back as the empty string and the capitalized booleans come back lowercased.
+//
+// `true` and `false` are resolving spellings too and are left out, because the
+// text the library gives back for them is the text that went in. `~` is a null
+// spelling and plainSafe refuses it on its leading character, so it never
+// reaches a plain scalar here.
+var respeltUnderStrTag = map[string]struct{}{
+	"null": {}, "Null": {}, "NULL": {},
+	"True": {}, "TRUE": {},
+	"False": {}, "FALSE": {},
+}
+
+// canPlain reports whether s can stand unquoted.
+//
+// strTagged says the node carries `!!str`, which is what lets the resolving
+// spellings through: `!!str null` is the three letters and `null` on its own is
+// the empty value. Nothing else in the table is unlocked by it, because
+// plainSafe already refuses every numeric spelling on its leading character.
+func canPlain(s string, strTagged bool) bool {
 	if !plainSafe.MatchString(s) {
 		return false
 	}
-	if _, resolves := resolving[s]; resolves {
+	if _, resolves := resolving[s]; resolves && !strTagged {
 		return false
 	}
 	// A trailing space is not preserved, and " #" opens a comment.

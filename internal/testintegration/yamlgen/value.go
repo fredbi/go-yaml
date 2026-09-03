@@ -62,6 +62,19 @@ type (
 		Name string
 		V    Value
 	}
+
+	// Tagged is a value carrying an explicit tag.
+	//
+	// Like [Anchored], it lives in the tree rather than in the [Style], because
+	// which node carries it is structural. Unlike an anchor it can change what
+	// the document means, so only the tags that agree with the value's own kind
+	// are generated -- see [TagFor]. `!!str` on a sequence is a document this
+	// library refuses and it should, which is a different question from the one
+	// this package asks.
+	Tagged struct {
+		Tag string
+		V   Value
+	}
 )
 
 // Pair is one mapping entry. Keys are strings because that is what decoding
@@ -104,6 +117,24 @@ func (s Seq) Decoded() any {
 
 func (a Anchored) Decoded() any { return a.V.Decoded() }
 
+// Decoded returns what the tagged value decodes to.
+//
+// One tag changes it. An untagged non-negative integer comes back as a uint64
+// and a negative one as an int64, and `!!int` overrides both with a plain int
+// -- so 5, !!int 5 and -5 are three spellings that produce three Go types. The
+// asymmetry is the library's rather than YAML's, and it is written down here
+// for the same reason [Int.Decoded] writes down the other half of it: a
+// generator that normalized it would stop noticing if it changed.
+func (t Tagged) Decoded() any {
+	if t.Tag == TagInt {
+		if n, ok := t.V.(Int); ok {
+			return n.V
+		}
+	}
+
+	return t.V.Decoded()
+}
+
 // Decoded returns what the anchored value decodes to, built afresh.
 //
 // Two occurrences of an alias decode to two structures that are equal and not
@@ -140,12 +171,111 @@ var awkwardStrings = []string{
 	"2001-12-14", "12:34:56", "a: b: c",
 }
 
-// Values generates a Value tree, some of whose nodes carry anchors and some of
-// which are aliases to them.
+// The tags a node can carry without changing what it means.
+//
+// Every one of them is measured rather than assumed. The three that resolve a
+// plain scalar by its own kind -- the non-specific `!`, a local tag, and the
+// verbatim spelling of the string tag -- turn any scalar into its text, so they
+// are only put on a [Str], a [Seq] or a [Map], where they are the identity.
+const (
+	TagNull     = "!!null"
+	TagBool     = "!!bool"
+	TagInt      = "!!int"
+	TagFloat    = "!!float"
+	TagStr      = "!!str"
+	TagSeq      = "!!seq"
+	TagMap      = "!!map"
+	TagLocal    = "!foo"
+	TagNone     = "!"
+	TagVerbatim = "!<tag:yaml.org,2002:str>"
+)
+
+// TagFor returns the tags that can be written on v without changing what it
+// decodes to, apart from the integer case [Tagged.Decoded] records.
+func TagFor(v Value) []string {
+	switch v.(type) {
+	case Null:
+		return []string{TagNull}
+	case Bool:
+		return []string{TagBool}
+	case Int:
+		return []string{TagInt}
+	case Float:
+		return []string{TagFloat}
+	case Str:
+		return []string{TagStr, TagLocal, TagNone, TagVerbatim}
+	case Seq:
+		return []string{TagSeq, TagLocal, TagNone}
+	case Map:
+		return []string{TagMap, TagLocal, TagNone}
+	default:
+		// Nothing else takes a tag. Tagging runs before anchors and aliases
+		// exist, so the only way here is a node that already carries one, and
+		// YAML gives a node one tag.
+		return nil
+	}
+}
+
+// Values generates a Value tree, some of whose nodes carry anchors, some of
+// which are aliases to them, and some of which carry a tag.
 func Values() *rapid.Generator[Value] {
 	return rapid.Custom(func(t *rapid.T) Value {
-		return withAliases(t, values(0).Draw(t, "tree"))
+		return withAliases(t, withTags(t, values(0).Draw(t, "tree")))
 	})
+}
+
+// withTags rewrites a tree so that some nodes carry a tag.
+//
+// It runs before [withAliases], because an [Alias] holds the value it stands
+// for rather than looking it up, and a tag put on the anchored node afterwards
+// would leave every alias to it decoding to what it meant before the tag. That
+// is not hypothetical: `!!int` turns a uint64 into an int, so the document and
+// the expected value disagreed on one node the first time round.
+func withTags(t *rapid.T, v Value) Value {
+	return (&tagger{t: t}).walk(v)
+}
+
+type tagger struct {
+	t *rapid.T
+}
+
+// tagOdds is one in N. Low enough that most nodes stay untagged, high enough
+// that a document of any size usually carries one.
+const tagOdds = 7
+
+func (g *tagger) walk(v Value) Value {
+	switch n := v.(type) {
+	case Seq:
+		items := make([]Value, 0, len(n.Items))
+		for _, item := range n.Items {
+			items = append(items, g.walk(item))
+		}
+
+		return g.maybeTag(Seq{Items: items})
+	case Map:
+		pairs := make([]Pair, 0, len(n.Pairs))
+		for _, p := range n.Pairs {
+			pairs = append(pairs, Pair{Key: p.Key, Val: g.walk(p.Val)})
+		}
+
+		return g.maybeTag(Map{Pairs: pairs})
+	default:
+		return g.maybeTag(v)
+	}
+}
+
+// maybeTag puts a tag on v, sometimes.
+func (g *tagger) maybeTag(v Value) Value {
+	if rapid.IntRange(0, tagOdds).Draw(g.t, "tag") != 0 {
+		return v
+	}
+
+	tags := TagFor(v)
+	if len(tags) == 0 {
+		return v
+	}
+
+	return Tagged{Tag: rapid.SampledFrom(tags).Draw(g.t, "tagname"), V: v}
 }
 
 // withAliases rewrites a tree so that some nodes are anchored and some later
@@ -193,24 +323,7 @@ func (a *aliaser) walk(v Value) Value {
 		return Alias(target)
 	}
 
-	var out Value
-
-	switch n := v.(type) {
-	case Seq:
-		items := make([]Value, 0, len(n.Items))
-		for _, item := range n.Items {
-			items = append(items, a.walk(item))
-		}
-		out = Seq{Items: items}
-	case Map:
-		pairs := make([]Pair, 0, len(n.Pairs))
-		for _, p := range n.Pairs {
-			pairs = append(pairs, Pair{Key: p.Key, Val: a.walk(p.Val)})
-		}
-		out = Map{Pairs: pairs}
-	default:
-		out = v
-	}
+	out := a.children(v)
 
 	if rapid.IntRange(0, anchorOdds).Draw(a.t, "anchor") != 0 {
 		return out
@@ -221,6 +334,37 @@ func (a *aliaser) walk(v Value) Value {
 	a.pool = append(a.pool, anchored)
 
 	return anchored
+}
+
+// children rebuilds v with the walk applied to everything inside it, and
+// nothing applied to v itself.
+//
+// A tag is transparent here. The walk descends through it so that anchors land
+// inside a tagged collection, but the tagged node is not offered an anchor of
+// its own -- [aliaser.walk] has already done that for the whole of it. Without
+// the split a node picks up an anchor on both sides of its tag, and `&a2 !!seq
+// &a1 []` names one node twice.
+func (a *aliaser) children(v Value) Value {
+	switch n := v.(type) {
+	case Seq:
+		items := make([]Value, 0, len(n.Items))
+		for _, item := range n.Items {
+			items = append(items, a.walk(item))
+		}
+
+		return Seq{Items: items}
+	case Map:
+		pairs := make([]Pair, 0, len(n.Pairs))
+		for _, p := range n.Pairs {
+			pairs = append(pairs, Pair{Key: p.Key, Val: a.walk(p.Val)})
+		}
+
+		return Map{Pairs: pairs}
+	case Tagged:
+		return Tagged{Tag: n.Tag, V: a.children(n.V)}
+	default:
+		return v
+	}
 }
 
 const maxDepth = 3
