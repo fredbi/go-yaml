@@ -1092,9 +1092,24 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		}
 		value := ctx.source(ctx.idx, ctx.idx+idx)
 		progress := utf8.RuneCountInString(value)
+
+		// CRLF ends one line. progressLine steps over a single character, so
+		// leaving the '\n' behind gives it to the token that follows, whose
+		// leading whitespace is then read as another break: a comment closing
+		// a CRLF line put the next token two lines down instead of one, and a
+		// blank line appeared above the comment when the document was written
+		// back.
+		crlf := c == '\r' && ctx.idx+idx+1 < len(ctx.src) && ctx.src[ctx.idx+idx+1] == '\n'
+		if crlf {
+			ctx.addOriginBuf('\n')
+		}
+
 		ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
+		if crlf {
+			s.offset += s.progress(ctx, 1)
+		}
 		ctx.clear()
 		return true
 	}

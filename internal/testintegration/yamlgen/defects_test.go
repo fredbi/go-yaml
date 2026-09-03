@@ -6,7 +6,6 @@ package yamlgen_test
 import (
 	"testing"
 
-	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
@@ -44,34 +43,4 @@ func renderOnce(t *testing.T, src string) string {
 	require.NoError(t, err)
 
 	return file.String()
-}
-
-// TestDefectCRLFBlanksALineAboveAStandaloneComment: a CRLF source gains a blank
-// line above a comment on its own line.
-//
-// It takes both halves. A document with standalone comments and no bare entry
-// renders unchanged, and so does one with a bare entry and no comment; the
-// blank line appears only when a `-` or a `key:` is the whole line somewhere in
-// the document. A lone CR is unaffected.
-func TestDefectCRLFBlanksALineAboveAStandaloneComment(t *testing.T) {
-	const src = "# c1\r\n-\r\n# c2\r\n- 1\r\n"
-	wellFormed(t, src)
-
-	once := renderOnce(t, src)
-	assert.Equal(t, "# c1\n- \n\n# c2\n- 1\n", once, "today: a blank line above # c2")
-	assert.Equal(t, "# c1\n- \n# c2\n- 1\n", renderOnce(t, once), "and it is gone again on the next pass")
-
-	t.Run("neither half alone", func(t *testing.T) {
-		for name, only := range map[string]string{
-			"no bare entry":       "# c1\r\n- 0\r\n# c2\r\n- 1\r\n",
-			"no comment":          "-\r\n- 1\r\n",
-			"a lone CR, not CRLF": "# c1\r-\r# c2\r- 1\r",
-		} {
-			t.Run(name, func(t *testing.T) {
-				wellFormed(t, only)
-				once := renderOnce(t, only)
-				assert.Equal(t, once, renderOnce(t, once), "settles in one pass")
-			})
-		}
-	})
 }

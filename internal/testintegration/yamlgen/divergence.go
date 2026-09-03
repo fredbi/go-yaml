@@ -109,20 +109,7 @@ func (p Property) String() string {
 // An entry here is a parser or renderer defect rather than an open question.
 // The emitter is gated against the YAML 1.2 grammar, so each of these documents
 // is one the library is obliged to read.
-var Ledger = []Divergence{
-	{
-		Name: "render/crlf-blanks-a-line-above-a-standalone-comment",
-		Reason: "A CRLF source gains a blank line above a comment on its own line, but only " +
-			"once the document also holds a block entry whose `-` or `key:` is the " +
-			"whole line. `# c1\\r\\n-\\r\\n# c2\\r\\n- 1\\r\\n` renders as " +
-			"`# c1\\n- \\n\\n# c2\\n- 1\\n`, and the blank line is gone again on the " +
-			"second render. Either half alone is fine, and a lone CR is fine.",
-		Property: Settle,
-		Match: func(v Value, st Style) bool {
-			return st.Break == BreakCRLF && st.Comments.head() && writesOpenEntry(v, st)
-		},
-	},
-}
+var Ledger = []Divergence{}
 
 // writesFolded reports whether emitting v in st writes a folded block scalar,
 // and writesOpenEntry whether it writes a block entry whose `-` or `key:` is

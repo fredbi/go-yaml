@@ -437,3 +437,32 @@ func TestFixedFoldedScalarNestedRendersYAML(t *testing.T) {
 	// ">" clips rather than strips, so the value keeps one trailing break.
 	assert.Equal(t, map[string]any{"a": map[string]any{"b": "x\n"}, "c": uint64(1)}, got)
 }
+
+// TestFixedCRLFComentDoesNotBlankALine: a comment closing a CRLF line leaves the
+// token after it on the next line, not two down.
+//
+// scanComment stopped at the '\r' and left the '\n' to whatever came next,
+// whose leading whitespace was then read as a second break. The document gained
+// a blank line above the comment when it was written back, and lost it again on
+// the render after that, so it never settled. It took both halves to show: a
+// standalone comment and a block entry whose `-` is the whole line.
+func TestFixedCRLFComentDoesNotBlankALine(t *testing.T) {
+	for _, test := range []struct{ name, src string }{
+		{"CRLF", "# c1\r\n-\r\n# c2\r\n- 1\r\n"},
+		{"lone CR", "# c1\r-\r# c2\r- 1\r"},
+		{"LF", "# c1\n-\n# c2\n- 1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.src), parser.Comments())
+			require.NoError(t, err)
+
+			once := file.String()
+			assert.Equal(t, "# c1\n- \n# c2\n- 1\n", once,
+				"every line break writes the same document")
+
+			again, err := parser.ParseBytes([]byte(once), parser.Comments())
+			require.NoError(t, err)
+			assert.Equal(t, once, again.String(), "and it settles in one pass")
+		})
+	}
+}
