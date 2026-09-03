@@ -151,7 +151,21 @@ func TestEveryMutationBreaksSomething(t *testing.T) {
 	oracle := grammar.NewRecognizer(1024)
 	broke := map[string]int{}
 
-	const enough = 5
+	// enough is how many refusals a mutation has to earn, and draws how many
+	// documents each check offers it.
+	//
+	// a-document-marker-inside sets the budget on its own. Inserting `---` or
+	// `...` into a document usually leaves another good one -- the marker opens
+	// a document rather than breaking one -- so it earns a refusal perhaps once
+	// in forty draws, where a-stray-indicator earns one in three. At forty
+	// draws the test failed about one run in twelve before the Break and flow
+	// axes went in and one in four after, because those axes spend the same
+	// budget on more shapes. Raising the draws costs nothing once every
+	// mutation is covered, since covered() returns before any of them are made.
+	const (
+		enough = 5
+		draws  = 200
+	)
 
 	covered := func() bool {
 		for _, name := range yamlgen.MutationNames() {
@@ -168,7 +182,7 @@ func TestEveryMutationBreaksSomething(t *testing.T) {
 			return
 		}
 
-		for range 40 {
+		for range draws {
 			src := yamlgen.Emit(
 				yamlgen.Values().Draw(rt, "value"),
 				yamlgen.Styles().Draw(rt, "style"),
