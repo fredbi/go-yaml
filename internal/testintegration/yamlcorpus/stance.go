@@ -149,14 +149,6 @@ var Departures = []Departure{
 		Corroborated: "libfyaml 1.0.0a8 reads it, and reads two %TAG handles together as well",
 	},
 	{
-		Pattern:  "the same key twice, one of them written as a key alone",
-		Kind:     Verdict,
-		Observed: `"{a, a: 1}" and "{a, a}" are read; "{a: 1, a: 2}" and "{a: , a: 1}" are refused`,
-		Because: "3.2.1.1: a flow mapping entry may be a key with no value, and it is an entry like any " +
-			"other -- so its key counts when the mapping is checked for duplicates",
-		Corroborated: "",
-	},
-	{
 		Pattern:  "two keys alike in text and different once resolved",
 		Kind:     Verdict,
 		Observed: `"1: x" and "\"1\": y" in one mapping are refused as a duplicate key`,

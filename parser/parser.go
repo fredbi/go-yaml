@@ -764,6 +764,10 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			}
 			p.handKey(ctx, key)
 
+			if err := p.recordKeyOnce(ctx, key.GetToken(), p.mapKeyText(key)); err != nil {
+				return nil, err
+			}
+
 			// "{p}" leaves the value out, and a writer needs the null that
 			// stands for it as much as it needs the key.
 			value, err := p.handNull(ctx, ctx.insertNullToken(mapKeyTk))
@@ -1096,13 +1100,8 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 // path built from it.
 func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string, colonTk *tapeToken) error {
 	tk := key.GetToken()
-	if !p.allowDuplicateMapKey {
-		if pos, defined := p.recordMapKey(ctx.keyBase, keyText, tk.Position); defined {
-			return yamlerrors.NewSyntax(
-				fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
-				tk,
-			)
-		}
+	if err := p.recordKeyOnce(ctx, tk, keyText); err != nil {
+		return err
 	}
 	if ctx.isFlow {
 		// A pair written inside a flow sequence is an implicit key: it has to
@@ -1125,6 +1124,29 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		return yamlerrors.NewSyntax("unexpected key name", tk)
 	}
 	return nil
+}
+
+// recordKeyOnce records tk among the keys of the mapping being parsed, and
+// refuses a key the mapping already holds.
+//
+// Every entry's key passes through here, including a flow entry written as a
+// key with no value: "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does,
+// and was read without complaint while the check only saw keys that came with
+// a ':'.
+func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, keyText string) error {
+	if p.allowDuplicateMapKey {
+		return nil
+	}
+
+	pos, defined := p.recordMapKey(ctx.keyBase, keyText, tk.Position)
+	if !defined {
+		return nil
+	}
+
+	return yamlerrors.NewSyntax(
+		fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
+		tk,
+	)
 }
 
 // isScalarKeyToken reports whether tk is a scalar written where a key goes,

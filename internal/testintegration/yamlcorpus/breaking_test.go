@@ -191,9 +191,10 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 	t.Logf("of the documents broken on purpose, the library catches %d, misses %d "+
 		"and reads %d that a declared departure covers", caught, missed, declared)
 
-	if declared == 0 {
-		t.Error("no document exercised the declared duplicate-key departure, " +
-			"so either it is fixed or the generator stopped writing a key-alone entry")
+	if declared != 0 {
+		t.Errorf("%d documents were read that a declared departure covers, and "+
+			"Departures no longer holds one for keys: either a departure came back or "+
+			"the entry describing it was removed too soon", declared)
 	}
 
 	if caught == 0 {

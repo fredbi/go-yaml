@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -92,31 +93,41 @@ func costGrowth(t *testing.T, shape yamlgen.Depth) float64 {
 	require.True(t, grammar.NewRecognizer(1024).Stream(yamlgen.DeepDocument(shape, 8)).OK,
 		"%s is not YAML 1.2, so its cost says nothing about parsing one", shape)
 
-	return parseCostPerByte(t, shape, small*costSpan) / parseCostPerByte(t, shape, small)
+	// The two depths are timed next to each other and the smallest ratio of the
+	// rounds is kept, rather than dividing one best time by the other. Taking
+	// each minimum apart lets a slow moment in one measurement and a quick one
+	// in the other multiply: the test read 1.0 in isolation and 3.1 under load,
+	// and failed about one run in three on its own. Timed together, a busy
+	// moment lands on both and the ratio holds.
+	best := math.Inf(1)
+	for range costRounds {
+		large := parseCostPerByte(t, shape, small*costSpan)
+		little := parseCostPerByte(t, shape, small)
+		best = math.Min(best, large/little)
+	}
+
+	return best
 }
 
-// parseCostPerByte times a parse three times over and keeps the fastest.
+// costRounds is how many times the pair is timed. The cost of a run is two
+// parses of the larger document, so this is the whole expense of the test.
+const costRounds = 5
+
+// parseCostPerByte times a parse and returns the cost of a byte.
 //
-// A parse does no I/O and allocates from a warm heap, so the spread between
-// runs is the scheduler's and the minimum is the closest thing to hand to the
-// cost of the work itself.
+// One parse: costGrowth times the two depths against each other several rounds
+// over and keeps the best ratio, which is where the noise is taken out.
 func parseCostPerByte(t *testing.T, shape yamlgen.Depth, n int) float64 {
 	t.Helper()
 
 	src := yamlgen.DeepDocument(shape, n)
-	best := time.Duration(1 << 62)
 
-	for range 3 {
-		start := time.Now()
-		_, err := parser.ParseBytes(src, parser.Comments())
-		elapsed := time.Since(start)
+	start := time.Now()
+	_, err := parser.ParseBytes(src, parser.Comments())
+	elapsed := time.Since(start)
 
-		require.NoError(t, err)
+	require.NoError(t, err)
+	require.NotZero(t, elapsed, "%s at depth %d was too fast to time", shape, n)
 
-		best = min(best, elapsed)
-	}
-
-	require.NotZero(t, best, "%s at depth %d was too fast to time", shape, n)
-
-	return float64(best) / float64(len(src))
+	return float64(elapsed) / float64(len(src))
 }

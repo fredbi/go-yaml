@@ -100,10 +100,9 @@ func KeyShapes() []stance.Shape {
 		},
 		{
 			// Found by the generator on 2026-09-03, once Style.FlowEmpty
-			// started writing a flow entry as a key with no colon. The
-			// duplicate-key check does not see the key-alone entry, so this
-			// document is read while "{a: 1, a: 2}" above is refused -- see
-			// Departures.
+			// started writing a flow entry as a key with no colon. It was read
+			// while "{a: 1, a: 2}" above was refused: the duplicate-key check
+			// saw only the keys that came with a ':'. Both are refused now.
 			Name:   "the same key twice, one of them written as a key alone",
 			Src:    []byte("{a, a: 1}\n"),
 			Intent: []stance.Tag{TagDuplicateKey},

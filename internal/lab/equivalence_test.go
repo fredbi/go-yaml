@@ -25,6 +25,11 @@ import (
 // refuses, or builds a tree that differs anywhere -- node type, value, or the
 // position of the token a node was built from -- is not a faster parser. It is
 // a different one, and the difference is the finding.
+//
+// A difference that is a fix is named in intendedDivergence and skipped there.
+// internal/refparser is frozen, so a defect corrected in the shipped parser
+// shows up here as a disagreement and stays one: the entry is what says which
+// of the two is right.
 func TestLabParserMatchesProduction(t *testing.T) {
 	t.Parallel()
 
@@ -47,6 +52,27 @@ func TestLabParserMatchesProduction(t *testing.T) {
 	}
 }
 
+// divergesOnPurpose reports whether a refusal the frozen parser did not make is
+// one the shipped parser makes on purpose.
+//
+// One rule so far. A flow entry written as a key alone is an entry like any
+// other, so its key counts when the mapping is checked for duplicates:
+// "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does. refparser recorded
+// only the keys that came with a ':', so it read the first and refused the
+// second. 3.2.1.1 says both are errors.
+//
+// Matching the reason rather than the document, because the fuzz seeds hold
+// many shapes of it and they are one finding. A duplicate the shipped parser
+// reports wrongly would still be caught: yamlcorpus holds the key rules, and
+// the conformance suite the documents.
+func divergesOnPurpose(err error) (string, bool) {
+	if err == nil || !strings.Contains(err.Error(), "already defined at") {
+		return "", false
+	}
+
+	return "a flow entry written as a key alone repeats its key (3.2.1.1)", true
+}
+
 func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	t.Helper()
 
@@ -67,6 +93,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	case wantErr != nil:
 		t.Fatalf("production refuses the document and the lab accepts it\nproduction: %v\nsource:\n%s", wantErr, text)
 	case gotErr != nil:
+		if why, ok := divergesOnPurpose(gotErr); ok {
+			t.Skipf("refused on purpose: %s\nlab: %v", why, gotErr)
+		}
+
 		t.Fatalf("the lab refuses a document production accepts\nlab: %v\nsource:\n%s", gotErr, text)
 	}
 
