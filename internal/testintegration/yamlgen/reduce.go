@@ -57,11 +57,12 @@ func reduce(src []byte, allowed, interesting func([]byte) bool) []byte {
 	}
 
 	within := func(b []byte) bool { return allowed(b) && interesting(b) }
+	br := documentBreak(src)
 
 	best := src
 	for range maxReductionRounds {
-		next := reduceLines(best, within)
-		next = reduceBytes(next, within)
+		next := reduceLines(best, br, within)
+		next = reduceBytes(next, br, within)
 		if bytes.Equal(next, best) {
 			break
 		}
@@ -75,14 +76,32 @@ func reduce(src []byte, allowed, interesting func([]byte) bool) []byte {
 // being fast matters less than terminating.
 const maxReductionRounds = 8
 
+// documentBreak returns the line break src is written with.
+//
+// [Emit] writes one break throughout, and reduction must keep it. Dropping the
+// \r of a CRLF, or splitting a document on \n when its breaks are lone CRs,
+// gives a document no [Style] produces -- and every defect the Break axis has
+// found so far stops reproducing the moment the break changes, so a reduction
+// that changed it would hand a fixer a document that does not fail.
+func documentBreak(src []byte) []byte {
+	switch {
+	case bytes.Contains(src, []byte("\r\n")):
+		return []byte("\r\n")
+	case bytes.Contains(src, []byte("\r")):
+		return []byte("\r")
+	default:
+		return []byte("\n")
+	}
+}
+
 // reduceLines drops whole lines, which is what removes the structure a
 // generated document carries around the defect.
-func reduceLines(src []byte, interesting func([]byte) bool) []byte {
+func reduceLines(src, br []byte, interesting func([]byte) bool) []byte {
 	best := src
 
 	for chunk := 8; chunk >= 1; chunk /= 2 {
 		for {
-			lines := splitAfter(best)
+			lines := splitAfter(best, br)
 			shrunk := false
 
 			for i := 0; i+chunk <= len(lines); i++ {
@@ -114,17 +133,30 @@ func reduceLines(src []byte, interesting func([]byte) bool) []byte {
 // space the generator explores is not a smaller case of the same defect; it is
 // a different defect, and handing that to somebody as a reproducer sends them
 // after the wrong thing.
-func reduceBytes(src []byte, interesting func([]byte) bool) []byte {
+func reduceBytes(src, br []byte, interesting func([]byte) bool) []byte {
 	best := src
 
 	for i := 0; i < len(best); {
-		if endsTheDocument(best, i) {
+		if endsTheDocument(best, i, br) {
 			break
 		}
 
-		candidate := make([]byte, 0, len(best)-1)
+		// A break comes out whole or not at all. Deleting the \r of a CRLF
+		// leaves a document written with two different breaks, which is a shape
+		// the emitter never produces and a defect nobody asked about.
+		width := 1
+		switch {
+		case bytes.HasPrefix(best[i:], br):
+			width = len(br)
+		case len(br) > 1 && best[i] == br[len(br)-1]:
+			i++
+
+			continue
+		}
+
+		candidate := make([]byte, 0, len(best)-width)
 		candidate = append(candidate, best[:i]...)
-		candidate = append(candidate, best[i+1:]...)
+		candidate = append(candidate, best[i+width:]...)
 
 		if interesting(candidate) {
 			best = candidate
@@ -167,19 +199,19 @@ func anchorsResolve(src []byte) bool {
 
 var (
 	anchorOrAlias = regexp.MustCompile(`([&*])([A-Za-z0-9_-]+)`)
-	anchorOnAlias = regexp.MustCompile(`&[A-Za-z0-9_-]+(?:\s|#[^\n]*\n)*\*`)
+	anchorOnAlias = regexp.MustCompile(`&[A-Za-z0-9_-]+(?:\s|#[^\r\n]*[\r\n])*\*`)
 )
 
-// endsTheDocument reports whether i is the line break the document ends on.
+// endsTheDocument reports whether i starts the line break the document ends on.
 //
 // The byte pass walks forwards and only ever shortens what is ahead of it, so
 // reaching this index means everything else has been considered already.
-func endsTheDocument(src []byte, i int) bool {
-	return i == len(src)-1 && src[i] == '\n'
+func endsTheDocument(src []byte, i int, br []byte) bool {
+	return i == len(src)-len(br) && bytes.HasPrefix(src[i:], br)
 }
 
-func splitAfter(src []byte) [][]byte {
-	lines := bytes.SplitAfter(src, []byte("\n"))
+func splitAfter(src, br []byte) [][]byte {
+	lines := bytes.SplitAfter(src, br)
 	// SplitAfter leaves a trailing empty element when the input ends in a
 	// newline, which is every well-formed document.
 	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {

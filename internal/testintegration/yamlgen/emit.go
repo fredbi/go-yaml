@@ -28,7 +28,17 @@ func Emit(v Value, st Style) string {
 	}
 	e.root(v)
 
-	return e.buf.String()
+	out := e.buf.String()
+	if st.Break != "" && st.Break != BreakLF {
+		// The emitter writes \n throughout and the break is substituted once
+		// at the end. Nothing else in the document can hold a raw \n: a break
+		// inside a scalar is either escaped by doubleQuote or written as a real
+		// break of the block scalar that carries it, and both are meant to
+		// become the document's break.
+		out = strings.ReplaceAll(out, "\n", string(st.Break))
+	}
+
+	return out
 }
 
 type emitter struct {
@@ -37,6 +47,15 @@ type emitter struct {
 	// comments numbers the comments as they are written, so that a test can
 	// check the same set came back rather than merely counting them.
 	comments int
+	// folded counts the folded block scalars written, and openEntries the block
+	// entries whose `-` or `key:` is the whole line -- an empty node, or a
+	// nested collection starting below.
+	//
+	// Both are there for [Ledger] predicates, and neither is worth re-deriving
+	// outside the emitter: whether it reaches for `>` depends on Style.Folded,
+	// on canFolded and on the node being in block context, and a predicate that
+	// reimplemented the three would drift from the emitter it describes.
+	folded, openEntries int
 }
 
 // comment returns the next comment body. Comments are numbered rather than
@@ -70,7 +89,7 @@ func (e *emitter) lineComment() {
 }
 
 func (e *emitter) root(v Value) {
-	if inline, ok := e.inline(v, e.st.Flow); ok {
+	if inline, ok := e.inline(v, e.st.flowAt(0)); ok {
 		e.buf.WriteString(inline)
 		e.lineComment()
 		e.buf.WriteString("\n")
@@ -78,7 +97,7 @@ func (e *emitter) root(v Value) {
 		return
 	}
 
-	e.block(v, 0)
+	e.block(v, 0, 0)
 }
 
 // inline returns v written on one line, when it can be.
@@ -127,7 +146,11 @@ func (e *emitter) inline(v Value, flow bool) (string, bool) {
 }
 
 // block writes v starting at the given indentation, on its own lines.
-func (e *emitter) block(v Value, indent int) {
+//
+// depth counts collections from the root, so that Style.FlowFrom can say where
+// the document changes over. It tracks indent whenever Style.Indent is 1 and
+// parts company from it otherwise, which is why both are carried.
+func (e *emitter) block(v Value, indent, depth int) {
 	switch n := v.(type) {
 	case Anchored:
 		// A block scalar takes its anchor in front of the header, where the
@@ -144,21 +167,21 @@ func (e *emitter) block(v Value, indent int) {
 		}
 
 		e.buf.WriteString("\n")
-		e.block(n.V, indent)
+		e.block(n.V, indent, depth)
 	case Seq:
 		for _, item := range n.Items {
 			e.headComment(indent)
 			e.pad(indent)
 			e.buf.WriteString("-")
-			e.child(item, indent)
+			e.child(item, indent, depth)
 		}
 	case Map:
 		for _, p := range n.Pairs {
 			e.headComment(indent)
 			e.pad(indent)
-			e.buf.WriteString(e.key(p.Key))
+			e.buf.WriteString(e.keyIn(p.Key, false))
 			e.buf.WriteString(":")
-			e.child(p.Val, indent)
+			e.child(p.Val, indent, depth)
 		}
 	case Str:
 		e.pad(indent)
@@ -175,7 +198,12 @@ func (e *emitter) block(v Value, indent int) {
 
 // child writes the value of a mapping pair or a sequence entry, having already
 // written the `-` or the `key:` it belongs to.
-func (e *emitter) child(v Value, indent int) {
+//
+// depth is the depth of the collection this entry belongs to, so the value
+// itself sits one deeper.
+func (e *emitter) child(v Value, indent, depth int) {
+	flow := e.st.flowAt(depth + 1)
+
 	// An anchor stays on the line that introduced the entry, whatever the value
 	// turns out to need: `k: &a` then the collection below it, or `k: &a |`
 	// then the scalar's content.
@@ -185,7 +213,7 @@ func (e *emitter) child(v Value, indent int) {
 		v = a.V
 	}
 
-	if s, ok := v.(Str); ok && !e.st.Flow && e.blockScalar(s.V) {
+	if s, ok := v.(Str); ok && !flow && e.blockScalar(s.V) {
 		e.buf.WriteString(anchor)
 		e.buf.WriteString(" ")
 		e.literal(s.V, indent+e.st.Indent, e.st.Indent)
@@ -195,12 +223,14 @@ func (e *emitter) child(v Value, indent int) {
 
 	e.buf.WriteString(anchor)
 
-	if inline, ok := e.inline(v, e.st.Flow); ok {
+	if inline, ok := e.inline(v, flow); ok {
 		// An empty node is written as nothing at all, so the separating space
 		// would be the only thing on the line after the `-` or the `key:` --
 		// trailing whitespace, and invisible in any failure it caused.
 		if inline != "" {
 			e.buf.WriteString(" ")
+		} else {
+			e.openEntries++
 		}
 		e.buf.WriteString(inline)
 		e.lineComment()
@@ -211,9 +241,10 @@ func (e *emitter) child(v Value, indent int) {
 
 	// A comment may sit on the line that introduces a nested block, where the
 	// value itself has not been written yet.
+	e.openEntries++
 	e.lineComment()
 	e.buf.WriteString("\n")
-	e.block(v, indent+e.st.Indent)
+	e.block(v, indent+e.st.Indent, depth+1)
 }
 
 // literal writes a string as a block scalar, choosing the chomping indicator
@@ -224,7 +255,7 @@ func (e *emitter) child(v Value, indent int) {
 // the root passes one more than the column it writes at.
 func (e *emitter) literal(s string, indent, stated int) {
 	if e.folds(s) {
-		e.folded(s, indent, stated)
+		e.foldedScalar(s, indent, stated)
 
 		return
 	}
@@ -265,6 +296,11 @@ func (e *emitter) literal(s string, indent, stated int) {
 func (e *emitter) flowSeq(n Seq) string {
 	items := make([]string, 0, len(n.Items))
 	for _, item := range n.Items {
+		if pair, ok := e.flowPair(item); ok {
+			items = append(items, pair)
+
+			continue
+		}
 		s, _ := e.inline(item, true)
 		items = append(items, s)
 	}
@@ -272,17 +308,58 @@ func (e *emitter) flowSeq(n Seq) string {
 	return "[" + strings.Join(items, ", ") + "]"
 }
 
+// flowPair writes a one-entry mapping inside a flow sequence without its
+// braces, as the `b: c` in [a, b: c].
+//
+// The braces are optional there and nowhere else, so this shape appears in no
+// other position in the grammar. It carries the same meaning either way, which
+// keeps it an invariance case rather than a second value.
+func (e *emitter) flowPair(v Value) (string, bool) {
+	if !e.st.FlowPairs {
+		return "", false
+	}
+
+	n, ok := v.(Map)
+	if !ok || len(n.Pairs) != 1 {
+		return "", false
+	}
+
+	val, ok := e.inline(n.Pairs[0].Val, true)
+	if !ok {
+		return "", false
+	}
+
+	return e.keyIn(n.Pairs[0].Key, true) + ": " + val, true
+}
+
 func (e *emitter) flowMap(n Map) string {
 	pairs := make([]string, 0, len(n.Pairs))
 	for _, p := range n.Pairs {
+		key := e.keyIn(p.Key, true)
+
+		if _, empty := p.Val.(Null); empty {
+			switch e.st.FlowEmpty {
+			case FlowNullEmpty:
+				// The space after the colon is not optional: without it, `p:,`
+				// puts the colon inside the plain scalar rather than between
+				// the key and its value.
+				pairs = append(pairs, key+": ")
+
+				continue
+			case FlowNullKeyAlone:
+				pairs = append(pairs, key)
+
+				continue
+			case FlowNullSpelled:
+			}
+		}
+
 		v, _ := e.inline(p.Val, true)
-		pairs = append(pairs, e.keyIn(p.Key, true)+": "+v)
+		pairs = append(pairs, key+": "+v)
 	}
 
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
-
-func (e *emitter) key(k string) string { return e.keyIn(k, e.st.Flow) }
 
 func (e *emitter) keyIn(k string, flow bool) string {
 	return e.scalarString(k, flow)
@@ -499,15 +576,18 @@ func (e *emitter) blockScalar(s string) bool {
 	return e.folds(s) || (e.st.Literal && canLiteral(s, e.st.BlockIndicator))
 }
 
-// folded writes a string as a folded block scalar.
+// foldedScalar writes a string as a folded block scalar.
 //
 // Folding joins two lines with a space and turns n+1 breaks into n, so a break
 // in the value is written as a blank line and the lines of the value end up
 // separated by one. That is the whole trick, and it is why canFolded refuses
 // any value whose own lines are empty: those would need a run of breaks one
 // longer again, and the arithmetic stops being obvious enough to trust.
-func (e *emitter) folded(s string, indent, stated int) {
+func (e *emitter) foldedScalar(s string, indent, stated int) {
 	body := strings.TrimRight(s, "\n")
+
+	e.folded++
+
 	trailing := len(s) - len(body)
 
 	e.buf.WriteString(">")

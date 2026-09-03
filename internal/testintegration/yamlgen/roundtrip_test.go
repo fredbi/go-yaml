@@ -68,11 +68,14 @@ func renderDoesNotSettle(src []byte) bool {
 // a round trip through both of them is green while the file on disk is one no
 // other tool will read. Only something outside the library can tell.
 //
-// It holds today, and that is worth stating: both open render divergences write
-// perfectly valid documents that mean something other than what went in, which
-// is a defect in what the renderer chose to say and not in how it said it.
+// It went ungated until 2026-09-03, when [yamlgen.Style.Break] found the first
+// documents this library renders as text the grammar refuses: a folded block
+// scalar in a nested position, written with a lone CR, comes back out with its
+// content at the parent's own column. So it now consults the ledger like the
+// rest, under [yamlgen.RenderValid].
 func TestRenderWritesValidYAML(t *testing.T) {
 	oracle := grammar.NewRecognizer(1024)
+	tally := newTally()
 
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
@@ -85,11 +88,21 @@ func TestRenderWritesValidYAML(t *testing.T) {
 		}
 
 		rendered := file.String()
-		if !oracle.Stream([]byte(rendered)).OK {
+		invalid := !oracle.Stream([]byte(rendered)).OK
+
+		if known := yamlgen.Known(yamlgen.RenderValid, value, style); known != nil {
+			tally.record(known.Name, invalid)
+
+			return
+		}
+
+		if invalid {
 			rt.Fatalf("style %s: rendering wrote something that is not YAML 1.2.\nfrom:\n%s\nto:\n%s",
 				style, indent(src), indent(rendered))
 		}
 	})
+
+	tally.report(t, yamlgen.RenderValid)
 }
 
 // TestRenderPreservesValue is the property that matters most for a library

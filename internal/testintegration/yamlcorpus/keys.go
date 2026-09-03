@@ -99,6 +99,16 @@ func KeyShapes() []stance.Shape {
 			Intent: []stance.Tag{TagDuplicateKey},
 		},
 		{
+			// Found by the generator on 2026-09-03, once Style.FlowEmpty
+			// started writing a flow entry as a key with no colon. The
+			// duplicate-key check does not see the key-alone entry, so this
+			// document is read while "{a: 1, a: 2}" above is refused -- see
+			// Departures.
+			Name:   "the same key twice, one of them written as a key alone",
+			Src:    []byte("{a, a: 1}\n"),
+			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
 			Name:   "the same key twice in a nested mapping",
 			Src:    []byte("outer:\n  a: 1\n  a: 2\n"),
 			Intent: []stance.Tag{TagDuplicateKey},

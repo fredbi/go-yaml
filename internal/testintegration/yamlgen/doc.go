@@ -20,6 +20,20 @@
 // compare against. Generating the value first is what makes the expectation
 // free.
 //
+// # The axes that cost nothing and found the most
+//
+// [Style.Break] writes the same document with LF, with CRLF and with a lone
+// carriage return. It is one [strings.ReplaceAll] at the end of [Emit], it
+// crosses every other axis for free, and it opened both entries in [Ledger] on
+// the run it was added. Reach for that shape of axis first.
+//
+// [Depth] and [DeepDocument] are the other direction: documents with no [Value]
+// behind them at all, nested past anything a person would write. Their point is
+// the cost of reading them. A parser that is quadratic in nesting depth reads
+// every document this package generates correctly, so nothing here that
+// compares an outcome can see it -- see TestNestingCostStaysLinear, which
+// compares the curve instead.
+//
 // # Why not the library's own renderer
 //
 // The renderer emits one style. One style cannot demonstrate invariance across

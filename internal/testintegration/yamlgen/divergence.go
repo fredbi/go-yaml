@@ -61,6 +61,13 @@ const (
 	// value, and it is the only one where the library and the grammar can be
 	// asked the same question.
 	Parses
+	// RenderValid: the text the renderer wrote is a YAML 1.2 document.
+	//
+	// Only the grammar can answer this. Re-reading the rendering, which is what
+	// Render and Settle do, cannot: a renderer and a parser that make the same
+	// mistake agree with each other while the file on disk is one no other tool
+	// will read.
+	RenderValid
 )
 
 func (p Property) String() string {
@@ -80,6 +87,9 @@ func (p Property) String() string {
 	if p&Parses != 0 {
 		names = append(names, "parses")
 	}
+	if p&RenderValid != 0 {
+		names = append(names, "render-valid")
+	}
 
 	return strings.Join(names, "|")
 }
@@ -91,15 +101,68 @@ func (p Property) String() string {
 // actually diverged -- so an entry that has been fixed shows up as one that no
 // longer diverges, rather than sitting here forever.
 //
-// Empty. Every shape the generator draws holds all five properties, which is a
-// claim the property tests re-earn on every run rather than a note about how
-// things once stood: a new divergence fails because it is missing from here,
-// and a fixed one fails because it is still listed.
+// Every entry here was opened by [Style.Break], the axis that writes the same
+// document with LF, CRLF and a lone CR. The ledger was empty before it, and the
+// three entries went in on the run that added it -- so an axis nobody had
+// crossed found three renderer defects in one afternoon.
 //
 // An entry here is a parser or renderer defect rather than an open question.
 // The emitter is gated against the YAML 1.2 grammar, so each of these documents
 // is one the library is obliged to read.
-var Ledger = []Divergence{}
+var Ledger = []Divergence{
+	{
+		Name: "render/folded-scalar-copies-the-source-break",
+		Reason: "The renderer copies the source's line break into the folded block scalar " +
+			"it writes instead of writing its own \\n, and lays the content out from the " +
+			"wrong column afterwards. `>-\\r\\n x\\r\\n` renders as `>-\\r\\n  x\\n`, which is a " +
+			"different document again on the next render. With a lone CR the content " +
+			"lines also drift right, so `>-\\r x\\r y\\r` reads back as \"x\\n y\" instead " +
+			"of \"x y\"; nested under an anchor line, a folded scalar renders to text " +
+			"the grammar refuses outright. " +
+			"`|` is unaffected.\n\n" +
+			"The predicate is wider than the defect for Render and RenderValid: a " +
+			"folded scalar with one content line and nothing after it renders " +
+			"correctly, so those two report fewer divergences than draws. Settle " +
+			"diverges on every draw.",
+		Property: Render | Settle | RenderValid,
+		Match: func(v Value, st Style) bool {
+			return st.Break != BreakLF && st.Break != "" && writesFolded(v, st)
+		},
+	},
+	{
+		Name: "render/crlf-blanks-a-line-above-a-standalone-comment",
+		Reason: "A CRLF source gains a blank line above a comment on its own line, but only " +
+			"once the document also holds a block entry whose `-` or `key:` is the " +
+			"whole line. `# c1\\r\\n-\\r\\n# c2\\r\\n- 1\\r\\n` renders as " +
+			"`# c1\\n- \\n\\n# c2\\n- 1\\n`, and the blank line is gone again on the " +
+			"second render. Either half alone is fine, and a lone CR is fine.",
+		Property: Settle,
+		Match: func(v Value, st Style) bool {
+			return st.Break == BreakCRLF && st.Comments.head() && writesOpenEntry(v, st)
+		},
+	},
+}
+
+// writesFolded reports whether emitting v in st writes a folded block scalar,
+// and writesOpenEntry whether it writes a block entry whose `-` or `key:` is
+// the whole line.
+//
+// Both emit the document a second time and read a counter off the emitter. That
+// costs one extra emit per ledger check and buys a predicate that cannot drift
+// from the emitter it describes.
+func writesFolded(v Value, st Style) bool {
+	e := &emitter{st: st}
+	e.root(v)
+
+	return e.folded > 0
+}
+
+func writesOpenEntry(v Value, st Style) bool {
+	e := &emitter{st: st}
+	e.root(v)
+
+	return e.openEntries > 0
+}
 
 // Known returns the ledger entry describing this pairing for the given
 // property, or nil.

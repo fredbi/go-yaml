@@ -135,7 +135,10 @@ type Departure struct {
 // Suite. That is the argument for the patterns in one sentence.
 //
 // Two entries left on 2026-08-27, both fixed rather than argued away: a cycle
-// decoding to nil, and an alias resolving to an earlier document's anchor.
+// decoding to nil, and an alias resolving to an earlier document's anchor. The
+// third arrived on 2026-09-03 from the generator rather than from a pattern:
+// Style.FlowEmpty started writing "{a}" and the duplicate-key check turned out
+// not to see it.
 var Departures = []Departure{
 	{
 		Pattern:  "a version directive and a tag directive together",
@@ -144,6 +147,14 @@ var Departures = []Departure{
 		Because: "6.8: nothing limits a document to one directive, and a %YAML beside a %TAG is the ordinary " +
 			"prelude -- so this is not an exotic shape but the commonest one there is",
 		Corroborated: "libfyaml 1.0.0a8 reads it, and reads two %TAG handles together as well",
+	},
+	{
+		Pattern:  "the same key twice, one of them written as a key alone",
+		Kind:     Verdict,
+		Observed: `"{a, a: 1}" and "{a, a}" are read; "{a: 1, a: 2}" and "{a: , a: 1}" are refused`,
+		Because: "3.2.1.1: a flow mapping entry may be a key with no value, and it is an entry like any " +
+			"other -- so its key counts when the mapping is checked for duplicates",
+		Corroborated: "",
 	},
 	{
 		Pattern:  "two keys alike in text and different once resolved",

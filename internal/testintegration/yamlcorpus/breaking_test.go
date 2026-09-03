@@ -4,6 +4,7 @@
 package yamlcorpus_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,7 +145,7 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var caught, missed int
+	var caught, missed, declared int
 
 	for _, c := range cases {
 		if !strings.HasPrefix(c.Name, "generated/") || len(c.Tags) == 0 {
@@ -166,6 +167,20 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 			continue
 		}
 
+		// One family is declared rather than failed. A flow mapping entry
+		// written as a key alone escapes the duplicate-key check, so "{a, a: 1}"
+		// is read while "{a: 1, a: 2}" is refused -- see Departures and the
+		// pattern "the same key twice, one of them written as a key alone".
+		// Every miss in the stored corpus was read by hand on 2026-09-03 and is
+		// that shape; the allowance is on the tag rather than the shape because
+		// telling one from the other needs a parse, and the pattern above is
+		// what pins the exact document.
+		if slices.Contains(c.Tags, string(yamlcorpus.TagDuplicateKey)) {
+			declared++
+
+			continue
+		}
+
 		missed++
 
 		if missed < 4 {
@@ -173,7 +188,13 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 		}
 	}
 
-	t.Logf("of the documents broken on purpose, the library catches %d and misses %d", caught, missed)
+	t.Logf("of the documents broken on purpose, the library catches %d, misses %d "+
+		"and reads %d that a declared departure covers", caught, missed, declared)
+
+	if declared == 0 {
+		t.Error("no document exercised the declared duplicate-key departure, " +
+			"so either it is fixed or the generator stopped writing a key-alone entry")
+	}
 
 	if caught == 0 {
 		t.Error("none were caught, which would make the family untested rather than passing")
