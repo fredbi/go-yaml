@@ -52,6 +52,11 @@ func TestNestingCostStaysLinear(t *testing.T) {
 		yamlgen.BlockMapIndented,
 		yamlgen.AliasChain,
 		yamlgen.FlatSeq,
+		// Both flow shapes were quadratic until keyWindow.release stopped
+		// copying the window onto itself once per token: 32,000 brackets cost
+		// 6,706 ns/byte where 4,000 cost 1,170. They belong here now.
+		yamlgen.FlowSeqNesting,
+		yamlgen.FlowMapNesting,
 	} {
 		t.Run(shape.String(), func(t *testing.T) {
 			got := costGrowth(t, shape)

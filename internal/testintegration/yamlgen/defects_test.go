@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
-	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -126,30 +125,4 @@ func TestDefectCRLFBlanksALineAboveAStandaloneComment(t *testing.T) {
 			})
 		}
 	})
-}
-
-// TestDefectFlowNestingIsQuadratic: the parse of a nested flow collection costs
-// time proportional to the square of its depth.
-//
-// 32,000 brackets cost 6,706 ns/byte where 4,000 cost 1,170, and the per-byte
-// cost doubles at every doubling of the depth. Nothing else in this package
-// could see it: the documents parse, they mean what they should, and they
-// render and settle -- the defect is entirely in how long the parse takes, and
-// a corpus that compares outcomes never asks.
-//
-// Pinned as a ratchet, so a parser that fixes this fails here and the shape
-// moves into TestNestingCostStaysLinear beside the other five.
-func TestDefectFlowNestingIsQuadratic(t *testing.T) {
-	for _, shape := range []yamlgen.Depth{yamlgen.FlowSeqNesting, yamlgen.FlowMapNesting} {
-		t.Run(shape.String(), func(t *testing.T) {
-			got := costGrowth(t, shape)
-			t.Logf("%s costs %.2f times as much per byte at %d times the depth", shape, got, costSpan)
-
-			assert.GreaterOrEqual(t, got, costCeiling,
-				"today: %s costs %.2f times as much per byte at %d times the depth. "+
-					"Under %.1f means the curve has been straightened -- move this shape "+
-					"into TestNestingCostStaysLinear and delete this case",
-				shape, got, costSpan, costCeiling)
-		})
-	}
 }
