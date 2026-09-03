@@ -833,6 +833,16 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				s.progressColumn(ctx, 1)
 				return nil, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(string(ctx.obuf), s.pos()))
 			}
+			// The escapes that name a code point -- \xXX, \uXXXX, \UXXXXXXXX --
+			// leave the marker and its digits to be recorded here. Every other
+			// case adds what it consumed as it goes; these cannot, because a
+			// surrogate pair settles how far it reaches only after the low half
+			// is read.
+			if isCodePointEscape(nextChar) {
+				for i := idx + 1; i <= idx+progress && i < size; i++ {
+					ctx.addOriginBuf(rune(src[i]))
+				}
+			}
 			idx += progress
 			s.progressColumn(ctx, progress)
 			continue
@@ -2512,4 +2522,10 @@ func (s *Scanner) Tokens() iter.Seq[token.Token] {
 			}
 		}
 	}
+}
+
+// isCodePointEscape reports whether an escape names a code point by its digits,
+// and so consumes more of the source than the backslash and one marker.
+func isCodePointEscape(marker rune) bool {
+	return marker == 'x' || marker == 'u' || marker == 'U'
 }

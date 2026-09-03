@@ -69,7 +69,7 @@ var offsetMissLedger = map[string]int{
 	"String":      71,
 	"Invalid":     23,
 	"Integer":     4,
-	"DoubleQuote": 3,
+	"DoubleQuote": 1,
 }
 
 // TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how
