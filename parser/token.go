@@ -555,64 +555,6 @@ func (g *grouper) group2(typ tokenGroupType, a, b *tapeToken) *tapeToken {
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
 
-// attachLineComments attaches the comment closing a token's line to that token, and
-// drops it from the stream.
-//
-// Nothing is held back. The comment arrives after the token it belongs to, and
-// the attachment is recorded against the token rather than written into it, so
-// the token may already have been handed on.
-func (g *grouper) attachLineComments(in []*tapeToken) []*tapeToken {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if tk.Type() == token.CommentType && g.lineComment != nil && g.lineComment.Line() == tk.Line() {
-			g.setLineComment(g.lineComment, tk.RawToken())
-
-			continue
-		}
-		out = append(out, tk)
-		g.lineComment = tk
-	}
-
-	return out
-}
-
-// groupBlockScalars joins a "|" or ">" header with the content that follows it.
-//
-// One token is held: the header, until the content arrives. A header ending the
-// stream has no content, and the group is the header alone -- which is what
-// "a: |" with nothing after it is.
-func (g *grouper) groupBlockScalars(in []*tapeToken) []*tapeToken {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.blockHeader != nil {
-			// Whatever follows the header is its content, read as it stands: a
-			// second "|" is content, not another header.
-			out = append(out, g.group2(g.blockType, g.blockHeader, tk))
-			g.blockHeader = nil
-
-			continue
-		}
-
-		switch tk.Type() {
-		case token.LiteralType:
-			g.blockHeader, g.blockType = tk, TokenGroupLiteral
-		case token.FoldedType:
-			g.blockHeader, g.blockType = tk, TokenGroupFolded
-		default:
-			out = append(out, tk)
-		}
-	}
-
-	// A header ending the stream has no content, so the group is the header
-	// alone. Between two runs it waits for the next one.
-	if g.ending && g.blockHeader != nil {
-		out = append(out, g.group1(g.blockType, g.blockHeader))
-		g.blockHeader = nil
-	}
-
-	return out
-}
-
 // groupAnchors joins "&" with the name after it, that name with what it names,
 // and "*" with the name after it.
 //

@@ -287,9 +287,17 @@ func (r *reader) fill() error {
 	// Each pass reads what the one before it left and hands on what it made of
 	// it, keeping on the grouper what it cannot settle yet, so a group
 	// straddling the join between two runs is grouped as one.
-	out := g.attachLineComments(r.run)
-	out = g.groupBlockScalars(out)
-	out = g.groupAnchors(out)
+	// The first two stages read one token at a time, the rest still take the
+	// run whole. What the machine hands out is the run the passes then read.
+	machine := g.out(len(r.run))
+	for _, tk := range r.run {
+		machine = g.feed(tk, machine)
+	}
+	if g.ending {
+		machine = g.finish(machine)
+	}
+
+	out := g.groupAnchors(machine)
 	out = g.groupScalarTags(out)
 	out = g.groupAnchorsWithScalarTags(out)
 	out = g.groupExplicitKeys(out)
