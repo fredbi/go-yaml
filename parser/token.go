@@ -1337,7 +1337,7 @@ func keyEndLine(tk *tapeToken) int {
 		return tk.Line()
 	}
 
-	return tk.Line() + strings.Count(strings.Trim(raw.Origin, " \r\n"), "\n")
+	return int(raw.EndLine)
 }
 
 // closesFlowCollection reports whether tk ends a flow collection.

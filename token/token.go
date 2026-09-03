@@ -857,6 +857,7 @@ func Make(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 
 	if typ, ok := reservedKeywordTypes[value]; ok {
@@ -933,6 +934,19 @@ type Token struct {
 	// comments still has to leave the lines they stood on, or what was written
 	// under them runs into what was written before.
 	CommentBreaksAbove int32
+	// EndLine is the line the token's text ends on, counting from 1 as
+	// [Position.Line] does. A token written on one line ends on the line it
+	// starts on, so EndLine equals Position.Line for all but block scalars,
+	// multi-line quoted scalars and comments.
+	//
+	// It is what a reader wants when it asks how far a token reaches, and it is
+	// settled here rather than counted again from [Token.Origin] at every site
+	// that asks. Leading and trailing whitespace does not count: those breaks
+	// belong to the gap around the token, not to the token.
+	//
+	// A token the parser makes up for a value the document leaves out ends
+	// where it starts, having no text in the document at all.
+	EndLine int32
 	// Type is a token type.
 	Type Type
 	// BlankLineAbove records that the author left an empty line above this
@@ -1037,6 +1051,7 @@ func MakeString(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1047,6 +1062,7 @@ func SequenceEntry(org string, pos Position) *Token {
 		Value:    string(SequenceEntryCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1057,6 +1073,7 @@ func MappingKey(pos Position) *Token {
 		Value:    string(MappingKeyCharacter),
 		Origin:   string(MappingKeyCharacter),
 		Position: pos,
+		EndLine:  pos.Line,
 	}
 }
 
@@ -1067,6 +1084,7 @@ func MappingValue(pos Position) *Token {
 		Value:    string(MappingValueCharacter),
 		Origin:   string(MappingValueCharacter),
 		Position: pos,
+		EndLine:  pos.Line,
 	}
 }
 
@@ -1077,6 +1095,7 @@ func CollectEntry(org string, pos Position) *Token {
 		Value:    string(CollectEntryCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1087,6 +1106,7 @@ func SequenceStart(org string, pos Position) *Token {
 		Value:    string(SequenceStartCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1097,6 +1117,7 @@ func SequenceEnd(org string, pos Position) *Token {
 		Value:    string(SequenceEndCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1107,6 +1128,7 @@ func MappingStart(org string, pos Position) *Token {
 		Value:    string(MappingStartCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1117,6 +1139,7 @@ func MappingEnd(org string, pos Position) *Token {
 		Value:    string(MappingEndCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1127,6 +1150,7 @@ func Comment(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1137,6 +1161,7 @@ func Anchor(org string, pos Position) *Token {
 		Value:    string(AnchorCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1147,6 +1172,7 @@ func Alias(org string, pos Position) *Token {
 		Value:    string(AliasCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1157,6 +1183,7 @@ func Tag(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1167,6 +1194,7 @@ func Literal(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1177,6 +1205,7 @@ func Folded(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1187,6 +1216,7 @@ func SingleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1197,6 +1227,7 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1207,6 +1238,7 @@ func Directive(org string, pos Position) *Token {
 		Value:    string(DirectiveCharacter),
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1217,6 +1249,7 @@ func Space(pos Position) *Token {
 		Value:    string(SpaceCharacter),
 		Origin:   string(SpaceCharacter),
 		Position: pos,
+		EndLine:  pos.Line,
 	}
 }
 
@@ -1227,6 +1260,7 @@ func MergeKey(org string, pos Position) *Token {
 		Value:    "<<",
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1237,6 +1271,7 @@ func DocumentHeader(org string, pos Position) *Token {
 		Value:    "---",
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1247,6 +1282,7 @@ func DocumentEnd(org string, pos Position) *Token {
 		Value:    "...",
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1260,6 +1296,7 @@ func Invalid(org string, pos Position) *Token {
 		Value:    org,
 		Origin:   org,
 		Position: pos,
+		EndLine:  pos.Line + int32(breaksIn(org)),
 	}
 }
 
@@ -1276,4 +1313,28 @@ func DetectLineBreakCharacter(src string) string {
 	default:
 		return "\n"
 	}
+}
+
+// breaksIn counts the line breaks org holds, ignoring the whitespace around it.
+//
+// CR LF and a lone CR each end one line, as they do for the scanner: counting
+// only "\n" would leave a document written with carriage returns reporting that
+// none of its tokens reaches past the line it starts on.
+func breaksIn(org string) int {
+	body := strings.Trim(org, " \t\r\n")
+
+	var n int
+	for i := 0; i < len(body); i++ {
+		switch body[i] {
+		case '\n':
+			n++
+		case '\r':
+			n++
+			if i+1 < len(body) && body[i+1] == '\n' {
+				i++
+			}
+		}
+	}
+
+	return n
 }
