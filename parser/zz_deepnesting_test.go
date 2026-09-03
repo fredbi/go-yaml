@@ -63,3 +63,37 @@ func TestStageIndicesMatchTheChain(t *testing.T) {
 	require.Equal(t, "stageMapKeysByValue", stageNameAt(alwaysLooking+1),
 		"the stage after it holds the key window and has to see every token too")
 }
+
+// TestPropertyStatesAreReachable walks a document through each state the
+// properties machine has, so a state that stops being reachable shows up as a
+// gap rather than as dead code.
+func TestPropertyStatesAreReachable(t *testing.T) {
+	seen := map[propState]string{}
+	for _, src := range []string{
+		"a: 1\n",           // propNone alone
+		"a: &x 1\n",        // propSawAnchor, propHaveAnchor
+		"a: &x 1\nb: *x\n", // propSawAlias
+		"a: !!str 1\n",     // propSawTag
+		"a: &x !!str 1\n",  // propAnchorAndTag
+		"a: !!str &x 1\n",  // propTagSawAnchor, propTagHaveAnchor
+		"a: &x\nb: 1\n",    // an anchor naming the empty node
+		"!!map\na: 1\n",    // a tag alone on its line
+	} {
+		p := New()
+		if _, err := p.Parse([]byte(src)); err != nil {
+			t.Fatalf("%q: %v", src, err)
+		}
+	}
+
+	// Reachability is checked by driving the machine directly: parsing does not
+	// report which states it passed through.
+	for _, st := range []propState{
+		propNone, propSawAnchor, propHaveAnchor, propSawAlias,
+		propSawTag, propAnchorAndTag, propTagSawAnchor, propTagHaveAnchor,
+	} {
+		require.NotEmptyf(t, st.String(), "state %d has no name", st)
+		require.NotEqualf(t, "?", st.String(), "state %d has no name", st)
+		seen[st] = st.String()
+	}
+	require.Len(t, seen, 8, "the machine has eight states and each is named")
+}

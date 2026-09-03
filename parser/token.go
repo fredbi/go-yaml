@@ -367,12 +367,14 @@ type grouper struct {
 	blockHeader *tapeToken     // a "|" or ">", waiting for its content
 	blockType   tokenGroupType // which of the two it is
 
+	// prop is where the properties before a node stand: see propState.
+	prop propState
+
 	anchor *tapeToken // a "&", waiting for its name
 	name   *tapeToken // an anchor name, waiting to see what it names
 	alias  *tapeToken // a "*", waiting for its name
 
-	tag    *tapeToken // a tag, waiting to see what it tags
-	tagged *tapeToken // an anchor name, waiting to see whether a tagged scalar follows
+	tag *tapeToken // a tag, waiting to see what it tags
 
 	// explicit is what groupExplicitKeys holds while it reads the body naming
 	// a '?' key, and keys what groupMapKeysByValue holds while it waits to see
