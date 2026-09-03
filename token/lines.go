@@ -161,9 +161,10 @@ func linesSpannedBy(tk *Token, isContent bool, lbc string) int {
 		return lines - 1
 	}
 
-	body := strings.TrimSpace(tk.Origin)
-
-	return strings.Count(strings.TrimRight(body, lbc), lbc)
+	// EndLine is that count, settled where the token was built: the breaks
+	// inside the token, with the whitespace around it left to whatever it
+	// separates.
+	return int(tk.EndLine - tk.Position.Line)
 }
 
 // normalizeNewLineChars reads CR LF and CR as one line break each.

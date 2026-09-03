@@ -1113,8 +1113,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 		// and a line break before the ':' is ordinary separation, so
 		// "{foo\n: bar}" is as legal as "{foo: bar}".
 		if ctx.inFlowSequence && isScalarKeyToken(tk) {
-			origin = p.removeRightWhiteSpace(origin)
-			if int(tk.Position.Line)+p.newLineCharacterNum(origin) != colonTk.Line() {
+			if int(tk.EndLine) != colonTk.Line() {
 				return yamlerrors.NewSyntax("map key definition includes an implicit line break", tk)
 			}
 		}
@@ -1156,13 +1155,6 @@ func carriesProperty(tk *tapeToken) bool {
 func (p *Parser) removeLeftWhiteSpace(src string) string {
 	// CR or LF or CRLF
 	return strings.TrimLeftFunc(src, func(r rune) bool {
-		return r == ' ' || r == '\r' || r == '\n'
-	})
-}
-
-func (p *Parser) removeRightWhiteSpace(src string) string {
-	// CR or LF or CRLF
-	return strings.TrimRightFunc(src, func(r rune) bool {
 		return r == ' ' || r == '\r' || r == '\n'
 	})
 }
