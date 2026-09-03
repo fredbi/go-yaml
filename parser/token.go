@@ -975,6 +975,13 @@ func (w *keyWindow) keepFrom() int {
 // release hands on what the window no longer has to keep, appending it to out.
 func (w *keyWindow) release(out []*tapeToken) []*tapeToken {
 	keep := w.keepFrom()
+	if keep == 0 {
+		// Nothing may be handed on: a flow collection is open and may yet close
+		// and stand as a key. Copying the window onto itself and taking zero
+		// off every opener is what that used to cost, once per token, which
+		// made a document of nothing but "[" quadratic in its own length.
+		return out
+	}
 	out = append(out, w.held[:keep]...)
 
 	w.held = append(w.held[:0], w.held[keep:]...)
