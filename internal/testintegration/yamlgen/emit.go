@@ -49,21 +49,11 @@ type emitter struct {
 	comments int
 
 	// The rest is here for [Ledger] predicates, and none of it is worth
-	// re-deriving outside the emitter: whether it reaches for `>` depends on
-	// Style.Folded, on canFolded and on the node being in block context, and a
-	// predicate that reimplemented the three would drift from the emitter it
-	// describes.
+	// re-deriving outside the emitter: whether a tag lands in front of an
+	// anchor depends on Style.PropertyOrder, on which node the tagger picked
+	// and on the position it is written in, and a predicate that reimplemented
+	// the three would drift from the emitter it describes.
 
-	// folded counts the folded block scalars written.
-	//
-	// It and openEntries are the two counters no divergence predicate reads
-	// any more: writesFolded and writesOpenEntry stood in divergence.go until
-	// the divergences they gated were fixed. Counting costs an increment, and
-	// writing a predicate back against them is two lines.
-	folded int
-	// openEntries counts the block entries whose value does not start on the
-	// entry's own line -- an empty node, or a collection beginning below.
-	openEntries int
 	// strTaggedRespelt counts the `!!str` scalars written plain whose spelling
 	// this library does not give back.
 	strTaggedRespelt int
@@ -356,7 +346,6 @@ func (e *emitter) child(v Value, indent, depth int) {
 	// going to occupy lines of its own anyway.
 	if e.st.PropertyLine && !p.none() && !flow {
 		if _, ok := e.inlineWith(v, flow, p.tag); !ok {
-			e.openEntries++
 			e.propertyLines++
 			e.lineComment()
 			e.buf.WriteString("\n")
@@ -378,7 +367,6 @@ func (e *emitter) child(v Value, indent, depth int) {
 		if inline != "" {
 			e.buf.WriteString(" ")
 		} else {
-			e.openEntries++
 			if p.tag != "" {
 				e.taggedLineEnds++
 			}
@@ -393,7 +381,6 @@ func (e *emitter) child(v Value, indent, depth int) {
 
 	// A comment may sit on the line that introduces a nested block, where the
 	// value itself has not been written yet.
-	e.openEntries++
 	if p.tag != "" {
 		e.taggedLineEnds++
 	}
@@ -764,8 +751,6 @@ func (e *emitter) blockScalar(s string) bool {
 // longer again, and the arithmetic stops being obvious enough to trust.
 func (e *emitter) foldedScalar(s string, indent, stated int) {
 	body := strings.TrimRight(s, "\n")
-
-	e.folded++
 
 	trailing := len(s) - len(body)
 

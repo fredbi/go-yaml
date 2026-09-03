@@ -121,8 +121,10 @@ var Ledger = []Divergence{
 			"it is a block scalar: the comment lands inside the content, and " +
 			"`  - |-` then `    trailing ` comes back as \"trailing  # c1\" instead of " +
 			"\"trailing \". So the entry claims Render as well as CommentsKept, and " +
-			"reports fewer divergences than draws on both.",
-		Property: Render | CommentsKept,
+			"Settle besides -- a comment that has moved onto a line whose own comment is " +
+			"still there renders differently again next time. It reports fewer " +
+			"divergences than draws on all three.",
+		Property: Render | Settle | CommentsKept,
 		Match: func(v Value, st Style) bool {
 			return st.Comments.line() && writesPropertyLine(v, st)
 		},
@@ -145,8 +147,13 @@ var Ledger = []Divergence{
 			"So three shapes fail three ways: a collection tag stops the parse, a tag on " +
 			"an empty node eats what follows, and any other tag is dropped so quietly " +
 			"that nothing notices until an alias asks the anchor what it names. The " +
-			"predicate asks for one of the three.",
-		Property: Parses | Decode | Render,
+			"predicate asks for one of the three.\n\n" +
+			"It claims all five properties, which no other entry does and this one has " +
+			"earned: a node that eats the rest of the document takes the comments with " +
+			"it, moves what it swallowed -- `a: !!null &a1` over `b: 1` comes back with b " +
+			"indented under a -- and a document whose entries have shifted does not render " +
+			"the same way twice.",
+		Property: Parses | Decode | Render | Settle | CommentsKept,
 		Match:    writesBrokenTaggedAnchor,
 	},
 	{

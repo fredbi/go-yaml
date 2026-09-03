@@ -443,9 +443,15 @@ func TestFixedFoldedScalarNestedRendersYAML(t *testing.T) {
 //
 // scanComment stopped at the '\r' and left the '\n' to whatever came next,
 // whose leading whitespace was then read as a second break. The document gained
-// a blank line above the comment when it was written back, and lost it again on
-// the render after that, so it never settled. It took both halves to show: a
-// standalone comment and a block entry whose `-` is the whole line.
+// a blank line next to the comment when it was written back, and lost it again
+// on the render after that, so it never settled.
+//
+// Any comment did it, at the end of a line as much as on one of its own. The
+// ledger entry that recorded it asked for a standalone comment and so missed
+// `- #\r\n -\r\n`, which failed TestRenderReachesAFixedPoint at a seed the
+// earlier runs had not drawn; `- 1 # c1\r\n- 2\r\n` gained its blank line with
+// no open entry anywhere. Both are below, because a fix is worth no more than
+// the shapes it is held to.
 func TestFixedCRLFComentDoesNotBlankALine(t *testing.T) {
 	for _, test := range []struct{ name, src string }{
 		{"CRLF", "# c1\r\n-\r\n# c2\r\n- 1\r\n"},
@@ -459,6 +465,25 @@ func TestFixedCRLFComentDoesNotBlankALine(t *testing.T) {
 			once := file.String()
 			assert.Equal(t, "# c1\n- \n# c2\n- 1\n", once,
 				"every line break writes the same document")
+
+			again, err := parser.ParseBytes([]byte(once), parser.Comments())
+			require.NoError(t, err)
+			assert.Equal(t, once, again.String(), "and it settles in one pass")
+		})
+	}
+
+	// A comment at the end of a line, which the entry above did not ask for.
+	for _, test := range []struct{ name, src, want string }{
+		{"a line comment over an open entry", "- #\r\n -\r\n", "- #\n  - \n"},
+		{"a line comment and no open entry", "- 1 # c1\r\n- 2\r\n", "- 1 # c1\n- 2\n"},
+		{"a line comment introducing a block", "- # c1\r\n  - x\r\n", "- # c1\n  - x\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.src), parser.Comments())
+			require.NoError(t, err)
+
+			once := file.String()
+			assert.Equal(t, test.want, once, "no blank line either side of the comment")
 
 			again, err := parser.ParseBytes([]byte(once), parser.Comments())
 			require.NoError(t, err)
