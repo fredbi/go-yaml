@@ -719,12 +719,12 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 }
 
 func (d *Decoder) unmarshalableDocument(node ast.Node) ([]byte, error) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, d.entry)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
 	return []byte(doc), nil
 }
 
 func (d *Decoder) unmarshalableText(node ast.Node) ([]byte, bool) {
-	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap, d.entry)
+	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
 	var v string
 	if err := Unmarshal([]byte(doc), &v); err != nil {
 		return nil, false

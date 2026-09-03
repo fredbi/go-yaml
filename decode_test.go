@@ -2443,6 +2443,15 @@ map: &map
 func TestCommentWithCustomUnmarshaler(t *testing.T) {
 	type T struct{}
 
+	// The bytes a custom unmarshaler receives are rendered from the node, so
+	// their layout is the renderer's and not the document's: a block sequence
+	// under a key sits at the key's own indentation whatever the source wrote.
+	// The comments are what this test is about, and they survive.
+	want := []string{
+		"foo:\n# comment\n- a: b",
+		"foo: # comment\n  bar: 1\n  baz: true",
+	}
+
 	for idx, test := range []string{
 		`
 foo:
@@ -2463,9 +2472,8 @@ foo: # comment
 				&v,
 				codec.CommentToMap(m),
 				codec.CustomUnmarshaler[T](func(dst *T, b []byte) error {
-					expected := bytes.Trim([]byte(test), "\n")
-					if !bytes.Equal(b, expected) {
-						return fmt.Errorf("failed to decode: got\n%s", string(test))
+					if string(b) != want[idx] {
+						return fmt.Errorf("got %q, want %q", string(b), want[idx])
 					}
 					return nil
 				}),
@@ -3009,7 +3017,9 @@ type unmarshalList struct {
 }
 
 func (u *unmarshalList) UnmarshalYAML(b []byte) error {
-	expected := `
+	// The renderer leaves the break that ends a node to whatever follows it,
+	// and here nothing does, so the last entry closes without one.
+	expected := strings.TrimSuffix(`
 - b: c # comment
   # comment
   d: | # comment
@@ -3020,7 +3030,7 @@ func (u *unmarshalList) UnmarshalYAML(b []byte) error {
 - h: i
 - j: [] # comment
 - k: {} # comment
-`
+`, "\n")
 	actual := "\n" + string(b)
 	if expected != actual {
 		return fmt.Errorf("unexpected bytes: expected [%q] but got [%q]", expected, actual)
@@ -3610,18 +3620,18 @@ func TestMapKeyCustomUnmarshaler(t *testing.T) {
 type bytesUnmershalerWithMapAlias struct{}
 
 func (*bytesUnmershalerWithMapAlias) UnmarshalYAML(b []byte) error {
+	// Rendered from the node the alias names, so the layout is the renderer's:
+	// the block sequence under "bar:" sits at bar's own indentation.
 	expected := strings.TrimPrefix(`
 aaaaa:
   bbbbb:
     bar:
-      - |
+    - |
+      foo
+        bar
+    - name: |
         foo
-          bar
-      - name: |
-          foo
-            bar
-
-`, "\n")
+          bar`, "\n")
 	if string(b) != expected {
 		return fmt.Errorf("failed to decode: expected:\n[%s]\nbut got:\n[%s]\n", expected, string(b))
 	}
@@ -4163,4 +4173,94 @@ func TestIssue735(t *testing.T) {
 			t.Fatalf("unexpected items: %v", v.Items)
 		}
 	})
+}
+
+// recordedBytes keeps the YAML a custom unmarshaler is handed.
+type recordedBytes struct{ raw string }
+
+func (r *recordedBytes) UnmarshalYAML(b []byte) error {
+	r.raw = string(b)
+
+	return nil
+}
+
+// TestBytesUnmarshalerReceivesAValueThatReadsBack states the contract the bytes
+// handed to a custom UnmarshalYAML are held to: parsing them gives the value the
+// node carries.
+//
+// They are rendered from the node rather than cut from the source, so their
+// layout is the renderer's -- a block sequence under a key sits at the key's own
+// indentation whatever the document wrote, and an alias arrives as the value it
+// names, since an unmarshaler holds no anchor map to look one up in. The value
+// is what has to survive, and this is where that is checked; the tests above
+// pin the exact text.
+func TestBytesUnmarshalerReceivesAValueThatReadsBack(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		yaml string
+		want any
+	}{
+		{
+			name: "a block scalar keeps its last line",
+			yaml: "foo: |\n  a\n  b\n",
+			want: "a\nb\n",
+		},
+		{
+			name: "a block scalar that keeps its trailing blanks",
+			yaml: "foo: |+\n  a\n\n\n",
+			want: "a\n\n\n",
+		},
+		{
+			name: "a folded scalar folds",
+			yaml: "foo: >\n  a\n  b\n",
+			want: "a b\n",
+		},
+		{
+			name: "a sequence written at the key's indentation",
+			yaml: "foo:\n- 1\n- 2\n",
+			want: []any{uint64(1), uint64(2)},
+		},
+		{
+			name: "a sequence written indented under its key",
+			yaml: "foo:\n  - 1\n  - 2\n",
+			want: []any{uint64(1), uint64(2)},
+		},
+		{
+			name: "an alias arrives as the node it names",
+			yaml: "x: &a\n  b: 1\nfoo: *a\n",
+			want: map[string]any{"b": uint64(1)},
+		},
+		{
+			name: "an alias inside a sequence",
+			yaml: "x: &a [1, 2]\nfoo:\n  - *a\n",
+			want: []any{[]any{uint64(1), uint64(2)}},
+		},
+		{
+			name: "a mapping holding a block scalar",
+			yaml: "foo:\n  a: |\n    x\n  b: 2\n",
+			want: map[string]any{"a": "x\n", "b": uint64(2)},
+		},
+		{
+			name: "a quoted scalar keeps its escapes",
+			yaml: "foo: \"a\\tb\"\n",
+			want: "a\tb",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var v struct {
+				Foo recordedBytes `yaml:"foo"`
+			}
+			if err := yaml.Unmarshal([]byte(test.yaml), &v); err != nil {
+				t.Fatal(err)
+			}
+
+			var got any
+			if err := yaml.Unmarshal([]byte(v.Foo.raw), &got); err != nil {
+				t.Fatalf("the bytes handed over do not parse: %q: %s", v.Foo.raw, err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("handed over %q, which reads as %#v, want %#v", v.Foo.raw, got, test.want)
+			}
+		})
+	}
 }
