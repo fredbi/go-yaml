@@ -57,9 +57,25 @@ func at(src string, offset int) string {
 //     Working it out afterwards cannot succeed, folding making the value
 //     shorter than the source it came from, and ctx.originStart does not track
 //     through a multi-line block.
-//   - 12 tokens carry an Origin that is not a slice of the source at all, so
-//     no offset can address it: trailing whitespace the origin buffer dropped,
-//     and escapes a double-quoted scalar rewrote.
+//
+//   - tokens carrying an Origin that is not a slice of the source at all, so no
+//     offset can address it. The escapes a double-quoted scalar rewrote were
+//     one half and are fixed: scanDoubleQuote records \xXX, \uXXXX and
+//     \UXXXXXXXX now.
+//
+//     The other half is the spaces a line ends with.
+//     Context.removeRightSpaceFromBuf trims them from the origin as well as
+//     from the value, so "a: one \n  two" -- a plain scalar continued over two
+//     lines, the first ending in a space -- has an Origin of "a: one\n  two",
+//     which the document does not contain. The offset then addresses 10 bytes
+//     past the value: the indent, the break and the space that folding saved.
+//
+//     ⚠️ Keeping the origin verbatim is not a one-line change. The origin
+//     buffer doubles as the state an indentation decision is taken from:
+//     leaving the trailing tabs in it turns "foo: 1" into a tab used as a map
+//     key. TestDecoder_TabCharacterAtRight and tabs-that-look-like-indentation
+//     both fail. Separating "the token's text" from "the buffer indentation is
+//     judged by" is what this needs, and it is a scanner change of its own.
 //
 // Line and Column were right throughout, which is what made the drift hard to
 // see: 3,287 of 3,489 columns address their token.
