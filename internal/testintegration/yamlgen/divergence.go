@@ -111,25 +111,6 @@ func (p Property) String() string {
 // is one the library is obliged to read.
 var Ledger = []Divergence{
 	{
-		Name: "render/folded-scalar-copies-the-source-break",
-		Reason: "The renderer copies the source's line break into the folded block scalar " +
-			"it writes instead of writing its own \\n, and lays the content out from the " +
-			"wrong column afterwards. `>-\\r\\n x\\r\\n` renders as `>-\\r\\n  x\\n`, which is a " +
-			"different document again on the next render. With a lone CR the content " +
-			"lines also drift right, so `>-\\r x\\r y\\r` reads back as \"x\\n y\" instead " +
-			"of \"x y\"; nested under an anchor line, a folded scalar renders to text " +
-			"the grammar refuses outright. " +
-			"`|` is unaffected.\n\n" +
-			"The predicate is wider than the defect for Render and RenderValid: a " +
-			"folded scalar with one content line and nothing after it renders " +
-			"correctly, so those two report fewer divergences than draws. Settle " +
-			"diverges on every draw.",
-		Property: Render | Settle | RenderValid,
-		Match: func(v Value, st Style) bool {
-			return st.Break != BreakLF && st.Break != "" && writesFolded(v, st)
-		},
-	},
-	{
 		Name: "render/crlf-blanks-a-line-above-a-standalone-comment",
 		Reason: "A CRLF source gains a blank line above a comment on its own line, but only " +
 			"once the document also holds a block entry whose `-` or `key:` is the " +

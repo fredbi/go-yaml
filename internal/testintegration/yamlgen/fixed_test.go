@@ -381,3 +381,59 @@ func TestFixedKeepChompingKeepsItsBlankLinesWhenFolded(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedFoldedScalarWritesItsOwnBreak: a folded block scalar is written with
+// "\n", whatever line break the document it came from used.
+//
+// The renderer used to copy the source's break into the scalar it wrote. A CRLF
+// document then rendered to a mixture of both and was a third document on the
+// next render; with a lone CR the content lines drifted a column right, so a
+// fold stopped folding and "x y" came back as "x\n y"; and nested, the content
+// landed at the parent's own column, which the grammar refuses outright.
+//
+// The break was doing two jobs: reading the origin, where it has to be the
+// source's, and writing the output, where it has to be "\n". Splitting them
+// left one thing to get right in the order -- the content is normalized before
+// dedentBy takes it apart, that function looking for "\n".
+func TestFixedFoldedScalarWritesItsOwnBreak(t *testing.T) {
+	for _, test := range []struct {
+		name, src, want string
+		value           any
+	}{
+		{"CRLF", ">-\r\n x\r\n", ">-\n  x\n", "x"},
+		{"lone CR, two lines", ">-\r x\r y\r", ">-\n  x\n  y\n", "x y"},
+		{"LF, unchanged", ">-\n x\n y\n", ">-\n  x\n  y\n", "x y"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(test.src), parser.Comments())
+			require.NoError(t, err)
+
+			once := file.String()
+			assert.Equal(t, test.want, once, "the renderer writes its own break")
+
+			second, err := parser.ParseBytes([]byte(once), parser.Comments())
+			require.NoError(t, err)
+			assert.Equal(t, once, second.String(), "and the document settles")
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(once), &got))
+			assert.Equal(t, test.value, got, "the fold still folds")
+		})
+	}
+}
+
+// TestFixedFoldedScalarNestedRendersYAML: a folded scalar under a mapping key
+// renders content indented past the key, not level with it.
+func TestFixedFoldedScalarNestedRendersYAML(t *testing.T) {
+	const src = "a:\r  b: >\r   x\rc: 1\r"
+
+	file, err := parser.ParseBytes([]byte(src), parser.Comments())
+	require.NoError(t, err)
+
+	assert.Equal(t, "a:\n  b: >\n    x\nc: 1\n", file.String())
+
+	var got any
+	require.NoError(t, yaml.Unmarshal([]byte(file.String()), &got))
+	// ">" clips rather than strips, so the value keeps one trailing break.
+	assert.Equal(t, map[string]any{"a": map[string]any{"b": "x\n"}, "c": uint64(1)}, got)
+}

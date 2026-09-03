@@ -9,7 +9,6 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -45,56 +44,6 @@ func renderOnce(t *testing.T, src string) string {
 	require.NoError(t, err)
 
 	return file.String()
-}
-
-// TestDefectFoldedScalarCopiesTheSourceBreak: rendering a document written with
-// CRLF or a lone CR copies that break into the folded block scalar it writes,
-// instead of writing the renderer's own \n.
-//
-// Three consequences, and the third is the one no round trip could have found.
-// The document never settles, because the second render writes \n where the
-// first wrote \r\n. With a lone CR the content lines also drift one column
-// right, so a fold stops folding and the value changes. And in a nested
-// position the content lands at the parent's own column, which is not a block
-// scalar at all -- the grammar refuses the result.
-//
-// `|` is unaffected: a literal scalar's content is written from the value,
-// which has no breaks of the source's kind left in it.
-func TestDefectFoldedScalarCopiesTheSourceBreak(t *testing.T) {
-	t.Run("the break comes through and the document does not settle", func(t *testing.T) {
-		const src = ">-\r\n x\r\n"
-		wellFormed(t, src)
-
-		once := renderOnce(t, src)
-		assert.Equal(t, ">-\r\n  x\n", once, "today: the source's CRLF, then the renderer's LF")
-		assert.Equal(t, ">-\n  x\n", renderOnce(t, once), "and a third document on the next pass")
-	})
-
-	t.Run("a lone CR reindents the lines after the first", func(t *testing.T) {
-		const src = ">-\r x\r y\r"
-		wellFormed(t, src)
-
-		var before, after any
-		require.NoError(t, yaml.Unmarshal([]byte(src), &before))
-		assert.Equal(t, "x y", before)
-
-		once := renderOnce(t, src)
-		assert.Equal(t, ">-\r  x\r   y\n", once, "today: ` y` is indented one further than ` x`")
-
-		require.NoError(t, yaml.Unmarshal([]byte(once), &after))
-		assert.Equal(t, "x\n y", after, "today: the deeper line is more-indented, so it stops folding")
-	})
-
-	t.Run("nested, the rendering is not YAML at all", func(t *testing.T) {
-		const src = "a:\r  b: >\r   x\rc: 1\r"
-		wellFormed(t, src)
-
-		once := renderOnce(t, src)
-		assert.Equal(t, "a:\n  b: >\r  x\nc: 1\n", once,
-			"today: the content sits at b's own column, so it is not the scalar's content")
-		assert.False(t, grammar.NewRecognizer(1024).Stream([]byte(once)).OK,
-			"today: the renderer wrote something no conforming parser reads")
-	})
 }
 
 // TestDefectCRLFBlanksALineAboveAStandaloneComment: a CRLF source gains a blank

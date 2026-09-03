@@ -676,15 +676,29 @@ func isFolded(tk *token.Token) bool {
 func (r *Renderer) foldedFromSource(n *LiteralNode, indent int) string {
 	value := n.Value.Value
 	origin := n.Value.GetToken().Origin
-	lbc := lineBreakOf(origin)
+
+	// srcBreak is how the source wrote a line break, and is what the origin has
+	// to be read with. It is not what is written back: the renderer writes "\n"
+	// whatever the document used, as it does everywhere else. Copying the
+	// source's break here left a CRLF document rendering to a mixture of both,
+	// so it never settled; with a lone CR the content lines drifted a column
+	// right, a fold stopped folding, and in a nested position the result was
+	// not a block scalar at all.
+	srcBreak := lineBreakOf(origin)
 
 	var content string
 	if strings.Trim(value, "\r\n") != "" {
 		// A value that is nothing but line breaks has no content lines to write
 		// back, whatever the source looks like: every one of its lines was
 		// blank, and the tail below is the whole of it.
-		lead := introducedIndent(origin, value, lbc)
-		content = dedentBy(trimTrailingBlankLines(origin, lbc, lead), lead)
+		lead := introducedIndent(origin, value, srcBreak)
+		content = trimTrailingBlankLines(origin, srcBreak, lead)
+
+		// Before dedenting, not after: dedentBy takes the lines apart at "\n",
+		// so a document written with lone carriage returns is one line to it
+		// and only the first loses its indentation.
+		content = strings.ReplaceAll(content, srcBreak, "\n")
+		content = dedentBy(content, lead)
 	}
 
 	blanks := trailingBreaks(value, lineBreakOf(value))
@@ -696,16 +710,16 @@ func (r *Renderer) foldedFromSource(n *LiteralNode, indent int) string {
 
 	var body strings.Builder
 	if content != "" {
-		body.WriteString(indentLinesWith(content, indent, lbc))
-		body.WriteString(lbc)
+		body.WriteString(indentLinesWith(content, indent, "\n"))
+		body.WriteString("\n")
 	}
 	for range max(blanks, 0) {
-		body.WriteString(lbc)
+		body.WriteString("\n")
 	}
 
 	// The last break belongs to whatever follows the node, the same way the
 	// literal spelling leaves it.
-	return lbc + strings.TrimSuffix(body.String(), lbc)
+	return "\n" + strings.TrimSuffix(body.String(), "\n")
 }
 
 // trimTrailingBlankLines removes the lines with nothing on them that a block
