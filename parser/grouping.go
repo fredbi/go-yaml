@@ -54,11 +54,15 @@ func init() {
 		stageLineComments,
 		stageBlockScalars,
 		stageAnchors,
+		stageScalarTags,
+		stageAnchorsWithScalarTags,
 	}
 	flushers = []flusher{
 		nil,
 		flushBlockScalars,
 		flushAnchors,
+		flushScalarTags,
+		flushAnchorsWithScalarTags,
 	}
 }
 
@@ -91,7 +95,8 @@ func (g *grouper) feed(tk *tapeToken, out []*tapeToken) []*tapeToken {
 // closes; feed keeps it up to date on the short way.
 func (g *grouper) settled() bool {
 	return g.blockHeader == nil &&
-		g.anchor == nil && g.name == nil && g.alias == nil
+		g.anchor == nil && g.name == nil && g.alias == nil &&
+		g.tag == nil && g.tagged == nil
 }
 
 // readByAStage says which token types a stage reads. Every other type walks the
@@ -103,7 +108,12 @@ var readByAStage = map[token.Type]bool{
 	token.AnchorType:        true, // stageAnchors
 	token.AliasType:         true,
 	token.SequenceEntryType: true,
+	token.TagType:           true, // stageScalarTags
 }
+
+// stageAnchorsWithScalarTags reads a group type rather than a token type, and
+// so is not named here: the groups it waits for are made by the stages before
+// it, and a token arriving from the scanner carries none.
 
 // pass hands tk to the stage after at, or to the output where at is the last.
 func (g *grouper) pass(at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
@@ -239,4 +249,83 @@ func flushAnchors(g *grouper, at int, out []*tapeToken) []*tapeToken {
 	}
 
 	return out
+}
+
+// stageScalarTags joins a tag with the scalar it tags.
+func stageScalarTags(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	if g.tag != nil {
+		grouped, ok := g.taggedScalar(g.tag, tk)
+		if !ok {
+			return out
+		}
+		if grouped != nil {
+			g.tag = nil
+
+			return g.pass(at, grouped, out)
+		}
+
+		// The tag stands on its own, and tk is read as any other token would
+		// be -- including as the next tag.
+		out = g.pass(at, g.tag, out)
+		g.tag = nil
+	}
+
+	if tk.Type() == token.TagType {
+		g.tag = tk
+
+		return out
+	}
+
+	return g.pass(at, tk, out)
+}
+
+// flushScalarTags hands on a tag that ended the stream, which tags nothing.
+func flushScalarTags(g *grouper, at int, out []*tapeToken) []*tapeToken {
+	if g.tag == nil {
+		return out
+	}
+
+	held := g.tag
+	g.tag = nil
+
+	return g.pass(at, held, out)
+}
+
+// stageAnchorsWithScalarTags joins an anchor name with a tagged scalar written
+// on the same line.
+func stageAnchorsWithScalarTags(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	if g.tagged != nil {
+		if g.tagged.Line() == tk.Line() && tk.GroupType() == TokenGroupScalarTag {
+			grouped := g.group2(TokenGroupAnchor, g.tagged, tk)
+			g.tagged = nil
+
+			return g.pass(at, grouped, out)
+		}
+
+		// The anchor names something else, or the empty node, and tk is read as
+		// any other token would be.
+		out = g.pass(at, g.tagged, out)
+		g.tagged = nil
+	}
+
+	if tk.GroupType() == TokenGroupAnchorName {
+		g.tagged = tk
+
+		return out
+	}
+
+	return g.pass(at, tk, out)
+}
+
+// flushAnchorsWithScalarTags hands on an anchor name that ended the stream. It
+// names the empty node, and the parser supplies that null.
+func flushAnchorsWithScalarTags(g *grouper, at int, out []*tapeToken) []*tapeToken {
+	if g.tagged == nil {
+		return out
+	}
+
+	held := g.tagged
+	g.tagged = nil
+
+	return g.pass(at, held, out)
 }

@@ -555,48 +555,6 @@ func (g *grouper) group2(typ tokenGroupType, a, b *tapeToken) *tapeToken {
 // walks. Each pass takes the tokens the one before it left and groups a little
 // more of them.
 
-// groupScalarTags joins a tag with the scalar it tags.
-//
-// One token is held: the tag, until the token after it says whether it tags
-// that one or stands on its own. A tag on its own is left in the stream and the
-// parser reads what it tags from there -- a tag on its own line, or one in
-// front of a collection.
-func (g *grouper) groupScalarTags(in []*tapeToken) []*tapeToken {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.tag != nil {
-			grouped, ok := g.taggedScalar(g.tag, tk)
-			if !ok {
-				return out
-			}
-			if grouped != nil {
-				out = append(out, grouped)
-				g.tag = nil
-
-				continue
-			}
-			// The tag stands on its own, and tk is read as any other token
-			// would be -- including as the next tag.
-			out = append(out, g.tag)
-			g.tag = nil
-		}
-
-		if tk.Type() == token.TagType {
-			g.tag = tk
-
-			continue
-		}
-		out = append(out, tk)
-	}
-
-	if g.ending && g.tag != nil {
-		out = append(out, g.tag)
-		g.tag = nil
-	}
-
-	return out
-}
-
 // taggedScalar returns the group joining tag with next, or nil where the tag
 // stands on its own. It reports false where the document is refused.
 //
@@ -639,46 +597,6 @@ func (g *grouper) taggedScalar(tag, next *tapeToken) (*tapeToken, bool) {
 		// it stands on its own and the parser reads what it tags.
 		return nil, true
 	}
-}
-
-// groupAnchorsWithScalarTags joins an anchor name with a tagged scalar.
-//
-// groupAnchors could not: the tag was still a token of its own when it ran, and
-// only groupScalarTags turns it into the scalar the anchor names. One token is
-// held, the anchor name, until the token after it says whether that is what it
-// names.
-func (g *grouper) groupAnchorsWithScalarTags(in []*tapeToken) []*tapeToken {
-	out := g.out(len(in))
-	for _, tk := range in {
-		if g.tagged != nil {
-			if g.tagged.Line() == tk.Line() && tk.GroupType() == TokenGroupScalarTag {
-				out = append(out, g.group2(TokenGroupAnchor, g.tagged, tk))
-				g.tagged = nil
-
-				continue
-			}
-			// The anchor names something else, or the empty node, and tk is
-			// read as any other token would be.
-			out = append(out, g.tagged)
-			g.tagged = nil
-		}
-
-		if tk.GroupType() == TokenGroupAnchorName {
-			g.tagged = tk
-
-			continue
-		}
-		out = append(out, tk)
-	}
-
-	if g.ending && g.tagged != nil {
-		// An anchor with nothing after it names the empty node. The parser
-		// supplies that null; there is nothing to group here.
-		out = append(out, g.tagged)
-		g.tagged = nil
-	}
-
-	return out
 }
 
 // directiveState is what groupDirectives holds while it reads a '%' line: the
