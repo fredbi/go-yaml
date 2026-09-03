@@ -1126,6 +1126,7 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		if s.isFirstCharAtLine && c == ' ' {
 			state.addIndent(ctx, s.column)
 		} else {
+			state.began(s.pos())
 			ctx.addBuf(c)
 		}
 		if !s.isNewLineChar(c) {
@@ -1144,7 +1145,7 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 			}
 		}
 		value := ctx.bufferedSrc()
-		ctx.addToken(token.String(string(value), string(ctx.obuf), s.pos()))
+		ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
 		ctx.clear()
 		s.progressColumn(ctx, 1)
 	} else if s.isNewLineChar(c) {
@@ -1155,7 +1156,7 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		if ctx.next() {
 			if s.foundDocumentSeparatorMarker(ctx.src[ctx.idx:]) {
 				value := ctx.bufferedSrc()
-				ctx.addToken(token.String(string(value), string(ctx.obuf), s.pos()))
+				ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
 				ctx.clear()
 				s.breakMultiLine(ctx)
 			}
@@ -1188,9 +1189,11 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 			s.lastDelimColumn = col
 		}
 		state.updateNewLineInFolded(ctx, s.column)
+		state.began(s.pos())
 		ctx.addBufWithTab(c)
 		s.progressColumn(ctx, 1)
 	}
+
 	return nil
 }
 

@@ -77,9 +77,15 @@ type MultiLineState struct {
 	// scalar's content. Under '+' an empty buffer then still keeps one break;
 	// where the header ended the source there was never a break to keep.
 	sawLineBreak bool
-	isRawFolded  bool
-	isLiteral    bool
-	isFolded     bool
+	// start is where the block scalar's content begins in the source, recorded
+	// when the first byte of it is read. The token is cut at the end of the
+	// block, where the cursor says nothing about where the content started.
+	start    token.Position
+	hasStart bool
+
+	isRawFolded bool
+	isLiteral   bool
+	isFolded    bool
 }
 
 var (
@@ -212,14 +218,30 @@ func (c *Context) resetBuffer() {
 // scalar whose text does not begin where the token does -- a quoted one, whose
 // value stands inside the quotes.
 func (c *Context) text(buf []byte, start int) string {
+	span, _ := c.textAt(buf, start)
+
+	return span
+}
+
+// textAt returns buf as a string and where in the source it was found, or -1
+// where buf is not the source's own bytes.
+//
+// start is where the caller believes buf begins. It is a guess for a value the
+// scanner folded: the offset it works out is the cursor less the folded
+// length, and folding makes the value shorter than the source it was read
+// from. Where the guess misses, the cursor gives the other end, and the offset
+// that matched is the one the token should carry.
+func (c *Context) textAt(buf []byte, start int) (string, int) {
 	if span, ok := c.window(buf, start); ok {
-		return span
+		return span, start
 	}
-	if span, ok := c.window(buf, c.idx-len(buf)); ok {
-		return span
+	if at := c.idx - len(buf); true {
+		if span, ok := c.window(buf, at); ok {
+			return span, at
+		}
 	}
 
-	return string(buf)
+	return string(buf), -1
 }
 
 // window returns the len(buf) bytes of the source at start, and reports whether
@@ -669,7 +691,22 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 	// pos.Offset() is where the value starts in the source. The cursor is not:
 	// a plain scalar is cut only once the scanner knows it did not run on to
 	// the next line, by which time the cursor stands well past it.
-	value := c.text(source, int(pos.Offset()))
+	// Where the value is the source's own bytes, the offset it was found at is
+	// the one the token should carry: what the caller worked out by counting
+	// back from the cursor misses for anything folding shortened.
+	value, at := c.textAt(source, int(pos.Offset()))
+	switch {
+	case at >= 0:
+		pos.SetOffset(int32(at))
+	default:
+		// Folding rewrote the value, so it is nowhere in the source to be
+		// found. The origin is still the source's own bytes and the buffer
+		// knows where it began, so the value starts that far in, past the
+		// whitespace the line was indented by.
+		if _, ok := c.window(c.obuf, c.originStart); ok {
+			pos.SetOffset(int32(c.originStart + leadingSpace(c.obuf)))
+		}
+	}
 
 	var tk token.Token
 	if c.isMultiLine() {
@@ -787,4 +824,37 @@ func (c *Context) takeTokens() token.Tokens {
 		}
 		tokens = append(tokens, tk)
 	}
+}
+
+// leadingSpace counts the whitespace bytes buf opens with.
+func leadingSpace(buf []byte) int {
+	var i int
+	for i < len(buf) {
+		switch buf[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+		default:
+			return i
+		}
+	}
+
+	return i
+}
+
+// began records where the block scalar's content starts, the first time a byte
+// of it is read.
+func (s *MultiLineState) began(pos token.Position) {
+	if s == nil || s.hasStart {
+		return
+	}
+	s.start, s.hasStart = pos, true
+}
+
+// from returns where the content began, or now where nothing was read.
+func (s *MultiLineState) from(now token.Position) token.Position {
+	if s == nil || !s.hasStart {
+		return now
+	}
+
+	return s.start
 }

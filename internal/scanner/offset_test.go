@@ -47,14 +47,16 @@ func at(src string, offset int) string {
 //
 // What is left splits in two, and neither part is the counter drifting:
 //
-//   - 89 tokens carry an offset that addresses somewhere else in the source.
-//     65 are multi-line String values -- block scalar content -- whose offset
-//     is counted back from the cursor by the length of the folded value, which
-//     is shorter than the source it was read from. 23 are Invalid, the tokens
-//     an error carries, built from the whole origin buffer. Reaching these
-//     needs the scanner to record where a value's source begins rather than
-//     work it out afterwards; ctx.originStart was tried for both and made the
-//     count worse, so it does not track through a multi-line block.
+//   - 53 tokens carry an offset that addresses somewhere else in the source.
+//     21 are multi-line String values -- block scalar content -- and 23 are
+//     Invalid, the tokens an error carries, built from the whole origin buffer.
+//     It was 65 and 23 until the scanner recorded where a block scalar's
+//     content begins instead of cutting the token at the end of the block and
+//     asking the cursor: MultiLineState.began marks the first byte of content
+//     read, and MultiLineState.from hands it back when the token is built.
+//     Working it out afterwards cannot succeed, folding making the value
+//     shorter than the source it came from, and ctx.originStart does not track
+//     through a multi-line block.
 //   - 12 tokens carry an Origin that is not a slice of the source at all, so
 //     no offset can address it: trailing whitespace the origin buffer dropped,
 //     and escapes a double-quoted scalar rewrote.
@@ -66,9 +68,9 @@ func at(src string, offset int) string {
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"String":      71,
+	"String":      27,
 	"Invalid":     23,
-	"Integer":     4,
+	"Integer":     3,
 	"DoubleQuote": 1,
 }
 
