@@ -297,8 +297,7 @@ func (r *reader) fill() error {
 		machine = g.finish(machine)
 	}
 
-	out := g.groupAnchors(machine)
-	out = g.groupScalarTags(out)
+	out := g.groupScalarTags(machine)
 	out = g.groupAnchorsWithScalarTags(out)
 	out = g.groupExplicitKeys(out)
 	out = g.groupMapKeysByValue(out)

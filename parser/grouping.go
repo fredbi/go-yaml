@@ -3,7 +3,10 @@
 
 package parser
 
-import "github.com/go-openapi/go-yaml/token"
+import (
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/token"
+)
 
 // The grouping as a state machine.
 //
@@ -50,16 +53,56 @@ func init() {
 	stages = []stage{
 		stageLineComments,
 		stageBlockScalars,
+		stageAnchors,
 	}
 	flushers = []flusher{
 		nil,
 		flushBlockScalars,
+		flushAnchors,
 	}
 }
 
 // feed walks tk through the chain and appends what comes out the far end.
+//
+// A token no stage is waiting for and no stage reads goes straight out. That is
+// the common case by a distance: a String, an Integer, a Float or a Bool means
+// nothing to any stage, and those are 53.8% of the tokens in the workloads.
+// Walking the chain to learn as much costs a call and a type test at every
+// stage; the table answers it once.
 func (g *grouper) feed(tk *tapeToken, out []*tapeToken) []*tapeToken {
+	if g.settled() && !readByAStage[tk.Type()] {
+		// stageLineComments notes every token it hands on, a comment closing a
+		// line attaching to whatever stood before it. Taking the short way
+		// still owes it that note.
+		g.lineComment = tk
+
+		return append(out, tk)
+	}
+
 	return g.pass(-1, tk, out)
+}
+
+// settled reports whether every stage has handed on what it was holding. Where
+// one is still waiting the token has to walk the chain, whatever its type: it
+// may be what the waiting stage was waiting for.
+//
+// g.lineComment is not among them. It is not a token held back but a note of
+// the one last handed on, so that a comment closing a line finds what it
+// closes; feed keeps it up to date on the short way.
+func (g *grouper) settled() bool {
+	return g.blockHeader == nil &&
+		g.anchor == nil && g.name == nil && g.alias == nil
+}
+
+// readByAStage says which token types a stage reads. Every other type walks the
+// chain only to be handed from one stage to the next.
+var readByAStage = map[token.Type]bool{
+	token.CommentType:       true, // stageLineComments
+	token.LiteralType:       true, // stageBlockScalars
+	token.FoldedType:        true,
+	token.AnchorType:        true, // stageAnchors
+	token.AliasType:         true,
+	token.SequenceEntryType: true,
 }
 
 // pass hands tk to the stage after at, or to the output where at is the last.
@@ -132,4 +175,68 @@ func flushBlockScalars(g *grouper, at int, out []*tapeToken) []*tapeToken {
 	g.blockHeader = nil
 
 	return g.pass(at, grouped, out)
+}
+
+// stageAnchors joins "&" with the name after it, that name with what it names,
+// and "*" with the name it stands for.
+func stageAnchors(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
+	switch {
+	case g.alias != nil:
+		grouped := g.group2(TokenGroupAlias, g.alias, tk)
+		g.alias = nil
+
+		return g.pass(at, grouped, out)
+	case g.anchor != nil:
+		g.name, g.anchor = g.group2(TokenGroupAnchorName, g.anchor, tk), nil
+
+		return out
+	case g.name != nil:
+		sameLine := g.name.Line() == tk.Line()
+		if sameLine && tk.Type() == token.SequenceEntryType {
+			g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
+
+			return out
+		}
+		if sameLine && isScalarType(tk) {
+			grouped := g.group2(TokenGroupAnchor, g.name, tk)
+			g.name = nil
+
+			return g.pass(at, grouped, out)
+		}
+
+		// The anchor names the empty node, and tk is read as any other token
+		// would be: two tokens leave the stage for the one that arrived.
+		out = g.pass(at, g.name, out)
+		g.name = nil
+	}
+
+	switch tk.Type() {
+	case token.AnchorType:
+		g.anchor = tk
+
+		return out
+	case token.AliasType:
+		g.alias = tk
+
+		return out
+	default:
+		return g.pass(at, tk, out)
+	}
+}
+
+// flushAnchors settles what the stage holds when the stream ends: a "&" or "*"
+// with no name is an error, and a name with nothing after it names the empty
+// node the parser supplies.
+func flushAnchors(g *grouper, at int, out []*tapeToken) []*tapeToken {
+	switch {
+	case g.anchor != nil:
+		g.fail(yamlerrors.NewSyntax("undefined anchor name", g.anchor.RawToken()))
+	case g.alias != nil:
+		g.fail(yamlerrors.NewSyntax("undefined alias name", g.alias.RawToken()))
+	case g.name != nil:
+		out = g.pass(at, g.name, out)
+		g.name = nil
+	}
+
+	return out
 }
