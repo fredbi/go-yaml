@@ -55,22 +55,37 @@ func TestLabParserMatchesProduction(t *testing.T) {
 // divergesOnPurpose reports whether a refusal the frozen parser did not make is
 // one the shipped parser makes on purpose.
 //
-// One rule so far. A flow entry written as a key alone is an entry like any
-// other, so its key counts when the mapping is checked for duplicates:
-// "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does. refparser recorded
-// only the keys that came with a ':', so it read the first and refused the
-// second. 3.2.1.1 says both are errors.
+// Two rules so far.
+//
+// A flow entry written as a key alone is an entry like any other, so its key
+// counts when the mapping is checked for duplicates: "{a, a: 1}" repeats a key
+// as much as "{a: 1, a: 2}" does. refparser recorded only the keys that came
+// with a ':', so it read the first and refused the second. 3.2.1.1 says both
+// are errors.
+//
+// A flow mapping entry that already holds a value cannot take a second ':':
+// after the "[]" in "{a: []:}" the mapping must continue with ',' or close.
+// refparser built an empty entry from the trailing ':';
+// validateMapKeyValueNextToken refuses it, and grammar.NewRecognizer reads the
+// document as not YAML 1.2 (7.4.2).
 //
 // Matching the reason rather than the document, because the fuzz seeds hold
-// many shapes of it and they are one finding. A duplicate the shipped parser
-// reports wrongly would still be caught: yamlcorpus holds the key rules, and
-// the conformance suite the documents.
+// many shapes of each and they are one finding apiece. A duplicate the shipped
+// parser reports wrongly would still be caught: yamlcorpus holds the key rules,
+// and the conformance suite the documents.
 func divergesOnPurpose(err error) (string, bool) {
-	if err == nil || !strings.Contains(err.Error(), "already defined at") {
+	if err == nil {
 		return "", false
 	}
 
-	return "a flow entry written as a key alone repeats its key (3.2.1.1)", true
+	switch msg := err.Error(); {
+	case strings.Contains(msg, "already defined at"):
+		return "a flow entry written as a key alone repeats its key (3.2.1.1)", true
+	case strings.Contains(msg, "map key-value is pre-defined"):
+		return "a flow mapping entry takes a single ':' (7.4.2)", true
+	default:
+		return "", false
+	}
 }
 
 func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
