@@ -35,6 +35,21 @@ func WithComments(on bool) RenderOption {
 	return func(r *Renderer) { r.comments = on }
 }
 
+// WithAliasTargets renders each alias as the node its anchor names, taking the
+// nodes from anchors keyed by anchor name. Without it an alias renders as the
+// reference it was written as, "*name", which is also what an alias whose
+// anchor is missing from the map falls back to.
+//
+// The decoder passes the anchors it has collected so that a custom
+// UnmarshalYAML receives the value an alias stands for rather than a reference
+// it has no way to look up.
+func WithAliasTargets(anchors map[string]Node) RenderOption {
+	return func(r *Renderer) {
+		r.aliasTargets = anchors
+		r.resolving = make(map[string]bool, len(anchors))
+	}
+}
+
 // Renderer turns an AST back into YAML text.
 //
 // It exists as a type rather than as a String method so that callers can
@@ -50,6 +65,13 @@ type Renderer struct {
 	indent         int
 	comments       bool
 	indentSequence bool
+	// aliasTargets holds the node each anchor names, and resolving the anchor
+	// names being rendered right now. Both are nil unless [WithAliasTargets]
+	// was passed, and a Renderer carrying them is built per call rather than
+	// shared: bare() copies the struct, so the two maps are the same maps in
+	// the copy, which is what lets the recursion below see its own progress.
+	aliasTargets map[string]Node
+	resolving    map[string]bool
 }
 
 // defaultRenderer and bareRenderer back the String methods of the composite
@@ -97,6 +119,10 @@ func (r *Renderer) Render(w io.Writer, n Node) error {
 func (r *Renderer) String(n Node) string {
 	if n == nil {
 		return ""
+	}
+
+	if alias, ok := n.(*AliasNode); ok && r.aliasTargets != nil {
+		return r.alias(alias)
 	}
 
 	switch node := n.(type) {
@@ -361,6 +387,44 @@ func (r *Renderer) keyComment(key Node) string {
 // keyCommented says the key carries a comment, which claims the rest of the
 // line: a collection that would otherwise sit beside its key goes below it so
 // that the comment stays next to the key it belongs to.
+// alias renders n as the node its anchor names.
+//
+// An anchor whose node holds the alias would render forever, so a name already
+// being rendered falls back to the reference: "&a1 [*a1]" renders the inner
+// alias as "*a1" rather than exhausting the stack.
+func (r *Renderer) alias(n *AliasNode) string {
+	name := n.Value.GetToken().Value
+	target := r.aliasTargets[name]
+	if target == nil || r.resolving[name] {
+		return n.String()
+	}
+
+	r.resolving[name] = true
+	defer delete(r.resolving, name)
+
+	return r.String(target)
+}
+
+// deref returns the node an alias names, for the layout questions below that
+// ask what shape a value has -- whether it fits on the key's line, whether it
+// is a block sequence, whether it carries its own indentation. An alias renders
+// as its target, so the target is what those questions are about.
+//
+// It resolves one step and does not guard against a cycle: rendering goes
+// through [Renderer.alias], which does, and one step answers the shape.
+func (r *Renderer) deref(n Node) Node {
+	alias, ok := n.(*AliasNode)
+	if !ok || r.aliasTargets == nil {
+		return n
+	}
+
+	if target := r.aliasTargets[alias.Value.GetToken().Value]; target != nil {
+		return target
+	}
+
+	return n
+}
+
 func (r *Renderer) value(n Node, keyCommented bool) string {
 	if n == nil {
 		return ""
@@ -371,8 +435,9 @@ func (r *Renderer) value(n Node, keyCommented bool) string {
 		return ""
 	}
 
-	if r.fitsOnKeyLine(n) && (!keyCommented || !isCollection(n)) &&
-		(!isCollection(n) || !strings.Contains(text, "\n")) {
+	shape := r.deref(n)
+	if r.fitsOnKeyLine(shape) && (!keyCommented || !isCollection(shape)) &&
+		(!isCollection(shape) || !strings.Contains(text, "\n")) {
 		// A flow collection fits on the key's line only while it stays on one
 		// line. A comment forces it onto several, and then the lines below it
 		// carry no indentation of their own: its closing bracket would land in
@@ -380,7 +445,7 @@ func (r *Renderer) value(n Node, keyCommented bool) string {
 		// wrote would not read back.
 		return " " + text
 	}
-	if sequence, ok := n.(*SequenceNode); ok && !sequence.IsFlowStyle && !r.indentSequence {
+	if sequence, ok := shape.(*SequenceNode); ok && !sequence.IsFlowStyle && !r.indentSequence {
 		// A block sequence under a mapping key sits at the key's own
 		// indentation unless asked otherwise: "key:" then "- item" in column
 		// one of the key's level. Both layouts are legal; this is the one YAML
@@ -422,7 +487,7 @@ func (r *Renderer) mappingKey(n *MappingKeyNode) string {
 // line -- "- " or "? " -- indenting its continuation lines to sit under it.
 func (r *Renderer) entry(n Node) string {
 	blank, text := splitLeadingBlank(r.String(n))
-	if carriesOwnIndent(n) {
+	if carriesOwnIndent(r.deref(n)) {
 		return blank + text
 	}
 
