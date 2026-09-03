@@ -1376,16 +1376,17 @@ func (g *grouper) groupExplicitKeyBody(body []*Token) ([]*Token, error) {
 //
 // A plain scalar may span several lines and its position records where it
 // starts, so the line that matters for the implicit-key rule has to be
-// computed. Whitespace on either side of the origin belongs to the neighboring
-// tokens rather than to this one -- a trailing newline in particular would
-// otherwise push the end line one past where the token really finishes.
+// computed. [token.Token.EndLine] already excludes the whitespace on either
+// side, which belongs to the neighboring tokens rather than to this one; a
+// trailing newline counted in would push the end line one past where the token
+// really finishes.
 func keyEndLine(tk *Token) int {
 	raw := tk.RawToken()
 	if raw == nil {
 		return tk.Line()
 	}
 
-	return tk.Line() + strings.Count(strings.Trim(raw.Origin, " \r\n"), "\n")
+	return tk.Line() + int(raw.EndLine()-raw.Position.Line)
 }
 
 // closesFlowCollection reports whether tk ends a flow collection.
