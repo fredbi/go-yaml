@@ -286,7 +286,7 @@ func (p *Parser) begin(src []byte) {
 	// reading the document through before parsing any of it. It sizes buffers
 	// and nothing else.
 	estimate := max(len(src)/8, 16)
-	p.reader = newReader(&p.scan, p.tokens, p.chunkSize, estimate, p.mode&parseComments != 0)
+	p.reader = newReader(&p.scan, p.tokens, estimate, p.mode&parseComments != 0)
 	p.lineComments = p.reader.g.lineComments
 }
 

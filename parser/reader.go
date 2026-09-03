@@ -27,17 +27,16 @@ type reader struct {
 	arena *tokenarena.TokenArena[tapeToken]
 	g     grouper
 
-	// run holds the tokens read and not yet grouped, at most batch of them.
-	// out holds what the grouping made of the last run, from at onward.
-	run   []*tapeToken
-	out   []*tapeToken
-	at    int
-	batch int
+	// out holds what the grouping has handed out and the descent has not yet
+	// taken, from at onward.
+	out []*tapeToken
+	at  int
 
 	// seq is the place on the tape of the next token read.
 	seq int
-	// drained says the scanner has no more to give.
-	drained bool
+	// drained says the scanner has no more to give, and finished that the
+	// grouping has been emptied of what it was still holding.
+	drained, finished bool
 	// keepComments says the mode asked for them. The rest are dropped as they
 	// arrive and never reach the grouping.
 	keepComments bool
@@ -58,15 +57,14 @@ type reader struct {
 
 // newReader returns a reader over what scan hands out.
 //
-// estimate is how many tokens the document is guessed to hold; it sizes buffers
-// and nothing else.
-func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[tapeToken], batch, estimate int, keepComments bool) *reader {
+// estimate is how many tokens the document is guessed to hold; it sizes the
+// grouping's own buffers and nothing else.
+func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[tapeToken], estimate int, keepComments bool) *reader {
 	r := &reader{
 		scan:         scan,
 		arena:        arena,
 		g:            newGrouper(estimate),
-		run:          make([]*tapeToken, 0, batch),
-		batch:        batch,
+		out:          make([]*tapeToken, 0, minGroupBlock),
 		keepComments: keepComments,
 	}
 	if keepComments {
@@ -247,12 +245,31 @@ func (r *reader) judgeNext() error {
 	return nil
 }
 
-// fill reads one run of tokens and keeps what the grouping makes of it.
+// fill reads tokens until the grouping hands one out, or the scanner runs dry.
+//
+// One token at a time: the grouping is a state machine now, so a token can be
+// fed the moment it is read and there is nothing to gain by reading a run of
+// them first. What that used to cost was a slice of tokens waiting to be
+// grouped, a second slice holding what the grouping made of the last run, and a
+// copy joining the two on every fill.
+//
+// It also means the scanner is never read further than the descent has asked
+// for, which is what lets a stage ask the scanner about the token in hand.
 func (r *reader) fill() error {
-	for len(r.run) < r.batch {
+	if r.at == len(r.out) {
+		// Everything handed out has been taken, so the buffer starts again
+		// rather than growing for the length of the document.
+		r.out, r.at = r.out[:0], 0
+	}
+
+	for r.at >= len(r.out) {
 		tk, ok := r.scan.NextToken()
 		if !ok {
-			r.drained = true
+			if r.finished {
+				break
+			}
+			r.drained, r.finished, r.g.ending = true, true, true
+			r.out = r.g.finish(r.out)
 
 			break
 		}
@@ -275,39 +292,13 @@ func (r *reader) fill() error {
 
 			return yamlerrors.NewSyntax("found an invalid token", held.RawToken())
 		}
-		r.run = append(r.run, held)
+
+		r.out = r.g.feed(held, r.out)
 	}
+
 	if err := r.scan.Err(); err != nil {
 		return err
 	}
 
-	g := &r.g
-	g.ending = r.drained
-
-	// Each pass reads what the one before it left and hands on what it made of
-	// it, keeping on the grouper what it cannot settle yet, so a group
-	// straddling the join between two runs is grouped as one.
-	// Each token walks the grouping on its own. What the stages settle comes
-	// out in order, and what they are still holding stays with them until the
-	// run after this one, or until finish empties them at the end of the
-	// stream.
-	out := g.out(len(r.run))
-	for _, tk := range r.run {
-		out = g.feed(tk, out)
-	}
-	if g.ending {
-		out = g.finish(out)
-	}
-	if g.err != nil {
-		return g.err
-	}
-
-	// out comes from a buffer the next run writes over, so what is left of the
-	// one before is kept and this run put after it.
-	kept := append([]*tapeToken(nil), r.out[r.at:]...)
-	r.out = append(append(r.out[:0], kept...), out...)
-	r.at = 0
-	r.run = r.run[:0]
-
-	return nil
+	return r.g.err
 }

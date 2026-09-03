@@ -33,7 +33,7 @@ func TestGroupCensus(t *testing.T) {
 	raw := tokenarena.New[tapeToken](tokenarena.SizeFor(len(src)))
 	raw.Pin()
 
-	r := newReader(&s, raw, tokenarena.MaxChunk, len(src)/8, false)
+	r := newReader(&s, raw, len(src)/8, false)
 
 	var tks []*tapeToken
 	for {
