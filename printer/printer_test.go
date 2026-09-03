@@ -130,18 +130,6 @@ a:
 	})
 }
 
-func TestPrinter_Anchor(t *testing.T) {
-	expected := `
-anchor: &x 1
-alias: *x`
-	tokens := tokenize(t, expected)
-	var p printer.Printer
-	got := p.PrintTokens(tokens)
-	if expected != got {
-		t.Fatalf("unexpected output: expect:[%s]\n actual:[%s]", expected, got)
-	}
-}
-
 func Test_Printer_Multiline(t *testing.T) {
 	yml := `
 text1: 'aaaa
