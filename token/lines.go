@@ -63,7 +63,7 @@ func (l *Lookback) read(tk *Token) {
 		// A comment stands between a header and its content without separating
 		// them, so it neither makes nor breaks a block header, and its breaks
 		// add to the run above whatever comes next.
-		l.commentBreaks += int32(strings.Count(normalizeNewLineChars(tk.Origin), "\n"))
+		l.commentBreaks += l.originBreaksOf(tk)
 	} else {
 		l.blockHeader[0] = tk.Type == LiteralType || tk.Type == FoldedType
 		l.commentBreaks = 0
@@ -120,7 +120,7 @@ func (l *Lookback) blankLineAbove(t *Token) bool {
 		//  bar: null # comment
 		//
 		//  baz: 1
-		return strings.Count(prev.Origin, lbc) > 0
+		return l.originBreaksBefore(prev) > 0
 	}
 
 	return lineDiff-adjustment > 0
@@ -167,7 +167,27 @@ func linesSpannedBy(tk *Token, isContent bool, lbc string) int {
 	return int(tk.EndLine() - tk.Position.Line)
 }
 
-// normalizeNewLineChars reads CR LF and CR as one line break each.
-func normalizeNewLineChars(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+// originBreaksBefore counts the breaks in the whole of prev's source text,
+// which needs the token before that one to say where prev's text began.
+func (l *Lookback) originBreaksBefore(prev *Token) int32 {
+	if !l.hasPrev2 {
+		return prev.BreaksAfterLeading()
+	}
+
+	return prev.EndLine() - l.prev2.EndLine() - l.prev2.TrailingBreaks() + prev.TrailingBreaks()
+}
+
+// originBreaksOf counts the line breaks in the whole of tk's source text, the
+// whitespace before and after it included.
+//
+// The tokens' texts follow one another with nothing between them, so the breaks
+// from where the token before it ended to where it ends are
+// EndLine(tk) - EndLine(prev); take off the breaks that belonged to the gap
+// after prev and add the ones in tk's own trailing gap.
+func (l *Lookback) originBreaksOf(tk *Token) int32 {
+	if !l.hasPrev {
+		return tk.BreaksAfterLeading()
+	}
+
+	return tk.EndLine() - l.prev.EndLine() - l.prev.TrailingBreaks() + tk.TrailingBreaks()
 }

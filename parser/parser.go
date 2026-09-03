@@ -1104,7 +1104,6 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 			)
 		}
 	}
-	origin := p.removeLeftWhiteSpace(tk.Origin)
 	if ctx.isFlow {
 		// A pair written inside a flow sequence is an implicit key: it has to
 		// fit on one line, and its ':' has to be on that line with it.
@@ -1122,7 +1121,7 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 	if tk.Type != token.StringType && tk.Type != token.SingleQuoteType && tk.Type != token.DoubleQuoteType {
 		return nil
 	}
-	if p.existsNewLineCharacter(origin) {
+	if tk.BreaksAfterLeading() > 0 {
 		return yamlerrors.NewSyntax("unexpected key name", tk)
 	}
 	return nil
@@ -1150,33 +1149,6 @@ func isScalarKeyToken(tk *token.Token) bool {
 // naming the node that follows it rather than a node of its own.
 func carriesProperty(tk *tapeToken) bool {
 	return tk.GroupType() == TokenGroupAnchorName || tk.Type() == token.TagType
-}
-
-func (p *Parser) removeLeftWhiteSpace(src string) string {
-	// CR or LF or CRLF
-	return strings.TrimLeftFunc(src, func(r rune) bool {
-		return r == ' ' || r == '\r' || r == '\n'
-	})
-}
-
-func (p *Parser) existsNewLineCharacter(src string) bool {
-	return p.newLineCharacterNum(src) > 0
-}
-
-func (p *Parser) newLineCharacterNum(src string) int {
-	var num int
-	for i := 0; i < len(src); i++ {
-		switch src[i] {
-		case '\r':
-			if len(src) > i+1 && src[i+1] == '\n' {
-				i++
-			}
-			num++
-		case '\n':
-			num++
-		}
-	}
-	return num
 }
 
 // valueContext returns the context for the value of key.

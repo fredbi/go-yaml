@@ -857,7 +857,7 @@ func Make(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 
 	if typ, ok := reservedKeywordTypes[value]; ok {
@@ -1075,7 +1075,7 @@ func MakeString(value string, org string, pos Position) Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1086,7 +1086,7 @@ func SequenceEntry(org string, pos Position) *Token {
 		Value:    string(SequenceEntryCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1119,7 +1119,7 @@ func CollectEntry(org string, pos Position) *Token {
 		Value:    string(CollectEntryCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1130,7 +1130,7 @@ func SequenceStart(org string, pos Position) *Token {
 		Value:    string(SequenceStartCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1141,7 +1141,7 @@ func SequenceEnd(org string, pos Position) *Token {
 		Value:    string(SequenceEndCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1152,7 +1152,7 @@ func MappingStart(org string, pos Position) *Token {
 		Value:    string(MappingStartCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1163,7 +1163,7 @@ func MappingEnd(org string, pos Position) *Token {
 		Value:    string(MappingEndCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1174,7 +1174,7 @@ func Comment(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1185,7 +1185,7 @@ func Anchor(org string, pos Position) *Token {
 		Value:    string(AnchorCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1196,7 +1196,7 @@ func Alias(org string, pos Position) *Token {
 		Value:    string(AliasCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1207,7 +1207,7 @@ func Tag(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1218,7 +1218,7 @@ func Literal(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1229,7 +1229,7 @@ func Folded(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1240,7 +1240,7 @@ func SingleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1251,7 +1251,7 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 		Value:    value,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1262,7 +1262,7 @@ func Directive(org string, pos Position) *Token {
 		Value:    string(DirectiveCharacter),
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1284,7 +1284,7 @@ func MergeKey(org string, pos Position) *Token {
 		Value:    "<<",
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1295,7 +1295,7 @@ func DocumentHeader(org string, pos Position) *Token {
 		Value:    "---",
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1306,7 +1306,7 @@ func DocumentEnd(org string, pos Position) *Token {
 		Value:    "...",
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1320,7 +1320,7 @@ func Invalid(org string, pos Position) *Token {
 		Value:    org,
 		Origin:   org,
 		Position: pos,
-		spans:    uint64(pos.Line + int32(breaksIn(org))),
+		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
 }
 
@@ -1363,15 +1363,23 @@ func breaksIn(org string) int {
 	return n
 }
 
-// The token's packed spans. EndLine takes the low 32 bits, CommentBreaksAbove
-// the next 31, and BlankLineAbove the top one.
+// The token's packed spans, from the low bit: EndLine in 32, CommentBreaksAbove
+// in 16, TrailingBreaks in 15, BlankLineAbove in 1.
+//
+// Four numbers in one field rather than four, because a call passes nine
+// registers and Go counts a struct's fields rather than its words.
 const (
-	endLineBits    = 32
-	commentBits    = 31
-	endLineMask    = 1<<endLineBits - 1
-	commentMask    = 1<<commentBits - 1
+	endLineBits  = 32
+	commentBits  = 16
+	trailingBits = 15
+
+	endLineMask  = 1<<endLineBits - 1
+	commentMask  = 1<<commentBits - 1
+	trailingMask = 1<<trailingBits - 1
+
 	commentShift   = endLineBits
-	blankLineShift = endLineBits + commentBits
+	trailingShift  = endLineBits + commentBits
+	blankLineShift = endLineBits + commentBits + trailingBits
 )
 
 // EndLine is the line the token's text ends on, counting from 1 as
@@ -1401,6 +1409,33 @@ func (t Token) CommentBreaksAbove() int32 {
 // document keeps the spacing it was written with.
 func (t Token) BlankLineAbove() bool { return t.spans>>blankLineShift != 0 }
 
+// TrailingBreaks counts the line breaks the whitespace after the token takes
+// up, before whatever is written next.
+//
+// [Token.EndLine] leaves them out: they are the gap after the token, not the
+// token. A reader that wants how far the token's text reaches including that
+// gap adds this, and one asking whether the token is followed by a break tests
+// it against zero.
+func (t Token) TrailingBreaks() int32 {
+	return int32(t.spans >> trailingShift & trailingMask)
+}
+
+// BreaksAfterLeading counts the line breaks from the token's first character to
+// the end of the whitespace following it. It is [Token.EndLine] less
+// [Position.Line], plus [Token.TrailingBreaks].
+func (t Token) BreaksAfterLeading() int32 {
+	return t.EndLine() - t.Position.Line + t.TrailingBreaks()
+}
+
+// SetTrailingBreaks records the line breaks the whitespace after the token
+// takes up.
+func (t *Token) SetTrailingBreaks(n int32) {
+	if n > trailingMask {
+		n = trailingMask
+	}
+	t.spans = t.spans&^(trailingMask<<trailingShift) | uint64(n)&trailingMask<<trailingShift
+}
+
 // SetEndLine records the line the token's text ends on.
 func (t *Token) SetEndLine(line int32) {
 	t.spans = t.spans&^endLineMask | uint64(line)&endLineMask
@@ -1409,6 +1444,9 @@ func (t *Token) SetEndLine(line int32) {
 // SetCommentBreaksAbove records the line breaks the comments above this token
 // take up.
 func (t *Token) SetCommentBreaksAbove(n int32) {
+	if n > commentMask {
+		n = commentMask
+	}
 	t.spans = t.spans&^(commentMask<<commentShift) | uint64(n)&commentMask<<commentShift
 }
 
@@ -1419,4 +1457,37 @@ func (t *Token) SetBlankLineAbove(blank bool) {
 	if blank {
 		t.spans |= 1 << blankLineShift
 	}
+}
+
+// trailingBreaksIn counts the line breaks in the whitespace org ends with.
+func trailingBreaksIn(org string) int {
+	i := len(org)
+	for i > 0 {
+		switch org[i-1] {
+		case ' ', '\t', '\r', '\n':
+			i--
+		default:
+			return breaksInRaw(org[i:])
+		}
+	}
+
+	return breaksInRaw(org)
+}
+
+// breaksInRaw counts CR LF, CR and LF as one break each, without trimming.
+func breaksInRaw(s string) int {
+	var n int
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\n':
+			n++
+		case '\r':
+			n++
+			if i+1 < len(s) && s[i+1] == '\n' {
+				i++
+			}
+		}
+	}
+
+	return n
 }

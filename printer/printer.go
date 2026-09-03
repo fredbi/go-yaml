@@ -91,45 +91,6 @@ func (p *Printer) PrintErrorMessage(msg string, isColored bool) string {
 	return msg
 }
 
-func (p *Printer) removeLeftSideNewLineChar(src string) string {
-	return strings.TrimLeft(strings.TrimLeft(strings.TrimLeft(src, "\r"), "\n"), "\r\n")
-}
-
-// newLineCount counts the line breaks in s, taking CR LF for one.
-//
-// It walks bytes: a line break is ASCII, and no byte of a multi-byte character
-// can be mistaken for one.
-func (p *Printer) newLineCount(s string) int {
-	cnt := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\r':
-			if i+1 < len(s) && s[i+1] == '\n' {
-				i++
-			}
-			cnt++
-		case '\n':
-			cnt++
-		}
-	}
-
-	return cnt
-}
-
-func (p *Printer) isNewLineLastChar(s string) bool {
-	for i := len(s) - 1; i > 0; i-- {
-		c := s[i]
-		switch c {
-		case ' ':
-			continue
-		case '\n', '\r':
-			return true
-		}
-		break
-	}
-	return false
-}
-
 func (p *Printer) setupErrorTokenFormat(annotateLine int, isColored bool) {
 	prefix := func(annotateLine, num int) string {
 		if annotateLine == num {
@@ -168,8 +129,12 @@ func (p *Printer) PrintErrorSource(src string, firstLine int, tk *token.Token, i
 	}
 
 	errLine := int(tk.Position.Line)
-	lastLine := errLine + p.newLineCount(p.removeLeftSideNewLineChar(tk.Origin))
-	if p.isNewLineLastChar(tk.Origin) {
+	// The token carries how far it reaches: the breaks from its first
+	// character to the end of the gap after it, and whether that gap opens on
+	// a break. Both were counted from its source text until the text stopped
+	// being kept.
+	lastLine := errLine + int(tk.BreaksAfterLeading())
+	if tk.TrailingBreaks() > 0 {
 		lastLine--
 	}
 

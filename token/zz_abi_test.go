@@ -61,19 +61,30 @@ func TestTokenFitsTheRegisterABI(t *testing.T) {
 // TestPackedFieldsRoundTrip checks the accessors give back what was put in,
 // including the values that sit either side of a bit boundary.
 func TestPackedFieldsRoundTrip(t *testing.T) {
-	for _, n := range []int32{0, 1, 2, 127, 128, 32767, 65535, 1 << 20, 1<<31 - 1} {
+	for _, n := range []int32{0, 1, 2, 127, 128, 4095, 32766, 1 << 20, 1<<31 - 1} {
 		var pos token.Position
 		pos.SetOffset(n)
 		pos.SetIndentNum(n)
 		require.Equalf(t, n, pos.Offset(), "offset %d", n)
 		require.Equalf(t, n, pos.IndentNum(), "indent %d", n)
 
+		// CommentBreaksAbove and TrailingBreaks are narrower than an int32 and
+		// saturate rather than wrap: a token with more than 65,535 lines of
+		// comment above it, or 32,766 blank lines after it, is a document no
+		// reader is going to draw an error window in.
+		const (
+			comments = 1<<16 - 1
+			trailing = 1<<15 - 1
+		)
+
 		var tk token.Token
 		tk.SetEndLine(n)
-		tk.SetCommentBreaksAbove(n & (1<<31 - 1))
+		tk.SetCommentBreaksAbove(n)
+		tk.SetTrailingBreaks(n)
 		tk.SetBlankLineAbove(true)
 		require.Equalf(t, n, tk.EndLine(), "end line %d", n)
-		require.Equalf(t, n&(1<<31-1), tk.CommentBreaksAbove(), "comment breaks %d", n)
+		require.Equalf(t, min(n, comments), tk.CommentBreaksAbove(), "comment breaks %d", n)
+		require.Equalf(t, min(n, trailing), tk.TrailingBreaks(), "trailing breaks %d", n)
 		require.Truef(t, tk.BlankLineAbove(), "blank line above, with %d beside it", n)
 
 		tk.SetBlankLineAbove(false)
