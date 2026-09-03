@@ -229,6 +229,15 @@ func (g *grouper) anchorNamesTagged(at int, tk *tapeToken, out []*tapeToken) ([]
 // taggedAnchorNames settles a tag standing before an anchor: the scalar after
 // them is what the anchor names, and the tag tags that.
 func (g *grouper) taggedAnchorNames(at int, tk *tapeToken, out []*tapeToken) ([]*tapeToken, bool) {
+	if g.name.Line() == tk.Line() && tk.Type() == token.SequenceEntryType {
+		// As when no tag stands before the anchor: what follows an anchor on
+		// its own line is what the anchor names, and a '-' opens an entry
+		// rather than naming anything.
+		g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after anchor on the same line", tk.RawToken()))
+
+		return out, false
+	}
+
 	if g.name.Line() == tk.Line() && isScalarType(tk) {
 		named := g.group2(TokenGroupAnchor, g.name, tk)
 		g.name = nil
@@ -274,10 +283,18 @@ func flushProperties(g *grouper, at int, out []*tapeToken) []*tapeToken {
 	case propSawTag:
 		out = g.pass(at, g.tag, out)
 		g.tag = nil
-	case propAnchorAndTag, propTagHaveAnchor:
+	case propAnchorAndTag:
+		// The anchor was read first, so it goes over first.
 		out = g.pass(at, g.name, out)
 		out = g.pass(at, g.tag, out)
 		g.name, g.tag = nil, nil
+	case propTagHaveAnchor:
+		// The tag was read first. Handing them over the other way round put a
+		// tag after the anchor the document wrote it before, and the descent
+		// built two nodes where there is one.
+		out = g.pass(at, g.tag, out)
+		out = g.pass(at, g.name, out)
+		g.tag, g.name = nil, nil
 	case propTagSawAnchor:
 		g.fail(yamlerrors.NewSyntax("undefined anchor name", g.anchor.RawToken()))
 	}
