@@ -8,96 +8,143 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
+// scanMultiLine reads one character of a block scalar's content.
+//
+// Six things a character can be, and the switch below is that list. The
+// indentation the header announced decides between most of them: a space at the
+// head of a line is indentation until the block's width is reached and content
+// after it, and a tab is refused in the first case and kept in the second.
 func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 	state := ctx.getMultiLineState()
 	ctx.addOriginBuf(c)
-	// normalize CR and CRLF to LF
-	if c == '\r' {
-		if ctx.nextChar() == '\n' {
-			ctx.addOriginBuf('\n')
-			s.offset += s.progress(ctx, 1)
-		}
-		c = '\n'
-	}
+	c = s.normalizeMultiLineBreak(ctx, c)
 
 	if isNewLineChar(c) {
 		state.sawLineBreak = true
 	}
 
-	if ctx.isEOS() {
-		if s.isFirstCharAtLine && c == ' ' {
-			state.addIndent(ctx, s.column)
-		} else {
-			state.began(s.pos())
-			ctx.addBuf(c)
-		}
+	switch {
+	case ctx.isEOS():
+		return s.closeMultiLineAtEOS(ctx, state, c)
 
-		if !isNewLineChar(c) {
-			// A line that ends here without content is empty, and an empty line
-			// is allowed less indentation than the header states: l-empty
-			// admits s-indent(<n). Holding it to the stated width refused every
-			// document whose block scalar both states its indentation and keeps
-			// its trailing blank lines.
-			state.updateIndentColumn(s.column)
-			if err := state.validateIndentColumn(); err != nil {
-				invalidMsg := err.Error()
-				invalidTk := token.Invalid(string(ctx.obuf), s.pos())
-				s.progressColumn(ctx, 1)
+	case isNewLineChar(c):
+		s.readMultiLineBreak(ctx, state, c)
 
-				return ErrInvalidToken(invalidMsg, invalidTk)
-			}
-		}
-		value := ctx.bufferedSrc()
-		ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
-		ctx.clear()
-		s.progressColumn(ctx, 1)
-	} else if isNewLineChar(c) {
-		ctx.addBuf(c)
-		state.updateSpaceOnlyIndentColumn(s.column - 1)
-		state.updateNewLineState()
-		s.progressLine(ctx)
-		if ctx.next() {
-			if s.foundDocumentSeparatorMarker(ctx.src[ctx.idx:]) {
-				value := ctx.bufferedSrc()
-				ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
-				ctx.clear()
-				s.breakMultiLine(ctx)
-			}
-		}
-	} else if s.isFirstCharAtLine && c == ' ' {
+	case s.isFirstCharAtLine && c == ' ':
+		// Still inside the indentation the header announced.
 		state.addIndent(ctx, s.column)
 		s.progressColumn(ctx, 1)
-	} else if s.isFirstCharAtLine && c == '\t' && state.isIndentColumn(s.column) {
-		err := ErrInvalidToken("found a tab character where an indentation space is expected", token.Invalid(string(ctx.obuf), s.pos()))
-		s.progressColumn(ctx, 1)
-		return err
-	} else if c == '\t' && !state.isIndentColumn(s.column) {
+
+	case s.isFirstCharAtLine && c == '\t' && state.isIndentColumn(s.column):
+		return s.refuseMultiLine(ctx, "found a tab character where an indentation space is expected")
+
+	case c == '\t' && !state.isIndentColumn(s.column):
+		// Past the indentation, so the tab is content and is kept as written.
 		ctx.addBufWithTab(c)
 		s.progressColumn(ctx, 1)
-	} else {
-		if err := state.validateIndentAfterSpaceOnly(s.column); err != nil {
-			invalidMsg := err.Error()
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
-			s.progressColumn(ctx, 1)
-			return ErrInvalidToken(invalidMsg, invalidTk)
-		}
-		state.updateIndentColumn(s.column)
-		if err := state.validateIndentColumn(); err != nil {
-			invalidMsg := err.Error()
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
-			s.progressColumn(ctx, 1)
-			return ErrInvalidToken(invalidMsg, invalidTk)
-		}
-		if col := state.lastDelimColumn(); col > 0 {
-			s.lastDelimColumn = col
-		}
-		state.updateNewLineInFolded(ctx, s.column)
-		state.began(s.pos())
-		ctx.addBufWithTab(c)
-		s.progressColumn(ctx, 1)
+
+	default:
+		return s.readMultiLineContent(ctx, state, c)
 	}
 
 	return nil
+}
+
+// normalizeMultiLineBreak reads CR and CRLF as the LF the rest of the scan
+// works in, taking the second byte of a CRLF with it. The origin buffer keeps
+// both bytes: the value is normalized, the text the document wrote is not.
+func (s *Scanner) normalizeMultiLineBreak(ctx *Context, c rune) rune {
+	if c != '\r' {
+		return c
+	}
+
+	if ctx.nextChar() == '\n' {
+		ctx.addOriginBuf('\n')
+		s.offset += s.progress(ctx, 1)
+	}
+
+	return '\n'
+}
+
+// closeMultiLineAtEOS ends the block on the last character of the source.
+func (s *Scanner) closeMultiLineAtEOS(ctx *Context, state *MultiLineState, c rune) error {
+	if s.isFirstCharAtLine && c == ' ' {
+		state.addIndent(ctx, s.column)
+	} else {
+		state.began(s.pos())
+		ctx.addBuf(c)
+	}
+
+	if !isNewLineChar(c) {
+		// A line that ends here without content is empty, and an empty line
+		// is allowed less indentation than the header states: l-empty
+		// admits s-indent(<n). Holding it to the stated width refused every
+		// document whose block scalar both states its indentation and keeps
+		// its trailing blank lines.
+		state.updateIndentColumn(s.column)
+		if err := state.validateIndentColumn(); err != nil {
+			return s.refuseMultiLine(ctx, err.Error())
+		}
+	}
+
+	s.emitMultiLine(ctx, state)
+	s.progressColumn(ctx, 1)
+
+	return nil
+}
+
+// readMultiLineBreak ends a content line, and ends the block itself where the
+// next line opens a document.
+func (s *Scanner) readMultiLineBreak(ctx *Context, state *MultiLineState, c rune) {
+	ctx.addBuf(c)
+	state.updateSpaceOnlyIndentColumn(s.column - 1)
+	state.updateNewLineState()
+	s.progressLine(ctx)
+
+	if ctx.next() && s.foundDocumentSeparatorMarker(ctx.src[ctx.idx:]) {
+		s.emitMultiLine(ctx, state)
+		s.breakMultiLine(ctx)
+	}
+}
+
+// readMultiLineContent takes a character that stands past the indentation, the
+// first of them settling where the block's content begins.
+func (s *Scanner) readMultiLineContent(ctx *Context, state *MultiLineState, c rune) error {
+	if err := state.validateIndentAfterSpaceOnly(s.column); err != nil {
+		return s.refuseMultiLine(ctx, err.Error())
+	}
+
+	state.updateIndentColumn(s.column)
+	if err := state.validateIndentColumn(); err != nil {
+		return s.refuseMultiLine(ctx, err.Error())
+	}
+
+	if col := state.lastDelimColumn(); col > 0 {
+		s.lastDelimColumn = col
+	}
+
+	state.updateNewLineInFolded(ctx, s.column)
+	state.began(s.pos())
+	ctx.addBufWithTab(c)
+	s.progressColumn(ctx, 1)
+
+	return nil
+}
+
+// emitMultiLine hands over the block read so far and starts the buffers again.
+func (s *Scanner) emitMultiLine(ctx *Context, state *MultiLineState) {
+	value := ctx.bufferedSrc()
+	ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
+	ctx.clear()
+}
+
+// refuseMultiLine reports msg against the block read so far. The column moves
+// first, so that the scan stands past the character that was refused.
+func (s *Scanner) refuseMultiLine(ctx *Context, msg string) error {
+	tk := token.Invalid(string(ctx.obuf), s.pos())
+	s.progressColumn(ctx, 1)
+
+	return ErrInvalidToken(msg, tk)
 }
 
 func (s *Scanner) breakMultiLine(ctx *Context) {
