@@ -77,13 +77,6 @@ func (c *Context) clear() {
 	c.mstate = nil
 }
 
-// abandon drops the text read towards a token that was refused, leaving only
-// the cursor. What the scanner reads next then starts a token of its own.
-func (c *Context) abandon() {
-	c.clear()
-	c.forgetTokens()
-}
-
 // forgetTokens drops what the tokens already emitted say about the next one.
 func (c *Context) forgetTokens() {
 	c.lastTk, c.hasLastTk = token.Token{}, false
@@ -156,28 +149,14 @@ func (c *Context) resetBuffer() {
 	c.originCut = false
 }
 
-// text returns buf as a string, taken from the source where it stands there
-// verbatim.
+// textAt returns buf as a string and where in the source it was found, or -1
+// where buf is not the source's own bytes.
 //
 // A Go substring shares the bytes it is taken from, so a token whose text is
 // the source's own costs nothing: it points into the document rather than
 // carrying a copy of it. Scanning rewrites the text often enough -- escapes,
-// folding, chomping -- that the source window at start is compared with buf
-// rather than assumed equal to it.
-//
-// Two windows are tried. The one at start catches a plain scalar, which is cut
-// only once the scanner knows it did not run on to the next line, so that by
-// then the cursor stands well past it. The one ending at the cursor catches a
-// scalar whose text does not begin where the token does -- a quoted one, whose
-// value stands inside the quotes.
-func (c *Context) text(buf []byte, start int) string {
-	span, _ := c.textAt(buf, start)
-
-	return span
-}
-
-// textAt returns buf as a string and where in the source it was found, or -1
-// where buf is not the source's own bytes.
+// folding, chomping -- that the source window is compared with buf rather than
+// assumed equal to it.
 //
 // start is where the caller believes buf begins. It is a guess for a value the
 // scanner folded: the offset it works out is the cursor less the folded
