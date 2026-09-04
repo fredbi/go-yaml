@@ -36,12 +36,10 @@ import (
 // growth of a slice to put the result in.
 func BenchmarkScannerNextToken(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
-		text := string(src)
-
 		var tokens int64
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init([]byte(text))
+			s.Init(src)
 
 			for {
 				if _, ok := s.NextToken(); !ok {
@@ -61,12 +59,10 @@ func BenchmarkScannerNextToken(b *testing.B) {
 // measured; the parser does not, which is why NextToken is the one above.
 func BenchmarkScannerScan(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
-		text := string(src)
-
 		var tokens int64
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init([]byte(text))
+			s.Init(src)
 
 			for {
 				batch, err := s.Scan()
@@ -89,14 +85,12 @@ func BenchmarkScannerScan(b *testing.B) {
 // and leave the other alone.
 func BenchmarkScannerCollect(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
-		text := string(src)
-
 		for b.Loop() {
 			var (
 				s      scanner.Scanner
 				tokens token.Tokens
 			)
-			s.Init([]byte(text))
+			s.Init(src)
 
 			for {
 				batch, err := s.Scan()
@@ -114,11 +108,9 @@ func BenchmarkScannerCollect(b *testing.B) {
 // against.
 func BenchmarkScanInit(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
-		text := string(src)
-
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init([]byte(text))
+			s.Init(src)
 		}
 	})
 }
