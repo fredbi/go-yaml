@@ -416,10 +416,8 @@ const (
 	// with a leading zero, and it drops 1.2's "0o" prefix, its unsigned
 	// exponent and its exponent without a fraction.
 	//
-	// Two pieces are not here yet. Base 60 ("190:20:30") is read as a string,
-	// where 1.1 reads 685230. And the conversion helpers -- [ParseInteger],
-	// [ParseFloat] and their big counterparts -- read 1.2, so a value typed
-	// under 1.1 whose spelling 1.2 does not share converts to nothing.
+	// Base 60 -- "190:20:30", which is 685230 -- is here too, read group by
+	// group since no strconv base reaches 60.
 	Schema11
 )
 
@@ -781,8 +779,8 @@ func shapeOfNumber(value string, schema Schema) (numberShape, bool) {
 // reading PyYAML settled on: the type's own regular expression matches a bare
 // ".", and no document means 0 by it.
 //
-// Base 60 -- "190:20:30", which 1.1 reads as 685230 -- is not here. It needs a
-// conversion no native strconv base covers, and [Schema11] says so.
+// Base 60 -- "190:20:30", which 1.1 reads as 685230 -- is read by
+// [shapeOfSexagesimal].
 func shapeOfNumber11(value string) (numberShape, bool) {
 	var negative bool
 	body := value
@@ -827,6 +825,10 @@ func shapeOfNumber11(value string) (numberShape, bool) {
 		return numberShape{typ: NumberTypeOctet, base: 8, digits: digits, negative: negative}, true
 	}
 
+	if strings.IndexByte(body, ':') >= 0 {
+		return shapeOfSexagesimal(body, negative)
+	}
+
 	i, whole := countDigits11(body, 0)
 	if i == len(body) {
 		if whole == 0 {
@@ -869,6 +871,85 @@ func shapeOfNumber11(value string) (numberShape, bool) {
 	return numberShape{typ: NumberTypeFloat, base: 10, digits: unseparate(body), negative: negative}, true
 }
 
+// sexagesimalBase is YAML 1.1's base 60. No strconv base reaches it -- strconv
+// stops at 36 -- so [sexagesimalValue] reads the groups itself.
+const sexagesimalBase = 60
+
+// shapeOfSexagesimal reads YAML 1.1's base 60: "190:20:30" is 190 hours, 20
+// minutes and 30 seconds, which is the integer 685230, and "190:20:30.5" is
+// the float beside it.
+//
+//	int    [-+]? [1-9] [0-9_]* ( : [0-5]? [0-9] )+
+//	float  [-+]? [0-9] [0-9_]* ( : [0-5]? [0-9] )+ \. [0-9_]*
+//
+// time.ParseDuration does not read this: it wants a unit on every group
+// ("190h20m30s") and this form has none.
+func shapeOfSexagesimal(body string, negative bool) (numberShape, bool) {
+	i, whole := countDigits11(body, 0)
+	if whole == 0 || body[0] == '_' {
+		return numberShape{}, false
+	}
+
+	// One or more ":" groups of one or two digits, none past 59.
+	groups := 0
+	for i < len(body) && body[i] == ':' {
+		i++
+		start := i
+		i = countDigits(body, i)
+		if n := i - start; n < 1 || n > 2 {
+			return numberShape{}, false
+		}
+		if body[start] > '5' && i-start == 2 {
+			return numberShape{}, false
+		}
+		groups++
+	}
+	if groups == 0 {
+		return numberShape{}, false
+	}
+
+	typ := NumberTypeDecimal
+	if i < len(body) {
+		// The float form, whose fraction closes the text.
+		if body[i] != '.' {
+			return numberShape{}, false
+		}
+		i++
+		if i, _ = countDigits11(body, i); i != len(body) {
+			return numberShape{}, false
+		}
+		typ = NumberTypeFloat
+	}
+
+	return numberShape{typ: typ, base: sexagesimalBase, digits: unseparate(body), negative: negative}, true
+}
+
+// sexagesimalValue reads base 60 written with colons, and reports false where
+// the groups overflow a uint64.
+//
+// digits may carry a fraction, which is left to the caller: the value returned
+// is the whole part.
+func sexagesimalValue(digits string) (uint64, string, bool) {
+	fraction := ""
+	if at := strings.IndexByte(digits, '.'); at >= 0 {
+		digits, fraction = digits[:at], digits[at:]
+	}
+
+	var n uint64
+	for _, group := range strings.Split(digits, ":") {
+		g, err := strconv.ParseUint(group, 10, 64)
+		if err != nil {
+			return 0, "", false
+		}
+		if n > (1<<64-1-g)/sexagesimalBase {
+			return 0, "", false
+		}
+		n = n*sexagesimalBase + g
+	}
+
+	return n, fraction, true
+}
+
 // countDigits11 returns the index just past the run of digits and "_"
 // separators starting at i, and how many of them were digits.
 func countDigits11(s string, i int) (int, int) {
@@ -906,20 +987,79 @@ func countDigits(s string, i int) int {
 	return i
 }
 
+// shapeOfTypedNumber returns the shape of text as a number of type typ, taking
+// the base from the type rather than resolving the text again.
+//
+// The type is what the schema settled: base 16 stands behind "0x", base 8
+// behind "0o" or a leading zero, base 2 behind "0b" and base 60 between colons,
+// and only the schema that typed the scalar knows which spellings it allowed.
+// So conversion reads the digits and does not re-decide what they are -- which
+// is how "0100" comes back as 64 in a document that said "%YAML 1.1" and as
+// 100 in one that did not.
+func shapeOfTypedNumber(text string, typ Type) (numberShape, bool) {
+	if text == "" {
+		return numberShape{}, false
+	}
+
+	var negative bool
+	body := text
+	switch body[0] {
+	case '-':
+		negative, body = true, body[1:]
+	case '+':
+		body = body[1:]
+	}
+
+	var (
+		base int
+		kind NumberType
+	)
+	switch typ {
+	case IntegerType:
+		base, kind = 10, NumberTypeDecimal
+	case OctetIntegerType:
+		// "0o755" in 1.2, "0755" in 1.1. Base 8 reads the leading zero the
+		// older form keeps.
+		base, kind = 8, NumberTypeOctet
+		body = strings.TrimPrefix(body, "0o")
+	case HexIntegerType:
+		base, kind = 16, NumberTypeHex
+		body = strings.TrimPrefix(body, "0x")
+	case BinaryIntegerType:
+		base, kind = 2, NumberTypeBinary
+		body = strings.TrimPrefix(body, "0b")
+	case FloatType:
+		base, kind = 10, NumberTypeFloat
+	default:
+		return numberShape{}, false
+	}
+
+	body = unseparate(body)
+	if strings.IndexByte(body, ':') >= 0 {
+		base = sexagesimalBase
+	}
+	if kind != NumberTypeFloat && base != sexagesimalBase && !inBase(body, base) {
+		return numberShape{}, false
+	}
+
+	return numberShape{typ: kind, base: base, digits: body, negative: negative}, true
+}
+
 // ParseInteger returns what an integer scalar means: an int64 where the text
 // carries a sign, a uint64 where it does not. It reports false where text is
-// not an integer.
+// not an integer of type typ.
 //
-// A scalar is typed without being converted, so this is where the conversion
-// happens: once each time it is asked for, rather than once for every number in
-// the document whether or not anything reads it.
-func ParseInteger(text string) (any, bool) {
-	shape, ok := shapeOfNumber(text, Schema12)
+// typ is the token's type, which says how the digits are written. A scalar is
+// typed without being converted, so this is where the conversion happens: once
+// each time it is asked for, rather than once for every number in the document
+// whether or not anything reads it.
+func ParseInteger(text string, typ Type) (any, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
 	if !ok || shape.typ == NumberTypeFloat {
 		return nil, false
 	}
 
-	u, err := strconv.ParseUint(shape.digits, shape.base, 64)
+	u, err := parseDigits(shape)
 	if err != nil {
 		return nil, false
 	}
@@ -939,21 +1079,41 @@ func ParseInteger(text string) (any, bool) {
 	}
 }
 
+// bigDigits reads a shape's digits as a big.Int. Base 60 is read group by
+// group, since big.Int.SetString stops at base 62 but reads no colons.
+func bigDigits(shape numberShape) (*big.Int, bool) {
+	if shape.base != sexagesimalBase {
+		return new(big.Int).SetString(shape.digits, shape.base)
+	}
+
+	n := new(big.Int)
+	group := new(big.Int)
+	base := big.NewInt(sexagesimalBase)
+	for _, text := range strings.Split(shape.digits, ":") {
+		if _, ok := group.SetString(text, 10); !ok {
+			return nil, false
+		}
+		n.Mul(n, base).Add(n, group)
+	}
+
+	return n, true
+}
+
 // ParseBigInteger returns text as a [big.Int], for a whole number no native
-// type holds. It reports false where text is not an integer.
+// type holds. It reports false where text is not an integer of type typ.
 //
 // The scanner types a scalar by the grammar its text follows and never by
 // whether a native type has room for it, so a document may carry an integer
 // wider than int64 or uint64. YAML 1.2 calls the type "arbitrary sized finite
 // mathematical integers", and this is where one that outgrows [ParseInteger]
 // is read exactly rather than lost.
-func ParseBigInteger(text string) (*big.Int, bool) {
-	shape, ok := shapeOfNumber(text, Schema12)
+func ParseBigInteger(text string, typ Type) (*big.Int, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
 	if !ok || shape.typ == NumberTypeFloat {
 		return nil, false
 	}
 
-	n, ok := new(big.Int).SetString(shape.digits, shape.base)
+	n, ok := bigDigits(shape)
 	if !ok {
 		return nil, false
 	}
@@ -981,14 +1141,19 @@ const (
 // It reports false where text is not a float.
 //
 // See [ParseBigInteger] for why a document may carry one.
-func ParseBigFloat(text string) (*big.Float, bool) {
-	shape, ok := shapeOfNumber(text, Schema12)
+func ParseBigFloat(text string, typ Type) (*big.Float, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
 	if !ok || shape.typ != NumberTypeFloat {
 		return nil, false
 	}
 
-	prec := min(max(uint(len(shape.digits))*4, bigFloatMinPrecision), bigFloatMaxPrecision)
-	f, _, err := big.ParseFloat(shape.digits, 10, prec, big.ToNearestEven)
+	digits, ok := floatDigits(shape)
+	if !ok {
+		return nil, false
+	}
+
+	prec := min(max(uint(len(digits))*4, bigFloatMinPrecision), bigFloatMaxPrecision)
+	f, _, err := big.ParseFloat(digits, 10, prec, big.ToNearestEven)
 	if err != nil {
 		return nil, false
 	}
@@ -999,19 +1164,56 @@ func ParseBigFloat(text string) (*big.Float, bool) {
 	return f, true
 }
 
+// parseDigits reads a shape's digits as an unsigned value. Base 60 is read
+// group by group, since strconv stops at base 36.
+func parseDigits(shape numberShape) (uint64, error) {
+	if shape.base == sexagesimalBase {
+		u, _, ok := sexagesimalValue(shape.digits)
+		if !ok {
+			return 0, strconv.ErrRange
+		}
+
+		return u, nil
+	}
+
+	return strconv.ParseUint(shape.digits, shape.base, 64)
+}
+
+// floatDigits returns the digits as text strconv can read as a float. Base 60
+// is turned into its decimal value first, which is what "190:20:30.5" means:
+// 685230.5.
+func floatDigits(shape numberShape) (string, bool) {
+	if shape.base != sexagesimalBase {
+		return shape.digits, true
+	}
+
+	whole, fraction, ok := sexagesimalValue(shape.digits)
+	if !ok {
+		return "", false
+	}
+
+	return strconv.FormatUint(whole, 10) + fraction, true
+}
+
 // ParseFloat returns what a float scalar means, and reports false where text is
-// not a float. See [ParseInteger] for when the conversion happens.
-func ParseFloat(text string) (float64, bool) {
-	shape, ok := shapeOfNumber(text, Schema12)
+// not a float of type typ. See [ParseInteger] for typ and for when the
+// conversion happens.
+func ParseFloat(text string, typ Type) (float64, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
 	if !ok || shape.typ != NumberTypeFloat {
 		return 0, false
 	}
 
-	f, err := strconv.ParseFloat(shape.digits, 64)
+	digits, ok := floatDigits(shape)
+	if !ok {
+		return 0, false
+	}
+
+	f, err := strconv.ParseFloat(digits, 64)
 	if err != nil {
 		return 0, false
 	}
-	if f == 0 && nonZeroMantissa(shape.digits) {
+	if f == 0 && nonZeroMantissa(digits) {
 		// Too small for a float64, which strconv rounds to zero without calling
 		// it an error -- 1.0e-400 comes back as (0, nil). Reporting false sends
 		// the caller to ParseBigFloat rather than handing over a zero the

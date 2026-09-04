@@ -119,3 +119,45 @@ func TestNumberNodeDefersItsConversion(t *testing.T) {
 }
 
 var intSink *ast.IntegerNode
+
+// TestNumberNodeConvertsBySpelling holds a number node to the base its token's
+// type names, not to the one a fresh reading of the text would pick.
+//
+// The two part company wherever the schemas spell a number differently. "0100"
+// is octal under YAML 1.1 and decimal under 1.2, and the text alone does not
+// say which document it came out of -- the type does, since that is what the
+// resolver settled. Reading the text again here would give 100 for a document
+// that said 64.
+func TestNumberNodeConvertsBySpelling(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		typ  token.Type
+		want any
+	}{
+		{"0100", token.IntegerType, uint64(100)},      // as YAML 1.2 typed it
+		{"0100", token.OctetIntegerType, uint64(64)},  // as YAML 1.1 typed it
+		{"0o100", token.OctetIntegerType, uint64(64)}, // and 1.2's own octal
+		{"0b1010", token.BinaryIntegerType, uint64(10)},
+		{"1_000", token.IntegerType, uint64(1000)},
+		{"-1_000", token.IntegerType, int64(-1000)},
+		{"0x_0A_74_AE", token.HexIntegerType, uint64(685230)},
+
+		// Base 60, which YAML 1.1 writes with colons.
+		{"190:20:30", token.IntegerType, uint64(685230)},
+		{"-1:30", token.IntegerType, int64(-90)},
+	} {
+		n := ast.Integer(&token.Token{Type: tc.typ, Value: tc.text})
+		assert.Equalf(t, tc.want, n.GetValue(), "%q as %s", tc.text, tc.typ)
+	}
+
+	for _, tc := range []struct {
+		text string
+		want float64
+	}{
+		{"190:20:30.5", 685230.5},
+		{"685_230.15", 685230.15},
+	} {
+		n := ast.Float(&token.Token{Type: token.FloatType, Value: tc.text})
+		assert.Equalf(t, tc.want, n.GetValue(), "%q as a float", tc.text)
+	}
+}

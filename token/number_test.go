@@ -55,8 +55,8 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
 			num := ToNumber(value)
 			if num == nil {
-				_, isInt := ParseInteger(value)
-				_, isFloat := ParseFloat(value)
+				_, isInt := ParseInteger(value, ScalarType(value, Schema12))
+				_, isFloat := ParseFloat(value, ScalarType(value, Schema12))
 				assert.Falsef(t, isInt, "%q is not a number, ParseInteger accepted it", value)
 				assert.Falsef(t, isFloat, "%q is not a number, ParseFloat accepted it", value)
 			}
@@ -65,8 +65,8 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 			if !isNumber {
 				assert.Nilf(t, num, "numberType says %q is not a number, ToNumber read it as a %s", value, typeOf(num))
 
-				_, isBigInt := ParseBigInteger(value)
-				_, isBigFloat := ParseBigFloat(value)
+				_, isBigInt := ParseBigInteger(value, ScalarType(value, Schema12))
+				_, isBigFloat := ParseBigFloat(value, ScalarType(value, Schema12))
 				assert.Falsef(t, isBigInt, "%q is not a number, ParseBigInteger accepted it", value)
 				assert.Falsef(t, isBigFloat, "%q is not a number, ParseBigFloat accepted it", value)
 
@@ -79,12 +79,12 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 			// take over exactly there.
 			if num == nil {
 				if typ == NumberTypeFloat {
-					_, ok := ParseBigFloat(value)
+					_, ok := ParseBigFloat(value, ScalarType(value, Schema12))
 					assert.Truef(t, ok, "%q is a float no float64 holds, ParseBigFloat refused it", value)
 
 					return
 				}
-				_, ok := ParseBigInteger(value)
+				_, ok := ParseBigInteger(value, ScalarType(value, Schema12))
 				assert.Truef(t, ok, "%q is an integer no native type holds, ParseBigInteger refused it", value)
 
 				return
@@ -95,21 +95,21 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 			// ParseInteger and ParseFloat are what a node converts with, and
 			// have to reach the value ToNumber reached.
 			if num.Type == NumberTypeFloat {
-				f, ok := ParseFloat(value)
+				f, ok := ParseFloat(value, ScalarType(value, Schema12))
 				assert.Truef(t, ok, "%q is a float, ParseFloat refused it", value)
 				assert.Equalf(t, num.Value, f, "%q: the float values differ", value)
 
-				_, ok = ParseInteger(value)
+				_, ok = ParseInteger(value, ScalarType(value, Schema12))
 				assert.Falsef(t, ok, "%q is a float, ParseInteger accepted it", value)
 
 				return
 			}
 
-			i, ok := ParseInteger(value)
+			i, ok := ParseInteger(value, ScalarType(value, Schema12))
 			assert.Truef(t, ok, "%q is a %s, ParseInteger refused it", value, num.Type)
 			assert.Equalf(t, num.Value, i, "%q: the integer values differ", value)
 
-			_, ok = ParseFloat(value)
+			_, ok = ParseFloat(value, ScalarType(value, Schema12))
 			assert.Falsef(t, ok, "%q is an integer, ParseFloat accepted it", value)
 		})
 	}
@@ -179,10 +179,10 @@ func TestParseBigReadsWhatNoNativeTypeHolds(t *testing.T) {
 		{"0xFFFFFFFFFFFFFFFFF", "295147905179352825855"},                                       // wider than uint64 in hex
 		{"99999999999999999999999999999999999999", "99999999999999999999999999999999999999"},   // far past all of them
 	} {
-		_, fitsNatively := ParseInteger(tc.text)
+		_, fitsNatively := ParseInteger(tc.text, ScalarType(tc.text, Schema12))
 		assert.Falsef(t, fitsNatively, "%q does not fit a native type, ParseInteger took it", tc.text)
 
-		n, ok := ParseBigInteger(tc.text)
+		n, ok := ParseBigInteger(tc.text, ScalarType(tc.text, Schema12))
 		require.Truef(t, ok, "%q is an integer, ParseBigInteger refused it", tc.text)
 		assert.Equalf(t, tc.want, n.String(), "%q", tc.text)
 	}
@@ -195,23 +195,23 @@ func TestParseBigReadsWhatNoNativeTypeHolds(t *testing.T) {
 		{"-1.0e400", "-1e+400"},
 		{"1.0e-400", "1e-400"}, // and under the smallest, which strconv rounds to zero without complaint
 	} {
-		_, fitsNatively := ParseFloat(tc.text)
+		_, fitsNatively := ParseFloat(tc.text, ScalarType(tc.text, Schema12))
 		assert.Falsef(t, fitsNatively, "%q does not fit a float64, ParseFloat took it", tc.text)
 
-		f, ok := ParseBigFloat(tc.text)
+		f, ok := ParseBigFloat(tc.text, ScalarType(tc.text, Schema12))
 		require.Truef(t, ok, "%q is a float, ParseBigFloat refused it", tc.text)
 		assert.Equalf(t, tc.want, f.Text('g', -1), "%q", tc.text)
 	}
 
 	// Neither reads what is not a number, and neither reads the other's kind.
 	for _, text := range []string{"", "-", "z", "0x", "1.5.5", "-0.5h", "2015-02-24T18:19:39.12Z"} {
-		_, isInt := ParseBigInteger(text)
-		_, isFloat := ParseBigFloat(text)
+		_, isInt := ParseBigInteger(text, ScalarType(text, Schema12))
+		_, isFloat := ParseBigFloat(text, ScalarType(text, Schema12))
 		assert.Falsef(t, isInt, "%q is not an integer, ParseBigInteger took it", text)
 		assert.Falsef(t, isFloat, "%q is not a float, ParseBigFloat took it", text)
 	}
-	_, isInt := ParseBigInteger("1.0e400")
+	_, isInt := ParseBigInteger("1.0e400", FloatType)
 	assert.False(t, isInt, "a float is not an integer")
-	_, isFloat := ParseBigFloat("18446744073709551616")
+	_, isFloat := ParseBigFloat("18446744073709551616", IntegerType)
 	assert.False(t, isFloat, "an integer is not a float")
 }

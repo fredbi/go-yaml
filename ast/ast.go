@@ -637,7 +637,7 @@ func (n *IntegerNode) GetValue() interface{} {
 	if n.Token == nil {
 		return nil
 	}
-	if v, ok := token.ParseInteger(n.Token.Value); ok {
+	if v, ok := token.ParseInteger(n.Token.Value, n.Token.Type); ok {
 		return v
 	}
 
@@ -645,7 +645,7 @@ func (n *IntegerNode) GetValue() interface{} {
 	// puts no bound on an integer -- "arbitrary sized finite mathematical
 	// integers" -- and the scanner types a scalar by its grammar, so the value
 	// is read exactly here and what to do with it is the decoder's.
-	if v, ok := token.ParseBigInteger(n.Token.Value); ok {
+	if v, ok := token.ParseBigInteger(n.Token.Value, n.Token.Type); ok {
 		return v
 	}
 
@@ -709,12 +709,12 @@ func (n *FloatNode) GetValue() interface{} {
 	if n.Token == nil {
 		return float64(0)
 	}
-	if v, ok := token.ParseFloat(n.Token.Value); ok {
+	if v, ok := token.ParseFloat(n.Token.Value, n.Token.Type); ok {
 		return v
 	}
 
 	// Past what a float64 reaches. See [IntegerNode.GetValue].
-	if v, ok := token.ParseBigFloat(n.Token.Value); ok {
+	if v, ok := token.ParseBigFloat(n.Token.Value, n.Token.Type); ok {
 		return v
 	}
 

@@ -137,10 +137,12 @@ func castToInteger(v interface{}) interface{} {
 	case float64:
 		return int(vv)
 	case string:
-		if i, ok := token.ParseInteger(vv); ok {
+		// The text came from a node the "!!int" tag stands over, which the
+		// resolver left as a string, so its spelling is 1.2's.
+		if i, ok := token.ParseInteger(vv, token.ScalarType(vv, token.Schema12)); ok {
 			return castToInteger(i)
 		}
-		if i, ok := token.ParseBigInteger(vv); ok {
+		if i, ok := token.ParseBigInteger(vv, token.ScalarType(vv, token.Schema12)); ok {
 			return castToInteger(i)
 		}
 
