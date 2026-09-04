@@ -1,7 +1,7 @@
 package scanner
 
 import (
-	"strings"
+	"bytes"
 
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -31,7 +31,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		}
 	}
 
-	if strings.HasPrefix(strings.TrimPrefix(string(ctx.obuf), " "), "\t") && !strings.HasPrefix(string(ctx.buf), "\t") {
+	if bytes.HasPrefix(bytes.TrimPrefix(ctx.obuf, []byte(" ")), []byte("\t")) && !bytes.HasPrefix(ctx.buf, []byte("\t")) {
 		invalidMsg := "tab character cannot use as a map key directly"
 		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)

@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -264,7 +265,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	// commentValueIndex indexes value, commentIndex indexes the origin buffer,
 	// which also holds the indentation before the header. Both are needed, and
 	// the comment is emitted only where value has one to emit.
-	commentIndex := strings.Index(string(ctx.obuf), "#")
+	commentIndex := bytes.IndexByte(ctx.obuf, '#')
 	headerBuf := string(ctx.obuf)
 	if commentValueIndex > 0 && commentIndex > 0 {
 		headerBuf = headerBuf[:commentIndex]

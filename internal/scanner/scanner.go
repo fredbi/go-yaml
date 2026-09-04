@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"iter"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/nocopy"
@@ -551,7 +550,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 		return false, nil
 	}
 
-	if strings.HasPrefix(strings.TrimPrefix(string(ctx.obuf), " "), "\t") {
+	if bytes.HasPrefix(bytes.TrimPrefix(ctx.obuf, []byte(" ")), []byte("\t")) {
 		invalidMsg := "tab character cannot use as a sequence delimiter"
 		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
 		s.progressColumn(ctx, 1)
