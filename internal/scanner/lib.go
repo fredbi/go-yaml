@@ -56,19 +56,64 @@ func firstUnprintable(text string) int {
 	raw := unsafe.Slice(unsafe.StringData(text), len(text))
 
 	i := 0
-	for i < len(text) {
-		if i+8 <= len(text) {
-			w := binary.LittleEndian.Uint64(raw[i:])
-			if w&swar.HighBits == 0 {
-				if m := swar.ControlMask(w) &^ swar.AllowedControlMask(w); m != 0 {
-					return i + swar.FirstByte(m)
-				}
-				i += 8
-
-				continue
+	for i+8 <= len(text) {
+		w := binary.LittleEndian.Uint64(raw[i:])
+		if w&swar.HighBits == 0 {
+			if m := swar.ControlMask(w) &^ swar.AllowedControlMask(w); m != 0 {
+				return i + swar.FirstByte(m)
 			}
+			i += 8
+
+			continue
 		}
 
+		next, bad := readNonASCII(text, w, i)
+		if bad >= 0 {
+			return bad
+		}
+		i = next
+	}
+
+	return firstUnprintableTail(text, i)
+}
+
+// readNonASCII steps over the characters of the word at i that carries a byte
+// over 0x7f, and returns where the bytes are ASCII again, or where the stream
+// holds a character it may not.
+//
+// It takes the whole run rather than one character: a document written in a
+// script of three bytes to the character loaded and tested a word for every one
+// of them, and every test failed the same way. It is a call rather than the
+// loop's own code so that the word loop above stays small -- the run is the
+// cold path, and twitter_status, the most non-Latin of the workloads, reaches
+// it for one word in five.
+func readNonASCII(text string, w uint64, i int) (int, int) {
+	// The ASCII bytes standing in front of the first one over 0x7f are read
+	// from the word as usual.
+	k := swar.FirstByte(w & swar.HighBits)
+	if m := (swar.ControlMask(w) &^ swar.AllowedControlMask(w)) & (1<<(8*k) - 1); m != 0 {
+		return 0, i + swar.FirstByte(m)
+	}
+	i += k
+
+	for i < len(text) && text[i] >= utf8.RuneSelf {
+		r, width := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && width <= 1 {
+			return 0, i
+		}
+		if !printable(r) {
+			return 0, i
+		}
+		i += width
+	}
+
+	return i, -1
+}
+
+// firstUnprintableTail reads the last bytes of the source, fewer than a word of
+// them, one character at a time.
+func firstUnprintableTail(text string, i int) int {
+	for i < len(text) {
 		if c := text[i]; c < utf8.RuneSelf {
 			if !printableASCII(c) {
 				return i
