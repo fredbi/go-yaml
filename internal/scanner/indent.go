@@ -51,8 +51,20 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 	}
 	if s.isFirstCharAtLine && c == ' ' {
 		if probe.Enabled {
-			probe.Check("indent.indentNum==column-1", s.indentNum == s.column-1, func() string {
-				return fmt.Sprintf("indentNum=%d column=%d", s.indentNum, s.column)
+			name := "indent.indentNum==column-1/spaces"
+			if s.indentHasTab {
+				name = "indent.indentNum==column-1/tab"
+			}
+			probe.Check(name, s.indentNum == s.column-1, func() string {
+				from := max(ctx.idx-24, 0)
+				to := min(ctx.idx+16, len(ctx.src))
+
+				return fmt.Sprintf(
+					"indentNum=%d column=%d line=%d idx=%d flow=%d/%d anchor=%v alias=%v directive=%v tab=%v around=%q",
+					s.indentNum, s.column, s.line, ctx.idx,
+					s.startedFlowSequenceNum, s.startedFlowMapNum,
+					s.isAnchor, s.isAlias, s.isDirective, s.indentHasTab,
+					ctx.src[from:to])
 			})
 		}
 		s.indentNum++

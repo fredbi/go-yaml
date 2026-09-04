@@ -30,19 +30,37 @@ import (
 // disagreeing more has lost an invariant; one that starts disagreeing less may
 // have become removable, and the entry comes down to say so.
 var stateLedger = map[string]int64{
-	// notSpaceCharPos marks the buffer's length less the whitespace it ends
-	// with. Computing it at the read instead -- a scan back over the buffer,
-	// once, rather than a compare and a store for every character written --
-	// would give the same answer 137,103 times in 137,129. The 26 that differ
-	// are unaccounted for, and 26 is not zero.
-	"buf.notSpaceCharPos==trimmed": 26,
+	// Outside a block scalar the mark is the buffer's length less the
+	// whitespace and the fold break it ends with, exactly: 135,723 reads and no
+	// disagreement. It was three until bufferedToken stopped clearing the value
+	// buffer and leaving the mark past the end of it.
+	//
+	// So it could be worked out at the read -- a scan back over the buffer,
+	// once per token -- instead of a compare and a store for every character
+	// written. Inside a block scalar it could not: the two sites that rewrite
+	// the buffer set it outright, keeping the space that folds a line and
+	// dropping the tab that ends one, and no scan of the bytes tells those
+	// apart from content.
+	"buf.notSpaceCharPos==trimmed/plain": 0,
+	"buf.notSpaceCharPos==trimmed/block": 4,
 
-	// The indentation counted so far and the column reached are the same number
-	// while a line is still opening, but for twelve cases in 34,174.
-	"indent.indentNum==column-1": 12,
+	// A mark past the end of the buffer made bufferedSrc slice a byte the last
+	// token wrote. Fixed; nothing may raise this.
+	"buf.notSpaceCharPos<=len(buf)": 0,
+
+	// A tab in the indentation is counted by the column and not by indentNum,
+	// which is what indentNum means. Every case is this one.
+	"indent.indentNum==column-1/tab": 3,
+
+	// A quoted scalar that spans a line break: the quote scanners call
+	// progressLine, which says the next character opens a line, and then read
+	// the rest of the scalar with progressColumn, which never reaches
+	// updateIndent. The column reaches 10 while the scanner still believes it
+	// is at the start of a line and the indentation is still 0.
+	"indent.indentNum==column-1/spaces": 9,
 
 	// The indent level a token was given and the level the scanner stands at
-	// part company where a block opens: 3,000 of 76,277.
+	// part company where a block opens: 3,000 of 76,279. Not a pair.
 	"indent.lastIndentLevel==indentLevel": 3000,
 }
 

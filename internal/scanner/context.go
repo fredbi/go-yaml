@@ -3,6 +3,7 @@ package scanner
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/probe"
@@ -606,13 +607,45 @@ func (c *Context) bufferedSrc() []byte {
 		//
 		// addBuf marks past a space or a tab, addBufWithTab only past a space,
 		// and a block scalar is what says which was used.
+		// Outside a block scalar the mark trails whitespace and the break that
+		// scanNewLine appends to fold a line -- which is why it is not part of
+		// the value. Inside one the mark is set outright at the two sites that
+		// rewrite the buffer, and no scan of the bytes could tell a break that
+		// folds from one the block keeps.
 		end := len(c.buf)
-		for end > 0 && (c.buf[end-1] == ' ' || (!c.isMultiLine() && c.buf[end-1] == '\t')) {
-			end--
+		if !c.isMultiLine() {
+			for end > 0 && (c.buf[end-1] == ' ' || c.buf[end-1] == '\t' || c.buf[end-1] == '\n') {
+				end--
+			}
+		} else {
+			for end > 0 && c.buf[end-1] == ' ' {
+				end--
+			}
 		}
-		probe.Check("buf.notSpaceCharPos==trimmed", c.notSpaceCharPos == end, func() string {
-			return fmt.Sprintf("notSpaceCharPos=%d trimmed=%d multiline=%v buf=%q",
-				c.notSpaceCharPos, end, c.isMultiLine(), string(c.buf))
+		// The sharp one: a mark past the end of the buffer makes buf[:mark] a
+		// slice of what the last token left behind.
+		probe.Check("buf.notSpaceCharPos<=len(buf)", c.notSpaceCharPos <= len(c.buf), func() string {
+			return fmt.Sprintf("mark=%d len(buf)=%d cap=%d multiline=%v origin=%q",
+				c.notSpaceCharPos, len(c.buf), cap(c.buf), c.isMultiLine(),
+				c.src[c.originStart:min(c.originEnd, len(c.src))])
+		})
+
+		name := "buf.notSpaceCharPos==trimmed/plain"
+		if c.isMultiLine() {
+			name = "buf.notSpaceCharPos==trimmed/block"
+		}
+		probe.Check(name, c.notSpaceCharPos == end, func() string {
+			from := max(c.originStart-16, 0)
+			to := min(c.idx+16, len(c.src))
+			last := "none"
+			if c.hasLastTk {
+				last = c.lastTk.Type.String() + "=" + strconv.Quote(c.lastTk.Value)
+			}
+
+			return fmt.Sprintf(
+				"mark=%d trimmed=%d buf=%q multiline=%v lastTk=%s origin=%q around=%q",
+				c.notSpaceCharPos, end, string(c.buf), c.isMultiLine(), last,
+				c.src[c.originStart:min(c.originEnd, len(c.src))], c.src[from:to])
 		})
 	}
 
@@ -669,7 +702,16 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 	}
 	source := c.bufferedSrc()
 	if len(source) == 0 {
-		c.buf = c.buf[:0] // clear value's buffer only.
+		// The value's buffer only: the text of the token stands, and the
+		// caller goes on reading it.
+		//
+		// The mark goes with it. Left where it was it outran the buffer, and
+		// bufferedSrc slices buf[:mark] -- which on an empty buffer with room
+		// left in it is a byte the last token wrote. Three reads in 137,129
+		// over the fuzz corpus, all of them after a block scalar whose content
+		// was whitespace.
+		c.buf = c.buf[:0]
+		c.notSpaceCharPos = 0
 
 		return token.Token{}, false
 	}
