@@ -101,7 +101,7 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken("found character '\t' that cannot start any token", token.Invalid(string(ctx.obuf), s.pos()))
+	err := ErrInvalidToken("found character '\t' that cannot start any token", token.Invalid(string(ctx.origin()), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 

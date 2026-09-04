@@ -9,17 +9,19 @@ import (
 
 // Context context at scanning
 type Context struct {
-	idx                int
-	size               int
-	notSpaceCharPos    int
-	notSpaceOrgCharPos int
-	src                string
-	buf                []byte
-	obuf               []byte
-	// originStart is where in src the origin buffer began. Where the buffer is
-	// a verbatim copy of the source from there, the token's text is a slice of
-	// src rather than a copy of the buffer.
+	idx             int
+	size            int
+	notSpaceCharPos int
+	src             string
+	buf             []byte
+	// originStart and originEnd bracket the current token's text in src. See
+	// [Context.origin].
 	originStart int
+	originEnd   int
+	// originCopy holds the text once a cut has taken bytes out of the middle of
+	// it, and originCut says it is in use.
+	originCopy []byte
+	originCut  bool
 	// blocks holds the tokens read, as values, in blocks that are never copied
 	// or resized. A token's address therefore holds good for as long as the
 	// Context does, and reading a whole document costs one allocation per block
@@ -148,7 +150,7 @@ func (c *Context) keyStartColumn() int {
 
 func (c *Context) reset(src string) {
 	c.idx = 0
-	c.originStart = 0
+	c.originStart, c.originEnd = 0, 0
 	c.size = len(src)
 	c.src = src
 	// The blocks are dropped rather than reused: a caller may still hold tokens
@@ -168,10 +170,10 @@ func (c *Context) reset(src string) {
 
 func (c *Context) resetBuffer() {
 	c.buf = c.buf[:0]
-	c.obuf = c.obuf[:0]
 	c.notSpaceCharPos = 0
-	c.notSpaceOrgCharPos = 0
-	c.originStart = c.idx
+	c.originStart, c.originEnd = c.idx, c.idx
+	c.originCopy = c.originCopy[:0]
+	c.originCut = false
 }
 
 // text returns buf as a string, taken from the source where it stands there
@@ -379,35 +381,97 @@ func (c *Context) addBufWithTab(r rune) {
 	}
 }
 
-// addOriginBuf records r as part of the text the current token was written as.
+// origin is the text the current token was written as: everything read since
+// the last token was cut, indentation and line breaks included.
 //
-// utf8.AppendRune already returns early for a rune below utf8.RuneSelf, so
-// checking for one here bought nothing: the two branches cost 106 against the
-// inliner's budget of 80 where AppendRune alone costs 94, and neither inlines.
-// A call that appends a rune cannot: AppendRune's body is worth about 70 on its
-// own and a call to it about 57.
+// It is a window on the source. Nothing keeps it -- Origin left the token, and
+// what reads it now measures it -- so the scanner records what it reads by
+// moving originEnd rather than by copying the bytes into a buffer. Over the
+// fuzz corpus that holds for 107,805 of 107,811 reads.
 //
-// Which is why this is 8% of the scanner and why the answer is not to tune it.
-// Nothing keeps obuf now that Origin has left the token -- its readers measure
-// it -- and it is byte for byte the source between originStart and the cursor
-// for 17,906 of 17,941 tokens over the fuzz corpus. The 35 that differ are
-// removeRightSpaceFromBuf trimming the spaces a line ends with.
-func (c *Context) addOriginBuf(r rune) {
-	c.obuf = utf8.AppendRune(c.obuf, r)
-	if r != ' ' && r != '\t' {
-		c.notSpaceOrgCharPos = len(c.obuf)
+// The exception is a line whose trailing spaces are cut. Each cut takes a
+// suffix, but the scan goes on and reads more, so what is left has a gap in the
+// middle of it and no window can say so. The first cut copies what the window
+// held and everything after it appends to the copy.
+func (c *Context) origin() string {
+	if c.originCut {
+		return string(c.originCopy)
 	}
+
+	return c.src[c.originStart:min(c.originEnd, len(c.src))]
 }
 
-func (c *Context) removeRightSpaceFromBuf() {
-	trimmedBuf := c.obuf[:c.notSpaceOrgCharPos]
-	buflen := len(trimmedBuf)
-	diff := len(c.obuf) - buflen
-	if diff > 0 {
-		c.obuf = c.obuf[:buflen]
-		c.buf = c.bufferedSrc()
+// addOriginBuf records that r was read as part of the current token.
+//
+// One add, where appending r to a buffer was 8% of the scanner: a call that
+// could not inline -- cost 106 against a budget of 80, utf8.AppendRune's body
+// being worth 70 on its own -- around an append that copied a byte already in
+// the source.
+func (c *Context) addOriginBuf(r rune) {
+	if r < utf8.RuneSelf && !c.originCut {
+		c.originEnd++
+
+		return
 	}
+
+	c.addOriginWide(r)
 }
+
+// addOriginWide records a character that the window cannot count in one byte,
+// or any character once a cut has put the text in a buffer.
+//
+// It is kept out of [Context.addOriginBuf] so that one stays inside the
+// inliner's budget: appending a rune is worth more than the whole budget on its
+// own, and this is called for a byte in a thousand.
+//
+//go:noinline
+func (c *Context) addOriginWide(r rune) {
+	if c.originCut {
+		c.originCopy = utf8.AppendRune(c.originCopy, r)
+
+		return
+	}
+
+	c.originEnd += utf8.RuneLen(r)
+}
+
+// removeRightSpaceFromBuf cuts the spaces and tabs a line ends with from the
+// token's text and from its value.
+//
+// Where the text is still a window, the run is found by reading back over the
+// source rather than by having marked it while reading forward: the mark cost a
+// compare and a store for every character of the document, and this costs the
+// length of the run, once, and only where there is one.
+func (c *Context) removeRightSpaceFromBuf() {
+	if c.originCut {
+		trimmed := len(c.originCopy)
+		for trimmed > 0 && isOriginSpace(c.originCopy[trimmed-1]) {
+			trimmed--
+		}
+		if trimmed == len(c.originCopy) {
+			return
+		}
+		c.originCopy = c.originCopy[:trimmed]
+		c.buf = c.bufferedSrc()
+
+		return
+	}
+
+	end := min(c.originEnd, len(c.src))
+	for end > c.originStart && isOriginSpace(c.src[end-1]) {
+		end--
+	}
+	if end == c.originEnd {
+		return
+	}
+
+	c.originCopy = append(c.originCopy[:0], c.src[c.originStart:end]...)
+	c.originCut = true
+	c.buf = c.bufferedSrc()
+}
+
+// isOriginSpace reports whether c is whitespace a line may end with.
+func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 
 // The cursor addresses c.src by byte, and decodes UTF-8 to read a character.
 // c.idx and c.size are byte counts; every method below that speaks of a
@@ -590,10 +654,14 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 
 		return token.Token{}, false
 	}
-	// originAt is where the origin buffer was found in the source, or -1 where
-	// the buffer is not the source's own bytes. Taken once: the comparison
-	// walks the whole buffer, and three sites below want the answer.
-	origin, originAt := c.textAt(c.obuf, c.originStart)
+	// The text the token was written as, and where it stands in the source. No
+	// searching for it: it is the window at originStart unless a cut took bytes
+	// out of the middle, and then it stands nowhere as a run.
+	origin := c.origin()
+	originAt := c.originStart
+	if c.originCut {
+		originAt = -1
+	}
 	// pos.Offset() is where the value starts in the source. The cursor is not:
 	// a plain scalar is cut only once the scanner knows it did not run on to
 	// the next line, by which time the cursor stands well past it.
@@ -610,7 +678,7 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		// knows where it began, so the value starts that far in, past the
 		// whitespace the line was indented by.
 		if originAt == c.originStart {
-			pos.SetOffset(int32(c.originStart + leadingSpace(c.obuf)))
+			pos.SetOffset(int32(c.originStart + leadingSpace(origin)))
 		}
 	}
 
@@ -626,7 +694,7 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		// points at inside it. Counting forward from the offset instead comes
 		// up short wherever a block scalar's indentation indicator leaves some
 		// of the leading spaces in the content.
-		tk.SetEndOffset(int32(originAt + len(c.obuf)))
+		tk.SetEndOffset(int32(originAt + len(c.origin())))
 	}
 
 	c.setTokenTypeByPrevTag(&tk)

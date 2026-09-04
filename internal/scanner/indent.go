@@ -92,7 +92,7 @@ func (s *Scanner) checkFlowIndent(ctx *Context) error {
 
 	s.progressLine(ctx)
 
-	return ErrInvalidToken("a flow collection continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.obuf), s.pos()))
+	return ErrInvalidToken("a flow collection continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.origin()), s.pos()))
 }
 
 // contentIndent is the indentation a further line of the construct now being
@@ -123,5 +123,5 @@ func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int) e
 		return nil
 	}
 
-	return ErrInvalidToken("a scalar continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.obuf), s.pos()))
+	return ErrInvalidToken("a scalar continues on a line that is not indented past the one it started on", token.Invalid(string(ctx.origin()), s.pos()))
 }

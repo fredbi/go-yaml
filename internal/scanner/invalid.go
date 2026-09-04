@@ -28,7 +28,7 @@ func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken(fmt.Sprintf("a plain scalar cannot begin with %q", c), token.Invalid(string(ctx.obuf), s.pos()))
+	err := ErrInvalidToken(fmt.Sprintf("a plain scalar cannot begin with %q", c), token.Invalid(string(ctx.origin()), s.pos()))
 	s.progressColumn(ctx, 1)
 
 	return err
@@ -41,7 +41,7 @@ func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
 
 	ctx.addBuf(c)
 	ctx.addOriginBuf(c)
-	err := ErrInvalidToken(fmt.Sprintf("%q is a reserved character", c), token.Invalid(string(ctx.obuf), s.pos()))
+	err := ErrInvalidToken(fmt.Sprintf("%q is a reserved character", c), token.Invalid(string(ctx.origin()), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 

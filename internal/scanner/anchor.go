@@ -14,7 +14,7 @@ func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
 
 		return false, err
 	}
-	ctx.addTokenValue(token.MakeAnchor(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeAnchor(ctx.origin(), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAnchor = true
 	ctx.clear()
@@ -33,7 +33,7 @@ func (s *Scanner) scanAlias(ctx *Context) (bool, error) {
 
 		return false, err
 	}
-	ctx.addTokenValue(token.MakeAlias(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeAlias(ctx.origin(), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAlias = true
 	ctx.clear()
@@ -57,9 +57,9 @@ func (s *Scanner) validateAnchorName(ctx *Context, what string) error {
 
 	switch {
 	case end == start:
-		return ErrInvalidToken(what+" must be followed by a name", token.Invalid(string(ctx.obuf), s.pos()))
+		return ErrInvalidToken(what+" must be followed by a name", token.Invalid(string(ctx.origin()), s.pos()))
 	case end < len(ctx.src) && (ctx.src[end] == '[' || ctx.src[end] == '{'):
-		return ErrInvalidToken(what+" must be separated from the node that follows it", token.Invalid(string(ctx.obuf), s.pos()))
+		return ErrInvalidToken(what+" must be separated from the node that follows it", token.Invalid(string(ctx.origin()), s.pos()))
 	default:
 		return nil
 	}

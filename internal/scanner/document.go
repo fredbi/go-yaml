@@ -9,7 +9,7 @@ import (
 
 func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) error {
 	if s.foundDocumentSeparatorMarker(src) {
-		return ErrInvalidToken("found unexpected document separator", token.Invalid(string(ctx.obuf), s.pos()))
+		return ErrInvalidToken("found unexpected document separator", token.Invalid(string(ctx.origin()), s.pos()))
 	}
 
 	return nil
@@ -48,7 +48,7 @@ func (s *Scanner) scanDocumentStart(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentHeader(string(ctx.obuf)+"---", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentHeader(string(ctx.origin())+"---", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	s.clearState()
@@ -68,7 +68,7 @@ func (s *Scanner) scanDocumentEnd(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentEnd(string(ctx.obuf)+"...", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentEnd(string(ctx.origin())+"...", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	return true

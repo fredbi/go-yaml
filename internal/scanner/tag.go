@@ -41,14 +41,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case ' ':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addTokenValue(token.MakeTag(value, ctx.obuf, tagPos))
+			ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addTokenValue(token.MakeTag(value, ctx.obuf, tagPos))
+				ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
@@ -58,11 +58,11 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 
-			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(string(ctx.obuf), s.pos()))
+			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(string(ctx.origin()), s.pos()))
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addTokenValue(token.MakeTag(value, ctx.obuf, tagPos))
+			ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
@@ -72,7 +72,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				// the tag: "[!]" is the non-specific tag on the empty node and
 				// not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addTokenValue(token.MakeTag(value, ctx.obuf, tagPos))
+				ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
@@ -83,14 +83,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 
 			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		case '{':
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 
 			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		default:

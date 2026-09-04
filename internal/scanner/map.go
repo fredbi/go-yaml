@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -31,9 +32,9 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		}
 	}
 
-	if bytes.HasPrefix(bytes.TrimPrefix(ctx.obuf, []byte(" ")), []byte("\t")) && !bytes.HasPrefix(ctx.buf, []byte("\t")) {
+	if strings.HasPrefix(strings.TrimPrefix(ctx.origin(), " "), "\t") && !bytes.HasPrefix(ctx.buf, []byte("\t")) {
 		invalidMsg := "tab character cannot use as a map key directly"
-		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+		invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 		s.progressColumn(ctx, 1)
 		return false, ErrInvalidToken(invalidMsg, invalidTk)
 	}
@@ -49,7 +50,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		// The check above reads the origin buffer, which a quoted key resets:
 		// "\tfoo: 1" was refused there and "\t\"\": 1" was not.
 		invalidMsg := "tab character cannot stand for the indentation a mapping entry needs"
-		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+		invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 		s.progressColumn(ctx, 1)
 
 		return false, ErrInvalidToken(invalidMsg, invalidTk)

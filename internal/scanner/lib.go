@@ -398,7 +398,7 @@ func firstLineIndentColumnByOpt(opt string) int {
 }
 
 // leadingSpace counts the whitespace bytes buf opens with.
-func leadingSpace(buf []byte) int {
+func leadingSpace(buf string) int {
 	var i int
 	for i < len(buf) {
 		switch buf[i] {

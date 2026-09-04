@@ -24,7 +24,7 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 	ctx.addOriginBuf('-')
 	err := ErrInvalidToken(
 		"'-' is not a scalar, and a flow collection has no sequence entries",
-		token.Invalid(string(ctx.obuf), s.pos()),
+		token.Invalid(string(ctx.origin()), s.pos()),
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -60,7 +60,7 @@ func (s *Scanner) scanFlowMapStart(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('{')
-	ctx.addTokenValue(token.MakeMappingStart(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeMappingStart(ctx.origin(), s.pos()))
 	s.enterFlow()
 	s.startedFlowMapNum++
 	s.progressColumn(ctx, 1)
@@ -75,7 +75,7 @@ func (s *Scanner) scanFlowMapEnd(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('}')
-	ctx.addTokenValue(token.MakeMappingEnd(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeMappingEnd(ctx.origin(), s.pos()))
 	s.startedFlowMapNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -89,7 +89,7 @@ func (s *Scanner) scanFlowArrayStart(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('[')
-	ctx.addTokenValue(token.MakeSequenceStart(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeSequenceStart(ctx.origin(), s.pos()))
 	s.enterFlow()
 	s.startedFlowSequenceNum++
 	s.progressColumn(ctx, 1)
@@ -104,7 +104,7 @@ func (s *Scanner) scanFlowArrayEnd(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf(']')
-	ctx.addTokenValue(token.MakeSequenceEnd(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeSequenceEnd(ctx.origin(), s.pos()))
 	s.startedFlowSequenceNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -118,7 +118,7 @@ func (s *Scanner) scanFlowEntry(ctx *Context, c rune) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf(c)
-	ctx.addTokenValue(token.MakeCollectEntry(ctx.obuf, s.pos()))
+	ctx.addTokenValue(token.MakeCollectEntry(ctx.origin(), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true

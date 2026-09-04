@@ -1,7 +1,6 @@
 package scanner
 
 import (
-	"bytes"
 	"errors"
 	"strings"
 	"unicode/utf8"
@@ -135,14 +134,14 @@ func (s *Scanner) readMultiLineContent(ctx *Context, state *MultiLineState, c ru
 // emitMultiLine hands over the block read so far and starts the buffers again.
 func (s *Scanner) emitMultiLine(ctx *Context, state *MultiLineState) {
 	value := ctx.bufferedSrc()
-	ctx.addTokenValue(token.MakeString(string(value), ctx.obuf, state.from(s.pos())))
+	ctx.addTokenValue(token.MakeString(string(value), ctx.origin(), state.from(s.pos())))
 	ctx.clear()
 }
 
 // refuseMultiLine reports msg against the block read so far. The column moves
 // first, so that the scan stands past the character that was refused.
 func (s *Scanner) refuseMultiLine(ctx *Context, msg string) error {
-	tk := token.Invalid(string(ctx.obuf), s.pos())
+	tk := token.Invalid(string(ctx.origin()), s.pos())
 	s.progressColumn(ctx, 1)
 
 	return ErrInvalidToken(msg, tk)
@@ -183,7 +182,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	// headerIndex is where the indicator stands in the origin buffer, which
 	// also holds the indentation written before it. The comment's position is
 	// measured from the indicator, so the two have to be told apart.
-	headerIndex := len(ctx.obuf)
+	headerIndex := len(ctx.origin())
 	ctx.addOriginBuf(header)
 	// As in scanTag: the offset takes the indicator, and the header's own
 	// position is taken before the step.
@@ -236,7 +235,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// a character the header may not hold.
 		if prev := value[commentValueIndex-1]; prev != ' ' && prev != '\t' {
 			invalidMsg := "comment must be separated from the block scalar header by a space"
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 			s.progressColumn(ctx, progress)
 
 			return ErrInvalidToken(invalidMsg, invalidTk)
@@ -250,7 +249,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	if len(opt) != 0 {
 		if err := validateMultiLineHeaderOption(opt); err != nil {
 			invalidMsg := err.Error()
-			invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 			s.progressColumn(ctx, progress)
 			return ErrInvalidToken(invalidMsg, invalidTk)
 		}
@@ -265,8 +264,8 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	// commentValueIndex indexes value, commentIndex indexes the origin buffer,
 	// which also holds the indentation before the header. Both are needed, and
 	// the comment is emitted only where value has one to emit.
-	commentIndex := bytes.IndexByte(ctx.obuf, '#')
-	headerBuf := string(ctx.obuf)
+	commentIndex := strings.IndexByte(ctx.origin(), '#')
+	headerBuf := string(ctx.origin())
 	if commentValueIndex > 0 && commentIndex > 0 {
 		headerBuf = headerBuf[:commentIndex]
 	}
@@ -291,7 +290,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		fromHeader := headerBuf[headerIndex:]
 		pos.SetOffset(pos.Offset() + int32(len(fromHeader)))
 		pos.Column += int32(utf8.RuneCountInString(fromHeader))
-		ctx.addTokenValue(token.MakeComment(comment, string(ctx.obuf[len(headerBuf):]), pos))
+		ctx.addTokenValue(token.MakeComment(comment, string(ctx.origin()[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep
 	s.progressColumn(ctx, progress)

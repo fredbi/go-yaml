@@ -1,9 +1,9 @@
 package scanner
 
 import (
-	"bytes"
 	"errors"
 	"iter"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/nocopy"
@@ -243,7 +243,7 @@ func (s *Scanner) scan(ctx *Context) error {
 					// Therefore, add an empty string token.
 					// But if literal/folded token column is 1, it is invalid at down state.
 					if tk.Position.Column == 1 {
-						return ErrInvalidToken("could not find multi-line content", token.Invalid(string(ctx.obuf), s.pos()))
+						return ErrInvalidToken("could not find multi-line content", token.Invalid(string(ctx.origin()), s.pos()))
 					}
 					if tk.Type != token.StringType {
 						ctx.addTokenValue(token.MakeString("", "", s.pos()))
@@ -461,8 +461,8 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 		// rewrote it -- leaves the column at 0, which is what the caller below
 		// reads as "no content".
 		column = 0
-		if at := bytes.Index(ctx.obuf, ctx.buf); at >= 0 {
-			column = utf8.RuneCount(ctx.obuf[:at]) + 1
+		if at := strings.Index(ctx.origin(), nocopy.String(ctx.buf)); at >= 0 {
+			column = utf8.RuneCountInString(ctx.origin()[:at]) + 1
 		}
 		// Since we are in a literal, folded or raw folded
 		// we can use the indent level from the last token.
@@ -516,7 +516,7 @@ func (s *Scanner) scanMergeKey(ctx *Context) bool {
 	}
 
 	s.lastDelimColumn = s.column
-	ctx.addTokenValue(token.MakeMergeKey(string(ctx.obuf)+"<<", s.pos()))
+	ctx.addTokenValue(token.MakeMergeKey(string(ctx.origin())+"<<", s.pos()))
 	s.progressColumn(ctx, 2)
 	ctx.clear()
 
@@ -550,16 +550,16 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 		return false, nil
 	}
 
-	if bytes.HasPrefix(bytes.TrimPrefix(ctx.obuf, []byte(" ")), []byte("\t")) {
+	if strings.HasPrefix(strings.TrimPrefix(ctx.origin(), " "), "\t") {
 		invalidMsg := "tab character cannot use as a sequence delimiter"
-		invalidTk := token.Invalid(string(ctx.obuf), s.pos())
+		invalidTk := token.Invalid(string(ctx.origin()), s.pos())
 		s.progressColumn(ctx, 1)
 		return false, ErrInvalidToken(invalidMsg, invalidTk)
 	}
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('-')
-	tk := token.MakeSequenceEntry(ctx.obuf, s.pos())
+	tk := token.MakeSequenceEntry(ctx.origin(), s.pos())
 	s.lastDelimColumn = int(tk.Position.Column)
 	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)

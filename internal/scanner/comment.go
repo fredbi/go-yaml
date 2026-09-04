@@ -21,7 +21,7 @@ func (s *Scanner) scanCommentIndicator(ctx *Context) error {
 	ctx.addOriginBuf('#')
 	err := ErrInvalidToken(
 		"a comment must be preceded by a space, and a scalar cannot begin with '#'",
-		token.Invalid(string(ctx.obuf), s.pos()),
+		token.Invalid(string(ctx.origin()), s.pos()),
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -70,7 +70,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 			ctx.addOriginBuf('\n')
 		}
 
-		ctx.addTokenValue(token.MakeComment(value, ctx.obuf, commentPos))
+		ctx.addTokenValue(token.MakeComment(value, ctx.origin(), commentPos))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		if crlf {
@@ -81,7 +81,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	}
 	// document ends with comment.
 	value := ctx.src[ctx.idx:]
-	ctx.addTokenValue(token.MakeComment(value, ctx.obuf, commentPos))
+	ctx.addTokenValue(token.MakeComment(value, ctx.origin(), commentPos))
 	progress := utf8.RuneCountInString(value)
 	s.progressColumn(ctx, progress)
 	s.progressLine(ctx)
