@@ -162,14 +162,22 @@ func (c *Context) reset(src string) {
 	c.size = len(src)
 	c.src = src
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
-	// The blocks are dropped rather than reused: a caller may still hold tokens
-	// from the source just read, and those stand in the blocks themselves.
-	c.blocks = nil
-	c.writeBlock = 0
-	c.written = 0
-	c.read = 0
-	c.readBlock = 0
-	c.readOffset = 0
+	// The first block is kept and emptied rather than dropped. It is the only
+	// one a NextToken run ever fills -- rewind gives it back between steps, and
+	// the most the scanner holds at once is two tokens -- so keeping it is one
+	// allocation the next document does not make.
+	//
+	// The rest go. Scan reads a whole document into the blocks without ever
+	// rewinding them, and a Context comes from a pool: keeping what a 293,000
+	// token document needed would hold 16 MB for every document after it.
+	//
+	// A caller holding a *token.Token from Next or All across an Init reads the
+	// next document through it. That pointer was never good for longer than the
+	// next token anyway: rewind reuses the blocks within a single run.
+	if len(c.blocks) > 1 {
+		c.blocks = c.blocks[:1]
+	}
+	c.rewind()
 	c.yield = nil
 	c.stopped = false
 	c.forgetTokens()
@@ -829,6 +837,9 @@ func (c *Context) appendToken(tk token.Token) {
 
 	if c.writeBlock == len(c.blocks) {
 		size := tokenBlockSizes[min(len(c.blocks), len(tokenBlockSizes)-1)]
+		if probe.Enabled {
+			probe.Count("buffer.makes", 1)
+		}
 		c.blocks = append(c.blocks, make([]token.Token, 0, size))
 	}
 
