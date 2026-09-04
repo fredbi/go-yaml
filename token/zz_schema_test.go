@@ -68,6 +68,7 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		{value: "190:20:30", want: StringType, want11: IntegerType, note: "1.1 reads base 60, so 685230"},
 		{value: "190:20:30.5", want: StringType, want11: FloatType, note: "and the float beside it"},
 		{value: "-1:30", want: StringType, want11: IntegerType, note: "as above, signed"},
+		{value: "1:2:3:4", want: StringType, want11: IntegerType, note: "any number of groups, all positional"},
 		{value: "1:60", want: StringType, want11: StringType, note: "60 is not a group of base 60"},
 		{value: "0:30", want: StringType, want11: StringType, note: "1.1's base 60 integer opens with 1 through 9"},
 		{value: "1:", want: StringType, want11: StringType},

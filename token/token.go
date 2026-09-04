@@ -602,7 +602,8 @@ func isBinaryLiteral(value string) bool {
 }
 
 // isSexagesimal reports whether value is written in YAML 1.1's base 60 --
-// "190:20:30", the form a duration or a time of day takes.
+// "190:20:30", the form a time, an angle or anything else counted in sixtieths
+// takes.
 //
 // The reading is loose: the encoder only has to decide whether to quote, and a
 // scalar quoted where it need not have been still reads back as itself.
@@ -875,15 +876,19 @@ func shapeOfNumber11(value string) (numberShape, bool) {
 // stops at 36 -- so [sexagesimalValue] reads the groups itself.
 const sexagesimalBase = 60
 
-// shapeOfSexagesimal reads YAML 1.1's base 60: "190:20:30" is 190 hours, 20
-// minutes and 30 seconds, which is the integer 685230, and "190:20:30.5" is
-// the float beside it.
+// shapeOfSexagesimal reads YAML 1.1's base 60, written as groups separated by
+// colons: "190:20:30" is the integer 685230 and "190:20:30.5" the float beside
+// it.
 //
 //	int    [-+]? [1-9] [0-9_]* ( : [0-5]? [0-9] )+
 //	float  [-+]? [0-9] [0-9_]* ( : [0-5]? [0-9] )+ \. [0-9_]*
 //
-// time.ParseDuration does not read this: it wants a unit on every group
-// ("190h20m30s") and this form has none.
+// The groups are positional, as digits are, and there may be any number of
+// them: d0:d1:d2 is d0*60^2 + d1*60 + d2, and "1:2:3:4" is 223384. The type
+// does not say what is being counted -- 1.1 gives a time and an angle as
+// examples -- so nothing here treats it as a duration. time.ParseDuration
+// could not read it anyway: it wants a unit on every group ("190h20m30s") and
+// this form carries none.
 func shapeOfSexagesimal(body string, negative bool) (numberShape, bool) {
 	i, whole := countDigits11(body, 0)
 	if whole == 0 || body[0] == '_' {
@@ -924,8 +929,8 @@ func shapeOfSexagesimal(body string, negative bool) (numberShape, bool) {
 	return numberShape{typ: typ, base: sexagesimalBase, digits: unseparate(body), negative: negative}, true
 }
 
-// sexagesimalValue reads base 60 written with colons, and reports false where
-// the groups overflow a uint64.
+// sexagesimalValue reads base 60 written with colons, taking the groups
+// positionally, and reports false where they overflow a uint64.
 //
 // digits may carry a fraction, which is left to the caller: the value returned
 // is the whole part.

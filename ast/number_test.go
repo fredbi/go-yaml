@@ -142,9 +142,13 @@ func TestNumberNodeConvertsBySpelling(t *testing.T) {
 		{"-1_000", token.IntegerType, int64(-1000)},
 		{"0x_0A_74_AE", token.HexIntegerType, uint64(685230)},
 
-		// Base 60, which YAML 1.1 writes with colons.
+		// Base 60, which YAML 1.1 writes as colon-separated groups. They are
+		// positional, as digits are, and there may be any number of them.
 		{"190:20:30", token.IntegerType, uint64(685230)},
 		{"-1:30", token.IntegerType, int64(-90)},
+		{"1:2", token.IntegerType, uint64(62)},
+		{"1:2:3:4", token.IntegerType, uint64(223384)},
+		{"1:2:3:4:5", token.IntegerType, uint64(13403045)},
 	} {
 		n := ast.Integer(&token.Token{Type: tc.typ, Value: tc.text})
 		assert.Equalf(t, tc.want, n.GetValue(), "%q as %s", tc.text, tc.typ)
