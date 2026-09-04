@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
 )
 
 // numberType reads a number's text and checks it without converting it, where
@@ -137,4 +138,59 @@ func TestReservedGatesLetEveryKeywordThrough(t *testing.T) {
 	} {
 		assert.Truef(t, mayBeNumber(value), "%q reads as a number, and the first-byte gate turns it away", value)
 	}
+}
+
+// TestParseBigReadsWhatNoNativeTypeHolds holds ParseBigInteger and
+// ParseBigFloat to the numbers ParseInteger and ParseFloat have to give up on.
+//
+// The two pairs divide the numbers between them: whatever fits a native type is
+// read by the first pair and refused by the second, and whatever does not is
+// the other way round. Nothing may fall between them.
+func TestParseBigReadsWhatNoNativeTypeHolds(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want string
+	}{
+		{"18446744073709551616", "18446744073709551616"},                                       // 2^64
+		{"+18446744073709551616", "18446744073709551616"},                                      // the sign is not part of the value
+		{"-9223372036854775809", "-9223372036854775809"},                                       // one below the smallest int64
+		{"340282366920938463463374607431768211456", "340282366920938463463374607431768211456"}, // 2^128
+		{"0xFFFFFFFFFFFFFFFFF", "295147905179352825855"},                                       // wider than uint64 in hex
+		{"1_0000000000000000000000", "10000000000000000000000"},                                // the separators come out
+	} {
+		_, fitsNatively := ParseInteger(tc.text)
+		assert.Falsef(t, fitsNatively, "%q does not fit a native type, ParseInteger took it", tc.text)
+
+		n, ok := ParseBigInteger(tc.text)
+		require.Truef(t, ok, "%q is an integer, ParseBigInteger refused it", tc.text)
+		assert.Equalf(t, tc.want, n.String(), "%q", tc.text)
+	}
+
+	for _, tc := range []struct {
+		text string
+		want string
+	}{
+		{"1.0e400", "1e+400"}, // past the largest float64
+		{"-1.0e400", "-1e+400"},
+		{"1.0e-400", "1e-400"}, // and under the smallest, which strconv rounds to zero without complaint
+	} {
+		_, fitsNatively := ParseFloat(tc.text)
+		assert.Falsef(t, fitsNatively, "%q does not fit a float64, ParseFloat took it", tc.text)
+
+		f, ok := ParseBigFloat(tc.text)
+		require.Truef(t, ok, "%q is a float, ParseBigFloat refused it", tc.text)
+		assert.Equalf(t, tc.want, f.Text('g', -1), "%q", tc.text)
+	}
+
+	// Neither reads what is not a number, and neither reads the other's kind.
+	for _, text := range []string{"", "-", "z", "0x", "1.5.5", "-0.5h", "2015-02-24T18:19:39.12Z"} {
+		_, isInt := ParseBigInteger(text)
+		_, isFloat := ParseBigFloat(text)
+		assert.Falsef(t, isInt, "%q is not an integer, ParseBigInteger took it", text)
+		assert.Falsef(t, isFloat, "%q is not a float, ParseBigFloat took it", text)
+	}
+	_, isInt := ParseBigInteger("1.0e400")
+	assert.False(t, isInt, "a float is not an integer")
+	_, isFloat := ParseBigFloat("18446744073709551616")
+	assert.False(t, isFloat, "an integer is not a float")
 }

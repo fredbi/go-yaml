@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -102,6 +103,34 @@ func (d *Decoder) isExceededMaxDepth() bool {
 	return d.decodeDepth > maxDecodeDepth
 }
 
+// castToInteger reads what "!!int" was written over.
+//
+// A number too wide for an int is handed back as it was read -- a uint64 or a
+// [big.Int] -- rather than truncated to fit. strconv.Atoi over the printed
+// value used to stand here, and it returned math.MaxInt64 for a number past
+// that and 0 for one it could not read at all, both silently.
+func castToInteger(v interface{}) interface{} {
+	switch vv := v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, *big.Int:
+		return vv
+	case float64:
+		return int(vv)
+	case float32:
+		return int(vv)
+	case string:
+		if i, ok := token.ParseInteger(vv); ok {
+			return i
+		}
+		if i, ok := token.ParseBigInteger(vv); ok {
+			return i
+		}
+
+		return 0
+	}
+
+	return 0
+}
+
 func (d *Decoder) castToFloat(v interface{}) interface{} {
 	switch vv := v.(type) {
 	case int:
@@ -128,6 +157,14 @@ func (d *Decoder) castToFloat(v interface{}) interface{} {
 		return float64(vv)
 	case float64:
 		return vv
+	case *big.Int:
+		f, _ := new(big.Float).SetInt(vv).Float64()
+
+		return f
+	case *big.Float:
+		f, _ := vv.Float64()
+
+		return f
 	case string:
 		// if error occurred, return zero value
 		f, _ := strconv.ParseFloat(vv, 64)
@@ -405,8 +442,8 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			i, _ := strconv.Atoi(fmt.Sprint(v))
-			return i, nil
+
+			return castToInteger(v), nil
 		case token.FloatTag:
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
@@ -641,7 +678,45 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 	return arrayNode, nil
 }
 
+// convertBigNumber converts a number the AST read into a [big.Int] or a
+// [big.Float], which it does for one no native type holds.
+//
+// A float destination takes the nearest float64 it can, which is ±Inf where the
+// number reaches past that -- the same answer strconv.ParseFloat gives for the
+// text. A string destination takes the digits. Anything else is left to
+// convertValue's own rules, which end in a type mismatch.
+func convertBigNumber(v reflect.Value, typ reflect.Type) (reflect.Value, bool) {
+	var (
+		f    float64
+		text string
+	)
+	switch n := v.Interface().(type) {
+	case *big.Int:
+		f, _ = new(big.Float).SetInt(n).Float64()
+		text = n.String()
+	case *big.Float:
+		f, _ = n.Float64()
+		text = n.Text('g', -1)
+	default:
+		return reflect.Value{}, false
+	}
+
+	switch typ.Kind() {
+	case reflect.Float32:
+		return reflect.ValueOf(float32(f)).Convert(typ), true
+	case reflect.Float64:
+		return reflect.ValueOf(f).Convert(typ), true
+	case reflect.String:
+		return reflect.ValueOf(text).Convert(typ), true
+	default:
+		return reflect.Value{}, false
+	}
+}
+
 func (d *Decoder) convertValue(v reflect.Value, typ reflect.Type, src ast.Node) (reflect.Value, error) {
+	if converted, ok := convertBigNumber(v, typ); ok {
+		return converted, nil
+	}
 	if typ.Kind() != reflect.String {
 		if !v.Type().ConvertibleTo(typ) {
 
@@ -1007,6 +1082,10 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 				dst.SetInt(int64(vv))
 				return nil
 			}
+		case *big.Int, *big.Float:
+			// The AST hands one of these over only for a number that outgrew
+			// int64, uint64 or float64, so nothing here has room for it. Fall
+			// through to the overflow error, which names the number.
 		case string: // handle scientific notation
 			if i, err := strconv.ParseFloat(vv, 64); err == nil {
 				if 0 <= i && i <= math.MaxUint64 && !dst.OverflowInt(int64(i)) {
@@ -1041,6 +1120,8 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 				dst.SetUint(uint64(vv))
 				return nil
 			}
+		case *big.Int, *big.Float:
+			// See the signed case above.
 		case string: // handle scientific notation
 			if i, err := strconv.ParseFloat(vv, 64); err == nil {
 				if 0 <= i && i <= math.MaxUint64 && !dst.OverflowUint(uint64(i)) {

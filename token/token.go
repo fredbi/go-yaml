@@ -3,6 +3,7 @@ package token
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -657,6 +658,66 @@ func ParseInteger(text string) (any, bool) {
 	}
 }
 
+// ParseBigInteger returns text as a [big.Int], for a whole number no native
+// type holds. It reports false where text is not an integer.
+//
+// The scanner types a scalar by the grammar its text follows and never by
+// whether a native type has room for it, so a document may carry an integer
+// wider than int64 or uint64. YAML 1.2 calls the type "arbitrary sized finite
+// mathematical integers", and this is where one that outgrows [ParseInteger]
+// is read exactly rather than lost.
+func ParseBigInteger(text string) (*big.Int, bool) {
+	shape, ok := shapeOfNumber(text)
+	if !ok || shape.typ == NumberTypeFloat {
+		return nil, false
+	}
+
+	n, ok := new(big.Int).SetString(shape.digits, shape.base)
+	if !ok {
+		return nil, false
+	}
+	if shape.negative {
+		n.Neg(n)
+	}
+
+	return n, true
+}
+
+// bigFloatPrecision is how many mantissa bits [ParseBigFloat] reads a number
+// into: four per decimal digit, which is more than the 3.33 a digit carries, so
+// nothing is lost up to the cap.
+//
+// 1024 bits is around 308 decimal digits. Past that the mantissa is rounded --
+// the exponent is not, so the number keeps its magnitude -- and the cap is
+// there so that a document holding a megabyte of digits does not ask for half
+// a megabyte of mantissa.
+const (
+	bigFloatMinPrecision = 64
+	bigFloatMaxPrecision = 1024
+)
+
+// ParseBigFloat returns text as a [big.Float], for a real no float64 holds.
+// It reports false where text is not a float.
+//
+// See [ParseBigInteger] for why a document may carry one.
+func ParseBigFloat(text string) (*big.Float, bool) {
+	shape, ok := shapeOfNumber(text)
+	if !ok || shape.typ != NumberTypeFloat {
+		return nil, false
+	}
+
+	prec := min(max(uint(len(shape.digits))*4, bigFloatMinPrecision), bigFloatMaxPrecision)
+	f, _, err := big.ParseFloat(shape.digits, 10, prec, big.ToNearestEven)
+	if err != nil {
+		return nil, false
+	}
+	if shape.negative {
+		f.Neg(f)
+	}
+
+	return f, true
+}
+
 // ParseFloat returns what a float scalar means, and reports false where text is
 // not a float. See [ParseInteger] for when the conversion happens.
 func ParseFloat(text string) (float64, bool) {
@@ -669,11 +730,34 @@ func ParseFloat(text string) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
+	if f == 0 && nonZeroMantissa(shape.digits) {
+		// Too small for a float64, which strconv rounds to zero without calling
+		// it an error -- 1.0e-400 comes back as (0, nil). Reporting false sends
+		// the caller to ParseBigFloat rather than handing over a zero the
+		// document did not write.
+		return 0, false
+	}
 	if shape.negative {
 		return -f, true
 	}
 
 	return f, true
+}
+
+// nonZeroMantissa reports whether the digits in front of the exponent hold
+// anything but zeros.
+func nonZeroMantissa(digits string) bool {
+	for i := range len(digits) {
+		c := digits[i]
+		if c == 'e' || c == 'E' {
+			break
+		}
+		if c >= '1' && c <= '9' {
+			return true
+		}
+	}
+
+	return false
 }
 
 // numberType reports which kind of number value is, and false where it is not

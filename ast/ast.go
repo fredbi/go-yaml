@@ -626,7 +626,8 @@ func (n *IntegerNode) AddColumn(col int) {
 }
 
 // GetValue reads the integer and returns it as an int64 where the document
-// wrote a sign, and as a uint64 where it did not. It returns nil where the text
+// wrote a sign, as a uint64 where it did not, and as a [big.Int] where neither
+// holds it. It returns nil where the text
 // is not an integer after all.
 //
 // The parser types the scalar without converting it, so the conversion happens
@@ -636,9 +637,19 @@ func (n *IntegerNode) GetValue() interface{} {
 	if n.Token == nil {
 		return nil
 	}
-	v, _ := token.ParseInteger(n.Token.Value)
+	if v, ok := token.ParseInteger(n.Token.Value); ok {
+		return v
+	}
 
-	return v
+	// The document wrote a whole number wider than int64 or uint64. YAML 1.2
+	// puts no bound on an integer -- "arbitrary sized finite mathematical
+	// integers" -- and the scanner types a scalar by its grammar, so the value
+	// is read exactly here and what to do with it is the decoder's.
+	if v, ok := token.ParseBigInteger(n.Token.Value); ok {
+		return v
+	}
+
+	return nil
 }
 
 // String int64 to text
@@ -687,8 +698,9 @@ func (n *FloatNode) AddColumn(col int) {
 	n.Token.AddColumn(col)
 }
 
-// GetValue reads the float and returns it as a float64, or 0 where the text is
-// not a float after all.
+// GetValue reads the float and returns it as a float64, as a [big.Float] where
+// the number reaches past what a float64 holds, or 0 where the text is not a
+// float after all.
 //
 // The parser types the scalar without converting it, so the conversion happens
 // here, each time it is asked for. Use [FloatNode.Text] to read the number as
@@ -697,9 +709,16 @@ func (n *FloatNode) GetValue() interface{} {
 	if n.Token == nil {
 		return float64(0)
 	}
-	v, _ := token.ParseFloat(n.Token.Value)
+	if v, ok := token.ParseFloat(n.Token.Value); ok {
+		return v
+	}
 
-	return v
+	// Past what a float64 reaches. See [IntegerNode.GetValue].
+	if v, ok := token.ParseBigFloat(n.Token.Value); ok {
+		return v
+	}
+
+	return float64(0)
 }
 
 // String float64 to text
