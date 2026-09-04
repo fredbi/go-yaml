@@ -18,7 +18,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	// every token after this one was reported a byte early. tagPos is taken
 	// before the step, where the tag's own text begins.
 	tagPos := s.pos()
-	s.offset += s.progress(ctx, 1) // skip '!' character
+	s.progress(ctx, 1) // skip '!' character
 
 	// A verbatim tag, "!<...>", holds a URI and takes it as written: the
 	// characters a shorthand may not contain are ordinary inside the brackets.

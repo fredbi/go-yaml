@@ -60,7 +60,7 @@ func (s *Scanner) normalizeMultiLineBreak(ctx *Context, c rune) rune {
 
 	if ctx.nextChar() == '\n' {
 		ctx.addOriginBuf('\n')
-		s.offset += s.progress(ctx, 1)
+		s.progress(ctx, 1)
 	}
 
 	return '\n'
@@ -187,7 +187,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	// As in scanTag: the offset takes the indicator, and the header's own
 	// position is taken before the step.
 	headerPos := s.pos()
-	s.offset += s.progress(ctx, 1) // skip '|' or '>' character
+	s.progress(ctx, 1) // skip '|' or '>' character
 
 	// The range gives idx in bytes, which is what endPos slices with, and what
 	// progressColumn advances by is characters. The two part company as soon as

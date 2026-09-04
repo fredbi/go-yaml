@@ -19,7 +19,7 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 		// tokenize. Reported once, and the source is then spent: a caller that
 		// loops until io.EOF would otherwise never reach it.
 		s.initErr = nil
-		s.sourcePos = s.sourceSize
+		s.ctx.idx = s.ctx.size
 
 		var invalidTokenErr *InvalidTokenError
 		if errors.As(err, &invalidTokenErr) {
@@ -31,7 +31,7 @@ func (s *Scanner) Scan() (token.Tokens, error) {
 		return nil, err
 	}
 
-	if s.sourcePos >= s.sourceSize {
+	if s.ctx.idx >= s.ctx.size {
 		return nil, io.EOF
 	}
 

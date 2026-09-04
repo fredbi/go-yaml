@@ -55,7 +55,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	// > -- https://yaml.org/spec/1.2/spec.html
 	if c == '\r' && ctx.nextChar() == '\n' {
 		ctx.addOriginBuf('\r')
-		s.offset += s.progress(ctx, 1)
+		s.progress(ctx, 1)
 		c = '\n'
 	}
 

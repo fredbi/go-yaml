@@ -46,7 +46,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	// As in scanTag: the offset takes the '#', and the comment's own position
 	// is taken before the step.
 	commentPos := s.pos()
-	s.offset += s.progress(ctx, 1) // skip '#' character
+	s.progress(ctx, 1) // skip '#' character
 
 	for idx, c := range ctx.src[ctx.idx:] {
 		ctx.addOriginBuf(c)
@@ -74,7 +74,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		if crlf {
-			s.offset += s.progress(ctx, 1)
+			s.progress(ctx, 1)
 		}
 		ctx.clear()
 		return true
