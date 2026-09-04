@@ -2,10 +2,6 @@ package scanner
 
 import (
 	"bytes"
-	"errors"
-	"strconv"
-	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/token"
@@ -64,37 +60,6 @@ type Context struct {
 	// one pass.
 	lookback *token.Lookback
 }
-
-type MultiLineState struct {
-	opt                              string
-	firstLineIndentColumn            int
-	prevLineIndentColumn             int
-	lineIndentColumn                 int
-	lastNotSpaceOnlyLineIndentColumn int
-	spaceOnlyIndentColumn            int
-	foldedNewLine                    bool
-	// sawLineBreak records that a line break was read as part of this block
-	// scalar's content. Under '+' an empty buffer then still keeps one break;
-	// where the header ended the source there was never a break to keep.
-	sawLineBreak bool
-	// start is where the block scalar's content begins in the source, recorded
-	// when the first byte of it is read. The token is cut at the end of the
-	// block, where the cursor says nothing about where the content started.
-	start    token.Position
-	hasStart bool
-
-	isRawFolded bool
-	isLiteral   bool
-	isFolded    bool
-}
-
-var (
-	ctxPool = sync.Pool{
-		New: func() interface{} {
-			return createContext()
-		},
-	}
-)
 
 func createContext() *Context {
 	return &Context{
@@ -297,145 +262,29 @@ func (c *Context) setRawFolded(column int) {
 	c.mstate = mstate
 }
 
-func firstLineIndentColumnByOpt(opt string) int {
-	opt = strings.TrimPrefix(opt, "-")
-	opt = strings.TrimPrefix(opt, "+")
-	opt = strings.TrimSuffix(opt, "-")
-	opt = strings.TrimSuffix(opt, "+")
-	i, _ := strconv.ParseInt(opt, 10, 0)
-	return int(i)
-}
-
-func (s *MultiLineState) lastDelimColumn() int {
-	if s.firstLineIndentColumn == 0 {
-		return 0
+func (c *Context) isMergeKey() bool {
+	if c.repeatNum('<') != 2 {
+		return false
 	}
-	return s.firstLineIndentColumn - 1
-}
-
-func (s *MultiLineState) updateIndentColumn(column int) {
-	if s.firstLineIndentColumn == 0 {
-		s.firstLineIndentColumn = column
-	}
-	if s.lineIndentColumn == 0 {
-		s.lineIndentColumn = column
-	}
-}
-
-func (s *MultiLineState) updateSpaceOnlyIndentColumn(column int) {
-	if s.firstLineIndentColumn != 0 {
-		return
-	}
-	s.spaceOnlyIndentColumn = column
-}
-
-func (s *MultiLineState) validateIndentAfterSpaceOnly(column int) error {
-	if s.firstLineIndentColumn != 0 {
-		return nil
-	}
-	if s.spaceOnlyIndentColumn > column {
-		return errors.New("invalid number of indent is specified after space only")
-	}
-	return nil
-}
-
-func (s *MultiLineState) validateIndentColumn() error {
-	if firstLineIndentColumnByOpt(s.opt) == 0 {
-		return nil
-	}
-	if s.firstLineIndentColumn > s.lineIndentColumn {
-		return errors.New("invalid number of indent is specified in the multi-line header")
-	}
-	return nil
-}
-
-func (s *MultiLineState) updateNewLineState() {
-	s.prevLineIndentColumn = s.lineIndentColumn
-	if s.lineIndentColumn != 0 {
-		s.lastNotSpaceOnlyLineIndentColumn = s.lineIndentColumn
-	}
-	s.foldedNewLine = true
-	s.lineIndentColumn = 0
-}
-
-func (s *MultiLineState) isIndentColumn(column int) bool {
-	if s.firstLineIndentColumn == 0 {
-		return column == 1
-	}
-	return s.firstLineIndentColumn > column
-}
-
-func (s *MultiLineState) addIndent(ctx *Context, column int) {
-	if s.firstLineIndentColumn == 0 {
-		return
-	}
-
-	// If the first line of the document has already been evaluated, the number is treated as the threshold, since the `firstLineIndentColumn` is a positive number.
-	if column < s.firstLineIndentColumn {
-		return
-	}
-
-	// `c.foldedNewLine` is a variable that is set to true for every newline.
-	if !s.isLiteral && s.foldedNewLine {
-		s.foldedNewLine = false
-	}
-	// Since addBuf ignore space character, add to the buffer directly.
-	ctx.buf = append(ctx.buf, ' ')
-	ctx.notSpaceCharPos = len(ctx.buf)
-}
-
-// updateNewLineInFolded if Folded or RawFolded context and the content on the current line starts at the same column as the previous line,
-// treat the new-line-char as a space.
-func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int) {
-	if s.isLiteral {
-		return
-	}
-
-	// Folded or RawFolded.
-
-	if !s.foldedNewLine {
-		return
-	}
-	var (
-		lastChar     byte
-		prevLastChar byte
-	)
-	if len(ctx.buf) != 0 {
-		lastChar = ctx.buf[len(ctx.buf)-1]
-	}
-	if len(ctx.buf) > 1 {
-		prevLastChar = ctx.buf[len(ctx.buf)-2]
-	}
-	if s.lineIndentColumn == s.prevLineIndentColumn {
-		// ---
-		// >
-		//  a
-		//  b
-		if lastChar == '\n' {
-			ctx.buf[len(ctx.buf)-1] = ' '
+	src := c.src
+	size := len(src)
+	for idx := c.idx + 2; idx < size; idx++ {
+		char := src[idx]
+		if char == ' ' {
+			continue
 		}
-	} else if s.prevLineIndentColumn == 0 && s.lastNotSpaceOnlyLineIndentColumn == column {
-		// if previous line is indent-space and new-line-char only, prevLineIndentColumn is zero.
-		// In this case, last new-line-char is removed.
-		// ---
-		// >
-		//  a
-		//
-		//  b
-		if lastChar == '\n' && prevLastChar == '\n' {
-			ctx.buf = ctx.buf[:len(ctx.buf)-1]
-			ctx.notSpaceCharPos = len(ctx.buf)
+		if char != ':' {
+			return false
+		}
+		if idx+1 < size {
+			nc := rune(src[idx+1])
+			if nc == ' ' || isNewLineChar(nc) {
+				return true
+			}
 		}
 	}
-	s.foldedNewLine = false
-}
 
-func (s *MultiLineState) hasTrimAllEndNewlineOpt() bool {
-	return strings.HasPrefix(s.opt, "-") || strings.HasSuffix(s.opt, "-") || s.isRawFolded
-}
-
-func (s *MultiLineState) hasKeepAllEndNewlineOpt() bool {
-	return strings.HasPrefix(s.opt, "+") || strings.HasSuffix(s.opt, "+")
+	return false
 }
 
 func (c *Context) addToken(tk *token.Token) {
@@ -838,35 +687,25 @@ func (c *Context) takeTokens() token.Tokens {
 	}
 }
 
-// leadingSpace counts the whitespace bytes buf opens with.
-func leadingSpace(buf []byte) int {
-	var i int
-	for i < len(buf) {
-		switch buf[i] {
-		case ' ', '\t', '\r', '\n':
-			i++
-		default:
-			return i
-		}
+// followsJSONLikeKey reports whether the key just read is one the spec calls
+// JSON-like: a quoted scalar, or a flow collection.
+//
+// Only after one of those may the ':' be adjacent, written with no space in
+// front of its value. Everywhere else the space is what separates the ':' from
+// the key, which is why [ a:b ] holds the one plain scalar "a:b" while
+// [ "a":b ] and [ {a: 1}:b ] each hold a pair.
+func (c *Context) followsJSONLikeKey() bool {
+	if c.existsBuffer() {
+		return false
 	}
 
-	return i
-}
-
-// began records where the block scalar's content starts, the first time a byte
-// of it is read.
-func (s *MultiLineState) began(pos token.Position) {
-	if s == nil || s.hasStart {
-		return
+	tk := c.lastContentToken()
+	if tk == nil {
+		return false
 	}
-	s.start, s.hasStart = pos, true
-}
-
-// from returns where the content began, or now where nothing was read.
-func (s *MultiLineState) from(now token.Position) token.Position {
-	if s == nil || !s.hasStart {
-		return now
+	if tk.Type.Indicator() == token.QuotedScalarIndicator {
+		return true
 	}
 
-	return s.start
+	return tk.Type == token.SequenceEndType || tk.Type == token.MappingEndType
 }
