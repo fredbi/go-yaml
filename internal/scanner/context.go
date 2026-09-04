@@ -30,26 +30,21 @@ type Context struct {
 	// it, and originCut says it is in use.
 	originCopy []byte
 	originCut  bool
-	// blocks holds the tokens read, as values, in blocks that are never copied
-	// or resized. A token's address therefore holds good for as long as the
-	// Context does, and reading a whole document costs one allocation per block
-	// rather than one per token.
-	blocks [][]token.Token
-	// writeBlock is the block being filled.
-	writeBlock int
-	// written counts the tokens read, read counts those handed over.
-	written int
+	// pending holds the tokens read but not yet handed over, as values.
+	//
+	// One step of the scan reads one token, or the two of a key that only turns
+	// out to be a key once the ':' is read, and NextToken drains what a step
+	// produced before taking the next -- so this holds two tokens at its
+	// fullest, whatever the document's length. TestBufferHoldsTwoTokens holds
+	// that bound.
+	pending []token.Token
 	// yield, where a caller is reading through Scanner.Tokens, takes each token
 	// as it is read instead of the buffer taking it. stopped records that yield
 	// asked to stop, which the scan loop reads to give up.
 	yield   func(token.Token) bool
 	stopped bool
-	// read counts the tokens handed over, and readBlock and readOffset address
-	// the next one. Tokens are handed over in the order they were read, so the
-	// cursor walks the blocks rather than indexing into them.
-	read       int
-	readBlock  int
-	readOffset int
+	// read is the index in pending of the next token to hand over.
+	read int
 	// lastTk is a copy of the token emitted most recently. tokens is drained as
 	// the caller takes them, so it is not the place to ask what came before.
 	lastTk    token.Token
@@ -142,16 +137,9 @@ func (c *Context) reset(src string) {
 	c.size = len(src)
 	c.src = src
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
-	// The first block is kept and emptied rather than dropped. It is the only
-	// one a scan ever fills -- rewind gives it back between steps, and the most
-	// the scanner holds at once is two tokens -- so keeping it is one
-	// allocation the next document does not make.
-	//
-	// The rest go, so that a Scanner reused on a second document does not carry
-	// what the first one needed.
-	if len(c.blocks) > 1 {
-		c.blocks = c.blocks[:1]
-	}
+	// pending keeps the room it holds: it never grows past a token or two, so a
+	// Scanner reading a second document carries nothing worth dropping and
+	// makes one allocation fewer.
 	c.rewind()
 	c.yield = nil
 	c.stopped = false
@@ -788,104 +776,52 @@ func (c *Context) lastToken() *token.Token {
 	return &c.lastTk
 }
 
-// tokenBlockSizes gives the size of each block in turn, the last of them for
-// every block after the fourth. A short document is read into a block it can
-// nearly fill, and a long one settles on blocks big enough that the blocks
-// slice itself hardly counts.
-var tokenBlockSizes = [...]int{32, 64, 128, 256}
+// buffered counts the tokens read since the buffer was last emptied, those
+// already handed over included. The scan loop reads it to tell whether the step
+// it is running produced a token.
+func (c *Context) buffered() int { return len(c.pending) }
 
-// appendToken writes tk into the buffer, taking a new block where the current
-// one is full.
+// appendToken buffers tk for the next NextToken to hand over.
 func (c *Context) appendToken(tk token.Token) {
 	if probe.Enabled {
-		// How many tokens the scanner holds at once, and how much room the
-		// blocks have taken. rewind empties them without giving the room back,
-		// so the high mark is what a single scan step ever produced.
+		// How many tokens the scanner holds at once, and how much room pending
+		// has taken. rewind empties it without giving the room back, so the
+		// high mark is what a single scan step ever produced.
 		probe.Count("buffer.appends", 1)
-		probe.Max("buffer.heldAtOnce", int64(c.written-c.read+1))
-		var room int
-		for _, b := range c.blocks {
-			room += cap(b)
+		probe.Max("buffer.heldAtOnce", int64(len(c.pending)-c.read+1))
+		probe.Max("buffer.roomTaken", int64(cap(c.pending)))
+		if cap(c.pending) == len(c.pending) {
+			probe.Count("buffer.grows", 1)
 		}
-		probe.Max("buffer.roomTaken", int64(room))
 	}
 
-	if c.writeBlock == len(c.blocks) {
-		size := tokenBlockSizes[min(len(c.blocks), len(tokenBlockSizes)-1)]
-		if probe.Enabled {
-			probe.Count("buffer.makes", 1)
-		}
-		c.blocks = append(c.blocks, make([]token.Token, 0, size))
-	}
-
-	block := &c.blocks[c.writeBlock]
-	*block = append(*block, tk)
-	if len(*block) == cap(*block) {
-		c.writeBlock++
-	}
-	c.written++
+	c.pending = append(c.pending, tk)
 }
 
 // popValue takes a copy of the oldest token not yet handed over, and reports
 // false where there is none.
 //
 // Nothing keeps the room the token stood in, so the buffer starts again from
-// its first block once it runs dry: a caller reading by value holds the
-// scanner to a block or two whatever the document's length.
+// the front once it runs dry: a caller reading by value holds the scanner to a
+// token or two whatever the document's length.
 func (c *Context) popValue() (token.Token, bool) {
-	tk, ok := c.popToken()
-	if !ok {
+	if c.read >= len(c.pending) {
 		c.rewind()
 
 		return token.Token{}, false
 	}
 
-	return *tk, true
-}
-
-// rewind empties the buffer, keeping the blocks to be written again. Call it
-// only where every token read has been handed over by value.
-func (c *Context) rewind() {
-	for i := range c.blocks {
-		c.blocks[i] = c.blocks[i][:0]
-	}
-	c.writeBlock = 0
-	c.written = 0
-	c.read = 0
-	c.readBlock = 0
-	c.readOffset = 0
-}
-
-// popToken takes the oldest token not yet handed over, and reports false where
-// there is none.
-func (c *Context) popToken() (*token.Token, bool) {
-	if c.read >= c.written {
-		return nil, false
-	}
-
-	for c.readOffset >= len(c.blocks[c.readBlock]) {
-		c.readBlock++
-		c.readOffset = 0
-	}
-
-	tk := &c.blocks[c.readBlock][c.readOffset]
-	c.readOffset++
+	tk := c.pending[c.read]
 	c.read++
 
 	return tk, true
 }
 
-// takeTokens hands over the tokens not yet taken, each addressed inside the
-// block it stands in.
-func (c *Context) takeTokens() token.Tokens {
-	tokens := make(token.Tokens, 0, c.written-c.read)
-	for {
-		tk, ok := c.popToken()
-		if !ok {
-			return tokens
-		}
-		tokens = append(tokens, tk)
-	}
+// rewind empties the buffer, keeping the room to be written again. Call it
+// only where every token read has been handed over by value.
+func (c *Context) rewind() {
+	c.pending = c.pending[:0]
+	c.read = 0
 }
 
 // followsJSONLikeKey reports whether the key just read is one the spec calls

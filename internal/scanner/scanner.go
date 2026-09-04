@@ -208,10 +208,10 @@ func (s *Scanner) NextToken() (token.Token, bool) {
 // so nothing has to be re-read; emitted counts the tokens ctx already held, so
 // a token another call left behind does not end this one straight away.
 func (s *Scanner) scan(ctx *Context) error {
-	emitted := ctx.written
+	emitted := ctx.buffered()
 
 	for ctx.next() {
-		if ctx.stopped || ctx.written > emitted {
+		if ctx.stopped || ctx.buffered() > emitted {
 			return nil
 		}
 		c := ctx.currentChar()
