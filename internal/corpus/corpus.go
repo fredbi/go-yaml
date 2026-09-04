@@ -91,6 +91,71 @@ func BlockScalars(n int) string {
 	return b.String()
 }
 
+// Quoted builds a mapping of n double-quoted values holding nothing to unescape.
+//
+// The scanner may hand a quoted scalar back as a window on the source when the
+// text between the quotes is the value; this is the shape that says what that
+// is worth.
+func Quoted(n int) string {
+	var b strings.Builder
+	b.Grow(n * 40)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: \"a plain enough value %06d\"\n", i, i)
+	}
+
+	return b.String()
+}
+
+// Escaped builds a mapping of n double-quoted values carrying escapes, one of
+// them naming a code point.
+//
+// scanDoubleQuote walks these a character at a time and builds the value in a
+// buffer, so this is the counterpart to Quoted: the difference between the two
+// is what escaping costs.
+func Escaped(n int) string {
+	var b strings.Builder
+	b.Grow(n * 56)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: \"a\\tvalue\\nwith \\\"escapes\\\" and \\u00e9 %06d\"\n", i, i)
+	}
+
+	return b.String()
+}
+
+// Commented builds a mapping of n entries with a comment above each and after
+// each, the shape a hand-written configuration file has.
+func Commented(n int) string {
+	var b strings.Builder
+	b.Grow(n * 72)
+
+	for i := range n {
+		fmt.Fprintf(&b, "# what key%06d is for\nkey%06d: value%06d # and why\n", i, i, i)
+	}
+
+	return b.String()
+}
+
+// Flow builds a mapping of n entries whose values are flow collections, which
+// the scanner counts brackets through rather than reading indentation.
+func Flow(n int) string {
+	var b strings.Builder
+	b.Grow(n * 56)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: {name: item%06d, tags: [a, b, c], on: true}\n", i, i)
+	}
+
+	return b.String()
+}
+
+// CRLF is FlatMap written with the line endings a Windows editor leaves, which
+// the scanner steps over as one break rather than two.
+func CRLF(n int) string {
+	return strings.ReplaceAll(FlatMap(n), "\n", "\r\n")
+}
+
 // Shape names the document shapes worth measuring separately. The order is
 // fixed so that benchmark output lines up run to run.
 var Shapes = []struct {
@@ -109,12 +174,49 @@ var Shapes = []struct {
 // curve.
 var Sizes = []int{100, 1000}
 
-// ForEachDocument runs fn over every shape and size, naming each sub-benchmark
-// and reporting throughput and allocations for it.
+// ScanShapes names the shapes that separate one part of the scanner from
+// another. They are kept apart from Shapes so that a number measured against
+// Shapes still means what it meant before this list existed.
+//
+// Shapes asks what a document costs; these ask what a construct costs. Quoted
+// against Escaped is the price of an escape, Commented the price of a comment,
+// Flow the price of counting brackets instead of columns, and CRLF the price of
+// a two-byte line break.
+var ScanShapes = []struct {
+	Name     string
+	Generate func(int) string
+}{
+	{"quoted", Quoted},
+	{"escaped", Escaped},
+	{"commented", Commented},
+	{"flow", Flow},
+	{"crlf", CRLF},
+}
+
+// ForEachDocument runs fn over every shape in Shapes and every size, naming each
+// sub-benchmark and reporting throughput and allocations for it.
 func ForEachDocument(b *testing.B, fn func(*testing.B, []byte)) {
 	b.Helper()
+	forEach(b, Shapes, fn)
+}
 
-	for _, shape := range Shapes {
+// ForEachScanDocument runs fn over Shapes and ScanShapes both. It is what the
+// scanner's own benchmarks use: they want the document shapes for continuity
+// and the construct shapes to tell one change from another.
+func ForEachScanDocument(b *testing.B, fn func(*testing.B, []byte)) {
+	b.Helper()
+	forEach(b, Shapes, fn)
+	forEach(b, ScanShapes, fn)
+}
+
+func forEach(b *testing.B, shapes []struct {
+	Name     string
+	Generate func(int) string
+}, fn func(*testing.B, []byte),
+) {
+	b.Helper()
+
+	for _, shape := range shapes {
 		for _, size := range Sizes {
 			src := []byte(shape.Generate(size))
 
