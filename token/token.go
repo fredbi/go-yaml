@@ -391,6 +391,21 @@ func (t Type) CharacterType() CharacterType {
 	}
 }
 
+// reservedKeywordLengths has bit n set where a keyword in
+// reservedKeywordTypes is n bytes long. The keywords are 1, 4 or 5 bytes --
+// "~", "null", ".inf", "false", "-.INF" -- so a value of any other length
+// cannot be one, and testing a bit is cheaper than hashing the value.
+//
+// It is built from the map in init rather than written out, so adding a
+// keyword widens the gate on its own.
+var reservedKeywordLengths uint64
+
+// isReservedLength reports whether a value of n bytes could be a reserved
+// keyword. A value longer than 63 bytes is none of them.
+func isReservedLength(n int) bool {
+	return n < 64 && reservedKeywordLengths&(1<<uint(n)) != 0
+}
+
 func init() {
 	for _, keyword := range reservedNullKeywords {
 		reservedKeywordTypes[keyword] = NullType
@@ -408,6 +423,12 @@ func init() {
 	}
 	for _, keyword := range reservedNanKeywords {
 		reservedKeywordTypes[keyword] = NanType
+	}
+
+	for keyword := range reservedKeywordTypes {
+		if len(keyword) < 64 {
+			reservedKeywordLengths |= 1 << uint(len(keyword))
+		}
 	}
 }
 
@@ -872,9 +893,20 @@ func Make[T Text](value string, org T, pos Position) Token {
 		spans:    spans,
 	}
 
-	if typ, ok := reservedKeywordTypes[value]; ok {
-		tk.Type = typ
+	// A plain scalar is a string unless it spells one of the reserved keywords
+	// or reads as a number. Both questions are asked of every scalar the
+	// scanner cuts, so both are gated on a test that a string answers without
+	// being hashed or taken apart: its length for the keywords, its first byte
+	// for a number.
+	if isReservedLength(len(value)) {
+		if typ, ok := reservedKeywordTypes[value]; ok {
+			tk.Type = typ
 
+			return tk
+		}
+	}
+
+	if !mayBeNumber(value) {
 		return tk
 	}
 
