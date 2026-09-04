@@ -1,6 +1,11 @@
 package scanner
 
-import "github.com/go-openapi/go-yaml/token"
+import (
+	"fmt"
+
+	"github.com/go-openapi/go-yaml/internal/probe"
+	"github.com/go-openapi/go-yaml/token"
+)
 
 // IndentState state for indent
 type IndentState int
@@ -45,7 +50,13 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 		return
 	}
 	if s.isFirstCharAtLine && c == ' ' {
+		if probe.Enabled {
+			probe.Check("indent.indentNum==column-1", s.indentNum == s.column-1, func() string {
+				return fmt.Sprintf("indentNum=%d column=%d", s.indentNum, s.column)
+			})
+		}
 		s.indentNum++
+
 		return
 	}
 	if s.isFirstCharAtLine && c == '\t' {

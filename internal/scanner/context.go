@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"bytes"
+	"fmt"
 	"unicode/utf8"
 
+	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -597,6 +599,23 @@ func (c *Context) isMultiLine() bool {
 }
 
 func (c *Context) bufferedSrc() []byte {
+	if probe.Enabled {
+		// Whether the mark is just "the length less the whitespace the buffer
+		// ends with", which a scan back over the buffer would give at the read
+		// instead of a compare and a store for every character written.
+		//
+		// addBuf marks past a space or a tab, addBufWithTab only past a space,
+		// and a block scalar is what says which was used.
+		end := len(c.buf)
+		for end > 0 && (c.buf[end-1] == ' ' || (!c.isMultiLine() && c.buf[end-1] == '\t')) {
+			end--
+		}
+		probe.Check("buf.notSpaceCharPos==trimmed", c.notSpaceCharPos == end, func() string {
+			return fmt.Sprintf("notSpaceCharPos=%d trimmed=%d multiline=%v buf=%q",
+				c.notSpaceCharPos, end, c.isMultiLine(), string(c.buf))
+		})
+	}
+
 	src := c.buf[:c.notSpaceCharPos]
 	if c.isMultiLine() {
 		mstate := c.getMultiLineState()

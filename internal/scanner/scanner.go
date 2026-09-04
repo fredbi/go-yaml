@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"unicode/utf8"
@@ -430,6 +431,12 @@ func (s *Scanner) scan(ctx *Context) error {
 
 // pos returns the position of the cursor.
 func (s *Scanner) pos() token.Position {
+	if probe.Enabled {
+		probe.Check("indent.lastIndentLevel==indentLevel", s.lastIndentLevel == s.indentLevel, func() string {
+			return fmt.Sprintf("lastIndentLevel=%d indentLevel=%d", s.lastIndentLevel, s.indentLevel)
+		})
+	}
+
 	s.lastIndentLevel = s.indentLevel
 
 	return token.At(int32(s.line), int32(s.column), int32(s.ctx.idx), int32(s.indentNum))
