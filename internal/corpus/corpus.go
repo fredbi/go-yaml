@@ -156,6 +156,56 @@ func CRLF(n int) string {
 	return strings.ReplaceAll(FlatMap(n), "\n", "\r\n")
 }
 
+// EscapedDense builds a mapping of n double-quoted values that are mostly
+// escapes -- eight in a scalar of about forty characters.
+//
+// A scalar holding one escape is written from the source up to it and rewritten
+// after; one holding many is rewritten almost entirely. The two say different
+// things about what an escape costs, so both are measured.
+func EscapedDense(n int) string {
+	var b strings.Builder
+	b.Grow(n * 64)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: \"a\\tb\\nc\\\"d\\\\e\\tf\\ng\\\"h %06d\"\n", i, i)
+	}
+
+	return b.String()
+}
+
+// EscapedSparse builds a mapping of n long double-quoted values carrying one
+// escape each, near the end.
+//
+// The value is a window on the source until the escape is read, so this is what
+// says whether the lazy copy is reached late or early.
+func EscapedSparse(n int) string {
+	var b strings.Builder
+	b.Grow(n * 96)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: \"a long enough run of plain text to be worth windowing\\t%06d\"\n", i, i)
+	}
+
+	return b.String()
+}
+
+// EscapedUnicode builds a mapping of n double-quoted values holding the escapes
+// that name a code point by its digits: \xXX, \uXXXX, \UXXXXXXXX and a UTF-16
+// surrogate pair.
+//
+// These are the ones scanDoubleQuote reads furthest ahead for, a surrogate pair
+// settling how far it reaches only once its low half is read.
+func EscapedUnicode(n int) string {
+	var b strings.Builder
+	b.Grow(n * 72)
+
+	for i := range n {
+		fmt.Fprintf(&b, "key%06d: \"\\x41\\u00e9\\U0001F600\\uD83D\\uDE00 %06d\"\n", i, i)
+	}
+
+	return b.String()
+}
+
 // Shape names the document shapes worth measuring separately. The order is
 // fixed so that benchmark output lines up run to run.
 var Shapes = []struct {
@@ -188,6 +238,9 @@ var ScanShapes = []struct {
 }{
 	{"quoted", Quoted},
 	{"escaped", Escaped},
+	{"escaped-dense", EscapedDense},
+	{"escaped-sparse", EscapedSparse},
+	{"escaped-unicode", EscapedUnicode},
 	{"commented", Commented},
 	{"flow", Flow},
 	{"crlf", CRLF},

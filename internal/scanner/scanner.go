@@ -549,7 +549,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('-')
-	tk := token.MakeSequenceEntry(string(ctx.obuf), s.pos())
+	tk := token.MakeSequenceEntry(ctx.obuf, s.pos())
 	s.lastDelimColumn = int(tk.Position.Column)
 	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)

@@ -128,7 +128,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			s.quoted = value[:0]
 		}
 
-		return token.MakeSingleQuote(text, string(ctx.obuf), srcpos), nil
+		return token.MakeSingleQuote(text, ctx.obuf, srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.obuf), srcpos))
@@ -427,7 +427,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			s.quoted = value[:0]
 		}
 
-		return token.MakeDoubleQuote(text, string(ctx.obuf), srcpos), nil
+		return token.MakeDoubleQuote(text, ctx.obuf, srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 

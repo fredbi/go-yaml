@@ -851,7 +851,7 @@ func New(value string, org string, pos Position) *Token {
 // Make builds the token for value without settling where it lives. New puts it
 // on the heap; a caller holding its tokens in a slice of values keeps this one
 // out of the heap altogether, which is why New is thin enough to inline.
-func Make(value string, org string, pos Position) Token {
+func Make[T Text](value string, org T, pos Position) Token {
 	tk := Token{
 		Type:     StringType,
 		Value:    value,
@@ -1071,7 +1071,7 @@ func String(value string, org string, pos Position) *Token {
 }
 
 // MakeString builds a string token without settling where it lives.
-func MakeString(value string, org string, pos Position) Token {
+func MakeString[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     StringType,
 		Value:    value,
@@ -1091,7 +1091,7 @@ func SequenceEntry(org string, pos Position) *Token {
 // MakeSequenceEntry builds the token SequenceEntry builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeSequenceEntry(org string, pos Position) Token {
+func MakeSequenceEntry[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     SequenceEntryType,
 		Value:    string(SequenceEntryCharacter),
@@ -1151,7 +1151,7 @@ func CollectEntry(org string, pos Position) *Token {
 // MakeCollectEntry builds the token CollectEntry builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeCollectEntry(org string, pos Position) Token {
+func MakeCollectEntry[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     CollectEntryType,
 		Value:    string(CollectEntryCharacter),
@@ -1171,7 +1171,7 @@ func SequenceStart(org string, pos Position) *Token {
 // MakeSequenceStart builds the token SequenceStart builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeSequenceStart(org string, pos Position) Token {
+func MakeSequenceStart[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     SequenceStartType,
 		Value:    string(SequenceStartCharacter),
@@ -1191,7 +1191,7 @@ func SequenceEnd(org string, pos Position) *Token {
 // MakeSequenceEnd builds the token SequenceEnd builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeSequenceEnd(org string, pos Position) Token {
+func MakeSequenceEnd[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     SequenceEndType,
 		Value:    string(SequenceEndCharacter),
@@ -1211,7 +1211,7 @@ func MappingStart(org string, pos Position) *Token {
 // MakeMappingStart builds the token MappingStart builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeMappingStart(org string, pos Position) Token {
+func MakeMappingStart[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     MappingStartType,
 		Value:    string(MappingStartCharacter),
@@ -1231,7 +1231,7 @@ func MappingEnd(org string, pos Position) *Token {
 // MakeMappingEnd builds the token MappingEnd builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeMappingEnd(org string, pos Position) Token {
+func MakeMappingEnd[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     MappingEndType,
 		Value:    string(MappingEndCharacter),
@@ -1252,7 +1252,7 @@ func Comment(value string, org string, pos Position) *Token {
 // does for a string. The scanner copies the token into its own storage, so a
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
-func MakeComment(value string, org string, pos Position) Token {
+func MakeComment[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     CommentType,
 		Value:    value,
@@ -1272,7 +1272,7 @@ func Anchor(org string, pos Position) *Token {
 // MakeAnchor builds the token Anchor builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeAnchor(org string, pos Position) Token {
+func MakeAnchor[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     AnchorType,
 		Value:    string(AnchorCharacter),
@@ -1292,7 +1292,7 @@ func Alias(org string, pos Position) *Token {
 // MakeAlias builds the token Alias builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeAlias(org string, pos Position) Token {
+func MakeAlias[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     AliasType,
 		Value:    string(AliasCharacter),
@@ -1312,7 +1312,7 @@ func Tag(value string, org string, pos Position) *Token {
 // MakeTag builds the token Tag builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeTag(value string, org string, pos Position) Token {
+func MakeTag[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     TagType,
 		Value:    value,
@@ -1333,7 +1333,7 @@ func Literal(value string, org string, pos Position) *Token {
 // does for a string. The scanner copies the token into its own storage, so a
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
-func MakeLiteral(value string, org string, pos Position) Token {
+func MakeLiteral[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     LiteralType,
 		Value:    value,
@@ -1354,7 +1354,7 @@ func Folded(value string, org string, pos Position) *Token {
 // does for a string. The scanner copies the token into its own storage, so a
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
-func MakeFolded(value string, org string, pos Position) Token {
+func MakeFolded[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     FoldedType,
 		Value:    value,
@@ -1374,7 +1374,7 @@ func SingleQuote(value string, org string, pos Position) *Token {
 // MakeSingleQuote builds the token SingleQuote builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeSingleQuote(value string, org string, pos Position) Token {
+func MakeSingleQuote[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     SingleQuoteType,
 		Value:    value,
@@ -1394,7 +1394,7 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 // MakeDoubleQuote builds the token DoubleQuote builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeDoubleQuote(value string, org string, pos Position) Token {
+func MakeDoubleQuote[T Text](value string, org T, pos Position) Token {
 	return Token{
 		Type:     DoubleQuoteType,
 		Value:    value,
@@ -1414,7 +1414,7 @@ func Directive(org string, pos Position) *Token {
 // MakeDirective builds the token Directive builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeDirective(org string, pos Position) Token {
+func MakeDirective[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     DirectiveType,
 		Value:    string(DirectiveCharacter),
@@ -1445,7 +1445,7 @@ func MergeKey(org string, pos Position) *Token {
 // MakeMergeKey builds the token MergeKey builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeMergeKey(org string, pos Position) Token {
+func MakeMergeKey[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     MergeKeyType,
 		Value:    "<<",
@@ -1465,7 +1465,7 @@ func DocumentHeader(org string, pos Position) *Token {
 // MakeDocumentHeader builds the token DocumentHeader builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeDocumentHeader(org string, pos Position) Token {
+func MakeDocumentHeader[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     DocumentHeaderType,
 		Value:    "---",
@@ -1485,7 +1485,7 @@ func DocumentEnd(org string, pos Position) *Token {
 // MakeDocumentEnd builds the token DocumentEnd builds, without settling where it lives.
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
-func MakeDocumentEnd(org string, pos Position) Token {
+func MakeDocumentEnd[T Text](org T, pos Position) Token {
 	return Token{
 		Type:     DocumentEndType,
 		Value:    "...",
@@ -1524,13 +1524,39 @@ func DetectLineBreakCharacter(src string) string {
 	}
 }
 
+// Text is the two ways a caller holds what a token was written as: the
+// document's own string, or the buffer a scanner filled reading it.
+//
+// The token keeps neither. It records how far the text reaches and how many
+// lines it spans, and everything below that takes a Text only measures it. So a
+// scanner hands over its buffer as it stands: turning it into a string first
+// copies the bytes to count them, which for a token longer than the compiler
+// will keep on the stack is an allocation for every token read.
+type Text interface{ ~string | ~[]byte }
+
+// trimBlanks returns org without the whitespace and line breaks around it.
+func trimBlanks[T Text](org T) T {
+	i, j := 0, len(org)
+	for i < j && isBlank(org[i]) {
+		i++
+	}
+	for j > i && isBlank(org[j-1]) {
+		j--
+	}
+
+	return org[i:j]
+}
+
+// isBlank reports whether c is whitespace or part of a line break.
+func isBlank(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+
 // breaksIn counts the line breaks org holds, ignoring the whitespace around it.
 //
 // CR LF and a lone CR each end one line, as they do for the scanner: counting
 // only "\n" would leave a document written with carriage returns reporting that
 // none of its tokens reaches past the line it starts on.
-func breaksIn(org string) int {
-	body := strings.Trim(org, " \t\r\n")
+func breaksIn[T Text](org T) int {
+	body := trimBlanks(org)
 
 	var n int
 	for i := 0; i < len(body); i++ {
@@ -1645,7 +1671,7 @@ func (t *Token) SetBlankLineAbove(blank bool) {
 }
 
 // trailingBreaksIn counts the line breaks in the whitespace org ends with.
-func trailingBreaksIn(org string) int {
+func trailingBreaksIn[T Text](org T) int {
 	i := len(org)
 	for i > 0 {
 		switch org[i-1] {
@@ -1660,7 +1686,7 @@ func trailingBreaksIn(org string) int {
 }
 
 // breaksInRaw counts CR LF, CR and LF as one break each, without trimming.
-func breaksInRaw(s string) int {
+func breaksInRaw[T Text](s T) int {
 	var n int
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -1682,7 +1708,7 @@ func breaksInRaw(s string) int {
 //
 // The whitespace an origin opens with belongs to the gap before the token
 // rather than to the token, and pos.Offset already points past it.
-func extentOf(org string, pos Position) int32 {
+func extentOf[T Text](org T, pos Position) int32 {
 	i := 0
 	for i < len(org) && (org[i] == ' ' || org[i] == '\t' || org[i] == '\n' || org[i] == '\r') {
 		i++

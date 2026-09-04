@@ -134,7 +134,7 @@ func (s *Scanner) readMultiLineContent(ctx *Context, state *MultiLineState, c ru
 // emitMultiLine hands over the block read so far and starts the buffers again.
 func (s *Scanner) emitMultiLine(ctx *Context, state *MultiLineState) {
 	value := ctx.bufferedSrc()
-	ctx.addTokenValue(token.MakeString(string(value), string(ctx.obuf), state.from(s.pos())))
+	ctx.addTokenValue(token.MakeString(string(value), ctx.obuf, state.from(s.pos())))
 	ctx.clear()
 }
 
