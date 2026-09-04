@@ -86,6 +86,11 @@ func TestMakeDoesNotAllocate(t *testing.T) {
 		"1234567890", "3.25", "0xFF", "0o755", "0b1010", "-42",
 		"18446744073709551615", "9223372036854775807", "-9223372036854775808",
 		"plain text", "true", "null", "",
+		// A leading zero reads the digits as octal, and 8 and 9 are not octal
+		// digits. inBase says so before strconv is asked, which used to answer
+		// with a *NumError and a copy of the text: two allocations for every
+		// leading-zero decimal a document holds.
+		"000999", "0008", "1e400",
 	} {
 		allocs := testing.AllocsPerRun(200, func() {
 			sink = Make(value, value, Position{})
@@ -94,8 +99,8 @@ func TestMakeDoesNotAllocate(t *testing.T) {
 	}
 }
 
-// Three forms still allocate, all of them rare, and all of them the price of
-// leaving the parsing to strconv rather than writing it again here.
+// Two forms still allocate, both rare, and both the price of leaving the
+// parsing to strconv rather than writing it again here.
 func TestMakeAllocatesOnlyWhereItMust(t *testing.T) {
 	for _, tc := range []struct {
 		value  string
@@ -103,7 +108,6 @@ func TestMakeAllocatesOnlyWhereItMust(t *testing.T) {
 		why    string
 	}{
 		{"1_000", 1, "the '_' separators have to come out before strconv reads the digits"},
-		{"1e400", 2, "strconv builds a NumError for a float too big to hold"},
 		{"-18446744073709551615", 1, "a NumError for digits that fit a uint64 but not an int64"},
 	} {
 		allocs := testing.AllocsPerRun(200, func() {

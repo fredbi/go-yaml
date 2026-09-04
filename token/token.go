@@ -582,6 +582,16 @@ func (s numberShape) check() error {
 		return err
 	}
 
+	// The digits are read here rather than by strconv, which is the common way
+	// this fails: a leading zero makes "000999" octal and 9 is not an octal
+	// digit. strconv says so by allocating a *strconv.NumError with a copy of
+	// the text inside it -- two allocations -- and numberType, the only caller,
+	// throws the error away and keeps the bool. A document whose values carry
+	// leading zeros paid that for every one of them.
+	if !inBase(s.digits, s.base) {
+		return errNotInBase
+	}
+
 	u, err := strconv.ParseUint(s.digits, s.base, 64)
 	if err != nil {
 		return err
@@ -1729,3 +1739,42 @@ func (t *Token) SetEndOffset(end int32) { t.end = end }
 // out. A token the parser makes up for a value the document leaves out ends
 // where it starts.
 func (t Token) EndOffset() int32 { return t.end }
+
+// errNotInBase says the digits hold a character the base does not admit. It is
+// a value rather than something built where it is returned: the caller reads
+// whether there was an error and not which one.
+var errNotInBase = errors.New("digit outside the base")
+
+// inBase reports whether every character of digits is one base admits. digits
+// carries no sign, no base prefix and no underscore -- shapeOfNumber has taken
+// all three off -- so anything that is not a digit of the base fails.
+func inBase(digits string, base int) bool {
+	if digits == "" {
+		return false
+	}
+
+	for i := range len(digits) {
+		if digitValue(digits[i]) >= base {
+			return false
+		}
+	}
+
+	return true
+}
+
+// digitValue is what c is worth as a digit, or 16 where it is not one, which no
+// base here admits.
+func digitValue(c byte) int {
+	const notADigit = 16
+
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10
+	default:
+		return notADigit
+	}
+}
