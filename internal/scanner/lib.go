@@ -33,21 +33,56 @@ const byteOrderMark = '\ufeff'
 // anything else looks the byte is gone and nothing has said so -- which is why
 // this reads the string rather than the runes the rest of the scanner works on.
 func validateStream(text string) error {
-	line, column, offset := 1, 1, 1
+	// A byte at a time while the bytes are ASCII, which is nearly all of them
+	// in nearly every document. Ranging over the string decodes a rune for each
+	// one instead, and the line and column were counted for every character to
+	// be read by none of them: only an error carries a position, and
+	// streamPosition works one out where that happens.
+	for i := 0; i < len(text); {
+		if c := text[i]; c < utf8.RuneSelf {
+			if !printableASCII(c) {
+				return ErrInvalidToken(
+					fmt.Sprintf("found character %q that a YAML stream may not hold", rune(c)),
+					token.Invalid(text[i:i+1], streamPosition(text, i)),
+				)
+			}
+			i++
 
-	for i, r := range text {
-		if r == utf8.RuneError {
+			continue
+		}
+
+		r, width := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && width <= 1 {
 			// Either a byte that is not text, or a U+FFFD the author wrote:
 			// only the width tells them apart.
-			if _, width := utf8.DecodeRuneInString(text[i:]); width <= 1 {
-				return ErrInvalidToken("found a byte that is part of no character", token.Invalid(text[i:i+1], token.At(int32((line)), int32((column)), int32(offset), 0)))
-			}
+			return ErrInvalidToken("found a byte that is part of no character",
+				token.Invalid(text[i:i+1], streamPosition(text, i)))
 		}
-
 		if !printable(r) {
-			return ErrInvalidToken(fmt.Sprintf("found character %q that a YAML stream may not hold", r), token.Invalid(string(r), token.At(int32((line)), int32((column)), int32(offset), 0)))
+			return ErrInvalidToken(
+				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
+				token.Invalid(string(r), streamPosition(text, i)),
+			)
 		}
+		i += width
+	}
 
+	return validateByteOrderMarks(text)
+}
+
+// printableASCII answers [printable] for the bytes below utf8.RuneSelf, where
+// it comes to one range and the three line and tab characters outside it.
+func printableASCII(c byte) bool {
+	return c >= 0x20 && c <= 0x7E || c == 0x09 || c == 0x0A || c == 0x0D
+}
+
+// streamPosition counts the characters before byte i, for the error that says
+// which one a stream may not hold. Line, column and offset all count from 1,
+// and offset counts characters rather than bytes, as validateStream reported
+// them when it counted every character to report one.
+func streamPosition(text string, i int) token.Position {
+	line, column, offset := 1, 1, 1
+	for _, r := range text[:i] {
 		offset++
 		if r == '\n' {
 			line++
@@ -58,7 +93,7 @@ func validateStream(text string) error {
 		column++
 	}
 
-	return validateByteOrderMarks(text)
+	return token.At(int32(line), int32(column), int32(offset), 0)
 }
 
 // validateByteOrderMarks checks that every U+FEFF in the source stands where
