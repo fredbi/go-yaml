@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -77,8 +78,18 @@ type Scanner struct {
 	err error
 }
 
-// Init prepares the scanner s to tokenize the text src by setting the scanner at the beginning of src.
-func (s *Scanner) Init(text string) {
+// Init sets s to read src from its first byte.
+//
+// src is not copied. The tokens keep windows into it -- a scalar the scan
+// carries through unchanged is a slice of these very bytes -- so src must not
+// be written to while those tokens are in use.
+//
+// The scanner reads a string inside, indexing and slicing it and decoding runes
+// out of it, and takes one over src without copying. That is a detail of how it
+// is written rather than something a caller should have to arrange, which is
+// why it is done here and not at the call.
+func (s *Scanner) Init(src []byte) {
+	text := nocopy.String(src)
 	s.initErr = validateStream(text)
 	s.reset(text)
 }

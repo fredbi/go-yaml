@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/internal/nocopy"
 	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -24,10 +25,11 @@ const (
 
 // ParseBytes reads src and returns the file it describes.
 func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
-	text := string(src)
+	// Not copied, as in parser.ParseBytes: the tree keeps windows into src.
+	text := nocopy.String(src)
 
 	var s scanner.Scanner
-	s.Init(text)
+	s.Init(src)
 
 	p, err := New(s.Tokens(), mode, append(opts, WithSource(text))...)
 	if scanErr := s.Err(); scanErr != nil {

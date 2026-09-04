@@ -31,7 +31,7 @@ func TestTopLevelEntriesAreNotAStopGap(t *testing.T) {
 
 	for _, w := range all {
 		var s scanner.Scanner
-		s.Init(string(w.Data))
+		s.Init(w.Data)
 
 		var toks []token.Token
 		for tk := range s.Tokens() {

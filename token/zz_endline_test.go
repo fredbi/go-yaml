@@ -26,7 +26,7 @@ import (
 func TestEndLineMatchesCountingTheOrigin(t *testing.T) {
 	for _, src := range append(handwritten(), workloads(t)...) {
 		var s scanner.Scanner
-		s.Init(src)
+		s.Init([]byte(src))
 
 		prev := 0
 		for tk := range s.All() {

@@ -71,7 +71,7 @@ func BenchmarkPullOverhead(b *testing.B) {
 func scannerSeq(src string) iter.Seq[*token.Token] {
 	return func(yield func(*token.Token) bool) {
 		var s scanner.Scanner
-		s.Init(src)
+		s.Init([]byte(src))
 
 		for tk := range s.All() {
 			if !yield(tk) {

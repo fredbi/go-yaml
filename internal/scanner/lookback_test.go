@@ -50,12 +50,12 @@ c: 2
 
 	var s scanner.Scanner
 
-	s.Init(src)
+	s.Init([]byte(src))
 	first := scanAll(&s)
 	require.NotEmpty(t, first)
 
 	// The same Scanner, told to read the same source again.
-	s.Init(src)
+	s.Init([]byte(src))
 	second := scanAll(&s)
 
 	require.Len(t, second, len(first))
@@ -95,7 +95,7 @@ func TestScanAndNextAgree(t *testing.T) {
 		src := string(test.InYAML)
 
 		var batch scanner.Scanner
-		batch.Init(src)
+		batch.Init([]byte(src))
 		tks, batchErr := batch.Scan()
 		if errors.Is(batchErr, io.EOF) {
 			// The source held no token at all, which is not a refusal.
@@ -103,21 +103,21 @@ func TestScanAndNextAgree(t *testing.T) {
 		}
 
 		var one scanner.Scanner
-		one.Init(src)
+		one.Init([]byte(src))
 		var pulled token.Tokens
 		for tk := range one.All() {
 			pulled = append(pulled, tk)
 		}
 
 		var byValue scanner.Scanner
-		byValue.Init(src)
+		byValue.Init([]byte(src))
 		var pushed []token.Token
 		for tk := range byValue.Tokens() {
 			pushed = append(pushed, tk)
 		}
 
 		var oneValue scanner.Scanner
-		oneValue.Init(src)
+		oneValue.Init([]byte(src))
 		var pulledValues []token.Token
 		for {
 			tk, ok := oneValue.NextToken()
@@ -152,7 +152,7 @@ func TestTokensResumesAfterBreak(t *testing.T) {
 	const src = "a: 1\nb: 2\nc: 3\n"
 
 	var whole scanner.Scanner
-	whole.Init(src)
+	whole.Init([]byte(src))
 	var want []token.Token
 	for tk := range whole.Tokens() {
 		want = append(want, tk)
@@ -160,7 +160,7 @@ func TestTokensResumesAfterBreak(t *testing.T) {
 	require.Greater(t, len(want), 6)
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	var got []token.Token
 	for tk := range s.Tokens() {

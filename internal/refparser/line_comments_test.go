@@ -35,7 +35,7 @@ last: done # the last one
 `
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	p, err := New(s.Tokens(), ParseComments)
 	require.NoError(t, err)

@@ -30,13 +30,15 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 		"escaped: \"needs\\ta copy\"\n" +
 		"block: |\n  first\n  second\n"
 
-	base := uintptr(unsafe.Pointer(unsafe.StringData(src)))
+	// The bytes the scanner is given, and the ones a window has to point into.
+	data := []byte(src)
+	base := uintptr(unsafe.Pointer(&data[0]))
 	indexIn := func(b []byte) int {
 		if len(b) == 0 {
 			return -1
 		}
 		p := uintptr(unsafe.Pointer(&b[0]))
-		if p < base || p >= base+uintptr(len(src)) {
+		if p < base || p >= base+uintptr(len(data)) {
 			return -1
 		}
 
@@ -44,7 +46,7 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 	}
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init(data)
 	p, err := refparser.New(s.Tokens(), 0)
 	require.NoError(t, err)
 	require.NoError(t, s.Err())

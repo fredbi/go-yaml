@@ -21,7 +21,7 @@ func BenchmarkParserNew(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			if _, err := refparser.New(s.Tokens(), 0); err != nil {
 				b.Fatal(err)
 			}
@@ -37,7 +37,7 @@ func BenchmarkParserParse(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			p, err := refparser.New(s.Tokens(), 0)
 			if err != nil {
 				b.Fatal(err)

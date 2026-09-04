@@ -14,7 +14,7 @@ import (
 // compares a whole document needs, and nothing else should.
 func scanTokens(src string) (token.Tokens, error) {
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	var tokens token.Tokens
 	for tk := range s.All() {

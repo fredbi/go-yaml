@@ -41,7 +41,7 @@ func BenchmarkScannerNextToken(b *testing.B) {
 		var tokens int64
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 
 			for {
 				if _, ok := s.NextToken(); !ok {
@@ -66,7 +66,7 @@ func BenchmarkScannerScan(b *testing.B) {
 		var tokens int64
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 
 			for {
 				batch, err := s.Scan()
@@ -96,7 +96,7 @@ func BenchmarkScannerCollect(b *testing.B) {
 				s      scanner.Scanner
 				tokens token.Tokens
 			)
-			s.Init(text)
+			s.Init([]byte(text))
 
 			for {
 				batch, err := s.Scan()
@@ -118,7 +118,7 @@ func BenchmarkScanInit(b *testing.B) {
 
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 		}
 	})
 }

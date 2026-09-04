@@ -28,7 +28,7 @@ func TestGroupCensus(t *testing.T) {
 	}
 
 	var s scanner.Scanner
-	s.Init(string(src))
+	s.Init(src)
 
 	raw := tokenarena.New[tapeToken](tokenarena.SizeFor(len(src)))
 	raw.Pin()

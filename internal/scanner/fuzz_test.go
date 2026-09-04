@@ -31,7 +31,7 @@ func scanAll(t *testing.T, src string) token.Tokens {
 		s      scanner.Scanner
 		tokens token.Tokens
 	)
-	s.Init(src)
+	s.Init([]byte(src))
 
 	for calls := 0; ; calls++ {
 		require.Lessf(t, calls, maxScanCalls,

@@ -58,7 +58,7 @@ func countTokens(t *testing.T, src string) int {
 	t.Helper()
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	var n int
 	for range s.Tokens() {

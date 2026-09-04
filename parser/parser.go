@@ -284,7 +284,7 @@ func (p *Parser) begin(src []byte) {
 	p.tokens.Pin()
 
 	p.src = nocopy.String(src)
-	p.scan.Init(p.src)
+	p.scan.Init(src)
 
 	// Guessed from the source rather than counted, since counting would mean
 	// reading the document through before parsing any of it. It sizes buffers

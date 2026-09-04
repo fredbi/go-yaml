@@ -68,7 +68,7 @@ func TestRetainedByLayer(t *testing.T) {
 
 		tokens := retainedMB(t, func() any {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			held := make([]token.Token, 0, 1024)
 			for tk := range s.Tokens() {
 				held = append(held, tk)

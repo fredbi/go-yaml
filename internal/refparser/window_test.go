@@ -32,7 +32,7 @@ func (s *stat) report(name string) {
 
 func measure(src string, colonBack, colonLines, flowBack, keyBody *stat) {
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 	var raw rawTokens
 	for tk := range s.Tokens() {
 		raw.add(tk)

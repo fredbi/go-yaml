@@ -101,7 +101,7 @@ func TestByteOrderMarkIsDroppedRatherThanRead(t *testing.T) {
 // not io.EOF.
 func scanErr(src string) error {
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	for calls := 0; calls < maxScanCalls; calls++ {
 		_, err := s.Scan()

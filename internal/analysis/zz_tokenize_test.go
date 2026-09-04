@@ -15,7 +15,7 @@ func tokenize(tb testing.TB, src string) token.Tokens {
 	tb.Helper()
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	var tokens token.Tokens
 	for tk := range s.All() {

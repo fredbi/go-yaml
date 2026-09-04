@@ -28,7 +28,7 @@ func TestArenaStats(t *testing.T) {
 
 	for _, w := range all {
 		var s scanner.Scanner
-		s.Init(string(w.Data))
+		s.Init(w.Data)
 
 		p, err := refparser.New(s.Tokens(), 0)
 		require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestArenaStatsAccountForEveryNode(t *testing.T) {
 	require.NoError(t, err)
 
 	var s scanner.Scanner
-	s.Init(string(w.Data))
+	s.Init(w.Data)
 
 	p, err := refparser.New(s.Tokens(), 0)
 	require.NoError(t, err)

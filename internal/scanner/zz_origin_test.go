@@ -49,7 +49,7 @@ func assertOriginsTile(t *testing.T, src string) {
 	t.Helper()
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init([]byte(src))
 
 	prev := 0
 	for tk := range s.All() {

@@ -36,15 +36,17 @@ func TestValueAliasesTheSource(t *testing.T) {
 		"escaped: \"needs\\ta copy\"\n" +
 		"folded: 'over\n  two lines'\n"
 
-	base := uintptr(unsafe.Pointer(unsafe.StringData(src)))
+	// The bytes the scanner is given, and the ones a window has to point into.
+	data := []byte(src)
+	base := uintptr(unsafe.Pointer(&data[0]))
 	aliases := func(s string) bool {
 		p := uintptr(unsafe.Pointer(unsafe.StringData(s)))
 
-		return p >= base && p < base+uintptr(len(src))
+		return p >= base && p < base+uintptr(len(data))
 	}
 
 	var s scanner.Scanner
-	s.Init(src)
+	s.Init(data)
 
 	seen := make(map[string]token.Type)
 	for tk := range s.Tokens() {

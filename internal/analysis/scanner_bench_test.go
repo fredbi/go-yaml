@@ -23,7 +23,7 @@ func BenchmarkScanBatch(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			for {
 				tks, err := s.Scan()
 				if err != nil || len(tks) == 0 {
@@ -39,7 +39,7 @@ func BenchmarkScanNext(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			for {
 				if _, ok := s.Next(); !ok {
 					break
@@ -54,7 +54,7 @@ func BenchmarkScanNextToken(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			for {
 				if _, ok := s.NextToken(); !ok {
 					break
@@ -69,7 +69,7 @@ func BenchmarkScanTokens(b *testing.B) {
 		text := string(src)
 		for b.Loop() {
 			var s scanner.Scanner
-			s.Init(text)
+			s.Init([]byte(text))
 			var last token.Type
 			for tk := range s.Tokens() {
 				last = tk.Type
