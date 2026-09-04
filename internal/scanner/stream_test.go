@@ -4,8 +4,6 @@
 package scanner_test
 
 import (
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -104,12 +102,8 @@ func scanErr(src string) error {
 	s.Init([]byte(src))
 
 	for calls := 0; calls < maxScanCalls; calls++ {
-		_, err := s.Scan()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
+		if _, ok := s.NextToken(); !ok {
+			return s.Err()
 		}
 	}
 

@@ -18,8 +18,9 @@ func tokenize(tb testing.TB, src string) token.Tokens {
 	s.Init([]byte(src))
 
 	var tokens token.Tokens
-	for tk := range s.All() {
-		tokens = append(tokens, tk)
+	for tk := range s.Tokens() {
+		held := tk
+		tokens = append(tokens, &held)
 	}
 	if err := s.Err(); err != nil {
 		tb.Fatalf("scanning %q: %v", src, err)

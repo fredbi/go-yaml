@@ -1,8 +1,6 @@
 package scanner_test
 
 import (
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -35,13 +33,14 @@ func scanAll(t *testing.T, src string) token.Tokens {
 
 	for calls := 0; ; calls++ {
 		require.Lessf(t, calls, maxScanCalls,
-			"Scan did not terminate after %d calls on %q", maxScanCalls, src)
+			"NextToken did not terminate after %d calls on %q", maxScanCalls, src)
 
-		subTokens, err := s.Scan()
-		if errors.Is(err, io.EOF) {
+		tk, ok := s.NextToken()
+		if !ok {
 			break
 		}
-		tokens.Add(subTokens...)
+		held := tk
+		tokens.Add(&held)
 	}
 
 	return tokens

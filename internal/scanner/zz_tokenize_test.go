@@ -17,8 +17,9 @@ func scanTokens(src string) (token.Tokens, error) {
 	s.Init([]byte(src))
 
 	var tokens token.Tokens
-	for tk := range s.All() {
-		tokens = append(tokens, tk)
+	for tk := range s.Tokens() {
+		held := tk
+		tokens = append(tokens, &held)
 	}
 
 	return tokens, s.Err()

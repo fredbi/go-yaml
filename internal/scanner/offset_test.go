@@ -46,18 +46,22 @@ func at(src string, offset int) string {
 // was reported that many bytes early. Twenty-one of the twenty-five types now
 // miss nothing at all.
 //
-// What is left is 25 of 3,489, and none of it is the counter drifting. 17 are
+// What is left is 18 of 3,489, and none of it is the counter drifting. 13 are
 // Invalid, the tokens an error carries, built from the whole origin buffer
-// rather than from one token's worth of it. 7 are multi-line String values --
-// block scalar content -- and one is a Comment.
+// rather than from one token's worth of it. 5 are multi-line String values --
+// block scalar content.
 //
-// It was 33 while the comparison ran against Token.Origin. That field held the
-// scanner's buffer, which is not always the document: Context.removeRightSpaceFromBuf
-// trims the spaces a line ends with from the origin as well as from the value,
-// so "a: one \n  two" -- a plain scalar continued over two lines, the first
-// ending in a space -- had an Origin of "a: one\n  two", which the document does
-// not contain. Reading the text back from the extents compares against the
-// document itself, and three of the types stopped missing anything at all.
+// It was 25 while this read the source through Scan, which returns a refusal as
+// an error where NextToken hands over the token the refusal names. The stream
+// the parser reads is the one measured here.
+//
+// It was 33 before that, while the comparison ran against Token.Origin. That
+// field held the scanner's buffer, which is not always the document:
+// Context.removeRightSpaceFromBuf trims the spaces a line ends with from the
+// origin as well as from the value, so "a: one \n  two" -- a plain scalar
+// continued over two lines, the first ending in a space -- had an Origin of
+// "a: one\n  two", which the document does not contain. Reading the text back
+// from the extents compares against the document itself.
 //
 // Line and Column were right throughout, which is what made the drift hard to
 // see: 3,287 of 3,489 columns address their token.
@@ -66,9 +70,8 @@ func at(src string, offset int) string {
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"Invalid": 17,
-	"String":  7,
-	"Comment": 1,
+	"Invalid": 13,
+	"String":  5,
 }
 
 // TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how

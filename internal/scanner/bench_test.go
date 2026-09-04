@@ -1,13 +1,10 @@
 package scanner_test
 
 import (
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/internal/scanner"
-	"github.com/go-openapi/go-yaml/token"
 )
 
 // The benchmarks below are the regression baseline for the scanner. They
@@ -53,53 +50,25 @@ func BenchmarkScannerNextToken(b *testing.B) {
 	})
 }
 
-// BenchmarkScannerScan measures Scan, which hands back a batch at a time.
+// BenchmarkScannerTokens measures the push call, which hands each token to a
+// function instead of waiting to be asked for it.
 //
-// refparser reads a document this way and so do the tests, so it stays
-// measured; the parser does not, which is why NextToken is the one above.
-func BenchmarkScannerScan(b *testing.B) {
+// It is the other way a caller drives the scanner, and it never fills the
+// hand-over buffer: Context.addToken yields where a yield function is set and
+// appends only where none is.
+func BenchmarkScannerTokens(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
 		var tokens int64
 		for b.Loop() {
 			var s scanner.Scanner
 			s.Init(src)
 
-			for {
-				batch, err := s.Scan()
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				tokens += int64(len(batch))
+			for range s.Tokens() {
+				tokens++
 			}
 		}
 
 		reportPerToken(b, tokens)
-	})
-}
-
-// BenchmarkScannerCollect is Scan with the tokens kept, which is what a caller
-// wanting the whole stream pays.
-//
-// The difference from BenchmarkScannerScan is the slice growing, not the
-// scanner working. Keep the two apart: a change to the scanner should move one
-// and leave the other alone.
-func BenchmarkScannerCollect(b *testing.B) {
-	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
-		for b.Loop() {
-			var (
-				s      scanner.Scanner
-				tokens token.Tokens
-			)
-			s.Init(src)
-
-			for {
-				batch, err := s.Scan()
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				tokens.Add(batch...)
-			}
-		}
 	})
 }
 

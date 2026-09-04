@@ -73,8 +73,9 @@ func scannerSeq(src string) iter.Seq[*token.Token] {
 		var s scanner.Scanner
 		s.Init([]byte(src))
 
-		for tk := range s.All() {
-			if !yield(tk) {
+		for tk := range s.Tokens() {
+			held := tk
+			if !yield(&held) {
 				return
 			}
 		}

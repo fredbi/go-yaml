@@ -52,7 +52,7 @@ func assertOriginsTile(t *testing.T, src string) {
 	s.Init([]byte(src))
 
 	prev := 0
-	for tk := range s.All() {
+	for tk := range s.Tokens() {
 		end := int(tk.EndOffset())
 		require.GreaterOrEqualf(t, end, prev,
 			"a %s token ends before the one before it, at %d after %d", tk.Type, end, prev)

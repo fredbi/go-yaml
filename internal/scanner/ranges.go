@@ -34,29 +34,30 @@ func quotedRanges(text string) byteRanges {
 
 	var ranges byteRanges
 	for {
-		tokens, err := s.Scan()
-		if err != nil {
+		tk, ok := s.NextToken()
+		if !ok {
 			return ranges
 		}
-		for _, tk := range tokens {
-			switch tk.Type {
-			case token.SingleQuoteType, token.DoubleQuoteType:
-			default:
-				continue
-			}
-			start, end := int(tk.Position.Offset()), int(tk.EndOffset())
-			if start < 0 || end > len(text) || start >= end {
-				// The token's offset does not address its text, so the span
-				// cannot be trusted. Leaving it out refuses a mark that a
-				// quoted scalar may hold, which is where this started.
-				continue
-			}
-			if q := text[start]; q != '\'' && q != '"' {
-				// Same again, caught where the bounds hold but the offset
-				// addresses something other than the quote the scalar opens on.
-				continue
-			}
-			ranges = append(ranges, struct{ start, end int }{start, end})
+
+		switch tk.Type {
+		case token.SingleQuoteType, token.DoubleQuoteType:
+		default:
+			continue
 		}
+
+		start, end := int(tk.Position.Offset()), int(tk.EndOffset())
+		if start < 0 || end > len(text) || start >= end {
+			// The token's offset does not address its text, so the span cannot
+			// be trusted. Leaving it out refuses a mark that a quoted scalar
+			// may hold, which is where this started.
+			continue
+		}
+		if q := text[start]; q != '\'' && q != '"' {
+			// Same again, caught where the bounds hold but the offset addresses
+			// something other than the quote the scalar opens on.
+			continue
+		}
+
+		ranges = append(ranges, struct{ start, end int }{start, end})
 	}
 }

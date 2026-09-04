@@ -29,7 +29,7 @@ func TestEndLineMatchesCountingTheOrigin(t *testing.T) {
 		s.Init([]byte(src))
 
 		prev := 0
-		for tk := range s.All() {
+		for tk := range s.Tokens() {
 			// The text the document wrote the token as: the tokens' extents
 			// tile the source, so it runs from the end of the one before.
 			end := min(max(int(tk.EndOffset()), prev), len(src))

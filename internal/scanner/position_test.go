@@ -53,7 +53,6 @@ var positionLedger = map[string]positionDefects{
 	"spec-example-8-5-chomping-trailing-lines":                     {zeroColumns: 2},
 	"spec-example-8-8-literal-content":                             {zeroColumns: 1},
 	"spec-example-8-8-literal-content-1-3":                         {zeroColumns: 1},
-	"tabs-that-look-like-indentation/06":                           {backwards: 1},
 }
 
 // TestPositionLedger measures token positions over the whole YAML Test Suite

@@ -4,8 +4,6 @@
 package scanner_test
 
 import (
-	"errors"
-	"io"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -34,29 +32,30 @@ b: |
 c: 2
 `
 
-	scanAll := func(s *scanner.Scanner) token.Tokens {
+	readAll := func(s *scanner.Scanner) []token.Token {
 		t.Helper()
 
-		var all token.Tokens
+		var all []token.Token
 		for {
-			tks, err := s.Scan()
-			all = append(all, tks...)
-			if errors.Is(err, io.EOF) {
+			tk, ok := s.NextToken()
+			if !ok {
+				require.NoError(t, s.Err())
+
 				return all
 			}
-			require.NoError(t, err)
+			all = append(all, tk)
 		}
 	}
 
 	var s scanner.Scanner
 
 	s.Init([]byte(src))
-	first := scanAll(&s)
+	first := readAll(&s)
 	require.NotEmpty(t, first)
 
 	// The same Scanner, told to read the same source again.
 	s.Init([]byte(src))
-	second := scanAll(&s)
+	second := readAll(&s)
 
 	require.Len(t, second, len(first))
 	for i := range first {
@@ -82,10 +81,10 @@ c: 2
 }
 
 // Scan, Next, Tokens and NextToken read the same source through the same scan:
-// in a batch, one pointer at a time, pushed by value and pulled by value. Up to
-// a refusal -- past which only Scan reads on -- all four have to agree token for
-// token.
-func TestScanAndNextAgree(t *testing.T) {
+// by pulling one at a time and by being pushed them, which are the two ways a
+// caller drives the scanner. They have to agree token for token, and on the
+// refusal that ends them.
+func TestPushAndPullAgree(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
 	require.NoError(t, err)
 	require.NotEmpty(t, tests)
@@ -94,56 +93,41 @@ func TestScanAndNextAgree(t *testing.T) {
 	for _, test := range tests {
 		src := string(test.InYAML)
 
-		var batch scanner.Scanner
-		batch.Init([]byte(src))
-		tks, batchErr := batch.Scan()
-		if errors.Is(batchErr, io.EOF) {
-			// The source held no token at all, which is not a refusal.
-			batchErr = nil
-		}
-
-		var one scanner.Scanner
-		one.Init([]byte(src))
-		var pulled token.Tokens
-		for tk := range one.All() {
-			pulled = append(pulled, tk)
-		}
-
-		var byValue scanner.Scanner
-		byValue.Init([]byte(src))
+		var pushing scanner.Scanner
+		pushing.Init([]byte(src))
 		var pushed []token.Token
-		for tk := range byValue.Tokens() {
+		for tk := range pushing.Tokens() {
 			pushed = append(pushed, tk)
 		}
 
-		var oneValue scanner.Scanner
-		oneValue.Init([]byte(src))
-		var pulledValues []token.Token
+		var pulling scanner.Scanner
+		pulling.Init([]byte(src))
+		var pulled []token.Token
 		for {
-			tk, ok := oneValue.NextToken()
+			tk, ok := pulling.NextToken()
 			if !ok {
 				break
 			}
-			pulledValues = append(pulledValues, tk)
+			pulled = append(pulled, tk)
 		}
 
-		require.Lenf(t, pulled, len(tks), "%s: Next yielded %d tokens, Scan %d", test.Name, len(pulled), len(tks))
-		require.Lenf(t, pushed, len(tks), "%s: Tokens yielded %d tokens, Scan %d", test.Name, len(pushed), len(tks))
-		require.Lenf(t, pulledValues, len(tks), "%s: NextToken yielded %d tokens, Scan %d", test.Name, len(pulledValues), len(tks))
-		for i := range tks {
-			assert.Equalf(t, *tks[i], *pulled[i], "%s: token %d differs from Next", test.Name, i)
-			assert.Equalf(t, *tks[i], pushed[i], "%s: token %d differs from Tokens", test.Name, i)
-			assert.Equalf(t, *tks[i], pulledValues[i], "%s: token %d differs from NextToken", test.Name, i)
+		require.Lenf(t, pushed, len(pulled),
+			"%s: Tokens yielded %d, NextToken %d", test.Name, len(pushed), len(pulled))
+		for i := range pulled {
+			assert.Equalf(t, pulled[i], pushed[i], "%s: token %d differs", test.Name, i)
 		}
-		if batchErr != nil {
-			require.EqualErrorf(t, one.Err(), batchErr.Error(), "%s: the refusals differ", test.Name)
-		} else {
-			require.NoErrorf(t, one.Err(), "%s: Next refused a source Scan accepted", test.Name)
+
+		switch {
+		case pulling.Err() == nil:
+			assert.NoErrorf(t, pushing.Err(), "%s: Tokens refused the document and NextToken did not", test.Name)
+		default:
+			require.EqualErrorf(t, pushing.Err(), pulling.Err().Error(), "%s: the refusals differ", test.Name)
 		}
-		compared += len(tks)
+
+		compared++
 	}
 
-	t.Logf("compared %d tokens over %d cases", compared, len(tests))
+	require.NotZero(t, compared)
 }
 
 // Breaking out of Tokens leaves the scanner on the token after the one the loop

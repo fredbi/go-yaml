@@ -18,37 +18,6 @@ import (
 // block for its address to hold. Tokens and NextToken hand over values, so the
 // scanner reuses one block whatever the document's length.
 
-func BenchmarkScanBatch(b *testing.B) {
-	forEachWorkload(b, func(b *testing.B, src []byte) {
-		text := string(src)
-		for b.Loop() {
-			var s scanner.Scanner
-			s.Init([]byte(text))
-			for {
-				tks, err := s.Scan()
-				if err != nil || len(tks) == 0 {
-					break
-				}
-			}
-		}
-	})
-}
-
-func BenchmarkScanNext(b *testing.B) {
-	forEachWorkload(b, func(b *testing.B, src []byte) {
-		text := string(src)
-		for b.Loop() {
-			var s scanner.Scanner
-			s.Init([]byte(text))
-			for {
-				if _, ok := s.Next(); !ok {
-					break
-				}
-			}
-		}
-	})
-}
-
 func BenchmarkScanNextToken(b *testing.B) {
 	forEachWorkload(b, func(b *testing.B, src []byte) {
 		text := string(src)
