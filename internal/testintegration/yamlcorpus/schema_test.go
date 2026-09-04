@@ -22,22 +22,28 @@ import (
 // position visible and hold it still, and a table nobody re-measures does
 // neither.
 //
-// Read down the column and the position is a hybrid: 1.2 for booleans,
-// sexagesimals and timestamps; 1.1 for a leading zero, for underscores and for
-// binary; and stricter than either for "1e3", which core and JSON both call a
-// float. That is worth knowing before choosing this library to read somebody
-// else's documents, and it is not written down anywhere else.
+// Read down the column and the position is the YAML 1.2 core schema, whole.
+// It was a hybrid until 2026-09-04 -- 1.2 for booleans, sexagesimals and
+// timestamps, 1.1 for a leading zero, for underscores and for binary, and
+// stricter than either for "1e3" -- because it fell out of a
+// normalize-then-strconv routine rather than out of a reading of any schema.
+//
+// YAML 1.1 is not gone, it is a schema the scanner can be told to read
+// (token.Schema11). What is missing is the parser end: the "%YAML 1.1"
+// directive and the option have to reach Scanner.SetSchema.
 var resolved = map[string]string{
 	// 1.2, and not 1.1: these are strings here, where YAML 1.1 read booleans.
 	"yes": "string", "no": "string", "on": "string", "off": "string",
 	"y": "string", "Yes": "string",
 
-	// 1.1, and not 1.2. "0777" is the load-bearing one: it comes back 511 and
-	// is written back out as 511, so a document saying 0777 does not say it
-	// any more once this library has been through it.
-	"0777":   "uint64",
-	"1_000":  "uint64",
-	"0b1010": "uint64",
+	// A leading zero opens a decimal number, where 1.1 read octal. "0777" is
+	// the load-bearing one -- see TestALeadingZeroKeepsItsQuantity.
+	"0777": "uint64",
+
+	// The "_" separator and the "0b" prefix are 1.1's and the core schema has
+	// neither, so these are text now where they were numbers.
+	"1_000":  "string",
+	"0b1010": "string",
 
 	// 1.2 again, where 1.1 read integers.
 	"1:30":     "string",
@@ -47,10 +53,10 @@ var resolved = map[string]string{
 	"0x1A": "uint64",
 	"0o17": "uint64",
 
-	// Stricter than core and than JSON, both of which make this a float. Into
-	// a float64 field it converts; it is only in an untyped read that it stays
-	// text, which is the path anything schema-driven takes.
-	"1e3": "string",
+	// Core: an exponent needs no fraction in front of it. This was a string
+	// until the grammar was written down, which is the one place the old
+	// position was stricter than every schema rather than looser.
+	"1e3": "float64",
 
 	// Core.
 	".inf": "float64", "-.Inf": "float64", ".nan": "float64",
@@ -81,20 +87,26 @@ func TestTheSchemaPositionIsWhatItWas(t *testing.T) {
 	}
 }
 
-// TestALeadingZeroChangesTheNumber is the one disagreement worth its own test.
+// TestALeadingZeroKeepsItsQuantity is the one entry worth its own test.
 //
-// Every other entry above changes a type. This one changes a *quantity*, and
-// then writes the changed quantity back: 0777 in, 511 out. A file mode written
-// the way file modes are written does not survive a round trip through this
-// library, and neither a grammar nor a verdict corpus can see it happen.
-func TestALeadingZeroChangesTheNumber(t *testing.T) {
+// Every other entry above records a type. This one used to record a changed
+// *quantity*, written back changed: 0777 in, 511 out, because a leading zero
+// opened an octal number as it does in YAML 1.1. A file mode written the way
+// file modes are written did not survive a round trip, and neither a grammar
+// nor a verdict corpus could see it happen.
+//
+// The core schema reads "[-+]? [0-9]+", so the quantity now survives. The
+// spelling does not: 0777 comes back as 777, which is the same number said
+// plainly. A reader who meant octal 511 wants YAML 1.1, and that is a schema
+// this library can be told to read rather than a defect to fix here.
+func TestALeadingZeroKeepsItsQuantity(t *testing.T) {
 	var v any
 	if err := yaml.Unmarshal([]byte("mode: 0777\n"), &v); err != nil {
 		t.Fatal(err)
 	}
 
 	got := v.(map[string]any)["mode"]
-	if fmt.Sprintf("%v", got) != "511" {
+	if fmt.Sprintf("%v", got) != "777" {
 		t.Fatalf("0777 now reads as %v, so this test and the ledger both need rewriting", got)
 	}
 
@@ -103,8 +115,8 @@ func TestALeadingZeroChangesTheNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(out) != "mode: 511\n" {
-		t.Errorf("0777 round-trips to %q, and was measured as \"mode: 511\\n\"", string(out))
+	if string(out) != "mode: 777\n" {
+		t.Errorf("0777 round-trips to %q, and was measured as \"mode: 777\\n\"", string(out))
 	}
 }
 

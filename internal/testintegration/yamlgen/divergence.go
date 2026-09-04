@@ -180,27 +180,6 @@ var Ledger = []Divergence{
 	},
 }
 
-// writesFolded reports whether emitting v in st writes a folded block scalar,
-// and writesOpenEntry whether it writes a block entry whose `-` or `key:` is
-// the whole line.
-//
-// Both emit the document a second time and read a counter off the emitter. That
-// costs one extra emit per ledger check and buys a predicate that cannot drift
-// from the emitter it describes.
-func writesFolded(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	return e.folded > 0
-}
-
-func writesOpenEntry(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	return e.openEntries > 0
-}
-
 // writesBrokenTaggedAnchor reports whether emitting v in st writes a tag before
 // an anchor in a way this library gets wrong.
 //

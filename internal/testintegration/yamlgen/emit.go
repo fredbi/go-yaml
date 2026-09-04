@@ -55,6 +55,11 @@ type emitter struct {
 	// describes.
 
 	// folded counts the folded block scalars written.
+	//
+	// It and openEntries are the two counters no divergence predicate reads
+	// any more: writesFolded and writesOpenEntry stood in divergence.go until
+	// the divergences they gated were fixed. Counting costs an increment, and
+	// writing a predicate back against them is two lines.
 	folded int
 	// openEntries counts the block entries whose value does not start on the
 	// entry's own line -- an empty node, or a collection beginning below.
