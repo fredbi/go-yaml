@@ -814,6 +814,19 @@ var tokenBlockSizes = [...]int{32, 64, 128, 256}
 // appendToken writes tk into the buffer, taking a new block where the current
 // one is full.
 func (c *Context) appendToken(tk token.Token) {
+	if probe.Enabled {
+		// How many tokens the scanner holds at once, and how much room the
+		// blocks have taken. rewind empties them without giving the room back,
+		// so the high mark is what a single scan step ever produced.
+		probe.Count("buffer.appends", 1)
+		probe.Max("buffer.heldAtOnce", int64(c.written-c.read+1))
+		var room int
+		for _, b := range c.blocks {
+			room += cap(b)
+		}
+		probe.Max("buffer.roomTaken", int64(room))
+	}
+
 	if c.writeBlock == len(c.blocks) {
 		size := tokenBlockSizes[min(len(c.blocks), len(tokenBlockSizes)-1)]
 		c.blocks = append(c.blocks, make([]token.Token, 0, size))

@@ -17,6 +17,9 @@ func Count(_ string, _ int64) {}
 // says what it saw without a passing run paying to describe itself.
 func Check(_ string, _ bool, _ func() string) {}
 
+// Max records the largest value seen for name.
+func Max(_ string, _ int64) {}
+
 // Counts returns what [Count] recorded, by name.
 func Counts() map[string]int64 { return nil }
 

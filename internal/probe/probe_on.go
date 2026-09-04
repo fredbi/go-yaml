@@ -43,6 +43,15 @@ func Check(name string, ok bool, detail func() string) {
 	checks[name] = inv
 }
 
+// Max records the largest value seen for name.
+func Max(name string, n int64) {
+	mx.Lock()
+	if n > counts[name] {
+		counts[name] = n
+	}
+	mx.Unlock()
+}
+
 // Counts returns what Count recorded, by name.
 func Counts() map[string]int64 {
 	mx.Lock()
