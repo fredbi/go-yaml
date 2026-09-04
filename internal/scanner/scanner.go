@@ -454,7 +454,9 @@ func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
 
 func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	if s.hasSavedPos {
-		tk, ok := ctx.bufferedToken(s.savedPos)
+		// The scanner went back to a position it saved, so the text may have
+		// run on to another line since. The origin says where it ends.
+		tk, ok := ctx.bufferedToken(s.savedPos, 0)
 		s.hasSavedPos = false
 
 		return tk, ok
@@ -480,9 +482,17 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	}
 	s.lastIndentLevel = level
 
+	// The token is cut where the scanner stands, so its text ends on the line
+	// it starts on -- except in a block scalar, whose value carries its own
+	// line breaks and whose end the origin has to give.
+	endLine := int32(line)
+	if ctx.isMultiLine() {
+		endLine = 0
+	}
+
 	return ctx.bufferedToken(token.At(
 		int32(line), int32(column), int32(ctx.idx-len(ctx.buf)), int32(s.indentNum),
-	))
+	), endLine)
 }
 
 // progressColumn advances by num characters. The column counts characters and

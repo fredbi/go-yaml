@@ -71,6 +71,14 @@ var stateLedger = map[string]int64{
 	// The indent level a token was given and the level the scanner stands at
 	// part company where a block opens: 3,000 of 76,279. Not a pair.
 	"indent.lastIndentLevel==indentLevel": 3000,
+
+	// bufferedToken assembles a token's extent from what the scanner already
+	// holds -- where the origin began, how long it is, and the line the text
+	// ends on -- instead of reading the origin back to work it out. This is
+	// that extent against token.MeasureOrigin's, which is what token.Make
+	// used. Nothing may raise it: a disagreement is a token pointing at the
+	// wrong stretch of source.
+	"token.extentMatchesTheOrigin": 0,
 }
 
 // TestStateLedger holds the scanner's state pairs to what they were measured at.

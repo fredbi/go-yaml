@@ -10,7 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 )
 
-// The four helpers measureOrigin replaced. Every Make call ran all of them, so
+// The four helpers MeasureOrigin replaced. Every Make call ran all of them, so
 // each walked the origin over again -- three times over the leading blanks
 // alone. They are kept here as the reference the fused version is held to.
 
@@ -85,7 +85,7 @@ func extentOfBlanks[T Text](org T, pos Position) int32 {
 	return pos.Offset() + int32(len(org)-i)
 }
 
-// TestMeasureOriginMatchesTheHelpersItReplaced runs measureOrigin against the
+// TestMeasureOriginMatchesTheHelpersItReplaced runs MeasureOrigin against the
 // four helpers above, over every origin of up to five characters drawn from a
 // space, a tab, a CR, an LF and a letter -- 3,906 of them, which covers a lone
 // CR, a CR LF, a break inside the text, an origin that is nothing but blanks,
@@ -126,14 +126,12 @@ func TestMeasureOriginMatchesTheHelpersItReplaced(t *testing.T) {
 		wantEnd := extentOfBlanks(org, pos)
 		wantSpans := uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift
 
-		end, spans := measureOrigin(org, pos)
-		assert.Equalf(t, wantEnd, end, "end offset for %q", org)
-		assert.Equalf(t, wantSpans, spans, "spans for %q: end line %d, trailing breaks %d",
+		ext := MeasureOrigin(org, pos)
+		assert.Equalf(t, wantEnd, ext.End, "end offset for %q", org)
+		assert.Equalf(t, wantSpans, ext.spans(), "spans for %q: end line %d, trailing breaks %d",
 			org, breaksIn(org), trailingBreaksIn(org))
 
 		// The []byte instantiation reads the same origin the same way.
-		endBytes, spansBytes := measureOrigin([]byte(org), pos)
-		assert.Equalf(t, end, endBytes, "end offset for []byte(%q)", org)
-		assert.Equalf(t, spans, spansBytes, "spans for []byte(%q)", org)
+		assert.Equalf(t, ext, MeasureOrigin([]byte(org), pos), "extent for []byte(%q)", org)
 	}
 }

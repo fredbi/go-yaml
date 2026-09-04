@@ -665,7 +665,7 @@ func (c *Context) bufferedSrc() []byte {
 // The token is returned by value: a caller that hands it straight to addToken
 // keeps it off the heap, since neither addToken nor setTokenTypeByPrevTag holds
 // on to it.
-func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
+func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token, bool) {
 	if c.idx == 0 {
 		return token.Token{}, false
 	}
@@ -712,19 +712,53 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		}
 	}
 
-	var tk token.Token
-	if c.isMultiLine() {
-		tk = token.MakeString(value, origin, pos)
+	// How far the token reaches. The scanner has read every byte of the origin
+	// to get here, so it need not read them again: where the origin began plus
+	// how long it is closes the token, and endLine says which line the text
+	// ends on.
+	//
+	// endLine is 0 where the caller cannot say -- a block scalar keeps its own
+	// line breaks, and a plain scalar cut at a remembered position may have run
+	// on since. A cut origin no longer stands in the source as a run. Those
+	// read the origin back through token.MeasureOrigin.
+	var ext token.Extent
+	if endLine == 0 || c.originCut {
+		ext = token.MeasureOrigin(origin, pos)
 	} else {
-		tk = token.Make(value, origin, pos)
+		// Only the blanks the origin ends with are read. The caller knows the
+		// line the text ends on, so the breaks inside it need not be counted --
+		// and for the tokens that reach here there are none.
+		ext.Trailing = token.TrailingBreaksIn(origin)
+		ext.EndLine = endLine
 	}
 	if originAt >= 0 {
-		// The origin buffer holds the source's own bytes, so where it was found
-		// plus how long it is closes the token exactly, whatever the offset
-		// points at inside it. Counting forward from the offset instead comes
-		// up short wherever a block scalar's indentation indicator leaves some
-		// of the leading spaces in the content.
-		tk.SetEndOffset(int32(originAt + len(c.origin())))
+		// The origin holds the source's own bytes, so where it was found plus
+		// how long it is closes the token exactly, whatever the offset points
+		// at inside it. Counting forward from the offset instead comes up short
+		// wherever a block scalar's indentation indicator leaves some of the
+		// leading spaces in the content.
+		ext.End = int32(originAt + len(origin))
+	}
+
+	// A quoted or folded scalar is a string whatever it spells. Only text
+	// written plainly is read for a keyword or a number.
+	typ := token.StringType
+	if !c.isMultiLine() {
+		typ = token.ScalarType(value)
+	}
+
+	tk := token.Assemble(typ, value, pos, ext)
+
+	if probe.Enabled {
+		// The extent the scanner worked out against the one read back from the
+		// origin, which is what token.Make would have used.
+		want := token.MeasureOrigin(origin, pos)
+		if originAt >= 0 {
+			want.End = int32(originAt + len(origin))
+		}
+		probe.Check("token.extentMatchesTheOrigin", ext == want, func() string {
+			return fmt.Sprintf("%s %q: scanner says %+v, the origin says %+v", typ, value, ext, want)
+		})
 	}
 
 	c.setTokenTypeByPrevTag(&tk)
