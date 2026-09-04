@@ -862,12 +862,14 @@ func New(value string, org string, pos Position) *Token {
 // on the heap; a caller holding its tokens in a slice of values keeps this one
 // out of the heap altogether, which is why New is thin enough to inline.
 func Make[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	tk := Token{
 		Type:     StringType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 
 	if typ, ok := reservedKeywordTypes[value]; ok {
@@ -1082,12 +1084,14 @@ func String(value string, org string, pos Position) *Token {
 
 // MakeString builds a string token without settling where it lives.
 func MakeString[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     StringType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1102,12 +1106,14 @@ func SequenceEntry(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeSequenceEntry[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     SequenceEntryType,
 		Value:    string(SequenceEntryCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1162,12 +1168,14 @@ func CollectEntry(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeCollectEntry[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     CollectEntryType,
 		Value:    string(CollectEntryCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1182,12 +1190,14 @@ func SequenceStart(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeSequenceStart[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     SequenceStartType,
 		Value:    string(SequenceStartCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1202,12 +1212,14 @@ func SequenceEnd(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeSequenceEnd[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     SequenceEndType,
 		Value:    string(SequenceEndCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1222,12 +1234,14 @@ func MappingStart(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeMappingStart[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     MappingStartType,
 		Value:    string(MappingStartCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1242,12 +1256,14 @@ func MappingEnd(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeMappingEnd[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     MappingEndType,
 		Value:    string(MappingEndCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1263,12 +1279,14 @@ func Comment(value string, org string, pos Position) *Token {
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
 func MakeComment[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     CommentType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1283,12 +1301,14 @@ func Anchor(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeAnchor[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     AnchorType,
 		Value:    string(AnchorCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1303,12 +1323,14 @@ func Alias(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeAlias[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     AliasType,
 		Value:    string(AliasCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1323,12 +1345,14 @@ func Tag(value string, org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeTag[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     TagType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1344,12 +1368,14 @@ func Literal(value string, org string, pos Position) *Token {
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
 func MakeLiteral[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     LiteralType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1365,12 +1391,14 @@ func Folded(value string, org string, pos Position) *Token {
 // caller that reaches for the pointer form pays a heap allocation for a value
 // that is read once and thrown away.
 func MakeFolded[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     FoldedType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1385,12 +1413,14 @@ func SingleQuote(value string, org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeSingleQuote[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     SingleQuoteType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1405,12 +1435,14 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeDoubleQuote[T Text](value string, org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     DoubleQuoteType,
 		Value:    value,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1425,12 +1457,14 @@ func Directive(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeDirective[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     DirectiveType,
 		Value:    string(DirectiveCharacter),
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1456,12 +1490,14 @@ func MergeKey(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeMergeKey[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     MergeKeyType,
 		Value:    "<<",
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1476,12 +1512,14 @@ func DocumentHeader(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeDocumentHeader[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     DocumentHeaderType,
 		Value:    "---",
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1496,12 +1534,14 @@ func DocumentEnd(org string, pos Position) *Token {
 // A caller handing it straight to a scanner wants this one: the pointer form
 // puts the token on the heap for a value that is copied and dropped.
 func MakeDocumentEnd[T Text](org T, pos Position) Token {
+	end, spans := measureOrigin(org, pos)
+
 	return Token{
 		Type:     DocumentEndType,
 		Value:    "...",
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1510,12 +1550,14 @@ func MakeDocumentEnd[T Text](org T, pos Position) Token {
 // What is wrong with it belongs to the error the scanner reports, not to the
 // token: a message on every token costs every token the room for one.
 func Invalid(org string, pos Position) *Token {
+	end, spans := measureOrigin(org, pos)
+
 	return &Token{
 		Type:     InvalidType,
 		Value:    org,
-		end:      extentOf(org, pos),
+		end:      end,
 		Position: pos,
-		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
+		spans:    spans,
 	}
 }
 
@@ -1544,45 +1586,8 @@ func DetectLineBreakCharacter(src string) string {
 // will keep on the stack is an allocation for every token read.
 type Text interface{ ~string | ~[]byte }
 
-// trimBlanks returns org without the whitespace and line breaks around it.
-func trimBlanks[T Text](org T) T {
-	i, j := 0, len(org)
-	for i < j && isBlank(org[i]) {
-		i++
-	}
-	for j > i && isBlank(org[j-1]) {
-		j--
-	}
-
-	return org[i:j]
-}
-
 // isBlank reports whether c is whitespace or part of a line break.
 func isBlank(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
-
-// breaksIn counts the line breaks org holds, ignoring the whitespace around it.
-//
-// CR LF and a lone CR each end one line, as they do for the scanner: counting
-// only "\n" would leave a document written with carriage returns reporting that
-// none of its tokens reaches past the line it starts on.
-func breaksIn[T Text](org T) int {
-	body := trimBlanks(org)
-
-	var n int
-	for i := 0; i < len(body); i++ {
-		switch body[i] {
-		case '\n':
-			n++
-		case '\r':
-			n++
-			if i+1 < len(body) && body[i+1] == '\n' {
-				i++
-			}
-		}
-	}
-
-	return n
-}
 
 // The token's packed spans, from the low bit: EndLine in 32, CommentBreaksAbove
 // in 16, TrailingBreaks in 15, BlankLineAbove in 1.
@@ -1680,37 +1685,59 @@ func (t *Token) SetBlankLineAbove(blank bool) {
 	}
 }
 
-// trailingBreaksIn counts the line breaks in the whitespace org ends with.
-func trailingBreaksIn[T Text](org T) int {
-	i := len(org)
-	for i > 0 {
-		switch org[i-1] {
-		case ' ', '\t', '\r', '\n':
-			i--
-		default:
-			return breaksInRaw(org[i:])
-		}
+// measureOrigin reads a token's origin once and returns both of the numbers
+// that used to be worked out from it separately: the offset just past the
+// token's text, and its packed spans.
+//
+// org is everything the scanner read since the previous token -- the blanks in
+// front of the token, its text, and the blanks after it. Three walks over that
+// are enough: forward over the leading blanks, backward over the trailing ones
+// counting their breaks, and once across the text between them. extentOf,
+// breaksIn and trailingBreaksIn together walked it six times, three of those
+// over the same leading blank run, and every Make call paid for all six.
+func measureOrigin[T Text](org T, pos Position) (int32, uint64) {
+	i := 0
+	for i < len(org) && isBlank(org[i]) {
+		i++
 	}
 
-	return breaksInRaw(org)
-}
-
-// breaksInRaw counts CR LF, CR and LF as one break each, without trimming.
-func breaksInRaw[T Text](s T) int {
-	var n int
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
+	// The blank run org ends with. It is measured from the end of the whole
+	// origin rather than from what the leading walk left, so an origin that is
+	// nothing but blanks counts every break in it as trailing -- which is what
+	// trailingBreaksIn did.
+	tail := len(org)
+	var trailing int
+	for tail > 0 && isBlank(org[tail-1]) {
+		tail--
+		switch org[tail] {
 		case '\n':
-			n++
+			trailing++
 		case '\r':
-			n++
-			if i+1 < len(s) && s[i+1] == '\n' {
-				i++
+			// Walking backwards reaches the '\n' of a CR LF first, so the '\r'
+			// in front of it has already been counted.
+			if tail+1 == len(org) || org[tail+1] != '\n' {
+				trailing++
 			}
 		}
 	}
 
-	return n
+	var breaks int
+	for k := i; k < max(i, tail); k++ {
+		switch org[k] {
+		case '\n':
+			breaks++
+		case '\r':
+			breaks++
+			if k+1 < tail && org[k+1] == '\n' {
+				k++
+			}
+		}
+	}
+
+	end := pos.Offset() + int32(len(org)-i)
+	spans := uint64(pos.Line+int32(breaks)) | uint64(trailing)&trailingMask<<trailingShift
+
+	return end, spans
 }
 
 // extentOf is the offset just past a token's text, given the source it was
