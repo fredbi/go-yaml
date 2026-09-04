@@ -74,7 +74,14 @@ type Scanner struct {
 	// ctx holds the cursor into the source and the tokens read but not yet
 	// taken. It lasts as long as the source does, so a scan can stop on a token
 	// and go on from there.
-	ctx *Context
+	//
+	// Held by value, and Init resets it. It used to come from a sync.Pool and
+	// go back on the next Init -- which meant it went back only where the same
+	// Scanner read a second document, and nothing returns one when a scan is
+	// simply finished. Over ten Unmarshal calls the pool was asked ten times,
+	// built ten Contexts and was given none back: the cost of a Get and a Put
+	// around the allocation it was there to save.
+	ctx Context
 	// err is what stopped Next. Once set it stays set: the scanner serves the
 	// tokens it had already read and then nothing more.
 	err error
@@ -117,10 +124,6 @@ func (s *Scanner) Err() error {
 // not show significant perf differences.
 func (s *Scanner) Tokens() iter.Seq[token.Token] {
 	return func(yield func(token.Token) bool) {
-		if s.ctx == nil {
-			return
-		}
-
 		// Whatever NextToken left buffered comes first.
 		for {
 			tk, ok := s.ctx.popValue()
@@ -152,7 +155,7 @@ func (s *Scanner) Tokens() iter.Seq[token.Token] {
 			if !s.ctx.next() {
 				return
 			}
-			if err := s.scan(s.ctx); err != nil {
+			if err := s.scan(&s.ctx); err != nil {
 				s.stop(err)
 
 				continue
@@ -173,10 +176,6 @@ func (s *Scanner) Tokens() iter.Seq[token.Token] {
 // whatever the document's length. A caller that wants a token to outlive the
 // next call keeps its own copy -- which it has, since the token is a value.
 func (s *Scanner) NextToken() (token.Token, bool) {
-	if s.ctx == nil {
-		return token.Token{}, false
-	}
-
 	for {
 		if tk, ok := s.ctx.popValue(); ok {
 			return tk, true
@@ -193,7 +192,7 @@ func (s *Scanner) NextToken() (token.Token, bool) {
 		if !s.ctx.next() {
 			return token.Token{}, false
 		}
-		if err := s.scan(s.ctx); err != nil {
+		if err := s.scan(&s.ctx); err != nil {
 			s.stop(err)
 
 			continue
@@ -613,10 +612,8 @@ func (s *Scanner) reset(text string) {
 	s.deepIndent = false
 	s.err = nil
 	s.lookback.Reset()
-	if s.ctx != nil {
-		s.ctx.release()
-	}
-	s.ctx = newContext(src, &s.lookback)
+	s.ctx.reset(src)
+	s.ctx.lookback = &s.lookback
 	s.clearState()
 }
 

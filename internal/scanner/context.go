@@ -77,26 +77,6 @@ type Context struct {
 	lookback *token.Lookback
 }
 
-func createContext() *Context {
-	return &Context{
-		idx: 0,
-	}
-}
-
-func newContext(src string, lookback *token.Lookback) *Context {
-	ctx, _ := ctxPool.Get().(*Context)
-	ctx.reset(src)
-	ctx.lookback = lookback
-	return ctx
-}
-
-func (c *Context) release() {
-	// The lookback belongs to the Scanner. Dropping it here keeps a pooled
-	// Context from holding a Scanner that is done with.
-	c.lookback = nil
-	ctxPool.Put(c)
-}
-
 func (c *Context) clear() {
 	c.resetBuffer()
 	c.mstate = nil
@@ -163,17 +143,12 @@ func (c *Context) reset(src string) {
 	c.src = src
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
 	// The first block is kept and emptied rather than dropped. It is the only
-	// one a NextToken run ever fills -- rewind gives it back between steps, and
-	// the most the scanner holds at once is two tokens -- so keeping it is one
+	// one a scan ever fills -- rewind gives it back between steps, and the most
+	// the scanner holds at once is two tokens -- so keeping it is one
 	// allocation the next document does not make.
 	//
-	// The rest go. Scan reads a whole document into the blocks without ever
-	// rewinding them, and a Context comes from a pool: keeping what a 293,000
-	// token document needed would hold 16 MB for every document after it.
-	//
-	// A caller holding a *token.Token from Next or All across an Init reads the
-	// next document through it. That pointer was never good for longer than the
-	// next token anyway: rewind reuses the blocks within a single run.
+	// The rest go, so that a Scanner reused on a second document does not carry
+	// what the first one needed.
 	if len(c.blocks) > 1 {
 		c.blocks = c.blocks[:1]
 	}
