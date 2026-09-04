@@ -3,6 +3,7 @@ package analysis
 import (
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"testing"
 	"time"
@@ -23,6 +24,8 @@ import (
 //
 // Reports rather than asserts, so it stays informative on any machine.
 func TestFlatMapScaling(t *testing.T) {
+	skipTimings(t)
+
 	t.Logf("%-8s %-9s %-14s %-11s %-14s %-11s %s",
 		"keys", "size", "go-yaml", "per key", "yaml.v3", "per key", "ratio")
 
@@ -54,6 +57,8 @@ func TestFlatMapScaling(t *testing.T) {
 // super-linear parseMap was located, and the split is kept so the next one is
 // found the same way.
 func TestStageAttribution(t *testing.T) {
+	skipTimings(t)
+
 	t.Logf("%-8s %-24s %-24s %s  (time, and per key)",
 		"keys", "Scan", "New (scan+group)", "Parse (+tree)")
 
@@ -92,6 +97,8 @@ func TestStageAttribution(t *testing.T) {
 // document takes. Relevant to anything parsing untrusted YAML, since the cost grows with the
 // square of the key count while a depth guard bounds only nesting.
 func TestWideDocumentCost(t *testing.T) {
+	skipTimings(t)
+
 	if testing.Short() {
 		t.Skip("slow by construction: that is the finding")
 	}
@@ -113,6 +120,8 @@ func TestWideDocumentCost(t *testing.T) {
 // Before parseMap parsed sibling entries in a loop, a 4x larger document took ~10x longer and
 // this failed outright.
 func TestParseScalesLinearly(t *testing.T) {
+	skipTimings(t)
+
 	const small, large = 4000, 16000 // a 4x increase in size
 
 	s := timeIt(t, func() { mustParse(t, flatMap(small)) })
@@ -174,5 +183,25 @@ func size(n int) string {
 		return fmt.Sprintf("%d KB", n/(1<<10))
 	default:
 		return fmt.Sprintf("%d B", n)
+	}
+}
+
+// skipTimings skips a test that measures wall time.
+//
+// A ratio of two clock readings is not a thing to gate on: the machine's own
+// variance swamps the signal, and these failed about one run in three while
+// nothing was wrong. They stay because they are useful to read, and are run by
+// asking:
+//
+//	YAML_TIMINGS=1 go test -run TestParseScalesLinearly ./internal/analysis/
+//
+// The replacement is a guard behind a build tag that reads the parser's own
+// counters -- tokens held, entries walked, allocations -- rather than the
+// clock. A count does not vary with the machine.
+func skipTimings(t *testing.T) {
+	t.Helper()
+
+	if os.Getenv("YAML_TIMINGS") == "" {
+		t.Skip("measures wall time; set YAML_TIMINGS=1 to run it")
 	}
 }

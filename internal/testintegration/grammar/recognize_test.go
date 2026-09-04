@@ -283,6 +283,8 @@ var throughputCases = []string{
 // It reports rather than asserts. The number is the input to a decision, not a
 // property to defend.
 func TestThroughput(t *testing.T) {
+	skipTimings(t)
+
 	const runs = 2000
 
 	measure := func(match func(string) grammar.Result) (time.Duration, int64, int64) {
