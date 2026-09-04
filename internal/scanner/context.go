@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/token"
@@ -16,7 +17,11 @@ type Context struct {
 	size            int
 	notSpaceCharPos int
 	src             string
-	buf             []byte
+	// raw is src's own bytes, for the word-at-a-time scans in
+	// [github.com/go-openapi/go-yaml/internal/swar]. A string cannot be loaded
+	// eight bytes at a time without unsafe, and Init was handed the slice.
+	raw []byte
+	buf []byte
 	// originStart and originEnd bracket the current token's text in src. See
 	// [Context.origin].
 	originStart int
@@ -156,6 +161,7 @@ func (c *Context) reset(src string) {
 	c.originStart, c.originEnd = 0, 0
 	c.size = len(src)
 	c.src = src
+	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
 	// The blocks are dropped rather than reused: a caller may still hold tokens
 	// from the source just read, and those stand in the blocks themselves.
 	c.blocks = nil
@@ -418,6 +424,19 @@ func (c *Context) addOriginBuf(r rune) {
 	}
 
 	c.addOriginWide(r)
+}
+
+// skipOrigin records that the n bytes at the cursor were read, as n calls to
+// [Context.addOriginBuf] would. The caller has established they are ASCII, so
+// each is one character and one byte.
+func (c *Context) skipOrigin(n int) {
+	if c.originCut {
+		c.originCopy = append(c.originCopy, c.src[c.idx:c.idx+n]...)
+
+		return
+	}
+
+	c.originEnd += n
 }
 
 // addOriginWide records a character that the window cannot count in one byte,

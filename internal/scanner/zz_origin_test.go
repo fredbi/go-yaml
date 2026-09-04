@@ -68,7 +68,7 @@ func assertOriginsTile(t *testing.T, src string) {
 
 // workloadDocs reads the workloads, which are large enough to hold the shapes a
 // handwritten case does not think of.
-func workloadDocs(t *testing.T) []string {
+func workloadDocs(t testing.TB) []string {
 	t.Helper()
 
 	const dir = "../analysis/workloads/testdata"

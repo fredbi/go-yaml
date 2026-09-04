@@ -34,6 +34,11 @@ type Scanner struct {
 	indentNum int
 	// prevLineIndentNum indicates the number of spaces used for indentation at previous line.
 	prevLineIndentNum int
+	// deepIndent says a line of this document has opened with indentEager
+	// spaces or more. Indentation runs together: a document that has indented
+	// once indents again, and the next line's run is read eight bytes at a time
+	// from its first space rather than probed for.
+	deepIndent bool
 	// indentLevel indicates the level of indent depth. This value does not match the column value.
 	indentLevel       int
 	isFirstCharAtLine bool
@@ -484,6 +489,17 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 // progressColumn advances by num characters. The column counts characters and
 // the offset counts the bytes those characters take, so the two advance by
 // different amounts wherever the source is not ASCII.
+// progressASCII steps over num bytes the caller has established are num
+// characters, each standing for itself.
+//
+// It is progressColumn without the loop: where every byte is a character, the
+// column, the offset and the cursor advance by the same count and none of them
+// has to be worked out a character at a time.
+func (s *Scanner) progressASCII(ctx *Context, num int) {
+	s.column += num
+	ctx.idx += num
+}
+
 func (s *Scanner) progressColumn(ctx *Context, num int) {
 	s.column += num
 	s.progress(ctx, num)
@@ -495,6 +511,9 @@ func (s *Scanner) progressOnly(ctx *Context, num int) {
 
 func (s *Scanner) progressLine(ctx *Context) {
 	s.prevLineIndentNum = s.indentNum
+	if s.indentNum >= indentEager {
+		s.deepIndent = true
+	}
 	s.column = 1
 	s.line++
 	s.indentNum = 0
@@ -591,6 +610,7 @@ func (s *Scanner) reset(text string) {
 	s.line = 1
 	s.column = 1
 	s.isFirstCharAtLine = true
+	s.deepIndent = false
 	s.err = nil
 	s.lookback.Reset()
 	if s.ctx != nil {

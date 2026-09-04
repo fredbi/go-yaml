@@ -48,15 +48,23 @@ var stateLedger = map[string]int64{
 	// token wrote. Fixed; nothing may raise this.
 	"buf.notSpaceCharPos<=len(buf)": 0,
 
-	// A tab in the indentation is counted by the column and not by indentNum,
-	// which is what indentNum means. Every case is this one.
-	"indent.indentNum==column-1/tab": 3,
-
-	// A quoted scalar that spans a line break: the quote scanners call
-	// progressLine, which says the next character opens a line, and then read
-	// the rest of the scalar with progressColumn, which never reaches
-	// updateIndent. The column reaches 10 while the scanner still believes it
-	// is at the start of a line and the indentation is still 0.
+	// One cause, in two shapes: isFirstCharAtLine is still true after characters
+	// have been read on the line by a path that does not reach updateIndent's
+	// space branch, so the column has moved and the indentation has not.
+	//
+	// The three with indentHasTab are a tab inside a block scalar's content,
+	// past the indentation the header set -- which is content and not
+	// indentation, YAML having none of the latter but spaces (s-indent(n) is
+	// s-space x n, and a tab there is refused). updateIndent runs for every
+	// character the main loop reads, block scalar content included, so it sets
+	// indentHasTab for a tab that indents nothing. Harmless: progressLine
+	// clears it, and nothing between reads it inside a block.
+	//
+	// The nine without are a quoted scalar spanning a line break. The quote
+	// scanners call progressLine, which says the next character opens a line,
+	// then read the rest of the scalar with progressColumn, which never reaches
+	// updateIndent.
+	"indent.indentNum==column-1/tab":    3,
 	"indent.indentNum==column-1/spaces": 9,
 
 	// The indent level a token was given and the level the scanner stands at
