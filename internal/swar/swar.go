@@ -42,6 +42,52 @@ func FirstByte(mask uint64) int { return bits.TrailingZeros64(mask) >> 3 }
 // reads an over-wide shift as zero, so k of 0 gives 0 without a branch.
 func LanesBelow(w uint64, k int) uint64 { return w & (^uint64(0) >> (64 - 8*k)) }
 
+// Broadcast copies b into all eight lanes.
+func Broadcast(b byte) uint64 { return lo * uint64(b) }
+
+// LanesZero flags the lanes of x that are zero, exactly.
+//
+// It is the one exact per-lane test the others are built from: a lane is zero
+// iff the carry the saturating add makes never reaches its high bit, and the
+// add cannot carry across a lane. The cheap "(x - lo) &^ x & high" form used by
+// the stop masks below is smaller but can flag a lane because a lower lane
+// borrowed, which is harmless where the caller takes only [FirstByte] and wrong
+// where it tests the mask for emptiness or clears lanes out of another mask.
+func LanesZero(x uint64) uint64 { return ^(((x &^ high) + ^high) | x) & high }
+
+// MaskEqual flags the lanes holding b, exactly.
+func MaskEqual(w uint64, b byte) uint64 { return LanesZero(w ^ Broadcast(b)) }
+
+// ControlMask flags the lanes holding a control character: a byte under 0x20,
+// or DEL. Every lane of w must hold a byte under 0x80, which a caller
+// establishes with w&[HighBits] == 0.
+//
+// Given that precondition a byte is under 0x20 exactly where its top three bits
+// are clear, which is one AND and one [LanesZero] rather than the range compare
+// a general "less than" needs.
+//
+// YAML 1.2's c-printable admits three of these -- see [AllowedControlMask] --
+// so a caller after the bytes a stream may not hold writes
+//
+//	ControlMask(w) &^ AllowedControlMask(w)
+//
+// The two are apart because together they cost 93 against the inline budget of
+// 80, and a mask function that does not inline puts a call back into the loop
+// this package exists to keep calls out of.
+func ControlMask(w uint64) uint64 {
+	return LanesZero(w&(lo*0xE0)) | LanesZero(w^(lo*0x7F))
+}
+
+// AllowedControlMask flags the lanes holding the three control characters YAML
+// 1.2's c-printable admits: tab, line feed and carriage return. See
+// [ControlMask].
+func AllowedControlMask(w uint64) uint64 {
+	m := LanesZero(w ^ (lo * 0x09))
+	m |= LanesZero(w ^ (lo * 0x0A))
+
+	return m | LanesZero(w^(lo*0x0D))
+}
+
 // DoubleQuoteStopMask flags the bytes that end a run inside a double-quoted
 // scalar: the closing '"', a '\' opening an escape, and anything under 0x20 --
 // which in a stream validateStream has passed is a tab or a line break.

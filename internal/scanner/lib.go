@@ -1,10 +1,13 @@
 package scanner
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
+	"github.com/go-openapi/go-yaml/internal/swar"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -33,18 +36,42 @@ const byteOrderMark = '\ufeff'
 // anything else looks the byte is gone and nothing has said so -- which is why
 // this reads the string rather than the runes the rest of the scanner works on.
 func validateStream(text string) error {
-	// A byte at a time while the bytes are ASCII, which is nearly all of them
-	// in nearly every document. Ranging over the string decodes a rune for each
-	// one instead, and the line and column were counted for every character to
-	// be read by none of them: only an error carries a position, and
-	// streamPosition works one out where that happens.
-	for i := 0; i < len(text); {
+	if at := firstUnprintable(text); at >= 0 {
+		return unprintableErr(text, at)
+	}
+
+	return validateByteOrderMarks(text)
+}
+
+// firstUnprintable returns the offset of the first byte the stream may not
+// hold, or -1 where every one of them is a character c-printable admits.
+//
+// Eight bytes at a time while they are ASCII, which is nearly all of them in
+// nearly every document: one word says whether any of the eight is a control
+// character other than tab, line feed and carriage return, or DEL. A word
+// carrying a byte over 0x7f is stepped through a character at a time, since
+// what c-printable admits up there is a question about the character rather
+// than about the byte, and the word loop takes over again after it.
+func firstUnprintable(text string) int {
+	raw := unsafe.Slice(unsafe.StringData(text), len(text))
+
+	i := 0
+	for i < len(text) {
+		if i+8 <= len(text) {
+			w := binary.LittleEndian.Uint64(raw[i:])
+			if w&swar.HighBits == 0 {
+				if m := swar.ControlMask(w) &^ swar.AllowedControlMask(w); m != 0 {
+					return i + swar.FirstByte(m)
+				}
+				i += 8
+
+				continue
+			}
+		}
+
 		if c := text[i]; c < utf8.RuneSelf {
 			if !printableASCII(c) {
-				return ErrInvalidToken(
-					fmt.Sprintf("found character %q that a YAML stream may not hold", rune(c)),
-					token.Invalid(text[i:i+1], streamPosition(text, i)),
-				)
+				return i
 			}
 			i++
 
@@ -55,19 +82,30 @@ func validateStream(text string) error {
 		if r == utf8.RuneError && width <= 1 {
 			// Either a byte that is not text, or a U+FFFD the author wrote:
 			// only the width tells them apart.
-			return ErrInvalidToken("found a byte that is part of no character",
-				token.Invalid(text[i:i+1], streamPosition(text, i)))
+			return i
 		}
 		if !printable(r) {
-			return ErrInvalidToken(
-				fmt.Sprintf("found character %q that a YAML stream may not hold", r),
-				token.Invalid(string(r), streamPosition(text, i)),
-			)
+			return i
 		}
 		i += width
 	}
 
-	return validateByteOrderMarks(text)
+	return -1
+}
+
+// unprintableErr names the character at offset i, which firstUnprintable found
+// the stream may not hold.
+func unprintableErr(text string, i int) error {
+	r, width := utf8.DecodeRuneInString(text[i:])
+	if r == utf8.RuneError && width <= 1 {
+		return ErrInvalidToken("found a byte that is part of no character",
+			token.Invalid(text[i:i+1], streamPosition(text, i)))
+	}
+
+	return ErrInvalidToken(
+		fmt.Sprintf("found character %q that a YAML stream may not hold", r),
+		token.Invalid(string(r), streamPosition(text, i)),
+	)
 }
 
 // printableASCII answers [printable] for the bytes below utf8.RuneSelf, where
