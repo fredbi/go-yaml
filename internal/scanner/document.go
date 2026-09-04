@@ -48,7 +48,7 @@ func (s *Scanner) scanDocumentStart(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addToken(token.DocumentHeader(string(ctx.obuf)+"---", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentHeader(string(ctx.obuf)+"---", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	s.clearState()
@@ -68,7 +68,7 @@ func (s *Scanner) scanDocumentEnd(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addToken(token.DocumentEnd(string(ctx.obuf)+"...", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentEnd(string(ctx.obuf)+"...", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	return true

@@ -70,7 +70,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 			ctx.addOriginBuf('\n')
 		}
 
-		ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
+		ctx.addTokenValue(token.MakeComment(value, string(ctx.obuf), commentPos))
 		s.progressColumn(ctx, progress)
 		s.progressLine(ctx)
 		if crlf {
@@ -81,7 +81,7 @@ func (s *Scanner) scanComment(ctx *Context) bool {
 	}
 	// document ends with comment.
 	value := ctx.src[ctx.idx:]
-	ctx.addToken(token.Comment(value, string(ctx.obuf), commentPos))
+	ctx.addTokenValue(token.MakeComment(value, string(ctx.obuf), commentPos))
 	progress := utf8.RuneCountInString(value)
 	s.progressColumn(ctx, progress)
 	s.progressLine(ctx)

@@ -60,7 +60,7 @@ func (s *Scanner) scanFlowMapStart(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('{')
-	ctx.addToken(token.MappingStart(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeMappingStart(string(ctx.obuf), s.pos()))
 	s.enterFlow()
 	s.startedFlowMapNum++
 	s.progressColumn(ctx, 1)
@@ -75,7 +75,7 @@ func (s *Scanner) scanFlowMapEnd(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('}')
-	ctx.addToken(token.MappingEnd(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeMappingEnd(string(ctx.obuf), s.pos()))
 	s.startedFlowMapNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -89,7 +89,7 @@ func (s *Scanner) scanFlowArrayStart(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('[')
-	ctx.addToken(token.SequenceStart(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeSequenceStart(string(ctx.obuf), s.pos()))
 	s.enterFlow()
 	s.startedFlowSequenceNum++
 	s.progressColumn(ctx, 1)
@@ -104,7 +104,7 @@ func (s *Scanner) scanFlowArrayEnd(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf(']')
-	ctx.addToken(token.SequenceEnd(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeSequenceEnd(string(ctx.obuf), s.pos()))
 	s.startedFlowSequenceNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -118,7 +118,7 @@ func (s *Scanner) scanFlowEntry(ctx *Context, c rune) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf(c)
-	ctx.addToken(token.CollectEntry(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeCollectEntry(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true

@@ -14,7 +14,7 @@ func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
 
 		return false, err
 	}
-	ctx.addToken(token.Anchor(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeAnchor(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAnchor = true
 	ctx.clear()
@@ -33,7 +33,7 @@ func (s *Scanner) scanAlias(ctx *Context) (bool, error) {
 
 		return false, err
 	}
-	ctx.addToken(token.Alias(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeAlias(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	s.isAlias = true
 	ctx.clear()

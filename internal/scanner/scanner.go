@@ -230,7 +230,7 @@ func (s *Scanner) scan(ctx *Context) error {
 						return ErrInvalidToken("could not find multi-line content", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					if tk.Type != token.StringType {
-						ctx.addToken(token.String("", "", s.pos()))
+						ctx.addTokenValue(token.MakeString("", "", s.pos()))
 					}
 				}
 				s.breakMultiLine(ctx)
@@ -424,7 +424,7 @@ func (s *Scanner) pos() token.Position {
 
 func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
 	if tk, ok := s.bufferedToken(ctx); ok {
-		ctx.addToken(&tk)
+		ctx.addTokenValue(tk)
 	}
 }
 
@@ -500,7 +500,7 @@ func (s *Scanner) scanMergeKey(ctx *Context) bool {
 	}
 
 	s.lastDelimColumn = s.column
-	ctx.addToken(token.MergeKey(string(ctx.obuf)+"<<", s.pos()))
+	ctx.addTokenValue(token.MakeMergeKey(string(ctx.obuf)+"<<", s.pos()))
 	s.progressColumn(ctx, 2)
 	ctx.clear()
 
@@ -543,9 +543,9 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('-')
-	tk := token.SequenceEntry(string(ctx.obuf), s.pos())
+	tk := token.MakeSequenceEntry(string(ctx.obuf), s.pos())
 	s.lastDelimColumn = int(tk.Position.Column)
-	ctx.addToken(tk)
+	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	return true, nil

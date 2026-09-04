@@ -16,7 +16,7 @@ func (s *Scanner) scanDirective(ctx *Context) bool {
 
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('%')
-	ctx.addToken(token.Directive(string(ctx.obuf), s.pos()))
+	ctx.addTokenValue(token.MakeDirective(string(ctx.obuf), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 	s.isDirective = true

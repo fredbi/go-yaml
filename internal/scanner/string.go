@@ -17,13 +17,13 @@ func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		ctx.addToken(tk)
+		ctx.addTokenValue(tk)
 	} else {
 		tk, err := s.scanDoubleQuote(ctx)
 		if err != nil {
 			return false, err
 		}
-		ctx.addToken(tk)
+		ctx.addTokenValue(tk)
 	}
 
 	ctx.clear()
@@ -31,7 +31,7 @@ func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
 	return true, nil
 }
 
-func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
+func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	ctx.addOriginBuf('\'')
 	baseIndent := s.contentIndent()
 	srcpos := s.pos()
@@ -74,10 +74,10 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			s.progressLine(ctx)
 			if idx+width < size {
 				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+width:]); err != nil {
-					return nil, err
+					return token.Token{}, err
 				}
 				if err := s.checkContinuationIndent(ctx, src[idx+width:], baseIndent); err != nil {
-					return nil, err
+					return token.Token{}, err
 				}
 			}
 
@@ -86,7 +86,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		} else if isFirstLineChar && c == '\t' {
 			if s.lastDelimColumn >= s.column {
-				return nil, ErrInvalidToken("tab character cannot be used for indentation in single-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
+				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in single-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
 			}
 
 			continue
@@ -105,13 +105,13 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.SingleQuote(string(value), string(ctx.obuf), srcpos), nil
+		return token.MakeSingleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
-	return nil, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.obuf), srcpos))
+	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.obuf), srcpos))
 }
 
-func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
+func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	ctx.addOriginBuf('"')
 	baseIndent := s.contentIndent()
 	srcpos := s.pos()
@@ -154,10 +154,10 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			s.progressLine(ctx)
 			if idx+width < size {
 				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+width:]); err != nil {
-					return nil, err
+					return token.Token{}, err
 				}
 				if err := s.checkContinuationIndent(ctx, src[idx+width:], baseIndent); err != nil {
-					return nil, err
+					return token.Token{}, err
 				}
 			}
 			continue
@@ -165,7 +165,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		} else if isFirstLineChar && c == '\t' {
 			if s.lastDelimColumn >= s.column {
-				return nil, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
+				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(string(ctx.obuf), s.pos()))
 			}
 			continue
 		} else if c == '\\' {
@@ -249,23 +249,23 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			case 'x':
 				// \x00 style must have 3 characters at least.
 				if idx+3 >= size {
-					return nil, ErrInvalidToken("not enough length for escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 3
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+progress+1])
 				if !isHex {
-					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
-					return nil, ErrInvalidToken("not enough length for escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 5
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+6])
 				if !isHex {
-					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-16 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 
 				// handle surrogate pairs.
@@ -274,19 +274,19 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 
 					// \u0000\u0000 style must have 11 characters at least.
 					if idx+11 >= size {
-						return nil, ErrInvalidToken("not enough length for escaped UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
+						return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 
 					if src[idx+6] != '\\' || src[idx+7] != 'u' {
-						return nil, ErrInvalidToken("found unexpected character after high surrogate for UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
+						return token.Token{}, ErrInvalidToken("found unexpected character after high surrogate for UTF-16 surrogate pair", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 
 					low, isHex := hexDigitsToInt(src[idx+8 : idx+12])
 					if !isHex {
-						return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in the low surrogate", token.Invalid(string(ctx.obuf), s.pos()))
+						return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in the low surrogate", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					if low < 0xDC00 || low > 0xDFFF {
-						return nil, ErrInvalidToken("found unexpected low surrogate after high surrogate", token.Invalid(string(ctx.obuf), s.pos()))
+						return token.Token{}, ErrInvalidToken("found unexpected low surrogate after high surrogate", token.Invalid(string(ctx.obuf), s.pos()))
 					}
 					codeNum = ((high - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000
 					progress += 6
@@ -295,12 +295,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			case 'U':
 				// \U00000000 style must have 9 characters at least.
 				if idx+9 >= size {
-					return nil, ErrInvalidToken("not enough length for escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				progress = 9
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+10])
 				if !isHex {
-					return nil, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(string(ctx.obuf), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case '\n':
@@ -328,7 +328,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 				value = utf8.AppendRune(value, nextChar)
 			default:
 				s.progressColumn(ctx, 1)
-				return nil, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(string(ctx.obuf), s.pos()))
+				return token.Token{}, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(string(ctx.obuf), s.pos()))
 			}
 			// The escapes that name a code point -- \xXX, \uXXXX, \UXXXXXXXX --
 			// leave the marker and its digits to be recorded here. Every other
@@ -374,9 +374,9 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (*token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.DoubleQuote(string(value), string(ctx.obuf), srcpos), nil
+		return token.MakeDoubleQuote(string(value), string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 
-	return nil, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(string(ctx.obuf), srcpos))
+	return token.Token{}, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(string(ctx.obuf), srcpos))
 }

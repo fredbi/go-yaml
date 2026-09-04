@@ -1083,7 +1083,16 @@ func MakeString(value string, org string, pos Position) Token {
 
 // SequenceEntry create token for SequenceEntry
 func SequenceEntry(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeSequenceEntry(org, pos)
+
+	return &tk
+}
+
+// MakeSequenceEntry builds the token SequenceEntry builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeSequenceEntry(org string, pos Position) Token {
+	return Token{
 		Type:     SequenceEntryType,
 		Value:    string(SequenceEntryCharacter),
 		end:      extentOf(org, pos),
@@ -1094,7 +1103,16 @@ func SequenceEntry(org string, pos Position) *Token {
 
 // MappingKey create token for MappingKey
 func MappingKey(pos Position) *Token {
-	return &Token{
+	tk := MakeMappingKey(pos)
+
+	return &tk
+}
+
+// MakeMappingKey builds the token MappingKey builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeMappingKey(pos Position) Token {
+	return Token{
 		Type:     MappingKeyType,
 		Value:    string(MappingKeyCharacter),
 		end:      extentOf(string(MappingKeyCharacter), pos),
@@ -1105,7 +1123,16 @@ func MappingKey(pos Position) *Token {
 
 // MappingValue create token for MappingValue
 func MappingValue(pos Position) *Token {
-	return &Token{
+	tk := MakeMappingValue(pos)
+
+	return &tk
+}
+
+// MakeMappingValue builds the token MappingValue builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeMappingValue(pos Position) Token {
+	return Token{
 		Type:     MappingValueType,
 		Value:    string(MappingValueCharacter),
 		end:      extentOf(string(MappingValueCharacter), pos),
@@ -1116,7 +1143,16 @@ func MappingValue(pos Position) *Token {
 
 // CollectEntry create token for CollectEntry
 func CollectEntry(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeCollectEntry(org, pos)
+
+	return &tk
+}
+
+// MakeCollectEntry builds the token CollectEntry builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeCollectEntry(org string, pos Position) Token {
+	return Token{
 		Type:     CollectEntryType,
 		Value:    string(CollectEntryCharacter),
 		end:      extentOf(org, pos),
@@ -1127,7 +1163,16 @@ func CollectEntry(org string, pos Position) *Token {
 
 // SequenceStart create token for SequenceStart
 func SequenceStart(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeSequenceStart(org, pos)
+
+	return &tk
+}
+
+// MakeSequenceStart builds the token SequenceStart builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeSequenceStart(org string, pos Position) Token {
+	return Token{
 		Type:     SequenceStartType,
 		Value:    string(SequenceStartCharacter),
 		end:      extentOf(org, pos),
@@ -1138,7 +1183,16 @@ func SequenceStart(org string, pos Position) *Token {
 
 // SequenceEnd create token for SequenceEnd
 func SequenceEnd(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeSequenceEnd(org, pos)
+
+	return &tk
+}
+
+// MakeSequenceEnd builds the token SequenceEnd builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeSequenceEnd(org string, pos Position) Token {
+	return Token{
 		Type:     SequenceEndType,
 		Value:    string(SequenceEndCharacter),
 		end:      extentOf(org, pos),
@@ -1149,7 +1203,16 @@ func SequenceEnd(org string, pos Position) *Token {
 
 // MappingStart create token for MappingStart
 func MappingStart(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeMappingStart(org, pos)
+
+	return &tk
+}
+
+// MakeMappingStart builds the token MappingStart builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeMappingStart(org string, pos Position) Token {
+	return Token{
 		Type:     MappingStartType,
 		Value:    string(MappingStartCharacter),
 		end:      extentOf(org, pos),
@@ -1160,7 +1223,16 @@ func MappingStart(org string, pos Position) *Token {
 
 // MappingEnd create token for MappingEnd
 func MappingEnd(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeMappingEnd(org, pos)
+
+	return &tk
+}
+
+// MakeMappingEnd builds the token MappingEnd builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeMappingEnd(org string, pos Position) Token {
+	return Token{
 		Type:     MappingEndType,
 		Value:    string(MappingEndCharacter),
 		end:      extentOf(org, pos),
@@ -1192,7 +1264,16 @@ func MakeComment(value string, org string, pos Position) Token {
 
 // Anchor create token for Anchor
 func Anchor(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeAnchor(org, pos)
+
+	return &tk
+}
+
+// MakeAnchor builds the token Anchor builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeAnchor(org string, pos Position) Token {
+	return Token{
 		Type:     AnchorType,
 		Value:    string(AnchorCharacter),
 		end:      extentOf(org, pos),
@@ -1203,7 +1284,16 @@ func Anchor(org string, pos Position) *Token {
 
 // Alias create token for Alias
 func Alias(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeAlias(org, pos)
+
+	return &tk
+}
+
+// MakeAlias builds the token Alias builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeAlias(org string, pos Position) Token {
+	return Token{
 		Type:     AliasType,
 		Value:    string(AliasCharacter),
 		end:      extentOf(org, pos),
@@ -1214,7 +1304,16 @@ func Alias(org string, pos Position) *Token {
 
 // Tag create token for Tag
 func Tag(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeTag(value, org, pos)
+
+	return &tk
+}
+
+// MakeTag builds the token Tag builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeTag(value string, org string, pos Position) Token {
+	return Token{
 		Type:     TagType,
 		Value:    value,
 		end:      extentOf(org, pos),
@@ -1267,7 +1366,16 @@ func MakeFolded(value string, org string, pos Position) Token {
 
 // SingleQuote create token for SingleQuote
 func SingleQuote(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeSingleQuote(value, org, pos)
+
+	return &tk
+}
+
+// MakeSingleQuote builds the token SingleQuote builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeSingleQuote(value string, org string, pos Position) Token {
+	return Token{
 		Type:     SingleQuoteType,
 		Value:    value,
 		end:      extentOf(org, pos),
@@ -1278,7 +1386,16 @@ func SingleQuote(value string, org string, pos Position) *Token {
 
 // DoubleQuote create token for DoubleQuote
 func DoubleQuote(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeDoubleQuote(value, org, pos)
+
+	return &tk
+}
+
+// MakeDoubleQuote builds the token DoubleQuote builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeDoubleQuote(value string, org string, pos Position) Token {
+	return Token{
 		Type:     DoubleQuoteType,
 		Value:    value,
 		end:      extentOf(org, pos),
@@ -1289,7 +1406,16 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 
 // Directive create token for Directive
 func Directive(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeDirective(org, pos)
+
+	return &tk
+}
+
+// MakeDirective builds the token Directive builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeDirective(org string, pos Position) Token {
+	return Token{
 		Type:     DirectiveType,
 		Value:    string(DirectiveCharacter),
 		end:      extentOf(org, pos),
@@ -1311,7 +1437,16 @@ func Space(pos Position) *Token {
 
 // MergeKey create token for MergeKey
 func MergeKey(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeMergeKey(org, pos)
+
+	return &tk
+}
+
+// MakeMergeKey builds the token MergeKey builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeMergeKey(org string, pos Position) Token {
+	return Token{
 		Type:     MergeKeyType,
 		Value:    "<<",
 		end:      extentOf(org, pos),
@@ -1322,7 +1457,16 @@ func MergeKey(org string, pos Position) *Token {
 
 // DocumentHeader create token for DocumentHeader
 func DocumentHeader(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeDocumentHeader(org, pos)
+
+	return &tk
+}
+
+// MakeDocumentHeader builds the token DocumentHeader builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeDocumentHeader(org string, pos Position) Token {
+	return Token{
 		Type:     DocumentHeaderType,
 		Value:    "---",
 		end:      extentOf(org, pos),
@@ -1333,7 +1477,16 @@ func DocumentHeader(org string, pos Position) *Token {
 
 // DocumentEnd create token for DocumentEnd
 func DocumentEnd(org string, pos Position) *Token {
-	return &Token{
+	tk := MakeDocumentEnd(org, pos)
+
+	return &tk
+}
+
+// MakeDocumentEnd builds the token DocumentEnd builds, without settling where it lives.
+// A caller handing it straight to a scanner wants this one: the pointer form
+// puts the token on the heap for a value that is copied and dropped.
+func MakeDocumentEnd(org string, pos Position) Token {
+	return Token{
 		Type:     DocumentEndType,
 		Value:    "...",
 		end:      extentOf(org, pos),

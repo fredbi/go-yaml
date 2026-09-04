@@ -59,7 +59,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	tk, ok := s.bufferedToken(ctx)
 	if ok {
 		s.lastDelimColumn = int(tk.Position.Column)
-		ctx.addToken(&tk)
+		ctx.addTokenValue(tk)
 	} else if col := ctx.keyStartColumn(); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens:
 		// it is quoted, or it is an empty scalar carrying an anchor, an alias or
@@ -75,7 +75,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		s.lastDelimColumn = s.column
 	}
 
-	ctx.addToken(token.MappingValue(s.pos()))
+	ctx.addTokenValue(token.MakeMappingValue(s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 
@@ -99,9 +99,9 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 		return false
 	}
 
-	tk := token.MappingKey(s.pos())
+	tk := token.MakeMappingKey(s.pos())
 	s.lastDelimColumn = int(tk.Position.Column)
-	ctx.addToken(tk)
+	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
 
