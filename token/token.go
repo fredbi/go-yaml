@@ -1171,7 +1171,17 @@ func MappingEnd(org string, pos Position) *Token {
 
 // Comment create token for Comment
 func Comment(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeComment(value, org, pos)
+
+	return &tk
+}
+
+// MakeComment builds a comment token without settling where it lives, as [MakeString]
+// does for a string. The scanner copies the token into its own storage, so a
+// caller that reaches for the pointer form pays a heap allocation for a value
+// that is read once and thrown away.
+func MakeComment(value string, org string, pos Position) Token {
+	return Token{
 		Type:     CommentType,
 		Value:    value,
 		end:      extentOf(org, pos),
@@ -1215,7 +1225,17 @@ func Tag(value string, org string, pos Position) *Token {
 
 // Literal create token for Literal
 func Literal(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeLiteral(value, org, pos)
+
+	return &tk
+}
+
+// MakeLiteral builds a literal token without settling where it lives, as [MakeString]
+// does for a string. The scanner copies the token into its own storage, so a
+// caller that reaches for the pointer form pays a heap allocation for a value
+// that is read once and thrown away.
+func MakeLiteral(value string, org string, pos Position) Token {
+	return Token{
 		Type:     LiteralType,
 		Value:    value,
 		end:      extentOf(org, pos),
@@ -1226,7 +1246,17 @@ func Literal(value string, org string, pos Position) *Token {
 
 // Folded create token for Folded
 func Folded(value string, org string, pos Position) *Token {
-	return &Token{
+	tk := MakeFolded(value, org, pos)
+
+	return &tk
+}
+
+// MakeFolded builds a folded token without settling where it lives, as [MakeString]
+// does for a string. The scanner copies the token into its own storage, so a
+// caller that reaches for the pointer form pays a heap allocation for a value
+// that is read once and thrown away.
+func MakeFolded(value string, org string, pos Position) Token {
+	return Token{
 		Type:     FoldedType,
 		Value:    value,
 		end:      extentOf(org, pos),

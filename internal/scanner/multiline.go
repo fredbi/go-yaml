@@ -134,7 +134,7 @@ func (s *Scanner) readMultiLineContent(ctx *Context, state *MultiLineState, c ru
 // emitMultiLine hands over the block read so far and starts the buffers again.
 func (s *Scanner) emitMultiLine(ctx *Context, state *MultiLineState) {
 	value := ctx.bufferedSrc()
-	ctx.addToken(token.String(string(value), string(ctx.obuf), state.from(s.pos())))
+	ctx.addTokenValue(token.MakeString(string(value), string(ctx.obuf), state.from(s.pos())))
 	ctx.clear()
 }
 
@@ -271,10 +271,10 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	}
 	switch header {
 	case '|':
-		ctx.addToken(token.Literal("|"+opt, headerBuf, headerPos))
+		ctx.addTokenValue(token.MakeLiteral("|"+opt, headerBuf, headerPos))
 		ctx.setLiteral(s.lastDelimColumn, opt)
 	case '>':
-		ctx.addToken(token.Folded(">"+opt, headerBuf, headerPos))
+		ctx.addTokenValue(token.MakeFolded(">"+opt, headerBuf, headerPos))
 		ctx.setFolded(s.lastDelimColumn, opt)
 	}
 	// The break that ended the header line is content of the scalar, and the
@@ -290,7 +290,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		fromHeader := headerBuf[headerIndex:]
 		pos.SetOffset(pos.Offset() + int32(len(fromHeader)))
 		pos.Column += int32(utf8.RuneCountInString(fromHeader))
-		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
+		ctx.addTokenValue(token.MakeComment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep
 	s.progressColumn(ctx, progress)

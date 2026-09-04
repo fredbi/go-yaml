@@ -54,7 +54,13 @@ type Context struct {
 	// them to find where a key made only of already-cut tokens begins.
 	propRun     propertyRun
 	prevPropRun propertyRun
-	mstate      *MultiLineState
+	// mstate points at block, or is nil where no block scalar is open. A block
+	// scalar cannot stand inside another -- its content is text, not nodes --
+	// so one is all that is ever open and block is the room it uses. Allocating
+	// a MultiLineState per header was a third of everything the scanner
+	// allocated reading a document of them.
+	mstate *MultiLineState
+	block  MultiLineState
 	// lookback belongs to the Scanner and outlives the Context, so a token
 	// still reads what stands above it when the source is scanned in more than
 	// one pass.
@@ -238,38 +244,36 @@ func (c *Context) getMultiLineState() *MultiLineState {
 // puts content at column 5.
 func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
-	mstate := &MultiLineState{
+	c.block = MultiLineState{
 		isLiteral:       true,
 		opt:             opt,
 		indentIndicator: indent,
 	}
 	if indent > 0 {
-		mstate.firstLineIndentColumn = lastDelimColumn + indent
+		c.block.firstLineIndentColumn = lastDelimColumn + indent
 	}
-	c.mstate = mstate
+	c.mstate = &c.block
 }
 
 // setFolded opens a block scalar that folds its line breaks into spaces, the
 // ">" of [MultiLineState]. lastDelimColumn is read as in setLiteral.
 func (c *Context) setFolded(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
-	mstate := &MultiLineState{
+	c.block = MultiLineState{
 		isFolded:        true,
 		opt:             opt,
 		indentIndicator: indent,
 	}
 	if indent > 0 {
-		mstate.firstLineIndentColumn = lastDelimColumn + indent
+		c.block.firstLineIndentColumn = lastDelimColumn + indent
 	}
-	c.mstate = mstate
+	c.mstate = &c.block
 }
 
 func (c *Context) setRawFolded(column int) {
-	mstate := &MultiLineState{
-		isRawFolded: true,
-	}
-	mstate.updateIndentColumn(column)
-	c.mstate = mstate
+	c.block = MultiLineState{isRawFolded: true}
+	c.block.updateIndentColumn(column)
+	c.mstate = &c.block
 }
 
 func (c *Context) isMergeKey() bool {
@@ -301,19 +305,31 @@ func (c *Context) addToken(tk *token.Token) {
 	if tk == nil {
 		return
 	}
-	c.lookback.Derive(tk)
-	c.recordToken(tk)
+
+	c.addTokenValue(*tk)
+}
+
+// addTokenValue hands over a token the caller holds by value.
+//
+// Nothing here keeps the token itself: Lookback stores copies, recordToken
+// copies into lastTk, and appendToken copies into the block it is filling. So a
+// caller building a token only to hand it over wants [token.MakeLiteral] and
+// its kind rather than [token.Literal] -- the pointer form has to put the token
+// on the heap for a value that is copied and dropped.
+func (c *Context) addTokenValue(tk token.Token) {
+	c.lookback.Derive(&tk)
+	c.recordToken(&tk)
 
 	if c.yield != nil {
 		// iter.Seq must not be called again once it has asked to stop.
-		if !c.stopped && !c.yield(*tk) {
+		if !c.stopped && !c.yield(tk) {
 			c.stopped = true
 		}
 
 		return
 	}
 
-	c.appendToken(*tk)
+	c.appendToken(tk)
 }
 
 // recordToken keeps what the tokens already read say about the ones to come.
