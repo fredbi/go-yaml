@@ -1675,6 +1675,13 @@ func (s *Scanner) scanMultiLineHeader(ctx *Context) (bool, error) {
 		return false, err
 	}
 	s.progressLine(ctx)
+	// Cut after the cursor has stepped over the whole header line, not inside
+	// the scan above: resetBuffer records where the next origin begins, and
+	// until progressLine the indicators and the break closing the header stand
+	// in front of the cursor. Cutting early said a block scalar's content began
+	// at the '|' or '>' that introduced it.
+	ctx.resetBuffer()
+
 	return true, nil
 }
 
@@ -1826,8 +1833,8 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		ctx.addToken(token.Comment(comment, string(ctx.obuf[len(headerBuf):]), pos))
 	}
 	s.indentState = IndentStateKeep
-	ctx.resetBuffer()
 	s.progressColumn(ctx, progress)
+
 	return nil
 }
 

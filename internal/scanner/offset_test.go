@@ -84,7 +84,7 @@ func at(src string, offset int) string {
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"String":      27,
+	"String":      10,
 	"Invalid":     23,
 	"Integer":     3,
 	"DoubleQuote": 1,
