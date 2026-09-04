@@ -86,7 +86,7 @@ func FuzzScannerScan(f *testing.F) {
 		require.Equalf(t, len(tokens), len(again), "token count is not stable for %q", src)
 
 		for i := range tokens {
-			assert.Equalf(t, tokens[i].Origin, again[i].Origin, "token %d origin is not stable for %q", i, src)
+			assert.Equalf(t, tokens[i].EndOffset(), again[i].EndOffset(), "token %d extent is not stable for %q", i, src)
 			assert.Equalf(t, tokens[i].Value, again[i].Value, "token %d value is not stable for %q", i, src)
 			assert.Equalf(t, tokens[i].Type, again[i].Type, "token %d type is not stable for %q", i, src)
 		}

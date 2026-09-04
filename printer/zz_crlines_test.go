@@ -66,8 +66,5 @@ func TestPrintErrorSourceSurvivesACarriageReturnDocument(t *testing.T) {
 // tokenAt builds a token standing on the given line, which is how a window is
 // asked for a line the text may not reach.
 func tokenAt(src string, line int) *token.Token {
-	tk := token.New("0", "0", token.Position{Line: int32(line), Column: 1})
-	tk.Origin = src
-
-	return tk
+	return token.New("0", "0", token.Position{Line: int32(line), Column: 1})
 }

@@ -865,6 +865,17 @@ type LiteralNode struct {
 	BaseNode
 	Start *token.Token
 	Value *StringNode
+	// Source is the block as the document wrote it, indicators excluded: the
+	// bytes from the end of Start to the end of Value, so the indentation of
+	// the first content line is part of it.
+	//
+	// The parser fills it for a folded scalar and leaves it empty for a literal
+	// one. Folding rewrites the line structure -- "a\nb" comes back as "a b" --
+	// so a folded scalar can only be written out again from the text it was
+	// read from; a literal scalar's value is its content exactly and needs no
+	// source. A node built by hand rather than parsed has none either, and
+	// renders as a literal.
+	Source string
 }
 
 // Read implements (io.Reader).Read
@@ -2170,3 +2181,48 @@ func Merge(dst Node, src Node) error {
 	}
 	return err
 }
+
+// BlockSource is the block a folded scalar was written as: src from the end of
+// its header token to the end of its content token, so that the indentation of
+// the first content line stands at the front of it. A parser fills
+// [LiteralNode.Source] with it.
+//
+// Nothing for a literal scalar, whose value is its content exactly, and nothing
+// where either offset does not address its token -- a window on some other part
+// of the document is worse than no source at all.
+func BlockSource(src string, header, content *token.Token) string {
+	if header == nil || content == nil || header.Type != token.FoldedType {
+		return ""
+	}
+
+	start, end := int(header.EndOffset()), int(content.EndOffset())
+	if start < 0 || end > len(src) || start >= end {
+		return ""
+	}
+
+	// A header carrying a comment -- ">1 # indentation indicator" -- ends at
+	// the comment rather than at the break, the comment standing as a token of
+	// its own. The block begins on the next line either way, so a header that
+	// did not end one is walked to the end of its line first. Without it the
+	// block was read back with the comment text at the front of it.
+	if start > 0 && !isLineBreak(src[start-1]) {
+		for start < end && !isLineBreak(src[start]) {
+			start++
+		}
+		if start < end && src[start] == '\r' {
+			start++
+		}
+		if start < end && src[start] == '\n' {
+			start++
+		}
+	}
+
+	if start >= end {
+		return ""
+	}
+
+	return src[start:end]
+}
+
+// isLineBreak reports whether c ends a line.
+func isLineBreak(c byte) bool { return c == '\n' || c == '\r' }

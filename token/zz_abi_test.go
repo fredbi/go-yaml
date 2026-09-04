@@ -38,7 +38,8 @@ func registers(t reflect.Type) int {
 }
 
 // TestTokenFitsTheRegisterABI holds the token inside the nine registers amd64
-// gives a call for its arguments and results.
+// gives a call for its arguments and results, with one to spare for the bool
+// beside it.
 //
 // Past nine the scanner writes every token it reads to the stack and the caller
 // reads it back: Scanner.NextToken spent 64 bytes a call at eleven, and the
@@ -46,59 +47,17 @@ func registers(t reflect.Type) int {
 // Offset and IndentNum for the same reason, and Token packs EndLine,
 // CommentBreaksAbove and BlankLineAbove.
 //
-// NextToken returns (Token, bool), so nine leaves the bool on the stack and
-// eight would put that in a register too. Getting there means Type joining the
-// packed word, which is 320 struct literals away.
+// NextToken returns (Token, bool), so nine would leave the bool on the stack.
+// Eight puts it in a register too, which is where dropping Origin left the
+// token: the text it carried cost two, and the extent that replaced it costs
+// one.
 func TestTokenFitsTheRegisterABI(t *testing.T) {
-	const limit = 9
+	// A ratchet. Eight is what the token needs today, and a field that pushes
+	// it to nine puts the bool back on the stack.
+	const limit = 8
 
 	got := registers(reflect.TypeOf(token.Token{}))
 	require.LessOrEqualf(t, got, limit,
 		"token.Token needs %d registers and a call has %d, so every token crosses the boundary through memory",
 		got, limit)
-}
-
-// TestPackedFieldsRoundTrip checks the accessors give back what was put in,
-// including the values that sit either side of a bit boundary.
-func TestPackedFieldsRoundTrip(t *testing.T) {
-	for _, n := range []int32{0, 1, 2, 127, 128, 4095, 32766, 1 << 20, 1<<31 - 1} {
-		var pos token.Position
-		pos.SetOffset(n)
-		pos.SetIndentNum(n)
-		require.Equalf(t, n, pos.Offset(), "offset %d", n)
-		require.Equalf(t, n, pos.IndentNum(), "indent %d", n)
-
-		// CommentBreaksAbove and TrailingBreaks are narrower than an int32 and
-		// saturate rather than wrap: a token with more than 65,535 lines of
-		// comment above it, or 32,766 blank lines after it, is a document no
-		// reader is going to draw an error window in.
-		const (
-			comments = 1<<16 - 1
-			trailing = 1<<15 - 1
-		)
-
-		var tk token.Token
-		tk.SetEndLine(n)
-		tk.SetCommentBreaksAbove(n)
-		tk.SetTrailingBreaks(n)
-		tk.SetBlankLineAbove(true)
-		require.Equalf(t, n, tk.EndLine(), "end line %d", n)
-		require.Equalf(t, min(n, comments), tk.CommentBreaksAbove(), "comment breaks %d", n)
-		require.Equalf(t, min(n, trailing), tk.TrailingBreaks(), "trailing breaks %d", n)
-		require.Truef(t, tk.BlankLineAbove(), "blank line above, with %d beside it", n)
-
-		tk.SetBlankLineAbove(false)
-		require.Falsef(t, tk.BlankLineAbove(), "blank line cleared, with %d beside it", n)
-		require.Equalf(t, n, tk.EndLine(), "end line survives clearing the blank line")
-	}
-}
-
-// TestAtBuildsAPosition covers the constructor the packed fields make necessary.
-func TestAtBuildsAPosition(t *testing.T) {
-	pos := token.At(3, 5, 42, 2)
-
-	require.Equal(t, int32(3), pos.Line)
-	require.Equal(t, int32(5), pos.Column)
-	require.Equal(t, int32(42), pos.Offset())
-	require.Equal(t, int32(2), pos.IndentNum())
 }

@@ -740,7 +740,7 @@ func isFolded(tk *token.Token) bool {
 // styles that discard them.
 func (r *Renderer) foldedFromSource(n *LiteralNode, indent int) string {
 	value := n.Value.Value
-	origin := n.Value.GetToken().Origin
+	origin := n.Source
 
 	// srcBreak is how the source wrote a line break, and is what the origin has
 	// to be read with. It is not what is written back: the renderer writes "\n"

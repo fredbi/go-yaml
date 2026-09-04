@@ -87,8 +87,8 @@ func flowNested() string {
 // flowLongScalars is a flow sequence of scalars that are long rather than many.
 //
 // A store sized in tokens is blind to this: the document is 500 kB in a few
-// thousand tokens, and every one of them holds an Origin running the length of
-// the scalar it was read from.
+// thousand tokens, and every one of them points at a scalar running the width
+// of the line it was read from.
 func flowLongScalars() string {
 	const members, width = 1200, 380
 

@@ -11,12 +11,12 @@ import (
 func TestTokenize(t *testing.T) {
 	tests := []struct {
 		YAML   string
-		Tokens token.Tokens
+		Tokens []wantToken
 	}{
 		{
 			YAML: `null
   `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.NullType,
 					Value:  "null",
@@ -26,7 +26,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `0_`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.IntegerType,
 					Value:  "0_",
@@ -36,7 +36,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `"hello\tworld"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.DoubleQuoteType,
 					Value:  "hello\tworld",
@@ -46,7 +46,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `0x_1A_2B_3C`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.HexIntegerType,
 					Value:  "0x_1A_2B_3C",
@@ -56,7 +56,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `+0b1010`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.BinaryIntegerType,
 					Value:  "+0b1010",
@@ -66,7 +66,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `0100`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.OctetIntegerType,
 					Value:  "0100",
@@ -76,7 +76,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `0o10`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.OctetIntegerType,
 					Value:  "0o10",
@@ -86,7 +86,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `0.123e+123`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.FloatType,
 					Value:  "0.123e+123",
@@ -97,7 +97,7 @@ func TestTokenize(t *testing.T) {
 		{
 			YAML: `{}
   `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.MappingStartType,
 					Value:  "{",
@@ -112,7 +112,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: hi`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -132,7 +132,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v:	a`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -153,7 +153,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: "true"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -173,7 +173,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: "false"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -193,7 +193,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: true`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -213,7 +213,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: false`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -233,7 +233,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: 10`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -253,7 +253,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: -10`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -273,7 +273,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: 42`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -293,7 +293,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: 4294967296`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -313,7 +313,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: "10"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -333,7 +333,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: 0.1`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -353,7 +353,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: 0.99`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -373,7 +373,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: -0.1`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -393,7 +393,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: .inf`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -413,7 +413,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: -.inf`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -433,7 +433,7 @@ func TestTokenize(t *testing.T) {
 		},
 		{
 			YAML: `v: .nan`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -462,7 +462,7 @@ a:
   jjj kkk
   "
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -482,7 +482,7 @@ a:
 		},
 		{
 			YAML: `v: null`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -502,7 +502,7 @@ a:
 		},
 		{
 			YAML: `v: ""`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -526,7 +526,7 @@ v:
 - A
 - B
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -567,7 +567,7 @@ v:
  B
  C
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -614,7 +614,7 @@ v:
  - 2
  - 3
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "v",
@@ -687,7 +687,7 @@ v:
 a:
  b: c
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -717,7 +717,7 @@ a:
 		},
 		{
 			YAML: `a: '-'`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -737,7 +737,7 @@ a:
 		},
 		{
 			YAML: `123`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.IntegerType,
 					Value:  "123",
@@ -748,7 +748,7 @@ a:
 		{
 			YAML: `hello: world
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "hello",
@@ -768,7 +768,7 @@ a:
 		},
 		{
 			YAML: `a: null`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -788,7 +788,7 @@ a:
 		},
 		{
 			YAML: `a: {x: 1}`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -828,7 +828,7 @@ a:
 		},
 		{
 			YAML: `a: [1, 2]`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -871,7 +871,7 @@ a:
 t2: 2018-01-09T10:40:47Z
 t4: 2098-01-09T10:40:47Z
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "t2",
@@ -906,7 +906,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: {b: c, d: e}`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -966,7 +966,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: 3s`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -986,7 +986,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: <foo>`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1006,7 +1006,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: "1:1"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1026,7 +1026,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: "\0"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1046,7 +1046,7 @@ t4: 2098-01-09T10:40:47Z
 		},
 		{
 			YAML: `a: !!binary gIGC`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1075,7 +1075,7 @@ a: !!binary |
  kJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJ
  CQ
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1112,7 +1112,7 @@ c: 3
 sub:
   e: 5
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "b",
@@ -1202,7 +1202,7 @@ sub:
 		},
 		{
 			YAML: `a: 1.2.3.4`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1222,7 +1222,7 @@ sub:
 		},
 		{
 			YAML: `a: "2015-02-24T18:19:39Z"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1242,7 +1242,7 @@ sub:
 		},
 		{
 			YAML: `a: 'b: c'`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1262,7 +1262,7 @@ sub:
 		},
 		{
 			YAML: `a: 'Hello #comment'`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1282,7 +1282,7 @@ sub:
 		},
 		{
 			YAML: `a: 100.5`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1302,7 +1302,7 @@ sub:
 		},
 		{
 			YAML: `a: bogus`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1322,7 +1322,7 @@ sub:
 		},
 		{
 			YAML: `"a": double quoted map key`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.DoubleQuoteType,
 					Value:  "a",
@@ -1342,7 +1342,7 @@ sub:
 		},
 		{
 			YAML: `'a': single quoted map key`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.SingleQuoteType,
 					Value:  "a",
@@ -1364,7 +1364,7 @@ sub:
 			YAML: `
 a: "double quoted"
 b: "value map"`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1401,7 +1401,7 @@ b: "value map"`,
 			YAML: `
 a: 'single quoted'
 b: 'value map'`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1436,7 +1436,7 @@ b: 'value map'`,
 		},
 		{
 			YAML: `json: '\"expression\": \"thi:\"'`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "json",
@@ -1456,7 +1456,7 @@ b: 'value map'`,
 		},
 		{
 			YAML: `json: "\"expression\": \"thi:\""`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "json",
@@ -1481,7 +1481,7 @@ a:
 
  c
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1509,7 +1509,7 @@ a:
  d 
 e: f
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1521,14 +1521,22 @@ e: f
 					Origin: ":",
 				},
 				{
-					Type:   token.StringType,
-					Value:  "b\nc d",
-					Origin: "\n b\n\n\n c\n d\n",
+					Type:  token.StringType,
+					Value: "b\nc d",
+					// Short of the "d \n" that closes the scalar, and the next
+					// token starts that much early to make up for it.
+					// Context.removeRightSpaceFromBuf trims the spaces a line
+					// ends with from the origin buffer as well as from the
+					// value, so the buffer is shorter than the source it was
+					// read from and the extent taken from its length falls
+					// behind. It is the same defect offsetMissLedger counts
+					// under String.
+					Origin: "   \n b   \n\n  \n c\n ",
 				},
 				{
 					Type:   token.StringType,
 					Value:  "e",
-					Origin: "e",
+					Origin: "d \ne",
 				},
 				{
 					Type:   token.MappingValueType,
@@ -1552,7 +1560,7 @@ a: |
  d 
 e: f
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1600,7 +1608,7 @@ a: >
  d 
 e: f
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1642,7 +1650,7 @@ e: f
 			YAML: `
 a: >
   Text`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "a",
@@ -1670,7 +1678,7 @@ a: >
 s: >
         1s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1698,7 +1706,7 @@ s: >
 s: >1        # comment
         1s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1731,7 +1739,7 @@ s: >1        # comment
 s: >+2
         1s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1759,7 +1767,7 @@ s: >+2
 s: >-3
         1s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1788,7 +1796,7 @@ s: >
     1s
     2s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1818,7 +1826,7 @@ s: >
       2s
     3s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1850,7 +1858,7 @@ s: >
     4s
     5s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1882,7 +1890,7 @@ s: >-3
     4s
     5s
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "s",
@@ -1911,7 +1919,7 @@ s: >-3
 
                   text
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.LiteralType,
 					Value:  "|2-",
@@ -1932,7 +1940,7 @@ s: >-3
 
 
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.LiteralType,
 					Value:  "|",
@@ -1950,7 +1958,7 @@ s: >-3
 |  		  # comment
   foo
 `,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.LiteralType,
 					Value:  "|",
@@ -1970,7 +1978,7 @@ s: >-3
 		},
 		{
 			YAML: `1x0`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "1x0",
@@ -1980,7 +1988,7 @@ s: >-3
 		},
 		{
 			YAML: `0b98765`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "0b98765",
@@ -1990,7 +1998,7 @@ s: >-3
 		},
 		{
 			YAML: `098765`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "098765",
@@ -2000,7 +2008,7 @@ s: >-3
 		},
 		{
 			YAML: `0o98765`,
-			Tokens: token.Tokens{
+			Tokens: []wantToken{
 				{
 					Type:   token.StringType,
 					Value:  "0o98765",
@@ -2015,6 +2023,7 @@ s: >-3
 			if len(tokens) != len(test.Tokens) {
 				t.Fatalf("Tokenize(%q) token count mismatch, expected: %d got: %d", test.YAML, len(test.Tokens), len(tokens))
 			}
+			origins := originsOf(test.YAML, tokens)
 			for i := range test.Tokens {
 				if tokens[i].Type != test.Tokens[i].Type {
 					t.Errorf("Tokenize(%q)[%d] token.Type mismatch, expected: %s got: %s", test.YAML, i, test.Tokens[i].Type, tokens[i].Type)
@@ -2022,12 +2031,24 @@ s: >-3
 				if tokens[i].Value != test.Tokens[i].Value {
 					t.Errorf("Tokenize(%q)[%d] token.Value mismatch, expected: %q got: %q", test.YAML, i, test.Tokens[i].Value, tokens[i].Value)
 				}
-				if tokens[i].Origin != test.Tokens[i].Origin {
-					t.Errorf("Tokenize(%q)[%d] token.Origin mismatch, expected: %q got: %q", test.YAML, i, test.Tokens[i].Origin, tokens[i].Origin)
+				if origins[i] != test.Tokens[i].Origin {
+					t.Errorf("Tokenize(%q)[%d] origin mismatch, expected: %q got: %q", test.YAML, i, test.Tokens[i].Origin, origins[i])
 				}
 			}
 		})
 	}
+}
+
+// wantToken is what a scan should give back: a token's type and value, and the
+// text the document wrote it as.
+//
+// Origin is not a field of [token.Token] -- carrying the text would cost every
+// token two registers -- so it is read back from the source with the token's
+// extent. See originsOf.
+type wantToken struct {
+	Type   token.Type
+	Value  string
+	Origin string
 }
 
 type testToken struct {

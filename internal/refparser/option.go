@@ -6,6 +6,16 @@ package refparser
 // Option represents parser's option.
 type Option func(p *Parser)
 
+// WithSource hands the parser the document its tokens were read from, so that a
+// folded block scalar can be given the text it was written as. Without it
+// [github.com/go-openapi/go-yaml/ast.LiteralNode.Source] stays empty and a
+// folded scalar renders from its value, which folding has already rewritten.
+func WithSource(src string) Option {
+	return func(p *Parser) {
+		p.src = src
+	}
+}
+
 // AllowDuplicateMapKey allow the use of keys with the same name in the same map,
 // but by default, this is not permitted.
 func AllowDuplicateMapKey() Option {

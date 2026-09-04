@@ -687,7 +687,10 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 
 		return token.Token{}, false
 	}
-	origin := c.text(c.obuf, c.originStart)
+	// originAt is where the origin buffer was found in the source, or -1 where
+	// the buffer is not the source's own bytes. Taken once: the comparison
+	// walks the whole buffer, and three sites below want the answer.
+	origin, originAt := c.textAt(c.obuf, c.originStart)
 	// pos.Offset() is where the value starts in the source. The cursor is not:
 	// a plain scalar is cut only once the scanner knows it did not run on to
 	// the next line, by which time the cursor stands well past it.
@@ -703,7 +706,7 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 		// found. The origin is still the source's own bytes and the buffer
 		// knows where it began, so the value starts that far in, past the
 		// whitespace the line was indented by.
-		if _, ok := c.window(c.obuf, c.originStart); ok {
+		if originAt == c.originStart {
 			pos.SetOffset(int32(c.originStart + leadingSpace(c.obuf)))
 		}
 	}
@@ -714,6 +717,15 @@ func (c *Context) bufferedToken(pos token.Position) (token.Token, bool) {
 	} else {
 		tk = token.Make(value, origin, pos)
 	}
+	if originAt >= 0 {
+		// The origin buffer holds the source's own bytes, so where it was found
+		// plus how long it is closes the token exactly, whatever the offset
+		// points at inside it. Counting forward from the offset instead comes
+		// up short wherever a block scalar's indentation indicator leaves some
+		// of the leading spaces in the content.
+		tk.SetEndOffset(int32(originAt + len(c.obuf)))
+	}
+
 	c.setTokenTypeByPrevTag(&tk)
 	c.resetBuffer()
 

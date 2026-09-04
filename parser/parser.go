@@ -86,6 +86,9 @@ type Parser struct {
 	// again once the parse has finished reading them. A full scan pins it and
 	// never lets go, so nothing is recycled and every token stands.
 	tokens *tokenarena.TokenArena[tapeToken]
+	// src is the document being read, kept so that a node can be given the
+	// text it was written as. A folded block scalar is the one that needs it.
+	src string
 	// onComplete is told about each node as it is finished. EXPERIMENT.
 	onComplete func(ast.Node)
 	// entries holds the entries of every mapping open at this point in the
@@ -280,7 +283,8 @@ func (p *Parser) begin(src []byte) {
 	// [Parser.Walk] is what gives it back.
 	p.tokens.Pin()
 
-	p.scan.Init(nocopy.String(src))
+	p.src = nocopy.String(src)
+	p.scan.Init(p.src)
 
 	// Guessed from the source rather than counted, since counting would mean
 	// reading the document through before parsing any of it. It sizes buffers
@@ -1530,6 +1534,8 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 		return nil, yamlerrors.NewSyntax("unexpected token. required string token", value.GetToken())
 	}
 	node.Value = str
+	node.Source = ast.BlockSource(p.src, node.Start, str.GetToken())
+
 	return node, nil
 }
 

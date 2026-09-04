@@ -28,10 +28,17 @@ func TestEndLineMatchesCountingTheOrigin(t *testing.T) {
 		var s scanner.Scanner
 		s.Init(src)
 
+		prev := 0
 		for tk := range s.All() {
-			want := tk.Position.Line + int32(strings.Count(strings.Trim(tk.Origin, " \r\n"), "\n"))
+			// The text the document wrote the token as: the tokens' extents
+			// tile the source, so it runs from the end of the one before.
+			end := min(max(int(tk.EndOffset()), prev), len(src))
+			origin := src[prev:end]
+			prev = end
+
+			want := tk.Position.Line + int32(strings.Count(strings.Trim(origin, " \r\n"), "\n"))
 			require.Equalf(t, want, tk.EndLine(),
-				"%s at line %d: Origin %q", tk.Type, tk.Position.Line, tk.Origin)
+				"%s at line %d: written as %q", tk.Type, tk.Position.Line, origin)
 			require.GreaterOrEqualf(t, tk.EndLine(), tk.Position.Line,
 				"%s ends before it starts", tk.Type)
 		}

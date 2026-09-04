@@ -12,10 +12,11 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
+	"github.com/go-openapi/go-yaml/token"
 )
 
-// sourceText is a token's text as it stands in the source: Origin without the
-// whitespace and line breaks written before it.
+// sourceText is a token's text as it stands in the source: the text it was
+// written as, without the whitespace and line breaks in front of it.
 func sourceText(origin string) string {
 	return strings.TrimLeft(origin, " \t\n\r")
 }
@@ -45,37 +46,18 @@ func at(src string, offset int) string {
 // was reported that many bytes early. Twenty-one of the twenty-five types now
 // miss nothing at all.
 //
-// What is left splits in two, and neither part is the counter drifting:
+// What is left is 25 of 3,489, and none of it is the counter drifting. 17 are
+// Invalid, the tokens an error carries, built from the whole origin buffer
+// rather than from one token's worth of it. 7 are multi-line String values --
+// block scalar content -- and one is a Comment.
 //
-//   - 53 tokens carry an offset that addresses somewhere else in the source.
-//     21 are multi-line String values -- block scalar content -- and 23 are
-//     Invalid, the tokens an error carries, built from the whole origin buffer.
-//     It was 65 and 23 until the scanner recorded where a block scalar's
-//     content begins instead of cutting the token at the end of the block and
-//     asking the cursor: MultiLineState.began marks the first byte of content
-//     read, and MultiLineState.from hands it back when the token is built.
-//     Working it out afterwards cannot succeed, folding making the value
-//     shorter than the source it came from, and ctx.originStart does not track
-//     through a multi-line block.
-//
-//   - tokens carrying an Origin that is not a slice of the source at all, so no
-//     offset can address it. The escapes a double-quoted scalar rewrote were
-//     one half and are fixed: scanDoubleQuote records \xXX, \uXXXX and
-//     \UXXXXXXXX now.
-//
-//     The other half is the spaces a line ends with.
-//     Context.removeRightSpaceFromBuf trims them from the origin as well as
-//     from the value, so "a: one \n  two" -- a plain scalar continued over two
-//     lines, the first ending in a space -- has an Origin of "a: one\n  two",
-//     which the document does not contain. The offset then addresses 10 bytes
-//     past the value: the indent, the break and the space that folding saved.
-//
-//     ⚠️ Keeping the origin verbatim is not a one-line change. The origin
-//     buffer doubles as the state an indentation decision is taken from:
-//     leaving the trailing tabs in it turns "foo: 1" into a tab used as a map
-//     key. TestDecoder_TabCharacterAtRight and tabs-that-look-like-indentation
-//     both fail. Separating "the token's text" from "the buffer indentation is
-//     judged by" is what this needs, and it is a scanner change of its own.
+// It was 33 while the comparison ran against Token.Origin. That field held the
+// scanner's buffer, which is not always the document: Context.removeRightSpaceFromBuf
+// trims the spaces a line ends with from the origin as well as from the value,
+// so "a: one \n  two" -- a plain scalar continued over two lines, the first
+// ending in a space -- had an Origin of "a: one\n  two", which the document does
+// not contain. Reading the text back from the extents compares against the
+// document itself, and three of the types stopped missing anything at all.
 //
 // Line and Column were right throughout, which is what made the drift hard to
 // see: 3,287 of 3,489 columns address their token.
@@ -84,10 +66,9 @@ func at(src string, offset int) string {
 // fails as a regression; one that starts missing fewer fails too, and the fix
 // is recorded by lowering the count.
 var offsetMissLedger = map[string]int{
-	"String":      10,
-	"Invalid":     23,
-	"Integer":     3,
-	"DoubleQuote": 1,
+	"Invalid": 17,
+	"String":  7,
+	"Comment": 1,
 }
 
 // TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how
@@ -102,8 +83,9 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 
 	for _, test := range tests {
 		src := string(test.InYAML)
-		for _, tk := range scanAll(t, src) {
-			want := sourceText(tk.Origin)
+		tokens := scanAll(t, src)
+		for i, tk := range tokens {
+			want := sourceText(originsOf(src, tokens)[i])
 			if want == "" {
 				continue
 			}
@@ -139,4 +121,28 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 			assert.Equalf(t, want, got, "%s: offset misses changed", name)
 		}
 	}
+}
+
+// originsOf reads back the text the document wrote each token as.
+//
+// [token.Token] does not carry it. The tokens' extents tile the source --
+// TestOriginsTileTheSource is where that is checked -- so the text of the token
+// at i is the source between the end of the one before it and its own end,
+// leading whitespace included.
+func originsOf(src string, tokens token.Tokens) []string {
+	origins := make([]string, len(tokens))
+	prev := 0
+	for i, tk := range tokens {
+		end := int(tk.EndOffset())
+		if end < prev || end > len(src) {
+			origins[i] = ""
+			prev = min(max(end, prev), len(src))
+
+			continue
+		}
+		origins[i] = src[prev:end]
+		prev = end
+	}
+
+	return origins
 }

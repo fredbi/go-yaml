@@ -855,7 +855,7 @@ func Make(value string, org string, pos Position) Token {
 	tk := Token{
 		Type:     StringType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -957,10 +957,11 @@ func (p *Position) String() string {
 type Token struct {
 	// Value is a string extracted with only meaningful characters, with spaces and such removed.
 	Value string
-	// Origin is a string that stores the original text as-is.
-	Origin string
 	// Position is where the token stands in the source.
 	Position Position
+	// end is the offset just past the token's text, so that src[Offset:end] is
+	// what the document wrote it as. Read it with [Token.EndOffset].
+	end int32
 	// spans packs three numbers that would otherwise take a register each:
 	// the line the token ends on, the line breaks its comments take up, and
 	// whether a blank line stands above it. Read them with [Token.EndLine()],
@@ -1025,8 +1026,9 @@ func (t *Token) Clone() *Token {
 // Dump outputs token information to stdout for debugging.
 func (t *Token) Dump() {
 	fmt.Printf(
-		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [ORG]:%q [POS(line:column:offset)]: %d:%d:%d\n",
-		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value, t.Origin, t.Position.Line, t.Position.Column, t.Position.Offset(),
+		"[TYPE]:%q [CHARTYPE]:%q [INDICATOR]:%q [VALUE]:%q [POS(line:column:offset:end)]: %d:%d:%d:%d\n",
+		t.Type, t.Type.CharacterType(), t.Type.Indicator(), t.Value,
+		t.Position.Line, t.Position.Column, t.Position.Offset(), t.EndOffset(),
 	)
 }
 
@@ -1073,7 +1075,7 @@ func MakeString(value string, org string, pos Position) Token {
 	return Token{
 		Type:     StringType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1084,7 +1086,7 @@ func SequenceEntry(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceEntryType,
 		Value:    string(SequenceEntryCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1095,7 +1097,7 @@ func MappingKey(pos Position) *Token {
 	return &Token{
 		Type:     MappingKeyType,
 		Value:    string(MappingKeyCharacter),
-		Origin:   string(MappingKeyCharacter),
+		end:      extentOf(string(MappingKeyCharacter), pos),
 		Position: pos,
 		spans:    uint64(pos.Line),
 	}
@@ -1106,7 +1108,7 @@ func MappingValue(pos Position) *Token {
 	return &Token{
 		Type:     MappingValueType,
 		Value:    string(MappingValueCharacter),
-		Origin:   string(MappingValueCharacter),
+		end:      extentOf(string(MappingValueCharacter), pos),
 		Position: pos,
 		spans:    uint64(pos.Line),
 	}
@@ -1117,7 +1119,7 @@ func CollectEntry(org string, pos Position) *Token {
 	return &Token{
 		Type:     CollectEntryType,
 		Value:    string(CollectEntryCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1128,7 +1130,7 @@ func SequenceStart(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceStartType,
 		Value:    string(SequenceStartCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1139,7 +1141,7 @@ func SequenceEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     SequenceEndType,
 		Value:    string(SequenceEndCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1150,7 +1152,7 @@ func MappingStart(org string, pos Position) *Token {
 	return &Token{
 		Type:     MappingStartType,
 		Value:    string(MappingStartCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1161,7 +1163,7 @@ func MappingEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     MappingEndType,
 		Value:    string(MappingEndCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1172,7 +1174,7 @@ func Comment(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     CommentType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1183,7 +1185,7 @@ func Anchor(org string, pos Position) *Token {
 	return &Token{
 		Type:     AnchorType,
 		Value:    string(AnchorCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1194,7 +1196,7 @@ func Alias(org string, pos Position) *Token {
 	return &Token{
 		Type:     AliasType,
 		Value:    string(AliasCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1205,7 +1207,7 @@ func Tag(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     TagType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1216,7 +1218,7 @@ func Literal(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     LiteralType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1227,7 +1229,7 @@ func Folded(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     FoldedType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1238,7 +1240,7 @@ func SingleQuote(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     SingleQuoteType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1249,7 +1251,7 @@ func DoubleQuote(value string, org string, pos Position) *Token {
 	return &Token{
 		Type:     DoubleQuoteType,
 		Value:    value,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1260,7 +1262,7 @@ func Directive(org string, pos Position) *Token {
 	return &Token{
 		Type:     DirectiveType,
 		Value:    string(DirectiveCharacter),
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1271,7 +1273,7 @@ func Space(pos Position) *Token {
 	return &Token{
 		Type:     SpaceType,
 		Value:    string(SpaceCharacter),
-		Origin:   string(SpaceCharacter),
+		end:      extentOf(string(SpaceCharacter), pos),
 		Position: pos,
 		spans:    uint64(pos.Line),
 	}
@@ -1282,7 +1284,7 @@ func MergeKey(org string, pos Position) *Token {
 	return &Token{
 		Type:     MergeKeyType,
 		Value:    "<<",
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1293,7 +1295,7 @@ func DocumentHeader(org string, pos Position) *Token {
 	return &Token{
 		Type:     DocumentHeaderType,
 		Value:    "---",
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1304,7 +1306,7 @@ func DocumentEnd(org string, pos Position) *Token {
 	return &Token{
 		Type:     DocumentEndType,
 		Value:    "...",
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1318,7 +1320,7 @@ func Invalid(org string, pos Position) *Token {
 	return &Token{
 		Type:     InvalidType,
 		Value:    org,
-		Origin:   org,
+		end:      extentOf(org, pos),
 		Position: pos,
 		spans:    uint64(pos.Line+int32(breaksIn(org))) | uint64(trailingBreaksIn(org))&trailingMask<<trailingShift,
 	}
@@ -1389,7 +1391,7 @@ const (
 //
 // It is what a reader wants when it asks how far a token reaches, and it is
 // settled where the token is built rather than counted again from
-// [Token.Origin] at every site that asks. Leading and trailing whitespace does
+// the origin text at every site that asks. Leading and trailing whitespace does
 // not count: those breaks belong to the gap around the token, not to the token.
 //
 // A token the parser makes up for a value the document leaves out ends where it
@@ -1491,3 +1493,30 @@ func breaksInRaw(s string) int {
 
 	return n
 }
+
+// extentOf is the offset just past a token's text, given the source it was
+// written as and where it starts.
+//
+// The whitespace an origin opens with belongs to the gap before the token
+// rather than to the token, and pos.Offset already points past it.
+func extentOf(org string, pos Position) int32 {
+	i := 0
+	for i < len(org) && (org[i] == ' ' || org[i] == '\t' || org[i] == '\n' || org[i] == '\r') {
+		i++
+	}
+
+	return pos.Offset() + int32(len(org)-i)
+}
+
+// SetEndOffset records where the token's text ends, for a scanner that knows
+// the window of source its origin buffer was copied from. [extentOf] counts
+// forward from the offset instead, which comes up short wherever a block
+// scalar's indentation indicator leaves some of the leading spaces in the
+// content: the offset points past them and the count does not include them.
+func (t *Token) SetEndOffset(end int32) { t.end = end }
+
+// EndOffset is the byte just past the token's text, so that src[Offset:EndOffset]
+// is what the document wrote the token as, with the whitespace before it left
+// out. A token the parser makes up for a value the document leaves out ends
+// where it starts.
+func (t Token) EndOffset() int32 { return t.end }

@@ -4,7 +4,7 @@
 // Package nocopy makes a string that shares a byte slice's memory.
 //
 // A parse turns the document it is handed into a string, because the scanner
-// reads a string and every token's Value and Origin is a slice of it. Written
+// reads a string and every token's Value is a slice of it. Written
 // as string(src) that allocates and copies the whole document: 3.7 MB of
 // golang_source copied once per parse, and held for as long as the tree is,
 // since the tree points into it.

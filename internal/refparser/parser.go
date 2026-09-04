@@ -29,7 +29,7 @@ func ParseBytes(src []byte, mode Mode, opts ...Option) (*ast.File, error) {
 	var s scanner.Scanner
 	s.Init(text)
 
-	p, err := New(s.Tokens(), mode, opts...)
+	p, err := New(s.Tokens(), mode, append(opts, WithSource(text))...)
 	if scanErr := s.Err(); scanErr != nil {
 		// The scanner stopped first, and says why. New only knows that the
 		// token it was handed was an invalid one.
@@ -95,6 +95,9 @@ var yamlVersionMap = map[string]YAMLVersion{
 type Parser struct {
 	tokens []*Token
 	raw    rawTokens
+	// src is the document the tokens were read from, where the caller passed
+	// it. A folded block scalar is the one node that needs it.
+	src string
 	// entries holds the entries of every mapping open at this point in the
 	// descent, innermost run last. parseMap takes its run off the end once the
 	// mapping is built.
@@ -1319,6 +1322,8 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 		return nil, yamlerrors.NewSyntax("unexpected token. required string token", value.GetToken())
 	}
 	node.Value = str
+	node.Source = ast.BlockSource(p.src, node.Start, str.GetToken())
+
 	return node, nil
 }
 

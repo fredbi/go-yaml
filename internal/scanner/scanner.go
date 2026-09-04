@@ -230,15 +230,19 @@ func quotedRanges(text string) byteRanges {
 			default:
 				continue
 			}
-			written := strings.TrimLeft(tk.Origin, " \t\n\r")
-			start := int(tk.Position.Offset())
-			if start < 0 || start+len(written) > len(text) || !strings.HasPrefix(text[start:], written) {
+			start, end := int(tk.Position.Offset()), int(tk.EndOffset())
+			if start < 0 || end > len(text) || start >= end {
 				// The token's offset does not address its text, so the span
 				// cannot be trusted. Leaving it out refuses a mark that a
 				// quoted scalar may hold, which is where this started.
 				continue
 			}
-			ranges = append(ranges, struct{ start, end int }{start, start + len(written)})
+			if q := text[start]; q != '\'' && q != '"' {
+				// Same again, caught where the bounds hold but the offset
+				// addresses something other than the quote the scalar opens on.
+				continue
+			}
+			ranges = append(ranges, struct{ start, end int }{start, end})
 		}
 	}
 }
