@@ -170,6 +170,13 @@ func (s *Scanner) scanMultiLineHeader(ctx *Context) (bool, error) {
 	return true, nil
 }
 
+// scanMultiLineHeaderOption reads the rest of the line a block scalar's header
+// opens, and hands over the header token.
+//
+// What follows the "|" or ">" is the indicators, then optionally a comment.
+// [MultiLineState] says what the indicators mean. The line holds nothing else,
+// content starting on the line below, which is why this reads to the break and
+// stops there.
 func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	header := ctx.currentChar()
 	// headerIndex is where the indicator stands in the origin buffer, which
@@ -291,7 +298,48 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	return nil
 }
 
+// MultiLineState is what a block scalar's header settled, kept while its
+// content is read.
+//
+// A block scalar is written as "|" or ">" and then lines below it, indented:
+//
+//	text: |
+//	  first line
+//	  second line
+//
+// "|" keeps the line structure and ">" folds it, so those two lines read back
+// as "first line\nsecond line\n" under "|" and "first line second line\n" under
+// ">". That is the whole difference between isLiteral and isFolded.
+//
+// The header may carry up to two indicators after the "|" or ">", in either
+// order. opt holds them as they were written -- "", "-", "+", "2", "2-", "-2".
+// The spec calls the pair c-b-block-header(m,t), where m is the indentation
+// indicator and t the chomping indicator.
+//
+// The indentation indicator is one digit, 1 to 9. Without it the block's
+// indentation is worked out from its first content line, which is ambiguous
+// when the content itself begins with spaces: there is no telling the
+// indentation from the text. The digit settles it, counted from the column of
+// whatever encloses the block, and everything past that width is content:
+//
+//	"a: |\n    text\n"    reads "text\n"      -- four spaces, all indentation
+//	"a: |2\n    text\n"   reads "  text\n"    -- two stated, so two are content
+//
+// The chomping indicator says what happens to the line breaks the block ends
+// on. "-" strips them all, "+" keeps them all, and writing neither clips them
+// to one:
+//
+//	"a: |-\n  text\n\n\n"  reads "text"
+//	"a: |\n  text\n\n\n"   reads "text\n"
+//	"a: |+\n  text\n\n\n"  reads "text\n\n\n"
+//
+// Both indicators are rare in documents people write, and neither can be
+// ignored: a document using them means something different from the same
+// document without them.
 type MultiLineState struct {
+	// opt is the header's indicators as the document wrote them, "" where it
+	// wrote none. At most one of each and at most two characters, in either
+	// order, which is what validateMultiLineHeaderOption enforces.
 	opt string
 	// indentIndicator is the width the header stated, 0 where it stated none.
 	// firstLineIndentColumn cannot answer for it: a header without a width
@@ -442,10 +490,22 @@ func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int) {
 	s.foldedNewLine = false
 }
 
+// hasTrimAllEndNewlineOpt reports whether the header strips every line break
+// the block ends on -- the "-" of "|-", which may stand before or after the
+// indentation indicator.
+//
+// A raw folded scalar strips them too, having no header to say so: it is read
+// as folded without being written as a block at all, and carries no trailing
+// blank lines into its value.
 func (s *MultiLineState) hasTrimAllEndNewlineOpt() bool {
 	return strings.HasPrefix(s.opt, "-") || strings.HasSuffix(s.opt, "-") || s.isRawFolded
 }
 
+// hasKeepAllEndNewlineOpt reports whether the header keeps every line break the
+// block ends on -- the "+" of "|+".
+//
+// Writing neither "+" nor "-" clips instead, keeping one break whatever the
+// document ended with.
 func (s *MultiLineState) hasKeepAllEndNewlineOpt() bool {
 	return strings.HasPrefix(s.opt, "+") || strings.HasSuffix(s.opt, "+")
 }

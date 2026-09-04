@@ -230,6 +230,12 @@ func (c *Context) getMultiLineState() *MultiLineState {
 	return c.mstate
 }
 
+// setLiteral opens a block scalar that keeps its line structure, the "|" of
+// [MultiLineState].
+//
+// lastDelimColumn is the column of whatever encloses the block, which is what
+// the header's indentation indicator counts from: "|2" under a key at column 3
+// puts content at column 5.
 func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	mstate := &MultiLineState{
@@ -243,6 +249,8 @@ func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 	c.mstate = mstate
 }
 
+// setFolded opens a block scalar that folds its line breaks into spaces, the
+// ">" of [MultiLineState]. lastDelimColumn is read as in setLiteral.
 func (c *Context) setFolded(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	mstate := &MultiLineState{

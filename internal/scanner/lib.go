@@ -305,6 +305,15 @@ func isPropertyToken(tk *token.Token) bool {
 // indicator, in either order, and either may be left out. Two of either is not
 // a header: "|--" used to pass because the check trimmed one indicator off each
 // end and found nothing left in the middle.
+// validateMultiLineHeaderOption refuses a block scalar header that carries
+// anything but its two indicators, or two of either.
+//
+// opt is what stands between the "|" or ">" and the end of its line, with any
+// comment already cut off: at most one digit 1 to 9 and at most one of "-" or
+// "+", in either order. [MultiLineState] says what each of them does.
+//
+// "|--" used to pass, the check having trimmed one indicator off each end and
+// found nothing left in the middle.
 func validateMultiLineHeaderOption(opt string) error {
 	var chomping, indentation bool
 
