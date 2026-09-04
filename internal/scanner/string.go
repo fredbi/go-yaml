@@ -38,7 +38,19 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := len(src)
-	value := []byte{}
+	// A single-quoted scalar reads back as the source between its quotes unless
+	// a line break is folded or a "''" stands for one quote. Until one of those
+	// happens the value is a window on src and nothing is built: value stays
+	// nil and copied stays false. The first rewrite copies what has been passed
+	// over so far, and the rest of the scalar is appended as before.
+	value := s.quoted[:0]
+	copied := false
+	keep := func(upto int) {
+		if !copied {
+			value = append(value, src[startIndex:upto]...)
+			copied = true
+		}
+	}
 	isFirstLineChar := false
 	isNewLine := false
 
@@ -53,6 +65,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 		}
 		ctx.addOriginBuf(c)
 		if isNewLineChar(c) {
+			keep(idx)
 			notSpaceIdx := -1
 			for i := len(value) - 1; i >= 0; i-- {
 				if value[i] == ' ' {
@@ -91,12 +104,15 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 
 			continue
 		} else if c != '\'' {
-			value = utf8.AppendRune(value, c)
+			if copied {
+				value = utf8.AppendRune(value, c)
+			}
 			isFirstLineChar = false
 
 			continue
 		} else if idx+width < len(ctx.src) && ctx.src[idx+width] == '\'' {
 			// '' handle as ' character
+			keep(idx)
 			value = utf8.AppendRune(value, c)
 			ctx.addOriginBuf(c)
 			idx++
@@ -105,7 +121,14 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.MakeSingleQuote(string(value), string(ctx.obuf), srcpos), nil
+
+		text := src[startIndex:idx]
+		if copied {
+			text = string(value)
+			s.quoted = value[:0]
+		}
+
+		return token.MakeSingleQuote(text, string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.obuf), srcpos))
@@ -118,7 +141,19 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := len(src)
-	value := []byte{}
+	// As in scanSingleQuote: the value is a window on src until something
+	// rewrites it -- a folded line break, an escape, or a tab dropped before
+	// one. keep copies what has been passed over the first time that happens,
+	// and the rest is appended as before. A scalar holding none of them, which
+	// is most of them, is never built.
+	value := s.quoted[:0]
+	copied := false
+	keep := func(upto int) {
+		if !copied {
+			value = append(value, src[startIndex:upto]...)
+			copied = true
+		}
+	}
 	isFirstLineChar := false
 	isNewLine := false
 
@@ -133,6 +168,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 		}
 		ctx.addOriginBuf(c)
 		if isNewLineChar(c) {
+			keep(idx)
 			notSpaceIdx := -1
 			for i := len(value) - 1; i >= 0; i-- {
 				if value[i] == ' ' {
@@ -169,6 +205,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			}
 			continue
 		} else if c == '\\' {
+			keep(idx)
 			isFirstLineChar = false
 			if idx+1 >= size {
 				value = utf8.AppendRune(value, c)
@@ -359,22 +396,38 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				foundNotSpaceChar = true
 			}
 			if foundNotSpaceChar {
-				value = utf8.AppendRune(value, c)
+				// The tab stands in the text, so it is the source's own byte
+				// and the window still holds.
+				if copied {
+					value = utf8.AppendRune(value, c)
+				}
 				if src[idx+1] != '"' {
 					s.progressColumn(ctx, 1)
 				}
 			} else {
+				// Dropped, with the whitespace after it, so the value parts
+				// company with the source here.
+				keep(idx)
 				idx += progress
 				s.progressColumn(ctx, progress)
 			}
 			continue
 		} else if c != '"' {
-			value = utf8.AppendRune(value, c)
+			if copied {
+				value = utf8.AppendRune(value, c)
+			}
 			isFirstLineChar = false
 			continue
 		}
 		s.progressColumn(ctx, 1)
-		return token.MakeDoubleQuote(string(value), string(ctx.obuf), srcpos), nil
+
+		text := src[startIndex:idx]
+		if copied {
+			text = string(value)
+			s.quoted = value[:0]
+		}
+
+		return token.MakeDoubleQuote(text, string(ctx.obuf), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 

@@ -19,8 +19,11 @@ import (
 // reading numbers as text -- validating them rather than converting them --
 // reads the document's own bytes.
 //
-// Where scanning rewrote the text, Value is a copy and has to be: a quoted
-// scalar loses its quotes and its escapes, and a folded one loses its layout.
+// Where scanning rewrote the text, Value is a copy and has to be: an escape
+// stands for a character the document did not write, and a folded scalar loses
+// its layout. Losing the quotes is not a rewrite -- the text between them is
+// still the source's own bytes -- so a quoted scalar holding no escape windows
+// onto the source like any other.
 func TestValueAliasesTheSource(t *testing.T) {
 	const src = "int: 1234567890\n" +
 		"float: 3.25\n" +
@@ -28,7 +31,10 @@ func TestValueAliasesTheSource(t *testing.T) {
 		"under: 1_000\n" +
 		"neg: -42\n" +
 		"plain: plain text\n" +
-		"quoted: \"needs a copy\"\n"
+		"quoted: \"no escape here\"\n" +
+		"single: 'no escape either'\n" +
+		"escaped: \"needs\\ta copy\"\n" +
+		"folded: 'over\n  two lines'\n"
 
 	base := uintptr(unsafe.Pointer(unsafe.StringData(src)))
 	aliases := func(s string) bool {
@@ -47,9 +53,9 @@ func TestValueAliasesTheSource(t *testing.T) {
 		}
 		seen[tk.Value] = tk.Type
 		switch tk.Value {
-		case "needs a copy":
+		case "needs\ta copy", "over two lines":
 			assert.Falsef(t, aliases(tk.Value),
-				"the quotes are stripped, so %q cannot be the source's own bytes", tk.Value)
+				"%q was rewritten as it was read, so it cannot be the source's own bytes", tk.Value)
 		default:
 			assert.Truef(t, aliases(tk.Value),
 				"%s %q should be a window into the source, not a copy of it", tk.Type, tk.Value)
@@ -65,4 +71,8 @@ func TestValueAliasesTheSource(t *testing.T) {
 	assert.Equal(t, token.IntegerType, seen["1_000"])
 	assert.Equal(t, token.IntegerType, seen["-42"])
 	assert.Equal(t, token.StringType, seen["plain text"])
+	assert.Equal(t, token.DoubleQuoteType, seen["no escape here"])
+	assert.Equal(t, token.SingleQuoteType, seen["no escape either"])
+	assert.Equal(t, token.DoubleQuoteType, seen["needs\ta copy"])
+	assert.Equal(t, token.SingleQuoteType, seen["over two lines"])
 }

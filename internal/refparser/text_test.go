@@ -26,7 +26,8 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 		"inf: -.inf\n" +
 		"null: ~\n" +
 		"plain: plain text\n" +
-		"quoted: \"needs a copy\"\n" +
+		"quoted: \"no escape here\"\n" +
+		"escaped: \"needs\\ta copy\"\n" +
 		"block: |\n  first\n  second\n"
 
 	base := uintptr(unsafe.Pointer(unsafe.StringData(src)))
@@ -76,16 +77,19 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 	assert.Equal(t, "-.inf", text["inf"])
 	assert.Equal(t, "~", text["null"])
 	assert.Equal(t, "plain text", text["plain"])
-	assert.Equal(t, "needs a copy", text["quoted"])
+	assert.Equal(t, "no escape here", text["quoted"])
+	assert.Equal(t, "needs\ta copy", text["escaped"])
 	assert.Equal(t, "first\nsecond\n", text["block"])
 
 	// The document's own bytes, for everything the scanner did not have to
 	// rewrite.
-	for _, key := range []string{"int", "float", "hex", "bool", "inf", "null", "plain"} {
+	for _, key := range []string{"int", "float", "hex", "bool", "inf", "null", "plain", "quoted"} {
 		assert.Truef(t, inSource[key], "%s: %q should be a window into the source", key, text[key])
 	}
-	// A quoted scalar loses its quotes and a block scalar its layout, so both
-	// have to be copies.
-	assert.False(t, inSource["quoted"], "a quoted scalar cannot be the source's own bytes")
+	// Losing the quotes is not a rewrite: the text between them is the source's
+	// own bytes and "quoted" is checked above with the rest. An escape stands
+	// for a character the document did not write, and a block scalar has the
+	// indentation cut from each of its lines, so those two are copies.
+	assert.False(t, inSource["escaped"], "an escaped scalar cannot be the source's own bytes")
 	assert.False(t, inSource["block"], "a block scalar cannot be the source's own bytes")
 }

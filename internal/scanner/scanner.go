@@ -13,6 +13,12 @@ import (
 // Scanner holds the scanner's internal state while processing a given text.
 // It can be allocated as part of another data structure but must be initialized via Init before use.
 type Scanner struct {
+	// quoted is the room a quoted scalar is rewritten in, kept between tokens.
+	// A scalar with nothing to rewrite never reaches for it -- its value is a
+	// window on the source -- and one that does finds a buffer already grown to
+	// the size the last such scalar needed. Building each of them from nothing
+	// cost an allocation or two per escape as the slice doubled its way up.
+	quoted []byte
 	// source is the text handed to Init, held as it was given. sourcePos and
 	// sourceSize count its bytes, and so does offset.
 	source     string
