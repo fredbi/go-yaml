@@ -345,6 +345,10 @@ var (
 	// and used to quote legacy keywords present in YAML 1.1 or lesser for compatibility reasons,
 	// even though this library is supposed to be YAML 1.2-compliant.
 	reservedEncKeywordTypes = map[string]Type{}
+	// reserved11KeywordTypes is reservedKeywordTypes with YAML 1.1's spellings
+	// of true and false added: "no" and "off" name the boolean there and a
+	// string here.
+	reserved11KeywordTypes = map[string]Type{}
 )
 
 // Indicator returns the indicator a token of type t is, or NotIndicator where
@@ -391,6 +395,43 @@ func (t Type) CharacterType() CharacterType {
 	}
 }
 
+// Schema is the tag resolution a plain scalar is read against.
+//
+// YAML resolves an untagged scalar by matching its text against a schema's
+// table, so what "0100" or "no" means is a question about a schema and not
+// about the text alone. A scanner is told which one to read; see
+// [github.com/go-openapi/go-yaml/internal/scanner.Scanner.SetSchema].
+type Schema uint8
+
+const (
+	// Schema12 is the YAML 1.2 core schema, spec §10.3.2. It is the zero
+	// value, so a scalar is read against 1.2 unless something says otherwise.
+	Schema12 Schema = iota
+
+	// Schema11 is YAML 1.1's resolution, which a document may ask for with a
+	// "%YAML 1.1" directive.
+	//
+	// It adds YAML 1.1's spellings of true and false -- y, n, yes, no, on, off
+	// -- the "_" digit separator, binary written "0b1010" and octal written
+	// with a leading zero, and it drops 1.2's "0o" prefix, its unsigned
+	// exponent and its exponent without a fraction.
+	//
+	// Two pieces are not here yet. Base 60 ("190:20:30") is read as a string,
+	// where 1.1 reads 685230. And the conversion helpers -- [ParseInteger],
+	// [ParseFloat] and their big counterparts -- read 1.2, so a value typed
+	// under 1.1 whose spelling 1.2 does not share converts to nothing.
+	Schema11
+)
+
+// keywordTypes is the keyword table schema resolves against.
+func keywordTypes(schema Schema) map[string]Type {
+	if schema == Schema11 {
+		return reserved11KeywordTypes
+	}
+
+	return reservedKeywordTypes
+}
+
 // reservedKeywordLengths has bit n set where a keyword in
 // reservedKeywordTypes is n bytes long. The keywords are 1, 4 or 5 bytes --
 // "~", "null", ".inf", "false", "-.INF" -- so a value of any other length
@@ -400,10 +441,21 @@ func (t Type) CharacterType() CharacterType {
 // keyword widens the gate on its own.
 var reservedKeywordLengths uint64
 
+// reserved11KeywordLengths is [reservedKeywordLengths] for
+// reserved11KeywordTypes.
+var reserved11KeywordLengths uint64
+
 // isReservedLength reports whether a value of n bytes could be a reserved
-// keyword. A value longer than 63 bytes is none of them.
-func isReservedLength(n int) bool {
-	return n < 64 && reservedKeywordLengths&(1<<uint(n)) != 0
+// keyword under schema. A value longer than 63 bytes is none of them.
+func isReservedLength(n int, schema Schema) bool {
+	if n >= 64 {
+		return false
+	}
+	if schema == Schema11 {
+		return reserved11KeywordLengths&(1<<uint(n)) != 0
+	}
+
+	return reservedKeywordLengths&(1<<uint(n)) != 0
 }
 
 func init() {
@@ -425,9 +477,18 @@ func init() {
 		reservedKeywordTypes[keyword] = NanType
 	}
 
-	for keyword := range reservedKeywordTypes {
+	for keyword, typ := range reservedKeywordTypes {
+		reserved11KeywordTypes[keyword] = typ
 		if len(keyword) < 64 {
 			reservedKeywordLengths |= 1 << uint(len(keyword))
+		}
+	}
+	for _, keyword := range reservedLegacyBoolKeywords {
+		reserved11KeywordTypes[keyword] = BoolType
+	}
+	for keyword := range reserved11KeywordTypes {
+		if len(keyword) < 64 {
+			reserved11KeywordLengths |= 1 << uint(len(keyword))
 		}
 	}
 }
@@ -516,14 +577,14 @@ func ToNumber(value string) *NumberValue {
 // binary written "0b...", and sexagesimal written "1:30:00". Its leading-zero
 // octal needs nothing here, since 1.2 reads "0755" as a decimal number anyway.
 func isNumber(value string) bool {
-	if _, ok := numberType(value); ok {
+	if _, ok := numberType(value, Schema12); ok {
 		return true
 	}
 	if !mayBeNumber(value) {
 		return false
 	}
 	if strings.Contains(value, "_") {
-		if _, ok := numberType(strings.ReplaceAll(value, "_", "")); ok {
+		if _, ok := numberType(strings.ReplaceAll(value, "_", ""), Schema12); ok {
 			return true
 		}
 	}
@@ -613,9 +674,12 @@ type numberShape struct {
 // ".inf" and ".nan" are floats too, and never reach here: reservedKeywordTypes
 // takes them first. A base prefix carries no sign, which is the table as
 // written -- "-0x1F" is a string.
-func shapeOfNumber(value string) (numberShape, bool) {
+func shapeOfNumber(value string, schema Schema) (numberShape, bool) {
 	if !mayBeNumber(value) {
 		return numberShape{}, false
+	}
+	if schema == Schema11 {
+		return shapeOfNumber11(value)
 	}
 
 	var negative bool
@@ -699,6 +763,140 @@ func shapeOfNumber(value string) (numberShape, bool) {
 	return numberShape{typ: NumberTypeFloat, base: 10, digits: body, negative: negative}, true
 }
 
+// shapeOfNumber11 reads value against YAML 1.1's integer and float types, and
+// reports false where the text is not a number there.
+//
+// The forms, from yaml.org/type/int and yaml.org/type/float:
+//
+//	int    [-+]? 0b [0-1_]+  |  [-+]? 0 [0-7_]+  |  [-+]? ( 0 | [1-9] [0-9_]* )
+//	       [-+]? 0x [0-9a-fA-F_]+
+//	float  [-+]? ( [0-9] [0-9_]* )? \. [0-9_]* ( [eE] [-+] [0-9]+ )?
+//
+// Three differences from 1.2 do the work. A "_" may stand between digits. A
+// leading zero opens an octal number rather than a decimal one. And a float
+// must carry a point, and a sign on its exponent, so "1e10" and "6.02e23" are
+// strings here and floats there.
+//
+// A point with digits on neither side is not read as a float, which is the
+// reading PyYAML settled on: the type's own regular expression matches a bare
+// ".", and no document means 0 by it.
+//
+// Base 60 -- "190:20:30", which 1.1 reads as 685230 -- is not here. It needs a
+// conversion no native strconv base covers, and [Schema11] says so.
+func shapeOfNumber11(value string) (numberShape, bool) {
+	var negative bool
+	body := value
+	switch body[0] {
+	case '-':
+		negative, body = true, body[1:]
+	case '+':
+		body = body[1:]
+	}
+	if body == "" {
+		return numberShape{}, false
+	}
+
+	// A base prefix, which 1.1 writes after the sign.
+	if len(body) > 2 && body[0] == '0' {
+		var base int
+		var typ NumberType
+		switch body[1] {
+		case 'b':
+			base, typ = 2, NumberTypeBinary
+		case 'x':
+			base, typ = 16, NumberTypeHex
+		}
+		if base != 0 {
+			digits := unseparate(body[2:])
+			if !inBase(digits, base) {
+				return numberShape{}, false
+			}
+
+			return numberShape{typ: typ, base: base, digits: digits, negative: negative}, true
+		}
+	}
+
+	// A leading zero opens an octal number, unless a point or an exponent makes
+	// the text a float: "0.5" is a float in 1.1 as it is in 1.2.
+	if len(body) > 1 && body[0] == '0' && !strings.ContainsAny(body, ".eE") {
+		digits := unseparate(body)
+		if !inBase(digits, 8) {
+			return numberShape{}, false
+		}
+
+		return numberShape{typ: NumberTypeOctet, base: 8, digits: digits, negative: negative}, true
+	}
+
+	i, whole := countDigits11(body, 0)
+	if i == len(body) {
+		if whole == 0 {
+			return numberShape{}, false
+		}
+
+		return numberShape{typ: NumberTypeDecimal, base: 10, digits: unseparate(body), negative: negative}, true
+	}
+
+	if body[i] != '.' {
+		return numberShape{}, false
+	}
+	i++
+	i, fraction := countDigits11(body, i)
+	if whole == 0 && fraction == 0 {
+		return numberShape{}, false
+	}
+
+	if i < len(body) {
+		// The exponent, whose sign 1.1 requires.
+		if body[i] != 'e' && body[i] != 'E' {
+			return numberShape{}, false
+		}
+		i++
+		if i >= len(body) || (body[i] != '+' && body[i] != '-') {
+			return numberShape{}, false
+		}
+		i++
+		if next := countDigits(body, i); next == i {
+			return numberShape{}, false
+		} else { //nolint:revive // the else keeps the cursor and the emptiness test together
+			i = next
+		}
+	}
+
+	if i != len(body) {
+		return numberShape{}, false
+	}
+
+	return numberShape{typ: NumberTypeFloat, base: 10, digits: unseparate(body), negative: negative}, true
+}
+
+// countDigits11 returns the index just past the run of digits and "_"
+// separators starting at i, and how many of them were digits.
+func countDigits11(s string, i int) (int, int) {
+	digits := 0
+	for i < len(s) {
+		switch {
+		case s[i] >= '0' && s[i] <= '9':
+			digits++
+		case s[i] == '_':
+		default:
+			return i, digits
+		}
+		i++
+	}
+
+	return i, digits
+}
+
+// unseparate removes YAML 1.1's "_" digit separators. A number written without
+// them is handed back as it stands, so it costs no allocation.
+func unseparate(s string) string {
+	if !strings.Contains(s, "_") {
+		return s
+	}
+
+	return strings.ReplaceAll(s, "_", "")
+}
+
 // countDigits returns the index just past the run of ASCII digits starting at i.
 func countDigits(s string, i int) int {
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
@@ -716,7 +914,7 @@ func countDigits(s string, i int) int {
 // happens: once each time it is asked for, rather than once for every number in
 // the document whether or not anything reads it.
 func ParseInteger(text string) (any, bool) {
-	shape, ok := shapeOfNumber(text)
+	shape, ok := shapeOfNumber(text, Schema12)
 	if !ok || shape.typ == NumberTypeFloat {
 		return nil, false
 	}
@@ -750,7 +948,7 @@ func ParseInteger(text string) (any, bool) {
 // mathematical integers", and this is where one that outgrows [ParseInteger]
 // is read exactly rather than lost.
 func ParseBigInteger(text string) (*big.Int, bool) {
-	shape, ok := shapeOfNumber(text)
+	shape, ok := shapeOfNumber(text, Schema12)
 	if !ok || shape.typ == NumberTypeFloat {
 		return nil, false
 	}
@@ -784,7 +982,7 @@ const (
 //
 // See [ParseBigInteger] for why a document may carry one.
 func ParseBigFloat(text string) (*big.Float, bool) {
-	shape, ok := shapeOfNumber(text)
+	shape, ok := shapeOfNumber(text, Schema12)
 	if !ok || shape.typ != NumberTypeFloat {
 		return nil, false
 	}
@@ -804,7 +1002,7 @@ func ParseBigFloat(text string) (*big.Float, bool) {
 // ParseFloat returns what a float scalar means, and reports false where text is
 // not a float. See [ParseInteger] for when the conversion happens.
 func ParseFloat(text string) (float64, bool) {
-	shape, ok := shapeOfNumber(text)
+	shape, ok := shapeOfNumber(text, Schema12)
 	if !ok || shape.typ != NumberTypeFloat {
 		return 0, false
 	}
@@ -849,8 +1047,8 @@ func nonZeroMantissa(digits string) bool {
 // The text is read and checked but not converted, and nothing here allocates:
 // typing a scalar costs no memory. What the number means is the caller's, from
 // [Token.Value] or [ast.ScalarNode.Text].
-func numberType(value string) (NumberType, bool) {
-	shape, ok := shapeOfNumber(value)
+func numberType(value string, schema Schema) (NumberType, bool) {
+	shape, ok := shapeOfNumber(value, schema)
 	if !ok {
 		return "", false
 	}
@@ -859,7 +1057,7 @@ func numberType(value string) (NumberType, bool) {
 }
 
 func toNumber(value string) (*NumberValue, error) {
-	shape, ok := shapeOfNumber(value)
+	shape, ok := shapeOfNumber(value, Schema12)
 	if !ok {
 		return nil, nil
 	}
@@ -1050,7 +1248,7 @@ func New(value string, org string, pos Position) *Token {
 // on the heap; a caller holding its tokens in a slice of values keeps this one
 // out of the heap altogether, which is why New is thin enough to inline.
 func Make[T Text](value string, org T, pos Position) Token {
-	return Assemble(ScalarType(value), value, pos, MeasureOrigin(org, pos))
+	return Assemble(ScalarType(value, Schema12), value, pos, MeasureOrigin(org, pos))
 }
 
 // Position type for position in YAML document
@@ -1953,17 +2151,17 @@ func Assemble(typ Type, value string, pos Position, ext Extent) Token {
 	}
 }
 
-// ScalarType is the type YAML 1.2 resolves a plain scalar's text to: the type
-// of a reserved keyword, of a number, or StringType where the text is neither.
+// ScalarType is the type schema resolves a plain scalar's text to: the type of
+// a reserved keyword, of a number, or StringType where the text is neither.
 //
 // A quoted scalar is a string whatever it spells, so this is asked only of text
 // written plainly.
-func ScalarType(value string) Type {
+func ScalarType(value string, schema Schema) Type {
 	// Both questions are asked of every plain scalar the scanner cuts, so both
 	// sit behind a test a string answers from its header: its length for the
 	// keywords, its first byte for a number.
-	if isReservedLength(len(value)) {
-		if typ, ok := reservedKeywordTypes[value]; ok {
+	if isReservedLength(len(value), schema) {
+		if typ, ok := keywordTypes(schema)[value]; ok {
 			return typ
 		}
 	}
@@ -1972,7 +2170,7 @@ func ScalarType(value string) Type {
 		return StringType
 	}
 
-	typ, ok := numberType(value)
+	typ, ok := numberType(value, schema)
 	if !ok {
 		return StringType
 	}

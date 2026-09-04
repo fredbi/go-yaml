@@ -17,6 +17,10 @@ type Context struct {
 	size            int
 	notSpaceCharPos int
 	src             string
+	// schema is the tag resolution plain scalars are read against. The zero
+	// value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner
+	// carries it across an Init.
+	schema token.Schema
 	// raw is src's own bytes, for the word-at-a-time scans in
 	// [github.com/go-openapi/go-yaml/internal/swar]. A string cannot be loaded
 	// eight bytes at a time without unsafe, and Init was handed the slice.
@@ -744,7 +748,7 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 	// written plainly is read for a keyword or a number.
 	typ := token.StringType
 	if !c.isMultiLine() {
-		typ = token.ScalarType(value)
+		typ = token.ScalarType(value, c.schema)
 	}
 
 	tk := token.Assemble(typ, value, pos, ext)

@@ -60,7 +60,7 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 				assert.Falsef(t, isInt, "%q is not a number, ParseInteger accepted it", value)
 				assert.Falsef(t, isFloat, "%q is not a number, ParseFloat accepted it", value)
 			}
-			typ, isNumber := numberType(value)
+			typ, isNumber := numberType(value, Schema12)
 
 			if !isNumber {
 				assert.Nilf(t, num, "numberType says %q is not a number, ToNumber read it as a %s", value, typeOf(num))
@@ -148,7 +148,7 @@ var sink Token
 // would type it as a plain string.
 func TestReservedGatesLetEveryKeywordThrough(t *testing.T) {
 	for keyword := range reservedKeywordTypes {
-		assert.Truef(t, isReservedLength(len(keyword)),
+		assert.Truef(t, isReservedLength(len(keyword), Schema12),
 			"%q is a reserved keyword of %d bytes, and the length gate turns it away",
 			keyword, len(keyword))
 	}

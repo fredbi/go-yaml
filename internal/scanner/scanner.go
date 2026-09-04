@@ -15,6 +15,9 @@ import (
 // Scanner holds the scanner's internal state while processing a given text.
 // It can be allocated as part of another data structure but must be initialized via Init before use.
 type Scanner struct {
+	// schema is the tag resolution plain scalars are read against. See
+	// SetSchema.
+	schema token.Schema
 	// quoted is the room a quoted scalar is rewritten in, kept between tokens.
 	// A scalar with nothing to rewrite never reaches for it -- its value is a
 	// window on the source -- and one that does finds a buffer already grown to
@@ -102,6 +105,28 @@ func (s *Scanner) Init(src []byte) {
 	s.initErr = validateStream(text)
 	s.reset(text)
 }
+
+// SetSchema says which YAML schema the scanner resolves plain scalars against.
+// A scanner starts on [token.Schema12] and keeps what it was last told across
+// an Init.
+//
+// What a plain scalar means is a question about a schema and not about its text
+// alone: YAML 1.1 reads "0100" as 64 and "no" as false, where 1.2 reads 100 and
+// the string "no". The scanner holds the answer and reads nothing into it. Its
+// caller decides -- the parser, which reads the "%YAML" directive and scopes it
+// to the document, and which will carry the option that sets it where a
+// document names no version.
+//
+// A schema set part way through a scan takes effect from the next scalar the
+// scanner cuts, which is what lets the parser set it once it has read the
+// directive and before it pulls the document's first token.
+func (s *Scanner) SetSchema(schema token.Schema) {
+	s.schema = schema
+	s.ctx.schema = schema
+}
+
+// Schema is the schema the scanner resolves plain scalars against.
+func (s *Scanner) Schema() token.Schema { return s.schema }
 
 // Err returns what stopped the scanner or nil.
 func (s *Scanner) Err() error {
@@ -624,6 +649,7 @@ func (s *Scanner) reset(text string) {
 	s.lookback.Reset()
 	s.ctx.reset(src)
 	s.ctx.lookback = &s.lookback
+	s.ctx.schema = s.schema
 	s.clearState()
 }
 

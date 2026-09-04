@@ -19,16 +19,16 @@ import (
 //	       [-+]? ( .inf | .Inf | .INF )  |  .nan | .NaN | .NAN
 //	str    everything else
 //
-// The 1.1 column says what a YAML 1.1 reader makes of the same text, and is
-// here as a record rather than as behavior: 1.1 is not implemented, and will
-// arrive as a parser option and a %YAML directive. Where the two columns
-// differ the case is marked, and those are the only places an option can
-// change an answer.
+// want11 says what the same text resolves to under [Schema11], where the two
+// differ; where it is left out the schemas agree. Those rows are the only
+// places a "%YAML 1.1" directive, or the parser option that will stand beside
+// it, can change an answer.
 func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 	for _, tc := range []struct {
-		value string
-		want  Type
-		note  string
+		value  string
+		want   Type
+		want11 Type // where 0, the two schemas agree
+		note   string
 	}{
 		// Integers.
 		{value: "0", want: IntegerType},
@@ -36,9 +36,9 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		{value: "-42", want: IntegerType},
 		{value: "+42", want: IntegerType},
 		{value: "0x1F", want: HexIntegerType},
-		{value: "0o755", want: OctetIntegerType, note: "1.1 has no 0o prefix and reads a string"},
-		{value: "0100", want: IntegerType, note: "1.1 reads a leading zero as octal, so 64"},
-		{value: "098765", want: IntegerType, note: "1.1 rejects 9 and 8 as octal digits and reads a string"},
+		{value: "0o755", want: OctetIntegerType, want11: StringType, note: "1.1 has no 0o prefix and reads a string"},
+		{value: "0100", want: IntegerType, want11: OctetIntegerType, note: "1.1 reads a leading zero as octal, so 64"},
+		{value: "098765", want: IntegerType, want11: StringType, note: "1.1 rejects 9 and 8 as octal digits and reads a string"},
 		{value: "18446744073709551616", want: IntegerType, note: "wider than uint64, and still an integer"},
 
 		// Floats.
@@ -46,11 +46,11 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		{value: "-3.25", want: FloatType},
 		{value: ".5", want: FloatType},
 		{value: "5.", want: FloatType},
-		{value: "1e10", want: FloatType, note: "1.1's float needs a '.', so it reads a string"},
-		{value: "1E+3", want: FloatType, note: "as above"},
-		{value: "6.02e23", want: FloatType, note: "1.1 needs a sign on the exponent, so it reads a string"},
+		{value: "1e10", want: FloatType, want11: StringType, note: "1.1's float needs a '.', so it reads a string"},
+		{value: "1E+3", want: FloatType, want11: StringType, note: "as above"},
+		{value: "6.02e23", want: FloatType, want11: StringType, note: "1.1 needs a sign on the exponent, so it reads a string"},
 		{value: "6.02e+23", want: FloatType},
-		{value: "1e400", want: FloatType, note: "past float64, and still a float"},
+		{value: "1e400", want: FloatType, want11: StringType, note: "past float64, and still a float; 1.1 needs a point"},
 		{value: ".inf", want: InfinityType},
 		{value: "-.inf", want: InfinityType},
 		{value: ".nan", want: NanType},
@@ -62,15 +62,15 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		{value: "FALSE", want: BoolType},
 
 		// Strings the 1.2 core schema does not read as anything else.
-		{value: "0b1010", want: StringType, note: "1.1 reads binary, so 10"},
-		{value: "1_000", want: StringType, note: "1.1 allows '_' between digits, so 1000"},
-		{value: "0x_0A", want: StringType, note: "as above"},
-		{value: "190:20:30", want: StringType, note: "1.1 reads base 60, so 685230"},
-		{value: "y", want: StringType, note: "1.1 reads a bool, so true"},
-		{value: "no", want: StringType, note: "1.1 reads a bool, so false"},
-		{value: "on", want: StringType, note: "1.1 reads a bool, so true"},
-		{value: "-0x1F", want: StringType, note: "the core schema writes no sign in front of a base prefix"},
-		{value: "-0o755", want: StringType, note: "as above"},
+		{value: "0b1010", want: StringType, want11: BinaryIntegerType, note: "1.1 reads binary, so 10"},
+		{value: "1_000", want: StringType, want11: IntegerType, note: "1.1 allows '_' between digits, so 1000"},
+		{value: "0x_0A", want: StringType, want11: HexIntegerType, note: "as above"},
+		{value: "190:20:30", want: StringType, want11: StringType, note: "1.1 reads base 60, so 685230"},
+		{value: "y", want: StringType, want11: BoolType, note: "1.1 reads a bool, so true"},
+		{value: "no", want: StringType, want11: BoolType, note: "1.1 reads a bool, so false"},
+		{value: "on", want: StringType, want11: BoolType, note: "1.1 reads a bool, so true"},
+		{value: "-0x1F", want: StringType, want11: HexIntegerType, note: "the core schema writes no sign in front of a base prefix"},
+		{value: "-0o755", want: StringType, want11: StringType, note: "as above"},
 
 		// Text that opens like a number and is not one.
 		{value: "", want: StringType},
@@ -88,6 +88,12 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		{value: "2015-01-01", want: StringType},
 		{value: "2001-12-15T02:59:43.1Z", want: StringType},
 	} {
-		assert.Equalf(t, tc.want, ScalarType(tc.value), "%q (%s)", tc.value, tc.note)
+		assert.Equalf(t, tc.want, ScalarType(tc.value, Schema12), "%q under 1.2 (%s)", tc.value, tc.note)
+
+		want11 := tc.want11
+		if want11 == UnknownType {
+			want11 = tc.want
+		}
+		assert.Equalf(t, want11, ScalarType(tc.value, Schema11), "%q under 1.1 (%s)", tc.value, tc.note)
 	}
 }
