@@ -1,14 +1,42 @@
 package scanner
 
-import "github.com/go-openapi/go-yaml/token"
+import (
+	"github.com/go-openapi/go-yaml/internal/probe"
+	"github.com/go-openapi/go-yaml/token"
+)
 
 // byteRanges holds half-open byte ranges of the source, in the order they were read.
 type byteRanges []struct{ start, end int }
 
 // holds reports whether at falls inside one of the ranges.
+//
+// The ranges are read off the tokens in the order the scan produced them, so
+// they rise and do not overlap -- one quoted scalar cannot stand inside
+// another. That is what lets this bisect.
+//
+// Walking them cost the caller a pass over every range for every line it asked
+// about, and validateByteOrderMarks asks once per line that carries a mark. A
+// document with a mark inside a quoted scalar on every line is valid YAML and
+// made that quadratic: 250,000 comparisons at 500 lines, 16,000,000 at 4,000,
+// four times the work for twice the document.
 func (r byteRanges) holds(at int) bool {
-	for _, span := range r {
-		if at >= span.start && at < span.end {
+	if probe.Enabled {
+		probe.Count("bom.holdsCalls", 1)
+	}
+
+	low, high := 0, len(r)
+	for low < high {
+		mid := low + (high-low)/2
+		if probe.Enabled {
+			probe.Count("bom.holdsSteps", 1)
+		}
+
+		switch span := r[mid]; {
+		case at < span.start:
+			high = mid
+		case at >= span.end:
+			low = mid + 1
+		default:
 			return true
 		}
 	}
