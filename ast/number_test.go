@@ -26,11 +26,11 @@ func TestNumberNodeReadsItsToken(t *testing.T) {
 		{"42", uint64(42)},
 		{"-42", int64(-42)},
 		{"+42", uint64(42)},
-		{"1_000", uint64(1000)},
 		{"0xFF", uint64(255)},
 		{"0o755", uint64(493)},
-		{"0b1010", uint64(10)},
-		{"02472256", uint64(685230)},
+		// A leading zero opens a decimal number under the 1.2 core schema; it
+		// made the number octal under 1.1, which read this as 685230.
+		{"02472256", uint64(2472256)},
 		{"18446744073709551615", uint64(18446744073709551615)},
 		{"9223372036854775807", uint64(9223372036854775807)},
 		{"-9223372036854775808", int64(-9223372036854775808)},
@@ -49,8 +49,12 @@ func TestNumberNodeReadsItsToken(t *testing.T) {
 		{"3.25", 3.25},
 		{"-3.25", -3.25},
 		{"0.0", 0},
-		{"685.230_15e+03", 685230.15},
 		{".5", 0.5},
+		{"5.", 5},
+		// An exponent needs no fraction in front of it. YAML 1.1's float
+		// required a ".", so this was a string there.
+		{"1e10", 1e10},
+		{"6.02E+23", 6.02e23},
 	} {
 		tk := token.New(tc.text, tc.text, token.Position{})
 		n := ast.Float(tk)

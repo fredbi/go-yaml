@@ -1,7 +1,6 @@
 package token
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -507,16 +506,62 @@ func ToNumber(value string) *NumberValue {
 	return num
 }
 
+// isNumber reports whether either YAML schema could take value for a number,
+// which is the question the encoder asks. A plain scalar some reader resolves
+// to a number has to be quoted, or a string written out here comes back as one.
+//
+// It is deliberately broader than [numberType], which reads the 1.2 core schema
+// alone -- the same reason reservedEncKeywordTypes carries YAML 1.1's spellings
+// of true and false. 1.1 adds three forms 1.2 does not have: the "_" separator,
+// binary written "0b...", and sexagesimal written "1:30:00". Its leading-zero
+// octal needs nothing here, since 1.2 reads "0755" as a decimal number anyway.
 func isNumber(value string) bool {
-	num, err := toNumber(value)
-	if err != nil {
-		var numErr *strconv.NumError
-		if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) {
-			return true
-		}
+	if _, ok := numberType(value); ok {
+		return true
+	}
+	if !mayBeNumber(value) {
 		return false
 	}
-	return num != nil
+	if strings.Contains(value, "_") {
+		if _, ok := numberType(strings.ReplaceAll(value, "_", "")); ok {
+			return true
+		}
+	}
+
+	return isBinaryLiteral(value) || isSexagesimal(value)
+}
+
+// isBinaryLiteral reports whether value is YAML 1.1's "0b" integer.
+func isBinaryLiteral(value string) bool {
+	digits := strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-")
+	if !strings.HasPrefix(digits, "0b") {
+		return false
+	}
+	digits = strings.ReplaceAll(digits[2:], "_", "")
+
+	return inBase(digits, 2)
+}
+
+// isSexagesimal reports whether value is written in YAML 1.1's base 60 --
+// "190:20:30", the form a duration or a time of day takes.
+//
+// The reading is loose: the encoder only has to decide whether to quote, and a
+// scalar quoted where it need not have been still reads back as itself.
+func isSexagesimal(value string) bool {
+	digits := strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-")
+	if !strings.Contains(digits, ":") {
+		return false
+	}
+
+	for i := range len(digits) {
+		switch c := digits[i]; {
+		case c >= '0' && c <= '9', c == ':', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 // mayBeNumber reports whether value can start a number.
@@ -538,9 +583,11 @@ func mayBeNumber(value string) bool {
 	}
 }
 
-// numberShape is what a number's text says about it before any of it is
-// parsed: which kind of number it would be, in which base, and which characters
-// carry the digits.
+// numberShape is what a number's text says about it: which kind of number it
+// is, in which base, and which characters carry the digits.
+//
+// digits is a slice of the text -- the sign and any base prefix taken off, and
+// nothing else -- so reading a number costs no allocation.
 type numberShape struct {
 	typ      NumberType
 	base     int
@@ -548,81 +595,117 @@ type numberShape struct {
 	negative bool
 }
 
-// shapeOfNumber reads value as a number without parsing it, and reports false
-// where the text cannot be one at all. Where it reports true the digits still
-// have to be checked, which is what [numberShape.check] does.
+// shapeOfNumber reads value against the YAML 1.2 core schema and reports false
+// where the text is not a number.
 //
-// TrimPrefix and ReplaceAll hand back value itself where there is nothing to
-// take out, so a number written plainly costs nothing here.
+// It reads the grammar and only the grammar. A number too wide for int64,
+// uint64 or float64 is still a number: the spec calls an integer an "arbitrary
+// sized finite mathematical integer" and leaves a float's range to the
+// implementation, so what to do about one that does not fit is the decoder's --
+// see [ParseBigInteger]. strconv.ParseFloat and strconv.ParseUint used to stand
+// here and typed such a number as a string.
+//
+// The grammar, from the core schema's resolution table:
+//
+//	int    [-+]? [0-9]+  |  0o [0-7]+  |  0x [0-9a-fA-F]+
+//	float  [-+]? ( \. [0-9]+ | [0-9]+ ( \. [0-9]* )? ) ( [eE] [-+]? [0-9]+ )?
+//
+// ".inf" and ".nan" are floats too, and never reach here: reservedKeywordTypes
+// takes them first. A base prefix carries no sign, which is the table as
+// written -- "-0x1F" is a string.
 func shapeOfNumber(value string) (numberShape, bool) {
 	if !mayBeNumber(value) {
 		return numberShape{}, false
 	}
 
-	dotCount := strings.Count(value, ".")
-	if dotCount > 1 {
+	var negative bool
+	body := value
+	switch body[0] {
+	case '-':
+		negative, body = true, body[1:]
+	case '+':
+		body = body[1:]
+	}
+	if body == "" {
 		return numberShape{}, false
 	}
 
-	shape := numberShape{
-		negative: strings.HasPrefix(value, "-"),
-		digits:   strings.ReplaceAll(strings.TrimPrefix(strings.TrimPrefix(value, "+"), "-"), "_", ""),
+	// 0o and 0x, which the table writes without a sign.
+	if len(value) == len(body) && len(body) > 2 && body[0] == '0' {
+		switch body[1] {
+		case 'o':
+			if !inBase(body[2:], 8) {
+				return numberShape{}, false
+			}
+
+			return numberShape{typ: NumberTypeOctet, base: 8, digits: body[2:]}, true
+		case 'x':
+			if !inBase(body[2:], 16) {
+				return numberShape{}, false
+			}
+
+			return numberShape{typ: NumberTypeHex, base: 16, digits: body[2:]}, true
+		}
 	}
 
-	switch {
-	case strings.HasPrefix(shape.digits, "0x"):
-		shape.digits = strings.TrimPrefix(shape.digits, "0x")
-		shape.base, shape.typ = 16, NumberTypeHex
-	case strings.HasPrefix(shape.digits, "0o"):
-		shape.digits = strings.TrimPrefix(shape.digits, "0o")
-		shape.base, shape.typ = 8, NumberTypeOctet
-	case strings.HasPrefix(shape.digits, "0b"):
-		shape.digits = strings.TrimPrefix(shape.digits, "0b")
-		shape.base, shape.typ = 2, NumberTypeBinary
-	case strings.HasPrefix(shape.digits, "0") && len(shape.digits) > 1 && dotCount == 0:
-		shape.base, shape.typ = 8, NumberTypeOctet
-	case dotCount == 1:
-		shape.typ = NumberTypeFloat
-	default:
-		shape.base, shape.typ = 10, NumberTypeDecimal
+	i := countDigits(body, 0)
+	whole := i
+	if i == len(body) {
+		if whole == 0 {
+			return numberShape{}, false
+		}
+
+		return numberShape{typ: NumberTypeDecimal, base: 10, digits: body, negative: negative}, true
 	}
 
-	return shape, true
+	float := false
+	if body[i] == '.' {
+		float = true
+		i++
+		fraction := countDigits(body, i) - i
+		i += fraction
+		// A number written without a whole part needs one after the point:
+		// ".5" is a float and "." is not.
+		if whole == 0 && fraction == 0 {
+			return numberShape{}, false
+		}
+	} else if whole == 0 {
+		return numberShape{}, false
+	}
+
+	if i < len(body) && (body[i] == 'e' || body[i] == 'E') {
+		float = true
+		i++
+		if i < len(body) && (body[i] == '+' || body[i] == '-') {
+			i++
+		}
+		if exponent := countDigits(body, i) - i; exponent == 0 {
+			return numberShape{}, false
+		} else {
+			i += exponent
+		}
+	}
+
+	// Anything left over is not part of a number: "1.5.5", "-0.5h", a
+	// timestamp.
+	if i != len(body) {
+		return numberShape{}, false
+	}
+
+	if !float {
+		return numberShape{typ: NumberTypeDecimal, base: 10, digits: body, negative: negative}, true
+	}
+
+	return numberShape{typ: NumberTypeFloat, base: 10, digits: body, negative: negative}, true
 }
 
-// check reads the digits to see whether they are a number of this shape, and
-// returns what strconv made of them so that a caller can tell a number too big
-// to hold from text that is not a number at all.
-//
-// A negative is checked against the unsigned digits and the smallest int64
-// rather than by putting the sign back, which would mean building a string for
-// strconv to read.
-func (s numberShape) check() error {
-	if s.typ == NumberTypeFloat {
-		_, err := strconv.ParseFloat(s.digits, 64)
-
-		return err
+// countDigits returns the index just past the run of ASCII digits starting at i.
+func countDigits(s string, i int) int {
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
 	}
 
-	// The digits are read here rather than by strconv, which is the common way
-	// this fails: a leading zero makes "000999" octal and 9 is not an octal
-	// digit. strconv says so by allocating a *strconv.NumError with a copy of
-	// the text inside it -- two allocations -- and numberType, the only caller,
-	// throws the error away and keeps the bool. A document whose values carry
-	// leading zeros paid that for every one of them.
-	if !inBase(s.digits, s.base) {
-		return errNotInBase
-	}
-
-	u, err := strconv.ParseUint(s.digits, s.base, 64)
-	if err != nil {
-		return err
-	}
-	if s.negative && u > 1<<63 {
-		return &strconv.NumError{Func: "ParseInt", Num: s.digits, Err: strconv.ErrRange}
-	}
-
-	return nil
+	return i
 }
 
 // ParseInteger returns what an integer scalar means: an int64 where the text
@@ -768,7 +851,7 @@ func nonZeroMantissa(digits string) bool {
 // [Token.Value] or [ast.ScalarNode.Text].
 func numberType(value string) (NumberType, bool) {
 	shape, ok := shapeOfNumber(value)
-	if !ok || shape.check() != nil {
+	if !ok {
 		return "", false
 	}
 
@@ -1938,8 +2021,6 @@ func (t Token) EndOffset() int32 { return t.end }
 // errNotInBase says the digits hold a character the base does not admit. It is
 // a value rather than something built where it is returned: the caller reads
 // whether there was an error and not which one.
-var errNotInBase = errors.New("digit outside the base")
-
 // inBase reports whether every character of digits is one base admits. digits
 // carries no sign, no base prefix and no underscore -- shapeOfNumber has taken
 // all three off -- so anything that is not a digit of the base fails.

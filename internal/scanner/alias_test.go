@@ -70,7 +70,9 @@ func TestValueAliasesTheSource(t *testing.T) {
 	assert.Equal(t, token.IntegerType, seen["1234567890"])
 	assert.Equal(t, token.FloatType, seen["3.25"])
 	assert.Equal(t, token.HexIntegerType, seen["0xFF"])
-	assert.Equal(t, token.IntegerType, seen["1_000"])
+	// "1_000" is a string under the 1.2 core schema, which has no digit
+	// separator. It still has to be the source's own bytes.
+	assert.Equal(t, token.StringType, seen["1_000"])
 	assert.Equal(t, token.IntegerType, seen["-42"])
 	assert.Equal(t, token.StringType, seen["plain text"])
 	assert.Equal(t, token.DoubleQuoteType, seen["no escape here"])

@@ -105,24 +105,43 @@ func (d *Decoder) isExceededMaxDepth() bool {
 
 // castToInteger reads what "!!int" was written over.
 //
-// A number too wide for an int is handed back as it was read -- a uint64 or a
-// [big.Int] -- rather than truncated to fit. strconv.Atoi over the printed
-// value used to stand here, and it returned math.MaxInt64 for a number past
-// that and 0 for one it could not read at all, both silently.
+// A number that fits an int is handed back as one, which is what the tag gave
+// through strconv.Atoi. One that does not keeps the width it was read at -- a
+// uint64 or a big.Int -- rather than being truncated to fit: Atoi returned
+// math.MaxInt64 for a number past that and 0 for one it could not read at all,
+// both silently.
 func castToInteger(v interface{}) interface{} {
 	switch vv := v.(type) {
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, *big.Int:
+	case int:
 		return vv
-	case float64:
-		return int(vv)
+	case int64:
+		if vv >= math.MinInt && vv <= math.MaxInt {
+			return int(vv)
+		}
+
+		return vv
+	case uint64:
+		if vv <= math.MaxInt {
+			return int(vv)
+		}
+
+		return vv
+	case *big.Int:
+		if vv.IsInt64() {
+			return castToInteger(vv.Int64())
+		}
+
+		return vv
 	case float32:
+		return int(vv)
+	case float64:
 		return int(vv)
 	case string:
 		if i, ok := token.ParseInteger(vv); ok {
-			return i
+			return castToInteger(i)
 		}
 		if i, ok := token.ParseBigInteger(vv); ok {
-			return i
+			return castToInteger(i)
 		}
 
 		return 0

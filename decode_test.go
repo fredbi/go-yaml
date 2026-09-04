@@ -99,17 +99,19 @@ func TestDecoder(t *testing.T) {
 			source: "v: 10",
 			value:  map[string]interface{}{"v": 10},
 		},
+		// YAML 1.1 wrote binary integers as "0b...". The 1.2 core schema has
+		// no such form, so these resolve to strings until WithYAML11 exists.
 		{
 			source: "v: 0b10",
-			value:  map[string]interface{}{"v": 2},
+			value:  map[string]interface{}{"v": "0b10"},
 		},
 		{
 			source: "v: -0b101010",
-			value:  map[string]interface{}{"v": -42},
+			value:  map[string]interface{}{"v": "-0b101010"},
 		},
 		{
 			source: "v: -0b1000000000000000000000000000000000000000000000000000000000000000",
-			value:  map[string]interface{}{"v": int64(-9223372036854775808)},
+			value:  map[string]interface{}{"v": "-0b1000000000000000000000000000000000000000000000000000000000000000"},
 		},
 		{
 			source: "v: 0xA",
@@ -147,17 +149,19 @@ func TestDecoder(t *testing.T) {
 			source: "v: 6.8523e+5",
 			value:  map[string]interface{}{"v": 6.8523e+5},
 		},
+		// The "_" digit separator is YAML 1.1's. The 1.2 core schema has no
+		// separator, so a number written with one is a string.
 		{
 			source: "v: 685.230_15e+03",
-			value:  map[string]interface{}{"v": 685.23015e+03},
+			value:  map[string]interface{}{"v": "685.230_15e+03"},
 		},
 		{
 			source: "v: 685_230.15",
-			value:  map[string]interface{}{"v": 685230.15},
+			value:  map[string]interface{}{"v": "685_230.15"},
 		},
 		{
 			source: "v: 685_230.15",
-			value:  map[string]float64{"v": 685230.15},
+			value:  map[string]string{"v": "685_230.15"},
 		},
 		{
 			source: "v: 685230",
@@ -165,23 +169,33 @@ func TestDecoder(t *testing.T) {
 		},
 		{
 			source: "v: +685_230",
-			value:  map[string]interface{}{"v": 685230},
+			value:  map[string]interface{}{"v": "+685_230"},
 		},
+		// A leading zero made a number octal in YAML 1.1. In 1.2 the decimal
+		// form is "[-+]? [0-9]+", which reads the zero and nothing into it.
 		{
 			source: "v: 02472256",
+			value:  map[string]interface{}{"v": 2472256},
+		},
+		{
+			source: "v: 0o2472256",
 			value:  map[string]interface{}{"v": 685230},
 		},
 		{
 			source: "v: 0x_0A_74_AE",
+			value:  map[string]interface{}{"v": "0x_0A_74_AE"},
+		},
+		{
+			source: "v: 0x0A74AE",
 			value:  map[string]interface{}{"v": 685230},
 		},
 		{
 			source: "v: 0b1010_0111_0100_1010_1110",
-			value:  map[string]interface{}{"v": 685230},
+			value:  map[string]interface{}{"v": "0b1010_0111_0100_1010_1110"},
 		},
 		{
 			source: "v: +685_230",
-			value:  map[string]int{"v": 685230},
+			value:  map[string]string{"v": "+685_230"},
 		},
 
 		// Bools from spec
@@ -239,17 +253,19 @@ func TestDecoder(t *testing.T) {
 			source: "v: 9223372036854775807",
 			value:  map[string]int64{"v": math.MaxInt64},
 		},
+		// The 1.2 core schema writes a base-16 integer as "0x [0-9a-fA-F]+",
+		// with no sign in front of the prefix, so "-0x7F" is a string.
 		{
-			source: "v: 0b111111111111111111111111111111111111111111111111111111111111111",
+			source: "v: 0x7FFFFFFFFFFFFFFF",
 			value:  map[string]int64{"v": math.MaxInt64},
+		},
+		{
+			source: "v: -0x7FFFFFFFFFFFFFFF",
+			value:  map[string]string{"v": "-0x7FFFFFFFFFFFFFFF"},
 		},
 		{
 			source: "v: -9223372036854775808",
 			value:  map[string]int64{"v": math.MinInt64},
-		},
-		{
-			source: "v: -0b111111111111111111111111111111111111111111111111111111111111111",
-			value:  map[string]int64{"v": -math.MaxInt64},
 		},
 
 		// uint
@@ -276,7 +292,7 @@ func TestDecoder(t *testing.T) {
 			value:  map[string]uint64{"v": math.MaxUint64},
 		},
 		{
-			source: "v: 0b1111111111111111111111111111111111111111111111111111111111111111",
+			source: "v: 0xFFFFFFFFFFFFFFFF",
 			value:  map[string]uint64{"v": math.MaxUint64},
 		},
 		{

@@ -25,10 +25,11 @@ func TestTokenize(t *testing.T) {
 			},
 		},
 		{
+			// The "_" digit separator is YAML 1.1's; the 1.2 core schema has none.
 			YAML: `0_`,
 			Tokens: []wantToken{
 				{
-					Type:   token.IntegerType,
+					Type:   token.StringType,
 					Value:  "0_",
 					Origin: "0_",
 				},
@@ -48,27 +49,30 @@ func TestTokenize(t *testing.T) {
 			YAML: `0x_1A_2B_3C`,
 			Tokens: []wantToken{
 				{
-					Type:   token.HexIntegerType,
+					Type:   token.StringType,
 					Value:  "0x_1A_2B_3C",
 					Origin: "0x_1A_2B_3C",
 				},
 			},
 		},
 		{
+			// YAML 1.1 wrote a binary integer as "0b..."; 1.2 has no such form.
 			YAML: `+0b1010`,
 			Tokens: []wantToken{
 				{
-					Type:   token.BinaryIntegerType,
+					Type:   token.StringType,
 					Value:  "+0b1010",
 					Origin: "+0b1010",
 				},
 			},
 		},
 		{
+			// A leading zero made a number octal in YAML 1.1. The 1.2 decimal
+			// form is "[-+]? [0-9]+", which reads the zero and nothing into it.
 			YAML: `0100`,
 			Tokens: []wantToken{
 				{
-					Type:   token.OctetIntegerType,
+					Type:   token.IntegerType,
 					Value:  "0100",
 					Origin: "0100",
 				},
@@ -1997,10 +2001,12 @@ s: >-3
 			},
 		},
 		{
+			// 9 and 8 are not octal digits, so this was a string under YAML 1.1.
+			// Under 1.2 it is a decimal number that opens with a zero.
 			YAML: `098765`,
 			Tokens: []wantToken{
 				{
-					Type:   token.StringType,
+					Type:   token.IntegerType,
 					Value:  "098765",
 					Origin: "098765",
 				},

@@ -11,9 +11,22 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 )
 
-// numberType reads a number's text and checks it without converting it, where
-// ToNumber converts. The two have to agree on what is a number and on which
-// kind it is, or a scalar would be typed one way and read another.
+// numberType reads a number's text against the grammar, where ToNumber
+// converts it. They have to agree on what is a number and on which kind it is,
+// or a scalar would be typed one way and read another.
+//
+// They part company in one place, and only one: a number the grammar accepts
+// that no native type holds. numberType still calls it a number -- YAML bounds
+// neither type -- and ToNumber reports nothing, which sends the caller to
+// ParseBigInteger or ParseBigFloat. Nothing may fall outside those two.
+func typeOf(num *NumberValue) NumberType {
+	if num == nil {
+		return ""
+	}
+
+	return num.Type
+}
+
 func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 	var cases []string
 
@@ -47,14 +60,36 @@ func TestNumberTypeAgreesWithToNumber(t *testing.T) {
 				assert.Falsef(t, isInt, "%q is not a number, ParseInteger accepted it", value)
 				assert.Falsef(t, isFloat, "%q is not a number, ParseFloat accepted it", value)
 			}
-			typ, ok := numberType(value)
+			typ, isNumber := numberType(value)
 
-			if num == nil {
-				assert.Falsef(t, ok, "ToNumber says %q is not a number, numberType says it is a %s", value, typ)
+			if !isNumber {
+				assert.Nilf(t, num, "numberType says %q is not a number, ToNumber read it as a %s", value, typeOf(num))
+
+				_, isBigInt := ParseBigInteger(value)
+				_, isBigFloat := ParseBigFloat(value)
+				assert.Falsef(t, isBigInt, "%q is not a number, ParseBigInteger accepted it", value)
+				assert.Falsef(t, isBigFloat, "%q is not a number, ParseBigFloat accepted it", value)
 
 				return
 			}
-			assert.Truef(t, ok, "ToNumber says %q is a %s, numberType says it is not a number", value, num.Type)
+
+			// A number by its grammar. ToNumber converts it where a native type
+			// holds it and reports nothing where none does -- the width is the
+			// decoder's to deal with, not the grammar's -- so the big readers
+			// take over exactly there.
+			if num == nil {
+				if typ == NumberTypeFloat {
+					_, ok := ParseBigFloat(value)
+					assert.Truef(t, ok, "%q is a float no float64 holds, ParseBigFloat refused it", value)
+
+					return
+				}
+				_, ok := ParseBigInteger(value)
+				assert.Truef(t, ok, "%q is an integer no native type holds, ParseBigInteger refused it", value)
+
+				return
+			}
+
 			assert.Equalf(t, num.Type, typ, "%q: the kinds differ", value)
 
 			// ParseInteger and ParseFloat are what a node converts with, and
@@ -87,34 +122,20 @@ func TestMakeDoesNotAllocate(t *testing.T) {
 		"1234567890", "3.25", "0xFF", "0o755", "0b1010", "-42",
 		"18446744073709551615", "9223372036854775807", "-9223372036854775808",
 		"plain text", "true", "null", "",
-		// A leading zero reads the digits as octal, and 8 and 9 are not octal
-		// digits. inBase says so before strconv is asked, which used to answer
-		// with a *NumError and a copy of the text: two allocations for every
-		// leading-zero decimal a document holds.
+		// A leading zero opened an octal number under YAML 1.1, where 8 and 9
+		// are not digits; the 1.2 core schema reads these as decimal.
 		"000999", "0008", "1e400",
+		// These two were the last that allocated. "1_000" went through
+		// strings.ReplaceAll to take the separators out before strconv read the
+		// digits, and "-18446744073709551615" fits a uint64 but not an int64,
+		// so strconv answered with a *NumError carrying a copy of the text.
+		// Neither is parsed any more: the grammar alone says what they are.
+		"1_000", "-18446744073709551615",
 	} {
 		allocs := testing.AllocsPerRun(200, func() {
 			sink = Make(value, value, Position{})
 		})
 		assert.Zerof(t, allocs, "typing %q allocated %.1f times", value, allocs)
-	}
-}
-
-// Two forms still allocate, both rare, and both the price of leaving the
-// parsing to strconv rather than writing it again here.
-func TestMakeAllocatesOnlyWhereItMust(t *testing.T) {
-	for _, tc := range []struct {
-		value  string
-		allocs float64
-		why    string
-	}{
-		{"1_000", 1, "the '_' separators have to come out before strconv reads the digits"},
-		{"-18446744073709551615", 1, "a NumError for digits that fit a uint64 but not an int64"},
-	} {
-		allocs := testing.AllocsPerRun(200, func() {
-			sink = Make(tc.value, tc.value, Position{})
-		})
-		assert.Equalf(t, tc.allocs, allocs, "typing %q: %s", tc.value, tc.why)
 	}
 }
 
@@ -156,7 +177,7 @@ func TestParseBigReadsWhatNoNativeTypeHolds(t *testing.T) {
 		{"-9223372036854775809", "-9223372036854775809"},                                       // one below the smallest int64
 		{"340282366920938463463374607431768211456", "340282366920938463463374607431768211456"}, // 2^128
 		{"0xFFFFFFFFFFFFFFFFF", "295147905179352825855"},                                       // wider than uint64 in hex
-		{"1_0000000000000000000000", "10000000000000000000000"},                                // the separators come out
+		{"99999999999999999999999999999999999999", "99999999999999999999999999999999999999"},   // far past all of them
 	} {
 		_, fitsNatively := ParseInteger(tc.text)
 		assert.Falsef(t, fitsNatively, "%q does not fit a native type, ParseInteger took it", tc.text)
