@@ -40,7 +40,8 @@ func TestOriginsTileTheSource(t *testing.T) {
 		assertOriginsTile(t, src)
 	}
 
-	for _, w := range workloadDocs(t) {
+	for _, doc := range workloadDocs(t) {
+		w := doc.text
 		assertOriginsTile(t, w)
 	}
 }
@@ -66,9 +67,17 @@ func assertOriginsTile(t *testing.T, src string) {
 		"the extents do not reach the end of the document")
 }
 
+// workloadDoc is one of the workload documents, under the name of the file it
+// was read from. A benchmark reports that name rather than an index, so a
+// number quoted in a commit says which document it was measured on.
+type workloadDoc struct {
+	name string
+	text string
+}
+
 // workloadDocs reads the workloads, which are large enough to hold the shapes a
 // handwritten case does not think of.
-func workloadDocs(t testing.TB) []string {
+func workloadDocs(t testing.TB) []workloadDoc {
 	t.Helper()
 
 	const dir = "../analysis/workloads/testdata"
@@ -77,7 +86,7 @@ func workloadDocs(t testing.TB) []string {
 		t.Skipf("the workloads are not readable from here: %v", err)
 	}
 
-	var out []string
+	var out []workloadDoc
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".yaml.gz") {
 			continue
@@ -89,7 +98,10 @@ func workloadDocs(t testing.TB) []string {
 		b, err := io.ReadAll(z)
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
-		out = append(out, string(b))
+		out = append(out, workloadDoc{
+			name: strings.TrimSuffix(e.Name(), ".yaml.gz"),
+			text: string(b),
+		})
 	}
 
 	return out

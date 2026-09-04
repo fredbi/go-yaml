@@ -134,7 +134,8 @@ func TestStateLedger(t *testing.T) {
 //
 //	go test -tags yamlprobe -run TestBufferHoldsTwoTokens ./internal/scanner/
 func TestBufferHoldsTwoTokens(t *testing.T) {
-	for _, src := range workloadDocs(t) {
+	for _, doc := range workloadDocs(t) {
+		src := doc.text
 		probe.Reset()
 
 		var s scanner.Scanner

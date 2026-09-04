@@ -4,7 +4,6 @@
 package scanner_test
 
 import (
-	"strconv"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/internal/scanner"
@@ -18,9 +17,9 @@ import (
 // change that pays on a long run is worth what this says it is worth, not what
 // the shapes say.
 func BenchmarkScannerWorkloads(b *testing.B) {
-	for i, text := range workloadDocs(b) {
-		src := []byte(text)
-		b.Run(strconv.Itoa(i), func(b *testing.B) {
+	for _, doc := range workloadDocs(b) {
+		src := []byte(doc.text)
+		b.Run(doc.name, func(b *testing.B) {
 			b.SetBytes(int64(len(src)))
 			b.ReportAllocs()
 			for b.Loop() {
