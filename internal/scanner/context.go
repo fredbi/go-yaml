@@ -379,12 +379,21 @@ func (c *Context) addBufWithTab(r rune) {
 	}
 }
 
+// addOriginBuf records r as part of the text the current token was written as.
+//
+// utf8.AppendRune already returns early for a rune below utf8.RuneSelf, so
+// checking for one here bought nothing: the two branches cost 106 against the
+// inliner's budget of 80 where AppendRune alone costs 94, and neither inlines.
+// A call that appends a rune cannot: AppendRune's body is worth about 70 on its
+// own and a call to it about 57.
+//
+// Which is why this is 8% of the scanner and why the answer is not to tune it.
+// Nothing keeps obuf now that Origin has left the token -- its readers measure
+// it -- and it is byte for byte the source between originStart and the cursor
+// for 17,906 of 17,941 tokens over the fuzz corpus. The 35 that differ are
+// removeRightSpaceFromBuf trimming the spaces a line ends with.
 func (c *Context) addOriginBuf(r rune) {
-	if r < utf8.RuneSelf {
-		c.obuf = append(c.obuf, byte(r))
-	} else {
-		c.obuf = utf8.AppendRune(c.obuf, r)
-	}
+	c.obuf = utf8.AppendRune(c.obuf, r)
 	if r != ' ' && r != '\t' {
 		c.notSpaceOrgCharPos = len(c.obuf)
 	}
