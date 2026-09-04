@@ -380,7 +380,11 @@ func (c *Context) addBufWithTab(r rune) {
 }
 
 func (c *Context) addOriginBuf(r rune) {
-	c.obuf = utf8.AppendRune(c.obuf, r)
+	if r < utf8.RuneSelf {
+		c.obuf = append(c.obuf, byte(r))
+	} else {
+		c.obuf = utf8.AppendRune(c.obuf, r)
+	}
 	if r != ' ' && r != '\t' {
 		c.notSpaceOrgCharPos = len(c.obuf)
 	}
@@ -404,6 +408,9 @@ func (c *Context) removeRightSpaceFromBuf() {
 func (c *Context) width() int {
 	if c.idx >= c.size {
 		return 0
+	}
+	if c.src[c.idx] < utf8.RuneSelf {
+		return 1
 	}
 	_, w := utf8.DecodeRuneInString(c.src[c.idx:])
 
@@ -447,6 +454,10 @@ func (c *Context) previousChar() rune {
 
 func (c *Context) currentChar() rune {
 	if c.idx < c.size {
+		if b := c.src[c.idx]; b < utf8.RuneSelf {
+			return rune(b)
+		}
+
 		r, _ := utf8.DecodeRuneInString(c.src[c.idx:])
 
 		return r
@@ -488,6 +499,14 @@ func (c *Context) progress(num int) int {
 	for range num {
 		if c.idx >= c.size {
 			break
+		}
+		// A byte below utf8.RuneSelf stands for a character of its own, so its
+		// width is known without decoding it. Decoding every character to ask
+		// how wide it is was 12% of the scanner's time.
+		if c.src[c.idx] < utf8.RuneSelf {
+			c.idx++
+
+			continue
 		}
 		_, w := utf8.DecodeRuneInString(c.src[c.idx:])
 		c.idx += w
