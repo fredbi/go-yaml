@@ -206,6 +206,28 @@ func EscapedUnicode(n int) string {
 	return b.String()
 }
 
+// DeepIndent builds a document nested six levels deep, so that most lines open
+// with a run of spaces long enough to be worth stepping over in bulk.
+//
+// The other shapes are shallow and their indentation runs are one to three
+// spaces, which is not what a document people write looks like: over the
+// analysis workloads the mean run is 2.4 to 10.8 spaces, and golang_source
+// spends 52% of its bytes in runs of eight or more. A scanner change that pays
+// only on a long run is invisible to every other shape here.
+func DeepIndent(n int) string {
+	var b strings.Builder
+	b.Grow(n * 128)
+	b.WriteString("root:\n  level1:\n    level2:\n      level3:\n        level4:\n          entries:\n")
+
+	for i := range n {
+		fmt.Fprintf(&b,
+			"            - name: item%06d\n              kind: example\n"+
+				"              spec:\n                value: %06d\n                enabled: true\n", i, i)
+	}
+
+	return b.String()
+}
+
 // Shape names the document shapes worth measuring separately. The order is
 // fixed so that benchmark output lines up run to run.
 var Shapes = []struct {
@@ -214,6 +236,7 @@ var Shapes = []struct {
 }{
 	{"flat", FlatMap},
 	{"nested", NestedDoc},
+	{"deepindent", DeepIndent},
 	{"anchored", Anchored},
 	{"blockscalars", BlockScalars},
 }

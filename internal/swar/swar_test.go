@@ -66,6 +66,27 @@ func TestSingleQuoteStopMask(t *testing.T) {
 	}
 }
 
+func TestSpaceMask(t *testing.T) {
+	for _, test := range []struct {
+		word string
+		want int
+	}{
+		{"        ", -1},
+		{"       x", 7},
+		{"x       ", 0},
+		{"  a     ", 2},
+		{"  \t     ", 2},
+		{"  \n     ", 2},
+		// The lane after a run of matches is where a borrow would land.
+		{"  !!null", 2},
+		{"       !", 7},
+		{"  \x00     ", 2},
+		{"  é    ", 2},
+	} {
+		assert.Equalf(t, test.want, stopsAt(test.word, SpaceMask), "%q", test.word)
+	}
+}
+
 func TestLanesBelow(t *testing.T) {
 	w := binary.LittleEndian.Uint64([]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	assert.Equal(t, uint64(0), LanesBelow(w, 0))
@@ -96,7 +117,7 @@ func TestInlinable(t *testing.T) {
 
 	text := string(out)
 	for _, fn := range []string{
-		"FirstByte", "LanesBelow", "DoubleQuoteStopMask", "SingleQuoteStopMask",
+		"FirstByte", "LanesBelow", "DoubleQuoteStopMask", "SingleQuoteStopMask", "SpaceMask",
 	} {
 		assert.Containsf(t, text, "can inline "+fn,
 			"%s no longer inlines, so its callers pay a call for eight bytes of work:\n%s", fn, text)

@@ -70,3 +70,27 @@ func SingleQuoteStopMask(w uint64) uint64 {
 
 	return m
 }
+
+// SpaceMask flags the bytes that are not a space, so a run of spaces ends at
+// the first lane it sets.
+//
+// Indentation is spaces and nothing else -- YAML refuses a tab there -- so this
+// is what steps over the opening of a line. Over the analysis workloads the mean
+// run is 2.4 to 10.8 spaces, and golang_source holds 52% of its bytes in runs of
+// eight or more.
+func SpaceMask(w uint64) uint64 {
+	// The saturating form, not the (q-lo)&^q one the stop masks use. That one
+	// borrows across lanes: a lane that matches leaves 0xff behind it and the
+	// borrow walks into the lanes above. A stop mask survives it because
+	// [FirstByte] reads the lowest flagged lane and a borrow can only flag one
+	// higher up. This mask flags what does NOT match, so the borrow lands on
+	// the lanes it is asked about: "  !!null" reported its first non-space at
+	// byte 4 rather than 2, and two spaces of indentation swallowed the "!!".
+	//
+	// Clearing the high bit of every lane before the add is what keeps the
+	// carry inside its lane: 0x7f + 0x7f is 0xfe and does not reach the next.
+	x := w ^ (lo * 0x20)
+	y := ((x & ^high) + ^high) | x
+
+	return y & high
+}
