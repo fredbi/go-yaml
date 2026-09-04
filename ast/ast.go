@@ -324,7 +324,8 @@ func Null(tk *token.Token) *NullNode {
 
 // Bool create node for boolean value
 func Bool(tk *token.Token) *BoolNode {
-	b, _ := strconv.ParseBool(tk.Value)
+	b, _ := token.ParseBool(tk.Value)
+
 	return &BoolNode{
 		Token: tk,
 		Value: b,

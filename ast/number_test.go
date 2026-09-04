@@ -165,3 +165,36 @@ func TestNumberNodeConvertsBySpelling(t *testing.T) {
 		assert.Equalf(t, tc.want, n.GetValue(), "%q as a float", tc.text)
 	}
 }
+
+// TestBoolNodeReadsEitherSchemasSpelling holds a boolean node to what the
+// document wrote.
+//
+// strconv.ParseBool stood here and does not know YAML's spellings. It refuses
+// "yes", "y" and "on", which YAML 1.1 reads as true, and ast.Bool threw the
+// error away -- so a 1.1 document's "yes" came back false, which is the same
+// answer it gives for "no".
+func TestBoolNodeReadsEitherSchemasSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		// YAML 1.2, and 1.1 too.
+		{"true", true}, {"True", true}, {"TRUE", true},
+		{"false", false}, {"False", false}, {"FALSE", false},
+		// YAML 1.1 only.
+		{"y", true}, {"Y", true}, {"yes", true}, {"Yes", true}, {"YES", true},
+		{"on", true}, {"On", true}, {"ON", true},
+		{"n", false}, {"N", false}, {"no", false}, {"No", false}, {"NO", false},
+		{"off", false}, {"Off", false}, {"OFF", false},
+	} {
+		n := ast.Bool(&token.Token{Type: token.BoolType, Value: tc.text})
+		assert.Equalf(t, tc.want, n.GetValue(), "%q", tc.text)
+	}
+
+	// strconv.ParseBool reads these as booleans and YAML resolves none of them
+	// to one, so nothing may reach a bool node spelling them.
+	for _, text := range []string{"1", "0", "t", "T", "f", "F", "", "maybe"} {
+		_, ok := token.ParseBool(text)
+		assert.Falsef(t, ok, "%q is not a YAML boolean", text)
+	}
+}

@@ -349,6 +349,11 @@ var (
 	// of true and false added: "no" and "off" name the boolean there and a
 	// string here.
 	reserved11KeywordTypes = map[string]Type{}
+	// boolValues gives what each spelling of a boolean means. It holds both
+	// schemas' spellings, which is safe because none means true under one and
+	// false under the other -- so reading a boolean needs no schema, only the
+	// type the schema already settled.
+	boolValues = map[string]bool{}
 )
 
 // Indicator returns the indicator a token of type t is, or NotIndicator where
@@ -464,9 +469,16 @@ func init() {
 	for _, keyword := range reservedBoolKeywords {
 		reservedKeywordTypes[keyword] = BoolType
 		reservedEncKeywordTypes[keyword] = BoolType
+		boolValues[keyword] = strings.EqualFold(keyword, "true")
 	}
 	for _, keyword := range reservedLegacyBoolKeywords {
 		reservedEncKeywordTypes[keyword] = BoolType
+		switch strings.ToLower(keyword) {
+		case "y", "yes", "on":
+			boolValues[keyword] = true
+		default:
+			boolValues[keyword] = false
+		}
 	}
 	for _, keyword := range reservedInfKeywords {
 		reservedKeywordTypes[keyword] = InfinityType
@@ -1048,6 +1060,24 @@ func shapeOfTypedNumber(text string, typ Type) (numberShape, bool) {
 	}
 
 	return numberShape{typ: kind, base: base, digits: body, negative: negative}, true
+}
+
+// ParseBool returns what a boolean scalar means, and reports false where text
+// is not one.
+//
+// strconv.ParseBool stood here and does not know YAML's spellings: it reads
+// "1", "t" and "T" as true, none of which YAML resolves to a boolean at all,
+// and it refuses "yes", "y" and "on", which YAML 1.1 reads as true. A scalar
+// typed BoolType and converted through it came back false whenever the document
+// wrote one of those.
+//
+// Both schemas' spellings are read here. That needs no schema of its own, since
+// none of them means true under one and false under the other, and a scalar
+// only reaches this once a schema has typed it a boolean.
+func ParseBool(text string) (bool, bool) {
+	b, ok := boolValues[text]
+
+	return b, ok
 }
 
 // ParseInteger returns what an integer scalar means: an int64 where the text

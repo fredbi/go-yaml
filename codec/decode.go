@@ -492,16 +492,15 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			str := strings.ToLower(fmt.Sprint(v))
-			b, err := strconv.ParseBool(str)
-			if err == nil {
+			str := fmt.Sprint(v)
+			if b, ok := token.ParseBool(str); ok {
 				return b, nil
 			}
-			switch str {
-			case "yes":
-				return true, nil
-			case "no":
-				return false, nil
+			// The tag says boolean whatever the text is, so a spelling neither
+			// schema resolves is tried once more in lower case: "!!bool Yes"
+			// and "!!bool YES" are the same request.
+			if b, ok := token.ParseBool(strings.ToLower(str)); ok {
+				return b, nil
 			}
 			return nil, yamlerrors.NewSyntax(fmt.Sprintf("cannot convert %q to boolean", fmt.Sprint(v)), n.Value.GetToken())
 		case token.StringTag:

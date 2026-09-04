@@ -104,3 +104,32 @@ func TestScalarTypeReadsTheCoreSchema(t *testing.T) {
 		assert.Equalf(t, want11, ScalarType(tc.value, Schema11), "%q under 1.1 (%s)", tc.value, tc.note)
 	}
 }
+
+// TestEveryBooleanKeywordHasAValue holds the two tables that decide a boolean
+// to each other: whatever either schema types BoolType, ParseBool has to read.
+//
+// They are built in the same init from the same lists, and this is what says a
+// spelling cannot be added to one and forgotten in the other -- which would
+// resolve it to a boolean and then read it as false.
+func TestEveryBooleanKeywordHasAValue(t *testing.T) {
+	for keyword, typ := range reserved11KeywordTypes {
+		if typ != BoolType {
+			continue
+		}
+		_, ok := ParseBool(keyword)
+		assert.Truef(t, ok, "%q resolves to a boolean and ParseBool does not read it", keyword)
+	}
+
+	for keyword, typ := range reservedEncKeywordTypes {
+		if typ != BoolType {
+			continue
+		}
+		_, ok := ParseBool(keyword)
+		assert.Truef(t, ok, "the encoder quotes %q as a boolean and ParseBool does not read it", keyword)
+	}
+
+	for keyword := range boolValues {
+		assert.Containsf(t, reserved11KeywordTypes, keyword,
+			"ParseBool reads %q and no schema resolves it to a boolean", keyword)
+	}
+}

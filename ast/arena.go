@@ -4,7 +4,6 @@
 package ast
 
 import (
-	"strconv"
 	"unsafe"
 
 	"github.com/go-openapi/go-yaml/token"
@@ -257,7 +256,7 @@ func (a *Arena) SequenceEntry(start *token.Token, value Node, headComment *Comme
 
 // Bool returns a [BoolNode] for tk, as [Bool] does.
 func (a *Arena) Bool(tk *token.Token) *BoolNode {
-	b, _ := strconv.ParseBool(tk.Value)
+	b, _ := token.ParseBool(tk.Value)
 	n := a.bools.next(a.blockSize())
 	n.Token, n.Value = tk, b
 
