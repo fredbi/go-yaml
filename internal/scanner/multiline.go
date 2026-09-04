@@ -292,7 +292,11 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 }
 
 type MultiLineState struct {
-	opt                              string
+	opt string
+	// indentIndicator is the width the header stated, 0 where it stated none.
+	// firstLineIndentColumn cannot answer for it: a header without a width
+	// leaves it 0 and the first content line then sets it.
+	indentIndicator                  int
 	firstLineIndentColumn            int
 	prevLineIndentColumn             int
 	lineIndentColumn                 int
@@ -348,7 +352,7 @@ func (s *MultiLineState) validateIndentAfterSpaceOnly(column int) error {
 }
 
 func (s *MultiLineState) validateIndentColumn() error {
-	if firstLineIndentColumnByOpt(s.opt) == 0 {
+	if s.indentIndicator == 0 {
 		return nil
 	}
 	if s.firstLineIndentColumn > s.lineIndentColumn {

@@ -231,11 +231,12 @@ func (c *Context) getMultiLineState() *MultiLineState {
 }
 
 func (c *Context) setLiteral(lastDelimColumn int, opt string) {
-	mstate := &MultiLineState{
-		isLiteral: true,
-		opt:       opt,
-	}
 	indent := firstLineIndentColumnByOpt(opt)
+	mstate := &MultiLineState{
+		isLiteral:       true,
+		opt:             opt,
+		indentIndicator: indent,
+	}
 	if indent > 0 {
 		mstate.firstLineIndentColumn = lastDelimColumn + indent
 	}
@@ -243,11 +244,12 @@ func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 }
 
 func (c *Context) setFolded(lastDelimColumn int, opt string) {
-	mstate := &MultiLineState{
-		isFolded: true,
-		opt:      opt,
-	}
 	indent := firstLineIndentColumnByOpt(opt)
+	mstate := &MultiLineState{
+		isFolded:        true,
+		opt:             opt,
+		indentIndicator: indent,
+	}
 	if indent > 0 {
 		mstate.firstLineIndentColumn = lastDelimColumn + indent
 	}

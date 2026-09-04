@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -331,13 +330,27 @@ func validateMultiLineHeaderOption(opt string) error {
 	return nil
 }
 
+// firstLineIndentColumnByOpt reads the indentation indicator out of a block
+// scalar header's options, or 0 where it carries none.
+//
+// c-indentation-indicator is one digit, 1 to 9, and validateMultiLineHeaderOption
+// has already refused an option holding anything else or holding two of them.
+// So the digit is found by looking for it.
+//
+// strconv.ParseInt read it before, over the option with its chomping indicator
+// trimmed off either end. For a header carrying no width -- a plain "|" or ">",
+// which is most of them -- that is ParseInt("") and a *strconv.NumError
+// allocated to say so. validateIndentColumn asked once per character of
+// content, and it came to 95% of everything the scanner allocated reading block
+// scalars.
 func firstLineIndentColumnByOpt(opt string) int {
-	opt = strings.TrimPrefix(opt, "-")
-	opt = strings.TrimPrefix(opt, "+")
-	opt = strings.TrimSuffix(opt, "-")
-	opt = strings.TrimSuffix(opt, "+")
-	i, _ := strconv.ParseInt(opt, 10, 0)
-	return int(i)
+	for i := range len(opt) {
+		if c := opt[i]; c >= '1' && c <= '9' {
+			return int(c - '0')
+		}
+	}
+
+	return 0
 }
 
 // leadingSpace counts the whitespace bytes buf opens with.
