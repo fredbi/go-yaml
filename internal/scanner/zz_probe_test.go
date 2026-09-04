@@ -7,7 +7,6 @@ package scanner_test
 
 import (
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -162,58 +161,4 @@ func TestBufferHoldsTwoTokens(t *testing.T) {
 			"the buffer took room for %d tokens, where two is all one step of scan fills",
 			counts["buffer.roomTaken"])
 	}
-}
-
-// TestByteOrderMarkSearchStaysLogarithmic holds validateByteOrderMarks to a
-// search that bisects rather than one that walks.
-//
-// A byte order mark may stand inside a quoted scalar and nowhere else a node
-// reaches, so placing one means knowing where the quoted scalars are, and
-// byteRanges.holds is asked once for every line that carries a mark. Walking
-// the ranges made that quadratic on a document with a mark on every line --
-// which is valid YAML: 250,000 comparisons at 500 lines and 16,000,000 at
-// 4,000, four times the work for twice the document.
-//
-// The counter is the instrument rather than a stopwatch. It does not vary with
-// the machine, and a wall-clock reading of the same thing failed about one run
-// in three while nothing was wrong.
-//
-//	go test -tags yamlprobe -run TestByteOrderMarkSearch ./internal/scanner/
-func TestByteOrderMarkSearchStaysLogarithmic(t *testing.T) {
-	marked := func(lines int) []byte {
-		var b strings.Builder
-		b.Grow(lines * 16)
-		for range lines {
-			b.WriteString("k: \"a\ufeffb\"\n")
-		}
-
-		return []byte(b.String())
-	}
-
-	steps := func(lines int) int64 {
-		probe.Reset()
-
-		var s scanner.Scanner
-		s.Init(marked(lines))
-		for {
-			if _, ok := s.NextToken(); !ok {
-				break
-			}
-		}
-
-		counts := probe.Counts()
-		require.EqualValues(t, lines, counts["bom.holdsCalls"],
-			"one question per line carrying a mark")
-
-		return counts["bom.holdsSteps"]
-	}
-
-	small, large := steps(1000), steps(4000)
-
-	// Four times the lines. Bisecting takes a little over four times the steps,
-	// walking would take sixteen. Three is the line between them, with room for
-	// the log term.
-	assert.Lessf(t, float64(large), 3*4*float64(small),
-		"the search took %d steps at 4,000 lines against %d at 1,000, which is the shape of a walk",
-		large, small)
 }

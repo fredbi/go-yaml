@@ -21,9 +21,19 @@ func isCodePointEscape(marker rune) bool {
 //
 // nb-char is c-printable less b-char and this, so a byte order mark is not a
 // character any node may hold: it marks a document prefix and nothing else.
-// validateByteOrderMarks refuses one anywhere a node may go, and Init drops the
-// rest, which is what a file saved by an editor that writes one needs.
+// Scanner.checkByteOrderMark refuses one anywhere a node may go, and the scan
+// steps over the rest, which is what a file saved by an editor that writes one
+// needs.
+//
+// A mark says nothing here about the encoding. The spec has a stream announce
+// UTF-16 or UTF-32 with one, and this library reads UTF-8 only -- the one place
+// it departs from YAML 1.2.2 on purpose. A UTF-16 stream's mark is two bytes
+// that are not a character, which validateStream refuses.
 const byteOrderMark = '\ufeff'
+
+// byteOrderMarkText is the mark's three bytes, for the prefix tests that step
+// over a run of them.
+const byteOrderMarkText = string(byteOrderMark)
 
 // validateStream checks that the source is text a YAML stream may hold.
 //
@@ -40,7 +50,7 @@ func validateStream(text string) error {
 		return unprintableErr(text, at)
 	}
 
-	return validateByteOrderMarks(text)
+	return nil
 }
 
 // firstUnprintable returns the offset of the first byte the stream may not
@@ -177,112 +187,6 @@ func streamPosition(text string, i int) token.Position {
 	}
 
 	return token.At(int32(line), int32(column), int32(offset), 0)
-}
-
-// validateByteOrderMarks checks that every U+FEFF in the source stands where
-// YAML 1.2 allows one.
-//
-// nb-char excludes the mark, so it is not a character a node may hold. The one
-// place it may appear is l-document-prefix ::= c-byte-order-mark? l-comment*,
-// and l-yaml-stream admits a run of those prefixes at the start of the stream,
-// after a document suffix, and before an explicit document. So a mark is valid
-// when it opens a line and a document begins after it -- immediately, or past
-// the blank and comment lines a prefix may carry.
-//
-// Marks are dropped rather than read, which is what a file saved by an editor
-// that writes one needs. Init removes every one of them once this has passed.
-func validateByteOrderMarks(text string) error {
-	// Marks opening the stream stand in the prefix that l-yaml-stream begins
-	// with, which always admits them. Where they are the only ones, there is
-	// nothing to place and nothing to read the quoted scalars for.
-	if !strings.ContainsRune(strings.TrimLeft(text, string(byteOrderMark)), byteOrderMark) {
-		return nil
-	}
-
-	quoted := quotedRanges(text)
-	lines := strings.Split(text, "\n")
-	offset := 1
-
-	for i, raw := range lines {
-		line := strings.TrimSuffix(raw, "\r")
-		marks := leadingMarks(line)
-
-		if rest := line[marks*utf8.RuneLen(byteOrderMark):]; strings.ContainsRune(rest, byteOrderMark) {
-			column := marks + 1 + strings.IndexRune(rest, byteOrderMark)
-			at := offset + column - 1
-
-			if !quoted.holds(at - 1) {
-				return ErrInvalidToken(
-					"found a byte order mark inside a line, where a node may not hold one",
-					token.Invalid(
-						string(byteOrderMark),
-						token.At(int32(i+1), int32(column), int32(at), 0),
-					),
-				)
-			}
-		}
-
-		if marks > 0 && !quoted.holds(offset-1) && !opensADocument(lines, i, marks) {
-			return ErrInvalidToken("found a byte order mark where no document begins", token.Invalid(string(byteOrderMark), token.At(int32((i+1)), int32((1)), int32(offset), 0)))
-		}
-
-		offset += len(raw) + 1
-	}
-
-	return nil
-}
-
-// leadingMarks counts the byte order marks a line opens with.
-func leadingMarks(line string) int {
-	n := 0
-	for strings.HasPrefix(line[n*utf8.RuneLen(byteOrderMark):], string(byteOrderMark)) {
-		n++
-	}
-
-	return n
-}
-
-// opensADocument reports whether the mark run at the head of lines[i] stands in
-// a document prefix.
-func opensADocument(lines []string, i, marks int) bool {
-	if i == 0 {
-		// The prefix opening the stream, which is where an editor writes one.
-		return true
-	}
-
-	rest := strings.TrimSuffix(lines[i], "\r")[marks*utf8.RuneLen(byteOrderMark):]
-	if isDocumentMarker(rest) {
-		return true
-	}
-
-	// A prefix may follow a document suffix, with blank and comment lines
-	// between the two.
-	for back := i - 1; back >= 0; back-- {
-		prev := strings.TrimSuffix(lines[back], "\r")
-		if strings.HasPrefix(prev, "...") {
-			return true
-		}
-		if !blankOrComment(prev) {
-			break
-		}
-	}
-
-	// Otherwise the prefix has to introduce an explicit document, which the
-	// comment lines it may carry stand before.
-	if !blankOrComment(rest) {
-		return false
-	}
-	for ahead := i + 1; ahead < len(lines); ahead++ {
-		next := strings.TrimSuffix(lines[ahead], "\r")
-		if strings.HasPrefix(next, "---") {
-			return true
-		}
-		if !blankOrComment(next) {
-			return false
-		}
-	}
-
-	return false
 }
 
 // isDocumentMarker reports whether a line opens with "---" or "...".

@@ -242,11 +242,14 @@ func (s *Scanner) scan(ctx *Context) error {
 		c := ctx.currentChar()
 
 		if c == byteOrderMark {
-			// validateByteOrderMarks has already refused a mark anywhere a node
-			// may go, so the one here opens a document and is not content. Step
-			// over it, counting its bytes: an offset addresses the source as it
-			// was handed in, and deleting the mark instead moved every offset
-			// after it.
+			if err := s.checkByteOrderMark(ctx); err != nil {
+				return err
+			}
+
+			// The mark opens a document prefix and is not content. Step over
+			// it, counting its bytes: an offset addresses the source as it was
+			// handed in, and deleting the mark instead moved every offset after
+			// it.
 			s.progressOnly(ctx, 1)
 			ctx.resetBuffer()
 
@@ -520,6 +523,82 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	), endLine)
 }
 
+// checkByteOrderMark says whether the mark at the cursor stands where YAML 1.2
+// admits one.
+//
+// nb-char excludes U+FEFF, so no node may hold one. l-document-prefix ::=
+// c-byte-order-mark? l-comment* is the only production that admits one, and
+// l-yaml-stream places those prefixes at the start of the stream, after a
+// document suffix, and before an explicit document.
+//
+// A mark inside a quoted scalar never reaches here. nb-json takes it like any
+// other character, so scanDoubleQuote and scanSingleQuote read one as content;
+// the one they refuse stands where a scalar's next line begins, which carries
+// indentation and not text.
+func (s *Scanner) checkByteOrderMark(ctx *Context) error {
+	if s.column != 1 {
+		// Past the first column, so the mark stands in a line that carries a
+		// node -- a plain scalar, a flow collection, a block scalar's content.
+		return ErrInvalidToken(
+			"found a byte order mark inside a line, where a node may not hold one",
+			token.Invalid(string(byteOrderMark), s.pos()),
+		)
+	}
+	if !s.documentOpensAtMark(ctx) {
+		return ErrInvalidToken(
+			"found a byte order mark where no document begins",
+			token.Invalid(string(byteOrderMark), s.pos()),
+		)
+	}
+
+	return nil
+}
+
+// documentOpensAtMark reports whether a document begins at the run of byte
+// order marks the cursor stands on, which is what makes them a prefix.
+//
+// The look-ahead reaches no further than the blank and comment lines a prefix
+// may carry: a document has to begin at the first line that holds anything
+// else.
+func (s *Scanner) documentOpensAtMark(ctx *Context) bool {
+	if s.line == 1 {
+		// The prefix opening the stream, which is where an editor writes one.
+		return true
+	}
+	if tk := ctx.lastContentToken(); tk != nil && tk.Type == token.DocumentEndType {
+		// A prefix may follow a document suffix.
+		return true
+	}
+
+	rest := ctx.src[ctx.idx:]
+	for strings.HasPrefix(rest, byteOrderMarkText) {
+		rest = rest[len(byteOrderMarkText):]
+	}
+
+	line, tail, _ := strings.Cut(rest, "\n")
+	if isDocumentMarker(strings.TrimSuffix(line, "\r")) {
+		return true
+	}
+	if !blankOrComment(strings.TrimSuffix(line, "\r")) {
+		return false
+	}
+
+	// Otherwise the prefix has to introduce an explicit document, which the
+	// comment lines it may carry stand before.
+	for tail != "" {
+		line, tail, _ = strings.Cut(tail, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasPrefix(line, "---") {
+			return true
+		}
+		if !blankOrComment(line) {
+			return false
+		}
+	}
+
+	return false
+}
+
 // progressColumn advances by num characters. The column counts characters and
 // the offset counts the bytes those characters take, so the two advance by
 // different amounts wherever the source is not ASCII.
@@ -633,8 +712,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 }
 
 // reset prepares s to tokenize text without judging whether text is a stream at
-// all. validateByteOrderMarks reads the quoted scalars back out of a scanner,
-// and cannot be the thing that decides whether that scanner may run.
+// all.
 func (s *Scanner) reset(text string) {
 	// The source is scanned as it was handed in. A byte order mark is stepped
 	// over where one stands, so every offset addresses the text the caller
