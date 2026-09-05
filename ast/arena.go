@@ -86,12 +86,17 @@ func (a *Arena) Stats() ArenaStats {
 // block hands out values of one type from an allocation at a time.
 //
 // The chunks are kept rather than let go of, so that [block.rewind] can hand
-// the same cells out again. A parse that never rewinds allocates exactly what
-// it did before and pays one slice header per chunk for the privilege.
+// the same cells out again. free is the rest of the chunk in hand, taken a cell
+// at a time as it was before there were chunks to keep.
 type block[T any] struct {
+	free   []T
 	chunks [][]T
-	// at is the chunk being handed out of and used how much of it has gone.
-	at, used int
+	// at is which chunk free points into.
+	at int
+	// rewound says the block has handed cells back at least once, so a cell may
+	// hold what a node left in it. A parse that gathers a tree never rewinds
+	// and never pays for the clearing.
+	rewound bool
 	// nodes, blocks and cells count what has been handed out and what was
 	// allocated to hand it out. They cost an increment each per node and are
 	// what [Arena.Stats] reports; deriving the same figures from a heap profile
@@ -101,31 +106,40 @@ type block[T any] struct {
 	cells  int
 }
 
-// next returns the next unused value, taking a new allocation of size when the
-// chunk in hand runs out.
-//
-// The cell is zeroed before it is handed out: after a rewind it holds whatever
-// the node that stood there left, and a constructor sets only the fields its
-// node has.
+// next returns the next unused value, moving to the next chunk when the one in
+// hand runs out and taking a new allocation of size where there is none.
 func (b *block[T]) next(size int) *T {
-	if b.at == len(b.chunks) {
-		b.chunks = append(b.chunks, make([]T, size))
-		b.blocks++
-		b.cells += size
-	} else if b.used == len(b.chunks[b.at]) {
-		b.at++
-		b.used = 0
-
-		return b.next(size)
+	if len(b.free) == 0 {
+		b.advance(size)
 	}
 
-	v := &b.chunks[b.at][b.used]
-	b.used++
+	v := &b.free[0]
+	b.free = b.free[1:]
 	b.nodes++
-	var zero T
-	*v = zero
+	if b.rewound {
+		// After a rewind the cell holds whatever the node that stood there
+		// left, and a constructor sets only the fields its node has.
+		var zero T
+		*v = zero
+	}
 
 	return v
+}
+
+// advance moves to the next chunk, allocating one where the block has none left.
+func (b *block[T]) advance(size int) {
+	if b.at+1 < len(b.chunks) {
+		b.at++
+		b.free = b.chunks[b.at]
+
+		return
+	}
+
+	b.chunks = append(b.chunks, make([]T, size))
+	b.at = len(b.chunks) - 1
+	b.free = b.chunks[b.at]
+	b.blocks++
+	b.cells += size
 }
 
 // blockMark is where a block stood.
@@ -133,7 +147,11 @@ type blockMark struct{ at, used int32 }
 
 // mark records where the block stands, for a later rewind.
 func (b *block[T]) mark() blockMark {
-	return blockMark{at: int32(b.at), used: int32(b.used)} //nolint:gosec // a document with 2^31 nodes of one type does not fit in memory
+	if len(b.chunks) == 0 {
+		return blockMark{}
+	}
+
+	return blockMark{at: int32(b.at), used: int32(len(b.chunks[b.at]) - len(b.free))} //nolint:gosec // a document with 2^31 nodes of one type does not fit in memory
 }
 
 // rewind hands the cells above m out again.
@@ -143,8 +161,13 @@ func (b *block[T]) mark() blockMark {
 // caller still pointing into that range reads whatever is written there next,
 // which is why only a walk rewinds and only past what it has handed over.
 func (b *block[T]) rewind(m blockMark) {
-	scrub(b.chunks, int(m.at), int(m.used), b.at, b.used)
-	b.at, b.used = int(m.at), int(m.used)
+	if len(b.chunks) == 0 {
+		return
+	}
+	used := len(b.chunks[b.at]) - len(b.free)
+	scrub(b.chunks, int(m.at), int(m.used), b.at, used)
+	b.at, b.free = int(m.at), b.chunks[m.at][m.used:]
+	b.rewound = true
 }
 
 // stats reports what this block handed out. width is taken at the type, so it
@@ -152,17 +175,12 @@ func (b *block[T]) rewind(m blockMark) {
 func (b *block[T]) stats(name string) TypeStats {
 	width := int(unsafe.Sizeof(*new(T)))
 
-	var unused int
-	if b.at < len(b.chunks) {
-		unused = len(b.chunks[b.at]) - b.used
-	}
-
 	return TypeStats{
 		Type:   name,
 		Nodes:  b.nodes,
 		Blocks: b.blocks,
 		Bytes:  b.cells * width,
-		Unused: unused * width,
+		Unused: len(b.free) * width,
 	}
 }
 
@@ -242,6 +260,12 @@ type Arena struct {
 	mappingRuns slab[*MappingValueNode]
 
 	size int
+	// marks is where the arena has been told to stand, innermost last. A walk
+	// pushes one as it starts an entry and pops it once the entry has gone
+	// over. Kept here rather than handed back and forth: the mark is nine
+	// block positions, and a parse gathering a tree would copy them for every
+	// entry of every mapping to record something it never rewinds to.
+	marks []Mark
 }
 
 // Mark is where an arena stood, taken by [Arena.Mark] and given back to
@@ -256,6 +280,24 @@ type Mark struct {
 	mappings      blockMark
 	sequences     blockMark
 	sequenceEntry blockMark
+}
+
+// Push records where the arena stands, for a later [Arena.Pop].
+func (a *Arena) Push() {
+	a.marks = append(a.marks, a.Mark())
+}
+
+// Pop hands out again every node taken since the matching [Arena.Push].
+//
+// ⚠️ It carries [Arena.Rewind]'s warning: every node handed out since the push
+// is dead the moment this returns.
+func (a *Arena) Pop() {
+	if len(a.marks) == 0 {
+		return
+	}
+	m := a.marks[len(a.marks)-1]
+	a.marks = a.marks[:len(a.marks)-1]
+	a.Rewind(m)
 }
 
 // Mark records where the arena stands.

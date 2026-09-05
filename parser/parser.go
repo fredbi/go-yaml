@@ -908,7 +908,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	// by the time the next one starts and keeps none of it, so the cells go out
 	// again for the entry that follows -- what stands at once is the depth
 	// rather than the mapping. A parse gathering a tree never rewinds.
-	entryMark := p.markNodes(ctx)
+	p.markNodes(ctx)
 
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
@@ -919,7 +919,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	// say the mapping begins.
 	mapNode.Start = keyValueNode.GetToken()
 	p.hold(keyValueNode)
-	p.rewindNodes(ctx, entryMark)
+	p.rewindNodes(ctx)
 
 	var tk *tapeToken
 	if ctx.isComment() {
@@ -946,7 +946,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			ctx.goNext()
 			break
 		}
-		entryMark := p.markNodes(ctx)
+		p.markNodes(ctx)
 		entry, err := p.parseMapEntry(ctx, ctx.currentToken())
 		if err != nil {
 			return nil, err
@@ -955,7 +955,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			return nil, err
 		}
 		p.hold(entry)
-		p.rewindNodes(ctx, entryMark)
+		p.rewindNodes(ctx)
 		if ctx.isComment() {
 			tk = ctx.nextNotCommentToken()
 		} else {
@@ -1887,7 +1887,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	var index uint
 	for tk.Type() == token.SequenceEntryType && tk.Column() == seqTk.Column() {
 		seqTk := tk
-		entryMark := p.markNodes(ctx)
+		p.markNodes(ctx)
 		headComment := p.parseHeadComment(ctx)
 		ctx.goNext() // skip sequence entry token
 
@@ -1905,7 +1905,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if p.walking() {
 			// Nothing gathers the entries and the walk has seen this one, so
 			// the cells it stands in go out again for the entry after it.
-			p.rewindNodes(ctx, entryMark)
+			p.rewindNodes(ctx)
 		} else {
 			p.seqEntries = append(p.seqEntries, pendingEntry{
 				value:       value,
@@ -2185,14 +2185,13 @@ func (p *Parser) parseFootComment(ctx context, col int) *ast.CommentGroupNode {
 // markNodes records where the node arena stands, so that a walk may hand the
 // same cells out again once what was built from them has gone over.
 //
-// It returns the zero mark where the parse gathers a tree, and rewindNodes then
-// does nothing: a gathered tree holds every node it built.
-func (p *Parser) markNodes(ctx context) ast.Mark {
+// It does nothing where the parse gathers a tree, and neither does rewindNodes:
+// a gathered tree holds every node it built.
+func (p *Parser) markNodes(ctx context) {
 	if !p.walking() {
-		return ast.Mark{}
+		return
 	}
-
-	return ctx.arena.Mark()
+	ctx.arena.Push()
 }
 
 // rewindNodes hands out again every node taken since m.
@@ -2201,9 +2200,9 @@ func (p *Parser) markNodes(ctx context) ast.Mark {
 // returned from. Nothing the parse still reads may have been built since m --
 // a mapping reads its first entry's token before rewinding to it, which is why
 // the rewind comes after that and not before.
-func (p *Parser) rewindNodes(ctx context, m ast.Mark) {
+func (p *Parser) rewindNodes(ctx context) {
 	if !p.walking() {
 		return
 	}
-	ctx.arena.Rewind(m)
+	ctx.arena.Pop()
 }
