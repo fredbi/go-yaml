@@ -417,6 +417,12 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 		// marker on the node. "--- ..." renders as "---".
 		node.End = end
 	}
+	if p.onComplete != nil {
+		// The document closes after its body, so a consumer folding nodes hears
+		// about it last and knows where one document of a stream ends and the
+		// next begins. An anchor's scope is exactly that.
+		p.onComplete(node)
+	}
 
 	return node, true, nil
 }
