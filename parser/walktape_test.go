@@ -74,7 +74,7 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 
 	for _, set := range [][]corpusDoc{ordinary, stress} {
 		for _, w := range set {
-			p := New(ChunkSize(tokenarena.SizeFor(len(w.data))))
+			p := New(WithChunkSize(tokenarena.SizeFor(len(w.data))))
 
 			keep := &counting{}
 			_, err := p.Walk(w.data, keep)

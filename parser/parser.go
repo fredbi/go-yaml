@@ -18,7 +18,7 @@ import (
 )
 
 // mode carries the settings an Option turns on. It is not part of the API:
-// callers say what they want with [Comments] and the rest.
+// callers say what they want with [WithComments] and the rest.
 type mode uint
 
 const (
@@ -223,7 +223,7 @@ func (p *Parser) tokenRefFrom(depth int32, pull func() (*tapeToken, bool)) *toke
 const pathSlabSize = 512
 
 // newPathNode returns the next unused step of the path trie, or nil when
-// [OmitNodePaths] has turned path recording off.
+// [WithOmitNodePaths] has turned path recording off.
 func (p *Parser) newPathNode() *ast.PathNode {
 	if p.omitNodePaths {
 		return nil

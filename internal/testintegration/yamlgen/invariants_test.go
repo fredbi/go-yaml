@@ -90,7 +90,7 @@ func TestInvariantRenderingPreservesTheValue(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		if _, err := parser.ParseBytes([]byte(src), parser.Comments()); err != nil {
+		if _, err := parser.ParseBytes([]byte(src), parser.WithComments()); err != nil {
 			return
 		}
 
@@ -114,7 +114,7 @@ func TestInvariantRenderingSettles(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		if _, err := parser.ParseBytes([]byte(src), parser.Comments()); err != nil {
+		if _, err := parser.ParseBytes([]byte(src), parser.WithComments()); err != nil {
 			return
 		}
 

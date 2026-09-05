@@ -107,7 +107,7 @@ func TestAFullScanRecyclesNothing(t *testing.T) {
 	t.Logf("%-19s %8s %6s %8s %9s %8s %8s", "workload", "tokens", "chunk", "chunks", "recycled", "live", "held")
 
 	for _, w := range all {
-		p := New(ChunkSize(tokenarena.SizeFor(len(w.data))))
+		p := New(WithChunkSize(tokenarena.SizeFor(len(w.data))))
 
 		_, err := p.Parse(w.data)
 		require.NoError(t, err)

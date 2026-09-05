@@ -59,12 +59,12 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
+			file, err := parser.ParseBytes([]byte(test.source), parser.WithComments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
 			// And it settles: what was written reads back to the same text.
-			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -112,11 +112,11 @@ func TestParseAnchorsOnFlowCollectionKeys(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
+			file, err := parser.ParseBytes([]byte(test.source), parser.WithComments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -134,7 +134,7 @@ func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {
 
 	for name, source := range sources {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(source), parser.Comments())
+			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}

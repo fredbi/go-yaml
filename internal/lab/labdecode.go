@@ -29,7 +29,7 @@ import (
 func DecodeProgressive(src []byte) (any, error) {
 	d := &folder{done: map[ast.Node]any{}}
 
-	f, err := parser.ParseBytes(src, parser.OnComplete(d.complete))
+	f, err := parser.ParseBytes(src, parser.WithOnComplete(d.complete))
 	if err != nil {
 		return nil, err
 	}

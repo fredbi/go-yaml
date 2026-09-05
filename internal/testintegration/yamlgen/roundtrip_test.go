@@ -28,7 +28,7 @@ func renderChangesValue(src []byte) bool {
 		return false
 	}
 
-	file, err := parser.ParseBytes(src, parser.Comments())
+	file, err := parser.ParseBytes(src, parser.WithComments())
 	if err != nil {
 		return false
 	}
@@ -46,13 +46,13 @@ func renderChangesValue(src []byte) bool {
 // renderDoesNotSettle reports whether rendering a document twice gives two
 // different documents.
 func renderDoesNotSettle(src []byte) bool {
-	first, err := parser.ParseBytes(src, parser.Comments())
+	first, err := parser.ParseBytes(src, parser.WithComments())
 	if err != nil {
 		return false
 	}
 	once := first.String()
 
-	second, err := parser.ParseBytes([]byte(once), parser.Comments())
+	second, err := parser.ParseBytes([]byte(once), parser.WithComments())
 	if err != nil {
 		return true
 	}
@@ -82,7 +82,7 @@ func TestRenderWritesValidYAML(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		file, err := parser.ParseBytes([]byte(src), parser.Comments())
+		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
 		if err != nil {
 			return
 		}
@@ -120,7 +120,7 @@ func TestRenderPreservesValue(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		file, err := parser.ParseBytes([]byte(src), parser.Comments())
+		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
 		if err != nil {
 			// Whether the document parses at all is TestEmitParses's question.
 			return
@@ -150,7 +150,7 @@ func TestRenderPreservesValue(t *testing.T) {
 // commentsAreLost reports whether rendering a document drops any of its
 // comments. Self-contained, so it doubles as a reduction predicate.
 func commentsAreLost(src []byte) bool {
-	file, err := parser.ParseBytes(src, parser.Comments())
+	file, err := parser.ParseBytes(src, parser.WithComments())
 	if err != nil {
 		return false
 	}
@@ -192,7 +192,7 @@ func TestRenderKeepsEveryComment(t *testing.T) {
 		}
 
 		src := yamlgen.Emit(value, style)
-		if _, err := parser.ParseBytes([]byte(src), parser.Comments()); err != nil {
+		if _, err := parser.ParseBytes([]byte(src), parser.WithComments()); err != nil {
 			return
 		}
 
@@ -227,7 +227,7 @@ func TestRenderReachesAFixedPoint(t *testing.T) {
 		style := yamlgen.Styles().Draw(rt, "style")
 		src := yamlgen.Emit(value, style)
 
-		if _, err := parser.ParseBytes([]byte(src), parser.Comments()); err != nil {
+		if _, err := parser.ParseBytes([]byte(src), parser.WithComments()); err != nil {
 			return
 		}
 

@@ -126,7 +126,7 @@ func parseCostPerByte(t *testing.T, shape yamlgen.Depth, n int) float64 {
 	src := yamlgen.DeepDocument(shape, n)
 
 	start := time.Now()
-	_, err := parser.ParseBytes(src, parser.Comments())
+	_, err := parser.ParseBytes(src, parser.WithComments())
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)

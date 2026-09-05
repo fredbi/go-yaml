@@ -40,7 +40,7 @@ func TestGroupingSurvivesEveryJoin(t *testing.T) {
 					want, err := refparser.ParseBytes(w.Data, 0)
 					require.NoError(t, err, w.Name)
 
-					got, err := parser.ParseBytes(w.Data, parser.ChunkSize(runs))
+					got, err := parser.ParseBytes(w.Data, parser.WithChunkSize(runs))
 					require.NoError(t, err, "%s in runs of %d", w.Name, runs)
 
 					assert.Equal(t, want.String(), got.String(),
@@ -64,7 +64,7 @@ func TestGroupingSurvivesEveryJoinOnSmallDocuments(t *testing.T) {
 			want, err := refparser.ParseBytes([]byte(src), refparser.ParseComments)
 			require.NoError(t, err)
 
-			got, err := parser.ParseBytes([]byte(src), parser.ChunkSize(1), parser.Comments())
+			got, err := parser.ParseBytes([]byte(src), parser.WithChunkSize(1), parser.WithComments())
 			require.NoError(t, err)
 
 			assert.Equal(t, want.String(), got.String(),

@@ -46,7 +46,7 @@ func TestStressShape(t *testing.T) {
 			}
 		}
 
-		file, err := parser.ParseBytes(w.Data, parser.Comments())
+		file, err := parser.ParseBytes(w.Data, parser.WithComments())
 		require.NoError(t, err)
 
 		var s stressShape
@@ -59,7 +59,7 @@ func TestStressShape(t *testing.T) {
 		}
 
 		peak := peakLiveMax(peakLiveRuns(), func() {
-			f, err := parser.ParseBytes(w.Data, parser.Comments())
+			f, err := parser.ParseBytes(w.Data, parser.WithComments())
 			require.NoError(t, err)
 			runtime.KeepAlive(f)
 		})

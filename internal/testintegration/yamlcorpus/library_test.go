@@ -105,7 +105,7 @@ func TestEveryPatternParses(t *testing.T) {
 	for _, p := range yamlcorpus.Patterns() {
 		src := build(t, p.Name)
 
-		if _, err := parser.ParseBytes(src, parser.Comments()); err != nil {
+		if _, err := parser.ParseBytes(src, parser.WithComments()); err != nil {
 			t.Errorf("%s: the parser refuses it, so the pattern tests the wrong layer: %v", p.Name, err)
 		}
 	}

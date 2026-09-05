@@ -34,7 +34,7 @@ func TestGroupingHolds(t *testing.T) {
 		for _, w := range set {
 			chunk := tokenarena.SizeFor(len(w.data))
 
-			p := New(ChunkSize(chunk))
+			p := New(WithChunkSize(chunk))
 			_, err := p.Parse(w.data)
 			require.NoError(t, err, w.name)
 

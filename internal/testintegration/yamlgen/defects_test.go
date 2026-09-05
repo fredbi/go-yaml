@@ -42,7 +42,7 @@ func wellFormed(t *testing.T, src string) {
 func renderOnce(t *testing.T, src string) string {
 	t.Helper()
 
-	file, err := parser.ParseBytes([]byte(src), parser.Comments())
+	file, err := parser.ParseBytes([]byte(src), parser.WithComments())
 	require.NoError(t, err)
 
 	return file.String()

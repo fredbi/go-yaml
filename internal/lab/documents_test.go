@@ -36,7 +36,7 @@ func TestDocumentBoundaries(t *testing.T) {
 	} {
 		t.Run(src, func(t *testing.T) {
 			want, wantErr := refparser.ParseBytes([]byte(src), refparser.ParseComments)
-			got, gotErr := parser.ParseBytes([]byte(src), parser.Comments())
+			got, gotErr := parser.ParseBytes([]byte(src), parser.WithComments())
 
 			require.NoError(t, wantErr)
 			require.NoError(t, gotErr)
@@ -80,7 +80,7 @@ func TestDocumentBoundariesInRunsOfOne(t *testing.T) {
 			want, err := refparser.ParseBytes([]byte(src), 0)
 			require.NoError(t, err)
 
-			got, err := parser.ParseBytes([]byte(src), parser.ChunkSize(1))
+			got, err := parser.ParseBytes([]byte(src), parser.WithChunkSize(1))
 			require.NoError(t, err)
 
 			assert.Equal(t, len(want.Docs), len(got.Docs))

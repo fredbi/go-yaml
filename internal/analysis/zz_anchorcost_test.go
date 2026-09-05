@@ -88,7 +88,7 @@ func walkBytes(t *testing.T, src []byte) uint64 {
 	t.Helper()
 
 	return allocatedBytes(func() {
-		_, err := parser.New(parser.OmitNodePaths()).Walk(src, nopVisitor{})
+		_, err := parser.New(parser.WithOmitNodePaths()).Walk(src, nopVisitor{})
 		require.NoError(t, err)
 	})
 }

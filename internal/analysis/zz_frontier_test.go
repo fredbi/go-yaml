@@ -27,7 +27,7 @@ func TestNodeFrontier(t *testing.T) {
 	t.Logf("%-19s %10s %8s %9s", "workload", "handed over", "at once", "ratio")
 	for _, w := range all {
 		c := &frontierCounter{}
-		_, err := parser.New(parser.OmitNodePaths()).Walk(w.Data, c)
+		_, err := parser.New(parser.WithOmitNodePaths()).Walk(w.Data, c)
 		require.NoError(t, err)
 
 		t.Logf("%-19s %10d %8d %8.0fx", w.Name, c.total, c.peak,

@@ -36,7 +36,7 @@ func BenchmarkParseBytes(b *testing.B) {
 func BenchmarkParseBytesWithComments(b *testing.B) {
 	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
-			if _, err := parser.ParseBytes(src, parser.Comments()); err != nil {
+			if _, err := parser.ParseBytes(src, parser.WithComments()); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -52,7 +52,7 @@ func BenchmarkParseBytesWithComments(b *testing.B) {
 // round trip and is not otherwise covered.
 func BenchmarkRender(b *testing.B) {
 	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
-		file, err := parser.ParseBytes(src, parser.Comments())
+		file, err := parser.ParseBytes(src, parser.WithComments())
 		require.NoError(b, err)
 		b.ResetTimer()
 

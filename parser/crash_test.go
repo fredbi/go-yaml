@@ -34,7 +34,7 @@ func TestParseDoesNotCrash(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			require.NotPanicsf(t, func() {
 				_, _ = parser.ParseBytes([]byte(test.source))
-				_, _ = parser.ParseBytes([]byte(test.source), parser.Comments())
+				_, _ = parser.ParseBytes([]byte(test.source), parser.WithComments())
 			}, "%s: %s", name, test.reason)
 		})
 	}

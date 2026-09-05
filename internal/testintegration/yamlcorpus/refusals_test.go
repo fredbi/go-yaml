@@ -32,7 +32,7 @@ func TestEveryRefusalSaysWhy(t *testing.T) {
 			assert.Equal(t, r.WellFormed, oracle.Stream([]byte(r.Src)).OK,
 				"the document is %q and WellFormed says otherwise", r.Src)
 
-			_, err := parser.ParseBytes([]byte(r.Src), parser.Comments())
+			_, err := parser.ParseBytes([]byte(r.Src), parser.WithComments())
 			require.Error(t, err, "%q is read, so there is no message to hold", r.Src)
 
 			assert.Contains(t, err.Error(), r.Says,
@@ -69,7 +69,7 @@ func TestTheCorpusDrawsEveryComplaint(t *testing.T) {
 	refused := 0
 
 	for _, c := range cases {
-		_, perr := parser.ParseBytes(c.Src, parser.Comments())
+		_, perr := parser.ParseBytes(c.Src, parser.WithComments())
 		if perr == nil {
 			continue
 		}
@@ -114,7 +114,7 @@ func missingFrom(got, want []string) []string {
 // and two different complaints must not collapse into one.
 func TestARefusalSignatureKeepsTheParserAndDropsTheDocument(t *testing.T) {
 	sig := func(src string) string {
-		_, err := parser.ParseBytes([]byte(src), parser.Comments())
+		_, err := parser.ParseBytes([]byte(src), parser.WithComments())
 		require.Error(t, err, "%q", src)
 
 		return yamlcorpus.RefusalSignature(err)

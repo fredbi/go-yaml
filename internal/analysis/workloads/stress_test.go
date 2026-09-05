@@ -28,12 +28,12 @@ func TestEveryStressDocumentParsesAndSettles(t *testing.T) {
 		t.Run(workload.Name, func(t *testing.T) {
 			require.NotEmpty(t, workload.Data)
 
-			file, err := parser.ParseBytes(workload.Data, parser.Comments())
+			file, err := parser.ParseBytes(workload.Data, parser.WithComments())
 			require.NoError(t, err)
 			require.Len(t, file.Docs, 1)
 
 			rendered := file.String()
-			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(rendered), parser.WithComments())
 			require.NoError(t, err, "the rendered document does not read back")
 			assert.Equal(t, rendered, reread.String(), "rendering does not settle")
 

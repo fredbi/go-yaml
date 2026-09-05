@@ -35,7 +35,7 @@ const pathSpecialChars = "$*.[]"
 // [BaseNode.GetPath] renders a node's steps when asked and does not keep the
 // result, so a caller reading the same path repeatedly should hold on to it.
 // The parser records these unless
-// [github.com/go-openapi/go-yaml/parser.OmitNodePaths] is passed.
+// [github.com/go-openapi/go-yaml/parser.WithOmitNodePaths] is passed.
 type PathNode struct {
 	parent *PathNode
 	seg    string

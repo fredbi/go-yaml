@@ -30,7 +30,7 @@ import (
 func ToJSONWalk(src []byte) ([]byte, error) {
 	w := &jsonWalker{}
 
-	file, err := parser.New(parser.OmitNodePaths()).Walk(src, w)
+	file, err := parser.New(parser.WithOmitNodePaths()).Walk(src, w)
 	if err != nil {
 		return nil, err
 	}

@@ -50,11 +50,11 @@ func TestParseExplicitKeyValues(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
+			file, err := parser.ParseBytes([]byte(test.source), parser.WithComments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 		})
@@ -109,11 +109,11 @@ func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			file, err := parser.ParseBytes([]byte(test.source), parser.Comments())
+			file, err := parser.ParseBytes([]byte(test.source), parser.WithComments())
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			reread, err := parser.ParseBytes([]byte(test.want), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
 

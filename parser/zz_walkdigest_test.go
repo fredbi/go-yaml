@@ -36,7 +36,7 @@ func TestWalkDigest(t *testing.T) {
 	for _, src := range walkSources(t) {
 		d := &digestVisitor{out: sum}
 		fmt.Fprintf(sum, "\n=== %s\n", src.name)
-		if _, err := parser.New(parser.Comments()).Walk([]byte(src.text), d); err != nil {
+		if _, err := parser.New(parser.WithComments()).Walk([]byte(src.text), d); err != nil {
 			fmt.Fprintf(sum, "refused: %v\n", err)
 			refused++
 

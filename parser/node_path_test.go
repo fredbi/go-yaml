@@ -17,7 +17,7 @@ import (
 func paths(t *testing.T, src string, opts ...parser.Option) []string {
 	t.Helper()
 
-	f, err := parser.ParseBytes([]byte(src), append([]parser.Option{parser.Comments()}, opts...)...)
+	f, err := parser.ParseBytes([]byte(src), append([]parser.Option{parser.WithComments()}, opts...)...)
 	require.NoError(t, err)
 
 	var got []string
@@ -94,9 +94,9 @@ func TestNodePathRendersIndexesPastOneDigit(t *testing.T) {
 func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 	const src = "foo:\n  bar: 1\n  baz:\n    - a\n    - b\n"
 
-	with, err := parser.ParseBytes([]byte(src), parser.Comments())
+	with, err := parser.ParseBytes([]byte(src), parser.WithComments())
 	require.NoError(t, err)
-	without, err := parser.ParseBytes([]byte(src), parser.Comments(), parser.OmitNodePaths())
+	without, err := parser.ParseBytes([]byte(src), parser.WithComments(), parser.WithOmitNodePaths())
 	require.NoError(t, err)
 
 	assert.Equal(t, with.String(), without.String(), "the document should render the same either way")
@@ -105,7 +105,7 @@ func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 	for _, p := range paths(t, src)[1:] {
 		assert.NotEmpty(t, p)
 	}
-	for _, p := range paths(t, src, parser.OmitNodePaths()) {
+	for _, p := range paths(t, src, parser.WithOmitNodePaths()) {
 		assert.Empty(t, p)
 	}
 }

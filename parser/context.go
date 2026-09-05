@@ -240,7 +240,7 @@ func (p *Parser) newContext() context {
 }
 
 // lineComment returns the comment closing the line tk stands on, or nil where
-// there is none. A stream read without [Comments] has none at all.
+// there is none. A stream read without [WithComments] has none at all.
 func (c context) lineComment(tk *tapeToken) *token.Token {
 	return c.lineComments[tk]
 }

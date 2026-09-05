@@ -205,7 +205,7 @@ func complaints(cases []suite.Case) (all, clean map[string]int) {
 			continue
 		}
 
-		_, perr := parser.ParseBytes(c.Src, parser.Comments())
+		_, perr := parser.ParseBytes(c.Src, parser.WithComments())
 
 		if (want == stance.Accept) == (perr == nil) {
 			if perr != nil || c.Meaning == nil || len(c.Meaning.JSON) == 0 {

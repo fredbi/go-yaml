@@ -16,7 +16,7 @@ import (
 // than a presentation option.
 var parseModes = map[string][]parser.Option{
 	"default":  nil,
-	"comments": {parser.Comments()},
+	"comments": {parser.WithComments()},
 }
 
 func FuzzParserParseBytes(f *testing.F) {
@@ -58,7 +58,7 @@ func FuzzParserWalk(f *testing.F) {
 	addSuiteSeeds(f)
 
 	f.Fuzz(func(t *testing.T, src string) {
-		file, err := parser.ParseBytes([]byte(src), parser.Comments())
+		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
 		if err != nil {
 			return
 		}

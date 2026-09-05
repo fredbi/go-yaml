@@ -95,7 +95,7 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 
 	var opts []parser.Option
 	if mode&refparser.ParseComments != 0 {
-		opts = append(opts, parser.Comments())
+		opts = append(opts, parser.WithComments())
 	}
 	got, gotErr := parser.ParseBytes([]byte(text), opts...)
 

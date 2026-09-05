@@ -1016,7 +1016,7 @@ content: |
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
-			file, err := parser.ParseBytes([]byte(test.dst), parser.Comments())
+			file, err := parser.ParseBytes([]byte(test.dst), parser.WithComments())
 			if err != nil {
 				t.Fatalf("%+v", err)
 			}
@@ -1030,7 +1030,7 @@ content: |
 
 			// Rendering comes from depth in the tree, so reading the output
 			// back and writing it again has to produce the same text.
-			again, err := parser.ParseBytes([]byte(actual), parser.Comments())
+			again, err := parser.ParseBytes([]byte(actual), parser.WithComments())
 			if err != nil {
 				t.Fatalf("re-reading the output: %+v", err)
 			}

@@ -8,23 +8,23 @@ import "github.com/go-openapi/go-yaml/ast"
 // Option represents parser's option.
 type Option func(p *Parser)
 
-// Comments keeps the comments a document holds. They are dropped by default,
+// WithComments keeps the comments a document holds. They are dropped by default,
 // before the grouping ever sees them.
-func Comments() Option {
+func WithComments() Option {
 	return func(p *Parser) {
 		p.mode |= parseComments
 	}
 }
 
-// AllowDuplicateMapKey allow the use of keys with the same name in the same map,
+// WithAllowDuplicateMapKey allow the use of keys with the same name in the same map,
 // but by default, this is not permitted.
-func AllowDuplicateMapKey() Option {
+func WithAllowDuplicateMapKey() Option {
 	return func(p *Parser) {
 		p.allowDuplicateMapKey = true
 	}
 }
 
-// OmitNodePaths stops the parser recording where each node sits in the
+// WithOmitNodePaths stops the parser recording where each node sits in the
 // document. [github.com/go-openapi/go-yaml/ast.Node.GetPath] then returns "",
 // and so does the CommentMap that [github.com/go-openapi/go-yaml.CommentToMap]
 // fills, which is keyed by those paths.
@@ -35,26 +35,26 @@ func AllowDuplicateMapKey() Option {
 // 454 KB on a 544 KB OpenAPI specification. Reach for this only when the
 // document is large, the paths go unread, and that memory is worth the
 // accessor going quiet.
-func OmitNodePaths() Option {
+func WithOmitNodePaths() Option {
 	return func(p *Parser) {
 		p.omitNodePaths = true
 	}
 }
 
-// OnComplete calls fn with each node as the parser finishes it, in completion
+// WithOnComplete calls fn with each node as the parser finishes it, in completion
 // order: a node's children are reported before the node. EXPERIMENT
 // (2026-08-27) -- the hook a decoder folding nodes into Go values needs.
-func OnComplete(fn func(ast.Node)) Option {
+func WithOnComplete(fn func(ast.Node)) Option {
 	return func(p *Parser) {
 		p.onComplete = fn
 	}
 }
 
-// ChunkSize sets how many tokens one chunk of the token arena holds.
+// WithChunkSize sets how many tokens one chunk of the token arena holds.
 //
 // Left unset it is [tokenarena.MaxChunk]. [ParseBytes] sizes it from the length
 // of the document instead, with [tokenarena.SizeFor].
-func ChunkSize(size int) Option {
+func WithChunkSize(size int) Option {
 	return func(p *Parser) {
 		p.chunkSize = size
 	}

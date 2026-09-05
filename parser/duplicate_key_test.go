@@ -145,6 +145,6 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 
 // TestDuplicateMapKeyAllowed checks that the option turns the whole check off.
 func TestDuplicateMapKeyAllowed(t *testing.T) {
-	_, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.AllowDuplicateMapKey())
+	_, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.WithAllowDuplicateMapKey())
 	require.NoError(t, err)
 }

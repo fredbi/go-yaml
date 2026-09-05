@@ -33,7 +33,7 @@ seq: [1, 2] # closes a flow sequence
 last: done # the last one
 `
 
-	p := New(Comments())
+	p := New(WithComments())
 
 	file, err := p.Parse([]byte(src))
 	require.NoError(t, err)

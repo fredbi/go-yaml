@@ -72,7 +72,7 @@ func TestSuiteRoundTrip(t *testing.T) {
 	failed := make(map[string]outcome)
 
 	for _, test := range tests {
-		file, err := parser.ParseBytes(test.InYAML, parser.Comments())
+		file, err := parser.ParseBytes(test.InYAML, parser.WithComments())
 		if err != nil {
 			continue
 		}
@@ -82,7 +82,7 @@ func TestSuiteRoundTrip(t *testing.T) {
 			got := stable
 			rendered := file.String()
 
-			reread, err := parser.ParseBytes([]byte(rendered), parser.Comments())
+			reread, err := parser.ParseBytes([]byte(rendered), parser.WithComments())
 			switch {
 			case err != nil:
 				got = unreadable

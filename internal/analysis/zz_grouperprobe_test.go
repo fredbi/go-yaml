@@ -39,10 +39,10 @@ func TestGrouperCellsOutliveTheirReaders(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, w := range all {
-		_, err := parser.New(parser.Comments()).Walk(w.Data, silentVisitor{})
+		_, err := parser.New(parser.WithComments()).Walk(w.Data, silentVisitor{})
 		assert.NoErrorf(t, err, "%s", w.Name)
 	}
-	_, err = parser.New(parser.Comments()).Walk(flowDoc(2000), silentVisitor{})
+	_, err = parser.New(parser.WithComments()).Walk(flowDoc(2000), silentVisitor{})
 	assert.NoError(t, err)
 
 	// A clean run records no check at all, since checkLive returns before
