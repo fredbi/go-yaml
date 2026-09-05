@@ -968,9 +968,16 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			// parsed by recursion, the innermost call always held exactly one value and so took
 			// that branch. Parsing them in a loop puts every value in one node, so the choice has
 			// to be made explicitly to keep the attribution identical.
-			last := mapNode.Values[len(mapNode.Values)-1]
-			last.FootComment = p.parseFootComment(ctx, keyTk.Column())
-			last.FootComment.SetPathNode(last.Key.GetPathNode())
+			//
+			// The comment is read either way. A walk gathers no entries, so there is nothing here
+			// to attach it to -- the entry it belongs to went over before the comment was reached,
+			// which is the foot-comment lag Walk's doc names.
+			foot := p.parseFootComment(ctx, keyTk.Column())
+			if len(mapNode.Values) != 0 {
+				last := mapNode.Values[len(mapNode.Values)-1]
+				last.FootComment = foot
+				last.FootComment.SetPathNode(last.Key.GetPathNode())
+			}
 		}
 	}
 	return mapNode, nil
