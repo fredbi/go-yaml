@@ -17,14 +17,6 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// mode carries the settings an Option turns on. It is not part of the API:
-// callers say what they want with [WithComments] and the rest.
-type mode uint
-
-const (
-	parseComments mode = 1 << iota // keep comments and put them in the tree
-)
-
 // ParseBytes reads src and returns the file it describes.
 //
 // src is not copied. The tree keeps windows into it -- every scalar the scanner
@@ -112,7 +104,7 @@ type Parser struct {
 	// mapping is built.
 	entries []*ast.MappingValueNode
 	// lineComments holds the comment closing a token's line, against that
-	// token. It is nil where the mode did not ask for comments.
+	// token. It is nil where the parse was not asked for comments.
 	lineComments map[*tapeToken]*token.Token
 	// yamlVersion is the version the document being read named, and version the
 	// one to fall back on where it names none.
@@ -162,8 +154,9 @@ type Parser struct {
 	// tokens at or behind where it stands.
 	body *tokenRef
 
-	// mode is what the options asked of the parse.
-	mode mode
+	// keepComments says [WithComments] was passed, so the comments a document
+	// holds reach the tree rather than being dropped as they are read.
+	keepComments bool
 
 	// chunkSize is how many tokens one chunk of the token arena holds.
 	chunkSize int
@@ -310,7 +303,7 @@ func (p *Parser) begin(src []byte) {
 	// reading the document through before parsing any of it. It sizes buffers
 	// and nothing else.
 	estimate := max(len(src)/8, 16)
-	p.reader = newReader(&p.scan, p.tokens, estimate, p.mode&parseComments != 0)
+	p.reader = newReader(&p.scan, p.tokens, estimate, p.keepComments)
 	p.lineComments = p.reader.g.lineComments
 }
 
@@ -2281,7 +2274,7 @@ func (p *Parser) holdFlowEntry(node *ast.MappingNode, entry *ast.MappingValueNod
 // codec.sequenceEntryNode reads it for the position of a missing-field error,
 // falling back to the mapping's first key where the sequence kept none.
 func (p *Parser) sequenceEntry(ctx context, entryTk *tapeToken, value ast.Node, headComment *ast.CommentGroupNode) (*ast.SequenceEntryNode, error) {
-	if p.mode&parseComments == 0 {
+	if !p.keepComments {
 		return nil, nil
 	}
 

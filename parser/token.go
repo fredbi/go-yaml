@@ -412,7 +412,7 @@ type grouper struct {
 	// createGroupedTokens reads err rather than what they made of it.
 	err error
 	// lineComments holds the comment written at the end of a token's line,
-	// against the token it belongs to. It stays nil where the mode did not ask
+	// against the token it belongs to. It stays nil where the parse was not asked
 	// for comments, and then no token has one.
 	lineComments map[*tapeToken]*token.Token
 	// block is how many of each one allocation covers.

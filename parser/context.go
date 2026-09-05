@@ -32,7 +32,7 @@ type context struct {
 	// context of one parse, so a copy carries the same one.
 	arena *ast.Arena
 	// lineComments holds the comment closing a token's line, against that
-	// token. It is nil where the mode did not ask for comments, and reading a
+	// token. It is nil where the parse was not asked for comments, and reading a
 	// nil map costs nothing.
 	lineComments map[*tapeToken]*token.Token
 	// keyBase is where the keys of the mapping being parsed start in the

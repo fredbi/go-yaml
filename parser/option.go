@@ -12,7 +12,7 @@ type Option func(p *Parser)
 // before the grouping ever sees them.
 func WithComments() Option {
 	return func(p *Parser) {
-		p.mode |= parseComments
+		p.keepComments = true
 	}
 }
 

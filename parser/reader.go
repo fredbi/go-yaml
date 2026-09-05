@@ -37,7 +37,7 @@ type reader struct {
 	// drained says the scanner has no more to give, and finished that the
 	// grouping has been emptied of what it was still holding.
 	drained, finished bool
-	// keepComments says the mode asked for them. The rest are dropped as they
+	// keepComments says the parse was asked for them. The rest are dropped as they
 	// arrive and never reach the grouping.
 	keepComments bool
 
