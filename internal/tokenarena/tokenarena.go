@@ -199,6 +199,17 @@ type TokenArena[T any] struct {
 	// released counts the chunks that have joined the free list, over the whole
 	// life of the arena.
 	released int
+
+	// byIndex finds the chunk holding a sequence without walking the lists.
+	// grow is called only when the chunk in hand is full, so every chunk but
+	// that one holds exactly chunkSize tokens and a chunk's base is always a
+	// multiple of it: the chunk holding seq is byIndex[seq/chunkSize].
+	//
+	// An entry is set when a chunk is filled and cleared when it joins the free
+	// list, so a lookup finds the chunks that are live or saved and no others,
+	// which is what chunkOf answers. It costs one pointer per chunk of the
+	// document -- 3 kB for citm_catalog.
+	byIndex []*Chunk[T]
 }
 
 // New returns an arena whose chunks hold size tokens each.
@@ -243,6 +254,7 @@ func (a *TokenArena[T]) grow() {
 	}
 
 	c.base, c.pos, c.saves = a.next, 0, 0
+	a.index(c)
 	a.live.pushBack(c)
 	a.head = c
 
@@ -392,19 +404,37 @@ func (a *TokenArena[T]) eachChunkIn(from, to int, do func(*Chunk[T])) {
 // chunkOf returns the chunk holding seq, wherever it stands, or nil where none
 // does any more.
 func (a *TokenArena[T]) chunkOf(seq int) *Chunk[T] {
-	for _, l := range []*list[T]{&a.live, &a.saved} {
-		for c := l.head; c != nil; c = c.next {
-			if seq >= c.base && seq < c.base+c.pos {
-				return c
-			}
-		}
+	at := seq / a.chunkSize
+	if seq < 0 || at >= len(a.byIndex) {
+		return nil
 	}
 
-	return nil
+	c := a.byIndex[at]
+	if c == nil || seq < c.base || seq >= c.base+c.pos {
+		return nil
+	}
+
+	return c
+}
+
+// index records where a chunk's run of sequences may be found.
+func (a *TokenArena[T]) index(c *Chunk[T]) {
+	at := c.base / a.chunkSize
+	for len(a.byIndex) <= at {
+		a.byIndex = append(a.byIndex, nil)
+	}
+	a.byIndex[at] = c
 }
 
 // freeChunk puts a chunk on the free list and counts it.
+//
+// The chunk stops answering for its run here rather than when it is filled
+// again: a caller asking what holds a sequence is asking whether the arena
+// still holds it, and once a chunk is free the answer is no.
 func (a *TokenArena[T]) freeChunk(c *Chunk[T]) {
+	if at := c.base / a.chunkSize; at < len(a.byIndex) && a.byIndex[at] == c {
+		a.byIndex[at] = nil
+	}
 	a.free.pushBack(c)
 	a.released++
 }

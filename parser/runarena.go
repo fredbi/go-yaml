@@ -26,19 +26,7 @@ type runArena[T any] struct {
 	full    []*runChunk[T]
 	free    []*runChunk[T]
 	size    int
-
-	// futile counts sweeps that freed nothing and skip how many to pass over
-	// before trying again. A document the grouping cannot let go of -- one flow
-	// collection spanning the whole of it, which is what a JSON document is --
-	// frees nothing however often it is asked, and asking once per node made
-	// such a document 77x slower.
-	futile int
-	skip   int
 }
-
-// maxSkip bounds the backoff, so a sweep is still attempted now and then on a
-// document that starts letting go again after a long flow collection.
-const maxSkip = 1 << 16
 
 // runChunk is one allocation of cells, and the newest token any of them stands
 // for.
@@ -121,13 +109,7 @@ func (a *runArena[T]) blockSize() int {
 // sequence could not be read would otherwise keep every chunk behind it. The
 // list is short once this is working, which is the point of it.
 func (a *runArena[T]) release(dead func(seq int32) bool, poison func([]T)) {
-	if a.skip > 0 {
-		a.skip--
-
-		return
-	}
-
-	var kept, freed int
+	var kept int
 	for _, c := range a.full {
 		if c.unknown || !c.finished(dead) {
 			a.full[kept] = c
@@ -140,19 +122,8 @@ func (a *runArena[T]) release(dead func(seq int32) bool, poison func([]T)) {
 		}
 		c.used, c.checked = 0, 0
 		a.free = append(a.free, c)
-		freed++
 	}
 	a.full = a.full[:kept]
-
-	if freed > 0 {
-		a.futile, a.skip = 0, 0
-
-		return
-	}
-	a.futile++
-	if a.skip = 1 << min(a.futile, 16); a.skip > maxSkip {
-		a.skip = maxSkip
-	}
 }
 
 // finished reports whether every cell of the chunk is done with, moving the
