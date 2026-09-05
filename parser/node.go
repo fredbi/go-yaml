@@ -184,7 +184,12 @@ func newSequenceNode(ctx context, tk *tapeToken, isFlow bool) (*ast.SequenceNode
 	return node, nil
 }
 
-func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode, error) {
+// newTagDefaultScalarValueNode builds the value a tag stands for when nothing
+// follows it: "!!int" alone is 0, "!!str" is the empty string.
+//
+// uri is the tag resolved against the document's handles, so "!!int" and
+// "!<tag:yaml.org,2002:int>" build the same node.
+func newTagDefaultScalarValueNode(ctx context, uri string, tag *token.Token) (ast.ScalarNode, error) {
 	pos := tag.Position
 	pos.Column++
 
@@ -192,7 +197,8 @@ func newTagDefaultScalarValueNode(ctx context, tag *token.Token) (ast.ScalarNode
 		tk   *tapeToken
 		node ast.ScalarNode
 	)
-	switch token.ReservedTagKeyword(tag.Value) {
+	tagged, _ := token.ReservedTagOf(uri)
+	switch tagged {
 	case token.IntegerTag:
 		tk = newSynthetic(token.New("0", "0", pos))
 		n, err := newIntegerNode(ctx, tk)

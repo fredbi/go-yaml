@@ -108,12 +108,13 @@ type Parser struct {
 	lineComments map[*tapeToken]*token.Token
 	// yamlVersion is the version the document being read named, and version the
 	// one to fall back on where it names none.
-	yamlVersion           YAMLVersion
-	version               YAMLVersion
-	allowDuplicateMapKey  bool
-	omitNodePaths         bool
-	secondaryTagDirective *ast.DirectiveNode
-	tagHandles            map[string]struct{}
+	yamlVersion          YAMLVersion
+	version              YAMLVersion
+	allowDuplicateMapKey bool
+	omitNodePaths        bool
+	// tagHandles maps a handle a TAG directive declared to the prefix it
+	// expands to.
+	tagHandles map[string]string
 
 	// keyStack holds the keys of every mapping open at this point in the
 	// descent, innermost last, and keyIndex addresses them. Both are reused
@@ -1618,6 +1619,7 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	node.URI = p.resolveTag(tagRawTk.Value)
 
 	// The tag stands around the node it types, so it goes over before that node
 	// and closes after it -- the same shape parseAnchorValue gives an anchor,
@@ -1633,32 +1635,9 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 
 	comment := p.parseHeadComment(ctx)
 
-	var tagValue ast.Node
-	if p.secondaryTagDirective != nil {
-		valueTk := ctx.currentToken()
-		if valueTk == nil {
-			// A secondary tag directive with nothing left to tag. Produce the
-			// same implicit null parseTagValue produces for the primary case,
-			// rather than building a node out of a token that is not there.
-			value, err := newNullNode(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
-			if err != nil {
-				return nil, err
-			}
-			tagValue = value
-		} else {
-			value, err := newStringNode(ctx, valueTk)
-			if err != nil {
-				return nil, err
-			}
-			tagValue = value
-		}
-		node.Directive = p.secondaryTagDirective
-	} else {
-		value, err := p.parseTagValue(ctx, tagRawTk, ctx.currentToken())
-		if err != nil {
-			return nil, err
-		}
-		tagValue = value
+	tagValue, err := p.parseTagValue(ctx, node.URI, tagRawTk, ctx.currentToken())
+	if err != nil {
+		return nil, err
 	}
 	if err := setHeadComment(comment, tagValue); err != nil {
 		return nil, err
@@ -1669,7 +1648,6 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 
 func (p *Parser) clearTagDirectives() {
 	p.tagHandles = nil
-	p.secondaryTagDirective = nil
 }
 
 // namedTagHandle returns the handle a tag shorthand uses, and whether that
@@ -1690,11 +1668,64 @@ func namedTagHandle(value string) (string, bool) {
 	return "!" + name + "!", true
 }
 
-func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *tapeToken) (ast.Node, error) {
+// resolveTag expands a tag shorthand to the URI it names.
+//
+// "!!int" is the secondary handle and a suffix, and stands for
+// tag:yaml.org,2002:int unless a "%TAG !!" directive gives that handle another
+// prefix. "!<...>" carries the URI already. "!thing" is the primary handle,
+// whose prefix is "!" unless a "%TAG !" directive changes it, so a local tag
+// names itself. "!name!suffix" needs the handle declared, which parseTag has
+// already checked.
+func (p *Parser) resolveTag(text string) string {
+	if suffix, ok := strings.CutPrefix(text, "!<"); ok {
+		return strings.TrimSuffix(suffix, ">")
+	}
+	if suffix, ok := strings.CutPrefix(text, "!!"); ok {
+		return p.tagPrefix("!!", token.YAMLTagPrefix) + suffix
+	}
+	if handle, ok := namedTagHandle(text); ok {
+		return p.tagPrefix(handle, "!") + strings.TrimPrefix(text, handle)
+	}
+	if suffix, ok := strings.CutPrefix(text, "!"); ok {
+		return p.tagPrefix("!", "!") + suffix
+	}
+
+	return text
+}
+
+// resolvedBySchema reports whether the scanner typed a plain scalar by the core
+// schema. A tag that resolves to nothing overrides that typing, and the scalar
+// keeps the text it was written with.
+func resolvedBySchema(tk *tapeToken) bool {
+	switch tk.Type() {
+	case token.BoolType, token.IntegerType, token.BinaryIntegerType, token.OctetIntegerType,
+		token.HexIntegerType, token.FloatType, token.InfinityType, token.NanType, token.NullType:
+		return true
+	default:
+		return false
+	}
+}
+
+// tagPrefix returns the prefix a handle expands to, or fallback where no
+// directive declared it.
+func (p *Parser) tagPrefix(handle, fallback string) string {
+	if prefix, declared := p.tagHandles[handle]; declared {
+		return prefix
+	}
+
+	return fallback
+}
+
+func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, tk *tapeToken) (ast.Node, error) {
 	if tk == nil {
 		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
 	}
-	switch token.ReservedTagKeyword(tagRawTk.Value) {
+
+	// Match on the URI rather than on the shorthand the tag was written with: a
+	// "%TAG" line repointing "!!" makes "!!seq" the document's own tag, which
+	// stands on whatever follows it rather than requiring a sequence.
+	tag, _ := token.ReservedTagOf(uri)
+	switch tag {
 	case token.MappingTag, token.SetTag:
 		if !p.isMapToken(tk) {
 			return nil, yamlerrors.NewSyntax("could not find map", tk.RawToken())
@@ -1711,7 +1742,7 @@ func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *tapeToken
 			// Nothing here is the tag's value: either punctuation closes what
 			// the tag was written in, or the next entry of the enclosing
 			// mapping has begun. The tag is on the empty node.
-			return newTagDefaultScalarValueNode(ctx, tagRawTk)
+			return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 		}
 		scalar, err := p.parseScalarValue(ctx, tk)
 		if err != nil {
@@ -1731,7 +1762,15 @@ func (p *Parser) parseTagValue(ctx context, tagRawTk *token.Token, tk *tapeToken
 		// written in. The tag stands on the empty node: "[!]", "[a, !]",
 		// "{a: !}". The case above says the same for the resolved tags, where
 		// the empty node takes the tag's own default rather than null.
-		return newTagDefaultScalarValueNode(ctx, tagRawTk)
+		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
+	}
+	if tk.Group == nil && resolvedBySchema(tk) {
+		// A tag the core schema does not resolve leaves its scalar as text,
+		// digits and all. Context.setTokenTypeByPrevTag does this in the
+		// scanner for the tags it reads as local ones, and it cannot do it
+		// here: it goes by the spelling, and only the parser knows what a
+		// "%TAG !!" line made of the handle.
+		return newStringNode(ctx, tk)
 	}
 
 	return p.parseToken(ctx, tk)
@@ -2108,20 +2147,14 @@ func (p *Parser) parseDirective(ctx context, g *tokenGroup) (*ast.DirectiveNode,
 		if err != nil {
 			return nil, err
 		}
-		if tagKey.Value == "!!" {
-			// The directive is hung on every node of the document that uses it,
-			// so its tokens stand for as long as the document does.
-			p.saveHere(g.First().Seq(), g.Last().Seq())
-			p.secondaryTagDirective = directive
-		}
-		if p.tagHandles == nil {
-			p.tagHandles = make(map[string]struct{})
-		}
-		p.tagHandles[tagKey.Value] = struct{}{}
 		tagValue, err := newStringNode(ctx, g.At(2))
 		if err != nil {
 			return nil, err
 		}
+		if p.tagHandles == nil {
+			p.tagHandles = make(map[string]string)
+		}
+		p.tagHandles[tagKey.Value] = tagValue.Value
 		directive.Values = append(directive.Values, tagKey, tagValue)
 	default:
 		if g.Len() > 1 {

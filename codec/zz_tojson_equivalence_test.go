@@ -24,7 +24,7 @@ import (
 // that back out. It is kept here as the oracle the folding converter is held
 // to, the way internal/refparser is kept for the parser.
 func toJSONViaValues(src []byte) ([]byte, error) {
-	var v interface{}
+	var v any
 	if err := codec.UnmarshalWithOptions(src, &v, codec.UseOrderedMap()); err != nil {
 		return nil, err
 	}

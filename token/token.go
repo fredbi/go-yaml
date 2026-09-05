@@ -503,6 +503,32 @@ func init() {
 	}
 }
 
+// YAMLTagPrefix is the prefix the secondary tag handle "!!" expands to unless
+// a "%TAG" directive gives it another, so "!!int" and
+// "!<tag:yaml.org,2002:int>" name one tag and not two.
+const YAMLTagPrefix = "tag:yaml.org,2002:"
+
+// ReservedTagOf returns the reserved tag a URI names, and reports false for
+// every other URI -- a tag the document defines, or one of another namespace.
+//
+// A document usually writes the shorthand "!!int" and means
+// tag:yaml.org,2002:int. Expanding the shorthand before matching here resolves
+// both spellings to one tag, and lets a "%TAG !!" line that repoints the
+// handle take "!!int" out of this namespace.
+func ReservedTagOf(uri string) (ReservedTagKeyword, bool) {
+	name, ok := strings.CutPrefix(uri, YAMLTagPrefix)
+	if !ok {
+		return "", false
+	}
+
+	keyword := ReservedTagKeyword("!!" + name)
+	if _, reserved := ReservedTagKeywordMap[keyword]; !reserved {
+		return "", false
+	}
+
+	return keyword, true
+}
+
 // ReservedTagKeyword type of reserved tag keyword
 type ReservedTagKeyword string
 

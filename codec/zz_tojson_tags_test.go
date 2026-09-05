@@ -42,10 +42,14 @@ func TestToJSONReadsTheTagsItKnows(t *testing.T) {
 		{"local", "a: !thing 12\n", `{"a":"12"}`},
 		{"unknown namespace", "a: !<tag:example.com,2020:thing> 12\n", `{"a":"12"}`},
 
-		// ⚠️ And so is the long form of a tag the core schema does resolve:
-		// "!!int" is shorthand for tag:yaml.org,2002:int and the two should
-		// mean the same, but only the shorthand is recognized.
-		{"long form int", "a: !<tag:yaml.org,2002:int> \"12\"\n", `{"a":"12"}`},
+		// The long form of a tag the core schema resolves. "!!int" is
+		// shorthand for tag:yaml.org,2002:int, so the two mean the same.
+		{"long form int", "a: !<tag:yaml.org,2002:int> \"12\"\n", `{"a":12}`},
+		{"long form str", "a: !<tag:yaml.org,2002:str> 12\n", `{"a":"12"}`},
+		{"long form bool", "a: !<tag:yaml.org,2002:bool> yes\n", `{"a":true}`},
+		{"long form seq", "a: !<tag:yaml.org,2002:seq> [1,2]\n", `{"a":[1,2]}`},
+		{"long form map", "a: !<tag:yaml.org,2002:map> {x: 1}\n", `{"a":{"x":1}}`},
+		{"long form merge", "b: &b {x: 1}\na:\n  !<tag:yaml.org,2002:merge> <<: *b\n", `{"b":{"x":1},"a":{"x":1}}`},
 
 		// The merge tag written out reads as the "<<" it stands on.
 		{"merge", "b: &b {x: 1}\na:\n  !!merge <<: *b\n", `{"b":{"x":1},"a":{"x":1}}`},

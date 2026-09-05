@@ -444,17 +444,11 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.NanNode:
 		return n.GetValue(), nil
 	case *ast.TagNode:
-		if n.Directive != nil {
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-			if v == nil {
-				return "", nil
-			}
-			return fmt.Sprint(v), nil
-		}
-		switch token.ReservedTagKeyword(n.Start.Value) {
+		// Match on the URI rather than on the shorthand the tag was written
+		// with, so "!!int" and "!<tag:yaml.org,2002:int>" agree and a "%TAG"
+		// line that repoints "!!" takes "!!int" out of YAML's namespace.
+		tag, _ := token.ReservedTagOf(n.URI)
+		switch tag {
 		case token.TimestampTag:
 			t, _ := d.castToTime(ctx, n.Value)
 			return t, nil

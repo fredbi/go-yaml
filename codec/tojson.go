@@ -61,7 +61,9 @@ func isMergeKey(n ast.Node) bool {
 	case *ast.MergeKeyNode:
 		return true
 	case *ast.TagNode:
-		return t.Start != nil && token.ReservedTagKeyword(t.Start.Value) == token.MergeTag
+		tag, ok := token.ReservedTagOf(t.URI)
+
+		return ok && tag == token.MergeTag
 	default:
 		return false
 	}
@@ -446,12 +448,16 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 // it is written.
 func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	text, isScalar := taggedText(t.Value)
-	if t.Start == nil || t.Directive != nil || !isScalar {
+	if !isScalar {
+		return nil, false
+	}
+	tag, reserved := token.ReservedTagOf(t.URI)
+	if !reserved {
 		return nil, false
 	}
 
 	var written []byte
-	switch token.ReservedTagKeyword(t.Start.Value) {
+	switch tag {
 	case token.StringTag:
 		written = appendJSONString(nil, text)
 	case token.IntegerTag:
