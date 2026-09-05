@@ -63,6 +63,7 @@ type Decoder struct {
 	allowedFieldPrefixes   []string
 	allowDuplicateMapKey   bool
 	useOrderedMap          bool
+	useStringKeys          bool
 	useJSONUnmarshaler     bool
 	parsedFile             *ast.File
 	streamIndex            int
@@ -86,6 +87,7 @@ func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
 		disallowUnknownField:   false,
 		allowDuplicateMapKey:   false,
 		useOrderedMap:          false,
+		useStringKeys:          false,
 	}
 }
 
@@ -1985,13 +1987,21 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			continue
 		}
 
-		k := d.createDecodableValue(keyType)
+		decodeKeyAs := keyType
+		if d.useStringKeys && keyType.Kind() == reflect.Interface {
+			// The map takes any key, so a scalar would otherwise arrive with
+			// the Go type its text resolves to. Read it as a string instead,
+			// through the same path a map[string]any takes, so the two agree
+			// on the spelling.
+			decodeKeyAs = stringType
+		}
+		k := d.createDecodableValue(decodeKeyAs)
 		if d.canDecodeByUnmarshaler(k) {
 			if err := d.decodeByUnmarshaler(ctx, k, key); err != nil {
 				return err
 			}
 		} else {
-			keyVal, err := d.createDecodedNewValue(ctx, keyType, reflect.Value{}, key)
+			keyVal, err := d.createDecodedNewValue(ctx, decodeKeyAs, reflect.Value{}, key)
 			if err != nil {
 				return err
 			}
@@ -2025,10 +2035,10 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 		}
 		if !k.IsValid() {
 			// expect nil key
-			mapValue.SetMapIndex(d.createDecodableValue(keyType), dstValue)
+			mapValue.SetMapIndex(d.createDecodableValue(decodeKeyAs), dstValue)
 			continue
 		}
-		if keyType.Kind() != k.Kind() {
+		if decodeKeyAs.Kind() != k.Kind() {
 			return yamlerrors.NewSyntax(
 				fmt.Sprintf("cannot convert %q type to %q type", k.Kind(), keyType.Kind()),
 				key.GetToken(),
@@ -2376,6 +2386,9 @@ func (d *Decoder) DecodeFromNodeContext(ctx context.Context, node ast.Node, v in
 	}
 	return nil
 }
+
+// stringType is the string type, for reading a mapping key as text.
+var stringType = reflect.TypeFor[string]()
 
 // dynamicTypeOf returns the type inside an interface value, or v's own type
 // where v is not one. It names what a key actually holds in an error about a

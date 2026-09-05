@@ -4,6 +4,7 @@
 package codec_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -28,6 +29,52 @@ func TestACollectionKeyIsRefusedNotPanicked(t *testing.T) {
 			require.Error(t, err)
 			assert.ErrorIs(t, err, yamlerrors.ErrUnhashableKey)
 			assert.Contains(t, err.Error(), "as a map key: Go cannot hash it")
+
+			// UseStringKeys does not make one usable either -- it reads keys as
+			// text, and a collection has no text.
+			into = nil
+			err = codec.UnmarshalWithOptions([]byte(src), &into, codec.UseStringKeys())
+			assert.Error(t, err)
 		})
 	}
+}
+
+// TestUseStringKeysReadsEveryKeyAsText records what the option changes and what
+// it leaves alone.
+func TestUseStringKeysReadsEveryKeyAsText(t *testing.T) {
+	const src = "1.5: a\ntrue: b\n"
+
+	t.Run("a map[any]any keeps the resolved type by default", func(t *testing.T) {
+		var into map[any]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &into))
+		assert.Equal(t, map[any]any{1.5: "a", true: "b"}, into)
+	})
+
+	t.Run("and takes strings with the option", func(t *testing.T) {
+		var into map[any]any
+		require.NoError(t, codec.UnmarshalWithOptions([]byte(src), &into, codec.UseStringKeys()))
+		assert.Equal(t, map[any]any{"1.5": "a", "true": "b"}, into)
+	})
+
+	t.Run("which is the spelling a map[string]any already gets", func(t *testing.T) {
+		var into map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &into))
+		assert.Equal(t, map[string]any{"1.5": "a", "true": "b"}, into)
+	})
+
+	t.Run("a named key type is untouched, with or without it", func(t *testing.T) {
+		for _, opts := range [][]codec.DecodeOption{nil, {codec.UseStringKeys()}} {
+			var into map[float64]any
+			require.NoError(t, codec.UnmarshalWithOptions([]byte("1.5: a\n"), &into, opts...))
+			assert.Equal(t, map[float64]any{1.5: "a"}, into)
+		}
+	})
+
+	t.Run("and a key the named type cannot take is still an error", func(t *testing.T) {
+		var into map[float64]any
+		err := codec.UnmarshalWithOptions([]byte("true: b\n"), &into, codec.UseStringKeys())
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, yamlerrors.ErrSyntax) || errors.Is(err, yamlerrors.ErrTypeMismatch),
+			"unexpected kind: %v", err)
+	})
 }

@@ -96,6 +96,27 @@ func UseOrderedMap() DecodeOption {
 	}
 }
 
+// UseStringKeys reads every mapping key as text, so a map with an interface key
+// type holds strings rather than the Go types the keys resolve to.
+//
+// Without it, "1.5: a" decoded into a map[any]any gives the key float64(1.5),
+// "true: a" gives bool(true), and a key the map's own type cannot take is an
+// error. With it both give a string, the same spelling a map[string]any gets,
+// which is what a JSON object needs. A map whose key type is named -- a
+// map[float64]any -- is untouched, since the caller asked for that type.
+//
+// It does not make a collection usable as a key. Go cannot hash a slice or a
+// map, so "? [a]" is an error either way; use
+// [github.com/go-openapi/go-yaml/parser.WithJSONCompatible] to refuse those at
+// parse time.
+func UseStringKeys() DecodeOption {
+	return func(d *Decoder) error {
+		d.useStringKeys = true
+
+		return nil
+	}
+}
+
 // UseJSONUnmarshaler if neither `Unmarshaler` nor `GoYAMLUnmarshaler` is implemented
 // and `UnmashalJSON([]byte)error` is implemented, convert the argument from `YAML` to `JSON` and then call it.
 func UseJSONUnmarshaler() DecodeOption {
