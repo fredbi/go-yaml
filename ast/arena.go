@@ -84,8 +84,14 @@ func (a *Arena) Stats() ArenaStats {
 }
 
 // block hands out values of one type from an allocation at a time.
+//
+// The chunks are kept rather than let go of, so that [block.rewind] can hand
+// the same cells out again. A parse that never rewinds allocates exactly what
+// it did before and pays one slice header per chunk for the privilege.
 type block[T any] struct {
-	free []T
+	chunks [][]T
+	// at is the chunk being handed out of and used how much of it has gone.
+	at, used int
 	// nodes, blocks and cells count what has been handed out and what was
 	// allocated to hand it out. They cost an increment each per node and are
 	// what [Arena.Stats] reports; deriving the same figures from a heap profile
@@ -96,19 +102,49 @@ type block[T any] struct {
 }
 
 // next returns the next unused value, taking a new allocation of size when the
-// one in hand runs out. Blocks are never reused, so a value handed out stays
-// valid for as long as anything points at it.
+// chunk in hand runs out.
+//
+// The cell is zeroed before it is handed out: after a rewind it holds whatever
+// the node that stood there left, and a constructor sets only the fields its
+// node has.
 func (b *block[T]) next(size int) *T {
-	if len(b.free) == 0 {
-		b.free = make([]T, size)
+	if b.at == len(b.chunks) {
+		b.chunks = append(b.chunks, make([]T, size))
 		b.blocks++
 		b.cells += size
+	} else if b.used == len(b.chunks[b.at]) {
+		b.at++
+		b.used = 0
+
+		return b.next(size)
 	}
-	v := &b.free[0]
-	b.free = b.free[1:]
+
+	v := &b.chunks[b.at][b.used]
+	b.used++
 	b.nodes++
+	var zero T
+	*v = zero
 
 	return v
+}
+
+// blockMark is where a block stood.
+type blockMark struct{ at, used int32 }
+
+// mark records where the block stands, for a later rewind.
+func (b *block[T]) mark() blockMark {
+	return blockMark{at: int32(b.at), used: int32(b.used)} //nolint:gosec // a document with 2^31 nodes of one type does not fit in memory
+}
+
+// rewind hands the cells above m out again.
+//
+// Everything allocated since m was taken is dead, and the chunks holding it
+// stay so the next allocations write over them. Nothing else is touched: a
+// caller still pointing into that range reads whatever is written there next,
+// which is why only a walk rewinds and only past what it has handed over.
+func (b *block[T]) rewind(m blockMark) {
+	scrub(b.chunks, int(m.at), int(m.used), b.at, b.used)
+	b.at, b.used = int(m.at), int(m.used)
 }
 
 // stats reports what this block handed out. width is taken at the type, so it
@@ -116,12 +152,17 @@ func (b *block[T]) next(size int) *T {
 func (b *block[T]) stats(name string) TypeStats {
 	width := int(unsafe.Sizeof(*new(T)))
 
+	var unused int
+	if b.at < len(b.chunks) {
+		unused = len(b.chunks[b.at]) - b.used
+	}
+
 	return TypeStats{
 		Type:   name,
 		Nodes:  b.nodes,
 		Blocks: b.blocks,
 		Bytes:  b.cells * width,
-		Unused: len(b.free) * width,
+		Unused: unused * width,
 	}
 }
 
@@ -201,6 +242,63 @@ type Arena struct {
 	mappingRuns slab[*MappingValueNode]
 
 	size int
+}
+
+// Mark is where an arena stood, taken by [Arena.Mark] and given back to
+// [Arena.Rewind].
+type Mark struct {
+	strings       blockMark
+	integers      blockMark
+	floats        blockMark
+	bools         blockMark
+	nulls         blockMark
+	mappingValues blockMark
+	mappings      blockMark
+	sequences     blockMark
+	sequenceEntry blockMark
+}
+
+// Mark records where the arena stands.
+//
+// A walk takes one as it enters a node and gives it back as it leaves, which
+// makes the arena a stack: the nodes of a subtree are handed out again for the
+// subtree that follows it. What a walk holds at once is its own depth rather
+// than the document, so a document of any size is read from a handful of
+// chunks.
+func (a *Arena) Mark() Mark {
+	return Mark{
+		strings:       a.strings.mark(),
+		integers:      a.integers.mark(),
+		floats:        a.floats.mark(),
+		bools:         a.bools.mark(),
+		nulls:         a.nulls.mark(),
+		mappingValues: a.mappingValues.mark(),
+		mappings:      a.mappings.mark(),
+		sequences:     a.sequences.mark(),
+		sequenceEntry: a.sequenceEntry.mark(),
+	}
+}
+
+// Rewind hands out again every node taken since m.
+//
+// ⚠️ Every node handed out since m is dead the moment this returns, and the
+// cells are written over by what comes next. Only a caller that knows nothing
+// points at them may call it -- [github.com/go-openapi/go-yaml/parser.Parser.Walk]
+// rewinds to what it marked on Enter once Leave has returned, and a parse that
+// gathers a tree never rewinds at all.
+//
+// The mapping runs are not rewound: a walk builds none, since a collection
+// walking keeps no entries.
+func (a *Arena) Rewind(m Mark) {
+	a.strings.rewind(m.strings)
+	a.integers.rewind(m.integers)
+	a.floats.rewind(m.floats)
+	a.bools.rewind(m.bools)
+	a.nulls.rewind(m.nulls)
+	a.mappingValues.rewind(m.mappingValues)
+	a.mappings.rewind(m.mappings)
+	a.sequences.rewind(m.sequences)
+	a.sequenceEntry.rewind(m.sequenceEntry)
 }
 
 // NewArena returns an arena whose blocks are sized for a document of n tokens.
