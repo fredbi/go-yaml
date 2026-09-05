@@ -338,6 +338,19 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 		}
 
 		return appendJSONFloat(out, jsonScalarOf(t))
+	case *ast.IntegerNode:
+		if tk := t.GetToken(); tk != nil {
+			if u, negative, ok := token.ParseWholeNumber(tk.Value, tk.Type); ok {
+				if negative && u != 0 {
+					// "-0" is the number zero, which JSON writes without a sign.
+					out = append(out, '-')
+				}
+
+				return strconv.AppendUint(out, u, 10)
+			}
+		}
+
+		return appendJSONScalar(out, jsonScalarOf(t))
 	case *ast.LiteralNode:
 		if t.Value == nil {
 			return append(out, "null"...)

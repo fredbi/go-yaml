@@ -1089,29 +1089,48 @@ func ParseBool(text string) (bool, bool) {
 // each time it is asked for, rather than once for every number in the document
 // whether or not anything reads it.
 func ParseInteger(text string, typ Type) (any, bool) {
-	shape, ok := shapeOfTypedNumber(text, typ)
-	if !ok || shape.typ == NumberTypeFloat {
-		return nil, false
-	}
-
-	u, err := parseDigits(shape)
-	if err != nil {
-		return nil, false
-	}
-	if !shape.negative {
-		return u, true
-	}
+	u, negative, ok := ParseWholeNumber(text, typ)
 
 	// The digits are read unsigned and negated here, rather than read again
 	// with the sign put back, which would mean building a string for strconv.
 	switch {
-	case u > 1<<63:
+	case !ok:
 		return nil, false
+	case !negative:
+		return u, true
 	case u == 1<<63:
 		return int64(-1 << 63), true // the smallest int64, which -int64(u) cannot hold
 	default:
 		return -int64(u), true
 	}
+}
+
+// ParseWholeNumber reads text as a whole number and returns how large it is and
+// whether it is negative, or false where text is not an integer of type typ or
+// is one no machine word holds.
+//
+// It is [ParseInteger] without the interface: that one answers int64 or uint64
+// depending on the number, so it boxes every integer of a document on the way
+// out, and a caller writing the digits back out unboxes them again. Reading
+// citm_catalog into JSON spent an eighth of everything it allocated there.
+//
+// The magnitude is returned rather than the value so that the smallest int64
+// fits: its magnitude is 1<<63, which int64 cannot hold.
+func ParseWholeNumber(text string, typ Type) (uint64, bool, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
+	if !ok || shape.typ == NumberTypeFloat {
+		return 0, false, false
+	}
+
+	u, err := parseDigits(shape)
+	if err != nil {
+		return 0, false, false
+	}
+	if shape.negative && u > 1<<63 {
+		return 0, false, false
+	}
+
+	return u, shape.negative, true
 }
 
 // bigDigits reads a shape's digits as a big.Int. Base 60 is read group by
