@@ -78,6 +78,27 @@ func TestATimestampIsATextualScalar(t *testing.T) {
 	}
 }
 
+// TestTimestampTagDoesNotFollowTheVersion records that an explicit
+// "!!timestamp" resolves under every YAML version.
+//
+// WithYAMLVersion selects the schema an untagged plain scalar resolves by, and
+// the versions disagree about several of those. A tag is not resolution: it
+// names tag:yaml.org,2002:timestamp, which the 2005 type repository defines and
+// which means the same thing whichever version the document declares. See
+// TestATimestampIsATextualScalar for the untagged half of the rule.
+func TestTimestampTagDoesNotFollowTheVersion(t *testing.T) {
+	for _, src := range []string{
+		"a: !!timestamp 2002-12-14\n",
+		"%YAML 1.1\n---\na: !!timestamp 2002-12-14\n",
+		"%YAML 1.2\n---\na: !!timestamp 2002-12-14\n",
+		"a: !<tag:yaml.org,2002:timestamp> 2002-12-14\n",
+	} {
+		var v map[string]any
+		require.NoErrorf(t, codec.Unmarshal([]byte(src), &v), "%q", src)
+		assert.IsTypef(t, time.Time{}, v["a"], "%q", src)
+	}
+}
+
 // TestATagThatCannotConvertIsRefused records that a scalar no format reads is
 // an error rather than a zero value.
 //

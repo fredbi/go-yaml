@@ -18,6 +18,46 @@
 //     them reports, with the position it happened at.
 //   - [github.com/go-openapi/go-yaml/expressions] navigates a document by
 //     path.
+//
+// # Tags
+//
+// A tag is read by the URI it names rather than by the shorthand it was written
+// with, so "!!int", "!<tag:yaml.org,2002:int>" and "!e!int" under
+// "%TAG !e! tag:yaml.org,2002:" are one tag. The expansion is on the node, at
+// [github.com/go-openapi/go-yaml/ast.TagNode.URI].
+//
+// The seven tags of the YAML 1.2 core schema (§10.2) are resolved: !!null,
+// !!bool, !!int, !!float, !!str, !!seq and !!map.
+//
+// Five more come from the 1.1 type repository at https://yaml.org/type and are
+// resolved as well, under either version:
+//
+//   - !!binary decodes base64 into []byte, and a text base64 cannot read is an
+//     error.
+//   - !!merge is the "<<" key, whose mapping's entries are folded into the one
+//     holding it.
+//   - !!omap has to stand on a sequence and decodes as one, in the order it was
+//     written. There is no ordered-map type behind it; use
+//     [codec.UseOrderedMap] to get [codec.MapSlice] for every mapping.
+//   - !!set has to stand on a mapping and decodes as a map with nil values.
+//   - !!timestamp decodes to a time.Time, and a text no format reads is an
+//     error. The formats are the ones yaml.org/type/timestamp.html spells.
+//
+// !!timestamp takes two rules, since YAML 1.2 has no timestamp of its own and
+// other libraries differ. An explicit !!timestamp resolves whatever version the
+// document declares, because a tag names a URI and is not resolution. An
+// untagged "2001-12-14" is a string in both versions, and only a Go field of
+// type time.Time asks for the conversion --
+// go.yaml.in/yaml/v3 reads it as a time.Time and gopkg.in/yaml.v2 as a string.
+// [github.com/go-openapi/go-yaml/parser.WithYAMLVersion] and a "%YAML" directive select what an untagged
+// plain scalar resolves to, and neither changes what a tag means.
+//
+// Three tags of the 1.1 repository are not resolved: !!pairs, !!value and
+// !!yaml. They are parsed and carried on the node like any other tag, and the
+// value under them stands as it was written. So does every tag outside these
+// fifteen -- a local "!thing", a handle a "%TAG" line declared, another
+// namespace -- with one rule: a tag nothing resolves leaves its scalar as text,
+// digits and all, so "!thing 12" is the string "12".
 package yaml
 
 import "github.com/go-openapi/go-yaml/codec"

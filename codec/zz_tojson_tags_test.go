@@ -42,6 +42,13 @@ func TestToJSONReadsTheTagsItKnows(t *testing.T) {
 		{"local", "a: !thing 12\n", `{"a":"12"}`},
 		{"unknown namespace", "a: !<tag:example.com,2020:thing> 12\n", `{"a":"12"}`},
 
+		// ⚠️ And so are the three tags of the 1.1 type repository nothing here
+		// resolves. They are parsed and carried on the node; the value under
+		// them stands as it was written.
+		{"pairs", "a: !!pairs [{x: 1},{x: 2}]\n", `{"a":[{"x":1},{"x":2}]}`},
+		{"value", "a: !!value =\n", `{"a":"="}`},
+		{"yaml", "a: !!yaml '!'\n", `{"a":"!"}`},
+
 		// The long form of a tag the core schema resolves. "!!int" is
 		// shorthand for tag:yaml.org,2002:int, so the two mean the same.
 		{"long form int", "a: !<tag:yaml.org,2002:int> \"12\"\n", `{"a":12}`},
