@@ -450,8 +450,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		tag, _ := token.ReservedTagOf(n.URI)
 		switch tag {
 		case token.TimestampTag:
-			t, _ := d.castToTime(ctx, n.Value)
-			return t, nil
+			return d.castToTime(ctx, n.Value)
 		case token.IntegerTag:
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
@@ -479,7 +478,15 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 					n.Value.GetToken(),
 				)
 			}
-			b, _ := base64.StdEncoding.DecodeString(str)
+			b, err := base64.StdEncoding.DecodeString(str)
+			if err != nil {
+				// Refused rather than answered with the bytes decoded so far.
+				// "!!binary" on a text base64 cannot read used to come back as
+				// an empty []byte with no error.
+				return nil, yamlerrors.NewSyntax(
+					fmt.Sprintf("cannot read %q as base64: %v", str, err), n.Value.GetToken())
+			}
+
 			return b, nil
 		case token.BooleanTag:
 			v, err := d.nodeToValue(ctx, n.Value)
@@ -1414,6 +1421,13 @@ func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, erro
 	}
 	if t, ok := v.(time.Time); ok {
 		return t, nil
+	}
+	if v == nil || v == "" {
+		// A "!!timestamp" on an empty node, or on a null. It takes the tag's
+		// own default -- the zero time. newTagDefaultScalarValueNode builds the
+		// empty string for the node a tag stands on with nothing after it, and
+		// handNull builds a null where the document ends there.
+		return time.Time{}, nil
 	}
 	s, ok := v.(string)
 	if !ok {

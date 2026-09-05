@@ -77,3 +77,30 @@ func TestATimestampIsATextualScalar(t *testing.T) {
 		assert.Equal(t, `{"a":"2002-12-14"}`, string(got))
 	}
 }
+
+// TestATagThatCannotConvertIsRefused records that a scalar no format reads is
+// an error rather than a zero value.
+//
+// Both conversions used to discard it -- "!!timestamp not-a-date" came back as
+// 0001-01-01 and "!!binary" on a text base64 cannot read came back as an empty
+// []byte, each with a nil error. go.yaml.in/yaml/v3 and gopkg.in/yaml.v2 both
+// refuse them.
+func TestATagThatCannotConvertIsRefused(t *testing.T) {
+	for src, want := range map[string]string{
+		"a: !!timestamp not-a-date\n":   `cannot read "not-a-date" as a timestamp`,
+		"a: !!binary \"not base64!\"\n": "as base64",
+	} {
+		var v any
+		err := codec.Unmarshal([]byte(src), &v)
+		require.Errorf(t, err, "%q", src)
+		assert.Containsf(t, err.Error(), want, "%q", src)
+	}
+
+	t.Run("and the tag on nothing takes its own default", func(t *testing.T) {
+		for _, src := range []string{"a: !!timestamp\nb: 1\n", "a: !!timestamp null\n"} {
+			var v map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &v), "%q", src)
+			assert.Equalf(t, time.Time{}, v["a"], "%q", src)
+		}
+	})
+}
