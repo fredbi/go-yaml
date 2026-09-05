@@ -823,8 +823,12 @@ func taggedText(n ast.Node) (string, bool) {
 		return l.Value.Value, true
 	}
 	if _, isNull := n.(*ast.NullNode); isNull {
-		// "!!str" on its own tags the empty string, not the word "null".
-		return "", true
+		if tk := n.GetToken(); tk != nil && tk.Type == token.ImplicitNullType {
+			// "!!str" with nothing after it tags the empty string. The token
+			// the parser puts there reads "null", which is what the node
+			// resolves to and not what the document wrote.
+			return "", true
+		}
 	}
 	if !isScalarNode(n) {
 		return "", false

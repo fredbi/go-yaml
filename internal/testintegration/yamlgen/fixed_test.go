@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -490,4 +491,43 @@ func TestFixedCRLFComentDoesNotBlankALine(t *testing.T) {
 			assert.Equal(t, once, again.String(), "and it settles in one pass")
 		})
 	}
+}
+
+// TestFixedStrTagKeepsTheSpelling: `!!str` settles what a plain scalar is, so
+// the spelling that went in is the one that comes back.
+//
+// The scalar used to be resolved first and the result turned into text, so
+// `!!str null`, `!!str Null`, `!!str NULL` and `!!str ~` all read "" and
+// `!!str True` and `!!str FALSE` read "true" and "false". The library
+// disagreed with itself about it, which is what made it a defect rather than a
+// reading of the spec: `!<tag:yaml.org,2002:str> null` is the same tag spelled
+// verbatim and read "null", as did `! null`, `!foo null` and `!!str "null"`.
+func TestFixedStrTagKeepsTheSpelling(t *testing.T) {
+	for _, src := range []string{
+		"!!str null\n", "!!str Null\n", "!!str NULL\n", "!!str ~\n",
+		"!!str True\n", "!!str TRUE\n", "!!str False\n", "!!str FALSE\n",
+		"!!str 5\n", "!!str on\n", "!!str true\n", "!!str x\n",
+	} {
+		wellFormed(t, src)
+
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+		assert.Equal(t, strings.TrimSuffix(strings.TrimPrefix(src, "!!str "), "\n"), got, "%q", src)
+	}
+
+	t.Run("every spelling of the same tag gives the same text", func(t *testing.T) {
+		for _, src := range []string{
+			"!!str null\n", "!<tag:yaml.org,2002:str> null\n", "! null\n", "!foo null\n", "!!str \"null\"\n",
+		} {
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+			assert.Equal(t, "null", got, "%q", src)
+		}
+	})
+
+	t.Run("and the tag on nothing is the empty string", func(t *testing.T) {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("a: !!str\nb: 1\n"), &got))
+		assert.Equal(t, map[string]any{"a": "", "b": uint64(1)}, got)
+	})
 }

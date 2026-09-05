@@ -54,9 +54,6 @@ type emitter struct {
 	// and on the position it is written in, and a predicate that reimplemented
 	// the three would drift from the emitter it describes.
 
-	// strTaggedRespelt counts the `!!str` scalars written plain whose spelling
-	// this library does not give back.
-	strTaggedRespelt int
 	// taggedLineEnds counts the nodes whose tag is the last thing on its line.
 	taggedLineEnds int
 	// propertyLines counts the nodes whose properties went on a line of their
@@ -548,10 +545,6 @@ func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 	switch e.st.Quoting {
 	case QuotePlain:
 		if canPlain(s, strTagged) {
-			if _, respelt := respeltUnderStrTag[s]; respelt && strTagged {
-				e.strTaggedRespelt++
-			}
-
 			return s
 		}
 
@@ -584,20 +577,6 @@ var resolving = map[string]struct{}{
 	"null": {}, "Null": {}, "NULL": {},
 	"true": {}, "True": {}, "TRUE": {},
 	"false": {}, "False": {}, "FALSE": {},
-}
-
-// respeltUnderStrTag are the plain spellings this library gives back
-// differently once `!!str` is written in front of them: the null spellings come
-// back as the empty string and the capitalized booleans come back lowercased.
-//
-// `true` and `false` are resolving spellings too and are left out, because the
-// text the library gives back for them is the text that went in. `~` is a null
-// spelling and plainSafe refuses it on its leading character, so it never
-// reaches a plain scalar here.
-var respeltUnderStrTag = map[string]struct{}{
-	"null": {}, "Null": {}, "NULL": {},
-	"True": {}, "TRUE": {},
-	"False": {}, "FALSE": {},
 }
 
 // canPlain reports whether s can stand unquoted.

@@ -508,6 +508,18 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
+			if text, ok := taggedText(n.Value); ok {
+				// The tag names the type, so the scalar keeps the text it was
+				// written with rather than what the core schema resolved it
+				// to: "!!str 0x10" is "0x10" and not "16", and "!!str False"
+				// keeps its capital F. An anchor over that scalar names the
+				// same string, so its recorded value is replaced too.
+				if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
+					d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(text)
+				}
+
+				return text, nil
+			}
 			if v == nil {
 				return "", nil
 			}

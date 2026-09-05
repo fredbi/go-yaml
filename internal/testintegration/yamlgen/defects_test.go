@@ -25,7 +25,7 @@ import (
 // writes one document with LF, CRLF and a lone CR. Neither shape is exotic and
 // neither was reachable before it. The third came from [yamlgen.DeepDocument]
 // the same day, and is the one no verdict could have found: the documents parse
-// correctly and cost quadratic time doing it. The last four came from [Tagged]
+// correctly and cost quadratic time doing it. The rest came from [Tagged]
 // and [yamlgen.Style.PropertyOrder] on the same day again.
 
 // wellFormed asserts src is a YAML 1.2 document before anything is asked of the
@@ -90,64 +90,23 @@ func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
 	})
 
 	t.Run("otherwise the anchor names the untagged value", func(t *testing.T) {
-		wellFormed(t, "a: !!str &a1 5\nb: *a1\n")
+		wellFormed(t, "a: !!int &a1 \"5\"\nb: *a1\n")
 
 		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("a: !!str &a1 5\nb: *a1\n"), &got))
-		assert.Equal(t, map[string]any{"a": "5", "b": uint64(5)}, got,
-			"today: one node, read as a string where it stands and as a number through the alias")
+		require.NoError(t, yaml.Unmarshal([]byte("a: !!int &a1 \"5\"\nb: *a1\n"), &got))
+		assert.Equal(t, map[string]any{"a": int(5), "b": "5"}, got,
+			"today: one node, read as a number where it stands and as a string through the alias")
 
 		got = nil
-		require.NoError(t, yaml.Unmarshal([]byte("a: &a1 !!str 5\nb: *a1\n"), &got))
+		require.NoError(t, yaml.Unmarshal([]byte("a: &a1 !!int \"5\"\nb: *a1\n"), &got))
+		assert.Equal(t, map[string]any{"a": int(5), "b": int(5)}, got)
+
+		// "!!str" is the one tag that survives the alias: the decoder replaces
+		// what the anchor recorded with the string, since that is the value
+		// the tag names. See TestFixedStrTagKeepsTheSpelling.
+		got = nil
+		require.NoError(t, yaml.Unmarshal([]byte("a: !!str &a1 5\nb: *a1\n"), &got))
 		assert.Equal(t, map[string]any{"a": "5", "b": "5"}, got)
-	})
-}
-
-// TestDefectStrTagResolvesFirst: `!!str` is meant to settle what a plain scalar
-// is. Instead the scalar is resolved and the result turned back into text, so
-// the spelling that went in is not the one that comes out.
-//
-// The library disagrees with itself about it, which is what makes this a defect
-// rather than a reading of the spec: the verbatim spelling of the very same tag
-// gives the text.
-func TestDefectStrTagResolvesFirst(t *testing.T) {
-	respelt := map[string]string{
-		"!!str null\n":  "",
-		"!!str Null\n":  "",
-		"!!str NULL\n":  "",
-		"!!str ~\n":     "",
-		"!!str True\n":  "true",
-		"!!str TRUE\n":  "true",
-		"!!str False\n": "false",
-		"!!str FALSE\n": "false",
-	}
-
-	for src, today := range respelt {
-		wellFormed(t, src)
-
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-		assert.Equal(t, today, got, "today: %q reads as %q, not as the text", src, today)
-	}
-
-	t.Run("every other spelling of the same tag gives the text", func(t *testing.T) {
-		for _, src := range []string{
-			"!<tag:yaml.org,2002:str> null\n", "! null\n", "!foo null\n", "!!str \"null\"\n",
-		} {
-			var got any
-			require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-			assert.Equal(t, "null", got, "%q", src)
-		}
-	})
-
-	t.Run("and a scalar that does not resolve is untouched", func(t *testing.T) {
-		for src, want := range map[string]string{
-			"!!str 5\n": "5", "!!str on\n": "on", "!!str true\n": "true", "!!str x\n": "x",
-		} {
-			var got any
-			require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-			assert.Equal(t, want, got, "%q", src)
-		}
 	})
 }
 

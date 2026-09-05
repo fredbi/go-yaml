@@ -102,7 +102,7 @@ func (p Property) String() string {
 // longer diverges, rather than sitting here forever.
 //
 // Two of these were opened by [Style.Break], the axis that writes the same
-// document with LF, CRLF and a lone CR, and four by [Tagged],
+// document with LF, CRLF and a lone CR, and the rest by [Tagged],
 // [Style.PropertyOrder] and [Style.PropertyLine]. The ledger was empty before
 // either; every entry in it came from an axis nobody had crossed.
 //
@@ -169,22 +169,6 @@ var Ledger = []Divergence{
 			return st.Comments.line() && writesTagAtLineEnd(v, st)
 		},
 	},
-	{
-		Name: "decode/a-str-tag-resolves-the-scalar-before-it-applies",
-		Reason: "`!!str` is meant to settle what a plain scalar is. Instead the scalar is " +
-			"resolved first and the result is turned into text, so the spelling that " +
-			"went in is not the one that comes back: `!!str null`, `!!str Null`, " +
-			"`!!str NULL` and `!!str ~` all read \"\", and `!!str True` and `!!str FALSE` " +
-			"read \"true\" and \"false\". The library disagrees with itself about it -- " +
-			"`!<tag:yaml.org,2002:str> null` is the same tag spelled verbatim and reads " +
-			"\"null\", as do `! null`, `!foo null` and `!!str \"null\"`. Anything that " +
-			"does not resolve is unaffected: `!!str 5` reads \"5\" and `!!str on` reads " +
-			"\"on\".",
-		Property: Decode | Render,
-		Match: func(v Value, st Style) bool {
-			return writesStrTaggedRespelling(v, st)
-		},
-	},
 }
 
 // writesBrokenTaggedAnchor reports whether emitting v in st writes a tag before
@@ -243,13 +227,6 @@ func aliasNames(v Value) map[string]bool {
 	walk(v)
 
 	return out
-}
-
-func writesStrTaggedRespelling(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	return e.strTaggedRespelt > 0
 }
 
 // writesPropertyLine reports whether emitting v in st puts a node's properties
