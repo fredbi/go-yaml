@@ -59,6 +59,11 @@ var (
 	// ErrUnexpectedNodeType reports a node of the wrong shape, such as a
 	// sequence where a mapping is required.
 	ErrUnexpectedNodeType = stderrors.New("unexpected node type")
+	// ErrUnhashableKey reports a mapping key Go cannot use as a map key -- a
+	// sequence or a mapping, decoded into a map whose key type admits one,
+	// such as a map[any]any. Setting it panicked with "hash of unhashable
+	// type" until it was reported here.
+	ErrUnhashableKey = stderrors.New("unhashable map key")
 	// ErrNotJSON reports a well-formed YAML document that JSON has no spelling
 	// for, found with
 	// [github.com/go-openapi/go-yaml/parser.WithJSONCompatible] on. It is not a
@@ -106,6 +111,15 @@ type Error struct {
 // NewSyntax reports msg as a malformed document at tk.
 func NewSyntax(msg string, tk *token.Token) *Error {
 	return &Error{kind: ErrSyntax, msg: msg, token: tk}
+}
+
+// NewUnhashableKey reports src as a mapping key Go cannot hash, at tk.
+func NewUnhashableKey(src reflect.Type, tk *token.Token) *Error {
+	return &Error{
+		kind:  ErrUnhashableKey,
+		msg:   fmt.Sprintf("cannot use %s as a map key: Go cannot hash it", src),
+		token: tk,
+	}
 }
 
 // NewNotJSON reports msg as a document JSON cannot hold, at tk.

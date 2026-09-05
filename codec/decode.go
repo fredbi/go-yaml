@@ -1999,6 +1999,13 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 		}
 
 		if k.IsValid() {
+			if !k.Comparable() {
+				// A sequence or a mapping used as a mapping key, into a map
+				// whose key type admits one. Go cannot hash it, and
+				// SetMapIndex panicked with "hash of unhashable type" rather
+				// than reporting the document.
+				return yamlerrors.NewUnhashableKey(dynamicTypeOf(k), key.GetToken())
+			}
 			if err := d.validateDuplicateKey(keyMap, k.Interface(), key); err != nil {
 				return err
 			}
@@ -2368,4 +2375,15 @@ func (d *Decoder) DecodeFromNodeContext(ctx context.Context, node ast.Node, v in
 		return err
 	}
 	return nil
+}
+
+// dynamicTypeOf returns the type inside an interface value, or v's own type
+// where v is not one. It names what a key actually holds in an error about a
+// map[any]any.
+func dynamicTypeOf(v reflect.Value) reflect.Type {
+	if v.Kind() == reflect.Interface && !v.IsNil() {
+		return v.Elem().Type()
+	}
+
+	return v.Type()
 }
