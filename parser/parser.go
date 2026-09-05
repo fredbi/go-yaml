@@ -63,22 +63,38 @@ func asSyntaxError(err error) error {
 	return err
 }
 
-// yamlVersion is the version a %YAML directive names. It is read to decide
-// whether the directive is one this parser accepts and is not reported.
-type yamlVersion string
+// YAMLVersion is a version of the YAML specification, as a "%YAML" directive
+// names one and as [WithYAMLVersion] asks for one.
+//
+// It decides how a plain scalar resolves. 1.1 reads "0100" as 64, "1_000" as
+// 1000, "1:30" as 90 and "yes" as true, where 1.2 reads 100 and the three
+// strings. 1.0 and 1.3 are accepted where a document names them -- the parser
+// reads a 1.x document -- and resolve as 1.1 and 1.2 respectively.
+type YAMLVersion string
 
 const (
-	yaml10 yamlVersion = "1.0"
-	yaml11 yamlVersion = "1.1"
-	yaml12 yamlVersion = "1.2"
-	yaml13 yamlVersion = "1.3"
+	YAML10 YAMLVersion = "1.0"
+	YAML11 YAMLVersion = "1.1"
+	YAML12 YAMLVersion = "1.2"
+	YAML13 YAMLVersion = "1.3"
 )
 
-var yamlVersionMap = map[string]yamlVersion{
-	"1.0": yaml10,
-	"1.1": yaml11,
-	"1.2": yaml12,
-	"1.3": yaml13,
+var yamlVersionMap = map[string]YAMLVersion{
+	"1.0": YAML10,
+	"1.1": YAML11,
+	"1.2": YAML12,
+	"1.3": YAML13,
+}
+
+// schemaFor is the scalar schema a version resolves against. 1.0 predates the
+// core schema and is read as 1.1, which is the closest thing it has.
+func schemaFor(v YAMLVersion) token.Schema {
+	switch v {
+	case YAML10, YAML11:
+		return token.Schema11
+	default:
+		return token.Schema12
+	}
 }
 
 type Parser struct {
@@ -97,8 +113,11 @@ type Parser struct {
 	entries []*ast.MappingValueNode
 	// lineComments holds the comment closing a token's line, against that
 	// token. It is nil where the mode did not ask for comments.
-	lineComments          map[*tapeToken]*token.Token
-	yamlVersion           yamlVersion
+	lineComments map[*tapeToken]*token.Token
+	// yamlVersion is the version the document being read named, and version the
+	// one to fall back on where it names none.
+	yamlVersion           YAMLVersion
+	version               YAMLVersion
 	allowDuplicateMapKey  bool
 	omitNodePaths         bool
 	secondaryTagDirective *ast.DirectiveNode
@@ -285,6 +304,7 @@ func (p *Parser) begin(src []byte) {
 
 	p.src = nocopy.String(src)
 	p.scan.Init(src)
+	p.scan.SetSchema(schemaFor(p.version))
 
 	// Guessed from the source rather than counted, since counting would mean
 	// reading the document through before parsing any of it. It sizes buffers
@@ -399,8 +419,10 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 		return nil, false, err
 	}
 	if end != nil {
-		// A "..." closes the scope a %YAML directive opened.
+		// A "..." closes the scope a %YAML directive opened, so the next
+		// document resolves against whatever the caller asked for.
 		p.yamlVersion = ""
+		p.scan.SetSchema(schemaFor(p.version))
 	}
 
 	// A TAG directive defines a handle for the one document that follows it,
@@ -2074,6 +2096,12 @@ func (p *Parser) parseDirective(ctx context, g *tokenGroup) (*ast.DirectiveNode,
 			return nil, yamlerrors.NewSyntax("YAML version has already been specified", valueRawTk)
 		}
 		p.yamlVersion = ver
+
+		// The scanner resolves plain scalars, so it is told here rather than
+		// asked later: a schema set part way through takes effect from the next
+		// scalar it cuts, and the directive stands before the document's body.
+		p.scan.SetSchema(schemaFor(ver))
+
 		versionNode, err := newStringNode(ctx, valueTk)
 		if err != nil {
 			return nil, err

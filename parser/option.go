@@ -59,3 +59,18 @@ func ChunkSize(size int) Option {
 		p.chunkSize = size
 	}
 }
+
+// WithYAMLVersion says which version of the specification a document is read
+// as where it names none itself.
+//
+// It decides how a plain scalar resolves, and the two versions disagree about
+// several: 1.1 reads "0100" as 64, "1_000" as 1000, "1:30" as 90 and "yes" as
+// true, where 1.2 reads 100 and the three strings. The default is [YAML12].
+//
+// A "%YAML" directive overrides this for the document it opens, and the version
+// goes back to what was asked for here when that document ends.
+func WithYAMLVersion(v YAMLVersion) Option {
+	return func(p *Parser) {
+		p.version = v
+	}
+}
