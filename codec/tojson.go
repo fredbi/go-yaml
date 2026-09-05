@@ -31,7 +31,12 @@ import (
 // [Unmarshal] reads. The rest are still read, so a stream whose later documents
 // cannot be converted is refused rather than half-answered.
 func ToJSON(src []byte) ([]byte, error) {
-	w := &jsonWriter{}
+	// The JSON runs from half the source to a little under it on the workload
+	// corpus -- 0.51x on golang_source, 0.93x on twitter_status -- so the
+	// source's length is one allocation that holds all of it. Growing from
+	// nothing cost more than the text itself: appendJSONString was a quarter of
+	// what the conversion allocated, almost all of it doubling.
+	w := &jsonWriter{out: make([]byte, 0, len(src))}
 
 	if _, err := parser.New(parser.OmitNodePaths()).Walk(src, w); err != nil {
 		return nil, err
