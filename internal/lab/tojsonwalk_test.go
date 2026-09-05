@@ -4,7 +4,9 @@
 package lab_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -36,11 +38,7 @@ func TestToJSONWalkMatchesCodec(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, json.Valid(got), "the walk wrote invalid JSON")
 
-			var wantValue, gotValue any
-			require.NoError(t, json.Unmarshal(want, &wantValue))
-			require.NoError(t, json.Unmarshal(got, &gotValue))
-
-			assert.Equal(t, wantValue, gotValue)
+			assert.Equal(t, readJSON(t, want), readJSON(t, got))
 		})
 	}
 }
@@ -67,11 +65,7 @@ func TestToJSONWalkOnSmallDocuments(t *testing.T) {
 			got, err := lab.ToJSONWalk([]byte(src))
 			require.NoError(t, err)
 
-			var wantValue, gotValue any
-			require.NoError(t, json.Unmarshal(want, &wantValue), "shipped wrote %q", want)
-			require.NoError(t, json.Unmarshal(got, &gotValue), "the walk wrote %q", got)
-
-			assert.Equal(t, wantValue, gotValue, "shipped %q, walk %q", want, got)
+			assert.Equal(t, readJSON(t, want), readJSON(t, got), "shipped %q, walk %q", want, got)
 		})
 	}
 }
@@ -100,11 +94,7 @@ func TestToJSONWalkOnAnchors(t *testing.T) {
 			got, err := lab.ToJSONWalk([]byte(src))
 			require.NoError(t, err)
 
-			var wantValue, gotValue any
-			require.NoError(t, json.Unmarshal(want, &wantValue), "shipped wrote %q", want)
-			require.NoError(t, json.Unmarshal(got, &gotValue), "the walk wrote %q", got)
-
-			assert.Equal(t, wantValue, gotValue, "shipped %q, walk %q", want, got)
+			assert.Equal(t, readJSON(t, want), readJSON(t, got), "shipped %q, walk %q", want, got)
 		})
 	}
 }
@@ -152,5 +142,54 @@ func TestToJSONWalkRefusesWhatItCannotWrite(t *testing.T) {
 			_, err := lab.ToJSONWalk([]byte(src))
 			require.Error(t, err, "the walk wrote something for %s", name)
 		})
+	}
+}
+
+// readJSON reads JSON into values, with every number held to the quantity it
+// names rather than to the digits it was written with.
+//
+// Two things make the plain reader wrong here. It reads a number into a
+// float64, which refuses anything past 1e308, and a converter that keeps a
+// document's numbers as numbers writes those -- twitter_status holds 3E4415.
+// And the converters spell a wide number differently: the shipped one writes
+// the digits the document wrote, and these write what big.Float renders, so
+// "3E4415" and "3e+4415" are the same number and not the same text.
+func readJSON(t *testing.T, text []byte) any {
+	t.Helper()
+
+	dec := json.NewDecoder(bytes.NewReader(text))
+	dec.UseNumber()
+
+	var v any
+	require.NoError(t, dec.Decode(&v), "not JSON: %s", text)
+
+	return byQuantity(v)
+}
+
+// byQuantity replaces every number with the quantity it names, exactly. A
+// big.Rat reads integers, decimals and exponents without rounding any of them,
+// which a big.Float at any fixed precision would.
+func byQuantity(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		if r, ok := new(big.Rat).SetString(t.String()); ok {
+			return "number " + r.RatString()
+		}
+
+		return "number " + t.String()
+	case map[string]any:
+		for k, e := range t {
+			t[k] = byQuantity(e)
+		}
+
+		return t
+	case []any:
+		for i, e := range t {
+			t[i] = byQuantity(e)
+		}
+
+		return t
+	default:
+		return v
 	}
 }

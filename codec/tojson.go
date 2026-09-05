@@ -332,6 +332,15 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 		return append(out, "null"...)
 	case *ast.FloatNode:
 		if tk := t.GetToken(); tk != nil {
+			// The digits the document wrote, where JSON spells a number the
+			// same way. Reading them into a float64 and writing them back
+			// rounds to what one holds: "0.1234567890123456789012345" came out
+			// as 0.12345678901234568, seventeen digits of twenty-five, on a
+			// value JSON can carry whole. Written through, nothing is lost and
+			// nothing is parsed.
+			if isJSONNumber(tk.Value) {
+				return append(out, tk.Value...)
+			}
 			if f, ok := token.ParseFloat(tk.Value, tk.Type); ok {
 				return appendJSONFloat64(out, f)
 			}
@@ -844,17 +853,18 @@ func jsonScalarOf(n ast.Node) any {
 	return nil
 }
 
-// maxFloatBits is the widest integer a float64 can hold the magnitude of.
-const maxFloatBits = 1024
-
 // appendJSONScalar writes one YAML scalar as JSON.
 //
-// A number too wide for a machine word arrives as a *big.Int or a *big.Float
-// and is written as the number it is -- up to the point where no JSON reader
-// can hold it. Past 1e308 it goes out quoted, because encoding/json refuses to
-// read a larger number into any Go type it has, and a string at least keeps the
-// digits. Infinity and NaN have no JSON spelling at all and are written as
-// null, which is what encoding/json refuses to write.
+// A number is written as a number, whatever width it takes. JSON bounds neither
+// integers nor floats -- RFC 8259 §6 leaves the range to the reader -- so a
+// value too wide for a machine word arrives as a *big.Int or a *big.Float and
+// goes out with its digits intact. What a reader makes of it is the reader's:
+// encoding/json refuses a number past 1e308 into a float64 and rounds one below
+// 1e-324 to zero, and a reader that wants either uses json.Number.
+//
+// Infinity and NaN are the exception, and not because of width: JSON has no
+// spelling for them at all. They are written as null, which is what
+// encoding/json refuses to write.
 func appendJSONScalar(out []byte, v any) []byte {
 	switch t := v.(type) {
 	case nil:
@@ -876,17 +886,10 @@ func appendJSONScalar(out []byte, v any) []byte {
 
 		return strconv.AppendFloat(out, t, 'g', -1, 64)
 	case *big.Int:
-		if t.BitLen() > maxFloatBits {
-			return appendJSONString(out, t.String())
-		}
-
 		return append(out, t.String()...)
 	case *big.Float:
 		if t.IsInf() {
 			return append(out, "null"...)
-		}
-		if f, _ := t.Float64(); math.IsInf(f, 0) {
-			return appendJSONString(out, t.Text('g', -1))
 		}
 
 		return t.Append(out, 'g', -1)
@@ -922,6 +925,61 @@ func appendJSONFloat64(out []byte, f float64) []byte {
 	at := len(out)
 
 	return withFraction(strconv.AppendFloat(out, f, 'g', -1, 64), at)
+}
+
+// isJSONNumber reports whether text is a number JSON spells the same way.
+//
+// YAML writes several floats JSON does not: ".5" and "5." leave a side of the
+// point empty, "+1.0" carries a sign JSON has no place for, "007.5" leads with
+// a zero, ".inf" and ".nan" are words, and YAML 1.1 puts "_" between digits.
+// Each of those is converted rather than copied.
+func isJSONNumber(text string) bool {
+	i := 0
+	if i < len(text) && text[i] == '-' {
+		i++
+	}
+
+	// An integer part of one digit, or several not opening with a zero.
+	start := i
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == start || (i-start > 1 && text[start] == '0') {
+		return false
+	}
+
+	if i < len(text) && text[i] == '.' {
+		i++
+		if i = digitsFrom(text, i); i < 0 {
+			return false
+		}
+	}
+
+	if i < len(text) && (text[i] == 'e' || text[i] == 'E') {
+		i++
+		if i < len(text) && (text[i] == '+' || text[i] == '-') {
+			i++
+		}
+		if i = digitsFrom(text, i); i < 0 {
+			return false
+		}
+	}
+
+	return i == len(text)
+}
+
+// digitsFrom reads one or more digits and returns where they end, or -1 where
+// there are none.
+func digitsFrom(text string, i int) int {
+	start := i
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return -1
+	}
+
+	return i
 }
 
 // withFraction keeps what was written from at looking like a float.

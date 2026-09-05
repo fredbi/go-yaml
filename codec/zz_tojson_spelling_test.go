@@ -14,6 +14,11 @@ import (
 
 // TestToJSONSpelling checks the text ToJSON writes, not the value it stands for.
 //
+// A float keeps the digits the document wrote wherever JSON spells a number the
+// same way, so "1e3" stays "1e3" and a value of twenty-five significant digits
+// keeps all of them. Where JSON spells it differently -- ".5", "5.", "007.5" --
+// the value is written out instead.
+//
 // TestToJSONMatchesTheValueConverter compares what json.Unmarshal reads back,
 // and JSON has one number type: it cannot tell 1.0 from 1, so a converter that
 // stopped writing the fractional part passed it. A document that wrote a float
@@ -22,7 +27,18 @@ import (
 func TestToJSONSpelling(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
 		{"a: 1.0\n", `{"a":1.0}`},
-		{"a: 1e3\n", `{"a":1000.0}`},
+		{"a: 1e3\n", `{"a":1e3}`},
+		{"a: 1.230\n", `{"a":1.230}`},
+		{"a: 0.1234567890123456789012345\n", `{"a":0.1234567890123456789012345}`},
+		{"a: .5\n", `{"a":0.5}`},
+		{"a: 5.\n", `{"a":5.0}`},
+		{"a: 007.5\n", `{"a":7.5}`},
+		// Past and below what a float64 holds, both written as numbers. JSON
+		// bounds neither, and what a reader makes of them is the reader's:
+		// encoding/json refuses the first into a float64 and rounds the second
+		// to zero, and json.Number reads both.
+		{"a: 1e400\n", `{"a":1e400}`},
+		{"a: 1e-400\n", `{"a":1e-400}`},
 		{"a: 1.5\n", `{"a":1.5}`},
 		{"a: -0.0\n", `{"a":-0.0}`},
 		{"a: 3\n", `{"a":3}`},
@@ -34,6 +50,7 @@ func TestToJSONSpelling(t *testing.T) {
 		{"a: .inf\n", `{"a":null}`},
 		{"a: .nan\n", `{"a":null}`},
 		{"a: 18446744073709551616\n", `{"a":18446744073709551616}`},
+		{"a: 123456789012345678901234567890\n", `{"a":123456789012345678901234567890}`},
 		{"a: 07\n", `{"a":7}`},
 		{"a: \"07\"\n", `{"a":"07"}`},
 		{"a: yes\n", `{"a":"yes"}`},

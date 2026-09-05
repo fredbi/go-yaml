@@ -698,13 +698,30 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 	return arrayNode, nil
 }
 
+// isBigNumber reports whether v holds a number wider than a native type.
+func isBigNumber(v reflect.Value) bool {
+	switch v.Interface().(type) {
+	case *big.Int, *big.Float:
+		return true
+	default:
+		return false
+	}
+}
+
+func isFloatKind(k reflect.Kind) bool { return k == reflect.Float32 || k == reflect.Float64 }
+
 // convertBigNumber converts a number the AST read into a [big.Int] or a
 // [big.Float], which it does for one no native type holds.
 //
-// A float destination takes the nearest float64 it can, which is ±Inf where the
-// number reaches past that -- the same answer strconv.ParseFloat gives for the
-// text. A string destination takes the digits. Anything else is left to
-// convertValue's own rules, which end in a type mismatch.
+// A float destination takes the nearest float64, and is refused where the
+// number reaches past what one holds: ±Inf, or zero from a number that is not
+// zero. strconv.ParseFloat answers the same values and returns ErrRange with
+// them, and dropping that gave a document holding 1e400 a field reading +Inf
+// with nothing said. A caller who wants the number whole decodes into a
+// *big.Int or a *big.Float, which take it exactly.
+//
+// A string destination takes the digits. Anything else is left to convertValue's
+// own rules, which end in a type mismatch.
 func convertBigNumber(v reflect.Value, typ reflect.Type) (reflect.Value, bool) {
 	var (
 		f    float64
@@ -722,9 +739,11 @@ func convertBigNumber(v reflect.Value, typ reflect.Type) (reflect.Value, bool) {
 	}
 
 	switch typ.Kind() {
-	case reflect.Float32:
-		return reflect.ValueOf(float32(f)).Convert(typ), true
-	case reflect.Float64:
+	case reflect.Float32, reflect.Float64:
+		if outOfFloatRange(f, text) {
+			return reflect.Value{}, false
+		}
+
 		return reflect.ValueOf(f).Convert(typ), true
 	case reflect.String:
 		return reflect.ValueOf(text).Convert(typ), true
@@ -733,9 +752,25 @@ func convertBigNumber(v reflect.Value, typ reflect.Type) (reflect.Value, bool) {
 	}
 }
 
+// outOfFloatRange reports whether the float64 nearest to a number has lost it
+// rather than rounded it: infinite where the digits are finite, or zero where
+// they are not.
+func outOfFloatRange(f float64, text string) bool {
+	if math.IsInf(f, 0) {
+		return true
+	}
+
+	return f == 0 && strings.ContainsFunc(text, func(r rune) bool {
+		return r >= '1' && r <= '9'
+	})
+}
+
 func (d *Decoder) convertValue(v reflect.Value, typ reflect.Type, src ast.Node) (reflect.Value, error) {
 	if converted, ok := convertBigNumber(v, typ); ok {
 		return converted, nil
+	}
+	if isBigNumber(v) && isFloatKind(typ.Kind()) {
+		return reflect.Value{}, yamlerrors.NewOverflow(typ, fmt.Sprint(v.Interface()), src.GetToken())
 	}
 	if typ.Kind() != reflect.String {
 		if !v.Type().ConvertibleTo(typ) {

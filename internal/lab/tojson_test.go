@@ -35,11 +35,7 @@ func TestToJSONProgressiveMatchesCodec(t *testing.T) {
 
 			require.True(t, json.Valid(got), "the experiment wrote invalid JSON")
 
-			var wantValue, gotValue any
-			require.NoError(t, json.Unmarshal(want, &wantValue))
-			require.NoError(t, json.Unmarshal(got, &gotValue))
-
-			assert.Equal(t, wantValue, gotValue)
+			assert.Equal(t, readJSON(t, want), readJSON(t, got))
 		})
 	}
 }
@@ -61,11 +57,7 @@ func TestToJSONProgressiveOnSmallDocuments(t *testing.T) {
 			got, err := lab.ToJSONProgressive([]byte(src))
 			require.NoError(t, err)
 
-			var wantValue, gotValue any
-			require.NoError(t, json.Unmarshal(want, &wantValue), "shipped converter wrote %q", want)
-			require.NoError(t, json.Unmarshal(got, &gotValue), "experiment wrote %q", got)
-
-			assert.Equal(t, wantValue, gotValue, "shipped %q, experiment %q", want, got)
+			assert.Equal(t, readJSON(t, want), readJSON(t, got), "shipped %q, experiment %q", want, got)
 		})
 	}
 }

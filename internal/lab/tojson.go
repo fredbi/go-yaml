@@ -6,6 +6,7 @@ package lab
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strconv"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -143,6 +144,16 @@ func appendScalar(out []byte, v any) []byte {
 		return strconv.AppendUint(out, t, 10)
 	case float64:
 		return strconv.AppendFloat(out, t, 'g', -1, 64)
+	case *big.Int:
+		// A number wider than a machine word is still a number. codec.ToJSON
+		// writes it as one and these are held to what it writes.
+		return append(out, t.String()...)
+	case *big.Float:
+		if t.IsInf() {
+			return append(out, "null"...)
+		}
+
+		return t.Append(out, 'g', -1)
 	default:
 		text, err := json.Marshal(t)
 		if err != nil {
