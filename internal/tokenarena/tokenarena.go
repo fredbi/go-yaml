@@ -196,6 +196,9 @@ type TokenArena[T any] struct {
 	frozen int
 
 	stats Stats
+	// released counts the chunks that have joined the free list, over the whole
+	// life of the arena.
+	released int
 }
 
 // New returns an arena whose chunks hold size tokens each.
@@ -279,7 +282,7 @@ func (a *TokenArena[T]) sweep() {
 		case c.saves > 0:
 			a.saved.pushBack(c)
 		default:
-			a.free.pushBack(c)
+			a.freeChunk(c)
 		}
 		c = next
 	}
@@ -350,7 +353,7 @@ func (a *TokenArena[T]) Release(from, to int) int {
 		}
 		if a.saved.holds(c) {
 			a.saved.remove(c)
-			a.free.pushBack(c)
+			a.freeChunk(c)
 			n++
 		}
 	})
@@ -366,7 +369,7 @@ func (a *TokenArena[T]) Release(from, to int) int {
 func (a *TokenArena[T]) ReleaseAll() {
 	for c := a.saved.popFront(); c != nil; c = a.saved.popFront() {
 		c.saves = 0
-		a.free.pushBack(c)
+		a.freeChunk(c)
 	}
 	for c := a.live.head; c != nil; c = c.next {
 		c.saves = 0
@@ -399,6 +402,18 @@ func (a *TokenArena[T]) chunkOf(seq int) *Chunk[T] {
 
 	return nil
 }
+
+// freeChunk puts a chunk on the free list and counts it.
+func (a *TokenArena[T]) freeChunk(c *Chunk[T]) {
+	a.free.pushBack(c)
+	a.released++
+}
+
+// Released counts the chunks the arena has let go of, over the whole of its
+// life. A caller keeping state beside the tape reads it to know whether
+// anything can have died since it last looked, which is one integer against
+// walking what it holds.
+func (a *TokenArena[T]) Released() int { return a.released }
 
 // Len returns how many tokens have been added.
 func (a *TokenArena[T]) Len() int { return a.stats.Tokens }
