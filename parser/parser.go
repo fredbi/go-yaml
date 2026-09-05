@@ -708,13 +708,14 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 
 		mapKeyTk := ctx.currentToken()
 		entered := len(node.Values)
+		p.markNodes(ctx)
 		switch mapKeyTk.GroupType() {
 		case TokenGroupMapKeyValue:
 			value, err := p.parseMapKeyValue(ctx.withGroup(p, mapKeyTk.Group), mapKeyTk.Group, entryTk)
 			if err != nil {
 				return nil, err
 			}
-			node.Values = append(node.Values, value)
+			p.holdFlowEntry(node, value)
 			ctx.goNext()
 		case TokenGroupMapKey:
 			p.markKey()
@@ -737,7 +738,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				node.Values = append(node.Values, mapValue)
+				p.holdFlowEntry(node, mapValue)
 				ctx.goNext()
 			} else {
 				ctx.goNext()
@@ -752,7 +753,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 				if err != nil {
 					return nil, err
 				}
-				node.Values = append(node.Values, mapValue)
+				p.holdFlowEntry(node, mapValue)
 			}
 		default:
 			if !p.isFlowMapDelim(ctx.nextToken()) {
@@ -788,7 +789,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			if err != nil {
 				return nil, err
 			}
-			node.Values = append(node.Values, mapValue)
+			p.holdFlowEntry(node, mapValue)
 			if ctx.currentToken() == mapKeyTk {
 				// A plain scalar key is still the current token, so skip it. A
 				// key that is a property group -- the "&a" of "{&a}" -- was
@@ -798,11 +799,14 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			}
 		}
 		if headComment != nil && len(node.Values) > entered {
-			// The comment introduced this entry, so it belongs above it.
+			// The comment introduced this entry, so it belongs above it. A walk
+			// gathers no entries, so there is nothing here to hang it on -- the
+			// entry went over before the comment was read.
 			if err := node.Values[entered].SetComment(headComment); err != nil {
 				return nil, err
 			}
 		}
+		p.rewindNodes(ctx)
 		isFirst = false
 	}
 	if node.End == nil {
@@ -1724,6 +1728,9 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 
 	ctx.goNext() // skip SequenceStart token
 
+	// index counts the elements read, which is what len(node.Values) used to
+	// say. A walk holds no element, so it cannot be counted by them.
+	var index uint
 	isFirst := true
 	for ctx.next() {
 		// A comment may sit anywhere separation may, including before the ','
@@ -1769,22 +1776,31 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			break
 		}
 
-		ctx := ctx.withIndex(p, uint(len(node.Values)))
+		ctx := ctx.withIndex(p, index)
+		index++
+		p.markNodes(ctx)
 		value, err := p.parseToken(ctx, ctx.currentToken())
 		if err != nil {
 			return nil, err
-		}
-		node.Values = append(node.Values, value)
-		if headComment != nil {
-			node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
-			node.ValueHeadComments[len(node.Values)-1] = headComment
 		}
 		seqEntry := ctx.arena.SequenceEntry(entryTk.RawToken(), value, headComment)
 		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
 			return nil, err
 		}
 		seqEntry.SetPathNode(ctx.path)
-		node.Entries = append(node.Entries, seqEntry)
+
+		if p.walking() {
+			// Nothing gathers the element and the walk has seen it, so the
+			// cells it stands in go out again for the element after it.
+			p.rewindNodes(ctx)
+		} else {
+			node.Values = append(node.Values, value)
+			if headComment != nil {
+				node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
+				node.ValueHeadComments[len(node.Values)-1] = headComment
+			}
+			node.Entries = append(node.Entries, seqEntry)
+		}
 
 		isFirst = false
 	}
@@ -2205,4 +2221,15 @@ func (p *Parser) rewindNodes(ctx context) {
 		return
 	}
 	ctx.arena.Pop()
+}
+
+// holdFlowEntry keeps a flow mapping's entry for the node above it, or drops it
+// where the parse is walking, as hold does for a block mapping: the key went
+// over before its value and the value announced itself, so the entry holds
+// nothing the caller has not seen.
+func (p *Parser) holdFlowEntry(node *ast.MappingNode, entry *ast.MappingValueNode) {
+	if p.walking() {
+		return
+	}
+	node.Values = append(node.Values, entry)
 }
