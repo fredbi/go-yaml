@@ -49,12 +49,16 @@ func TestStructValidator(t *testing.T) {
 - name: john
   age: 20
 - age: 10`,
-			ExpectedErr: `[4:1] Key: 'Name' Error:Field validation for 'Name' failed on the 'required' tag
+			// The caret stands on the entry's first key rather than on its "-".
+			// A parse that was not asked for comments builds no
+			// ast.SequenceEntryNode, so the sequence keeps no "-" to point at
+			// and codec.missingFieldToken falls back to the first key.
+			ExpectedErr: `[4:3] Key: 'Name' Error:Field validation for 'Name' failed on the 'required' tag
    1 | ---
    2 | - name: john
    3 |   age: 20
 >  4 | - age: 10
-       ^
+         ^
 `,
 			Instance: &[]struct {
 				Name string `yaml:"name" validate:"required"`

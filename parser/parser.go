@@ -1783,11 +1783,10 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		seqEntry := ctx.arena.SequenceEntry(entryTk.RawToken(), value, headComment)
-		if err := setLineComment(ctx, seqEntry, entryTk); err != nil {
+		seqEntry, err := p.sequenceEntry(ctx, entryTk, value, headComment)
+		if err != nil {
 			return nil, err
 		}
-		seqEntry.SetPathNode(ctx.path)
 
 		if p.walking() {
 			// Nothing gathers the element and the walk has seen it, so the
@@ -1799,7 +1798,9 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 				node.ValueHeadComments = growHeadComments(node.ValueHeadComments, len(node.Values))
 				node.ValueHeadComments[len(node.Values)-1] = headComment
 			}
-			node.Entries = append(node.Entries, seqEntry)
+			if seqEntry != nil {
+				node.Entries = append(node.Entries, seqEntry)
+			}
 		}
 
 		isFirst = false
@@ -1862,12 +1863,16 @@ func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
 	}
 
 	node.Values = make([]ast.Node, len(entries))
-	node.Entries = make([]*ast.SequenceEntryNode, len(entries))
+	if entries[0].entry != nil {
+		node.Entries = make([]*ast.SequenceEntryNode, len(entries))
+	}
 
 	var commented bool
 	for i, held := range entries {
 		node.Values[i] = held.value
-		node.Entries[i] = held.entry
+		if node.Entries != nil {
+			node.Entries[i] = held.entry
+		}
 		commented = commented || held.headComment != nil
 	}
 	if !commented {
@@ -1913,11 +1918,10 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		seqEntry := ctx.arena.SequenceEntry(seqTk.RawToken(), value, headComment)
-		if err := setLineComment(ctx, seqEntry, seqTk); err != nil {
+		seqEntry, err := p.sequenceEntry(ctx, seqTk, value, headComment)
+		if err != nil {
 			return nil, err
 		}
-		seqEntry.SetPathNode(ctx.path)
 		if p.walking() {
 			// Nothing gathers the entries and the walk has seen this one, so
 			// the cells it stands in go out again for the entry after it.
@@ -2232,4 +2236,26 @@ func (p *Parser) holdFlowEntry(node *ast.MappingNode, entry *ast.MappingValueNod
 		return
 	}
 	node.Values = append(node.Values, entry)
+}
+
+// sequenceEntry returns the node holding an element's '-' and its comments, and
+// nil where the parse was not asked for comments.
+//
+// The node carries a head comment, a line comment and the '-' the element was
+// written with. A parse dropping comments has only the '-' to put in it:
+// ast.Renderer reads Entries only when it is writing comments, and
+// codec.sequenceEntryNode reads it for the position of a missing-field error,
+// falling back to the mapping's first key where the sequence kept none.
+func (p *Parser) sequenceEntry(ctx context, entryTk *tapeToken, value ast.Node, headComment *ast.CommentGroupNode) (*ast.SequenceEntryNode, error) {
+	if p.mode&parseComments == 0 {
+		return nil, nil
+	}
+
+	node := ctx.arena.SequenceEntry(entryTk.RawToken(), value, headComment)
+	if err := setLineComment(ctx, node, entryTk); err != nil {
+		return nil, err
+	}
+	node.SetPathNode(ctx.path)
+
+	return node, nil
 }
