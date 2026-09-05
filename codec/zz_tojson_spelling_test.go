@@ -10,6 +10,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestToJSONSpelling checks the text ToJSON writes, not the value it stands for.
@@ -47,8 +49,6 @@ func TestToJSONSpelling(t *testing.T) {
 		{"a: 18446744073709551615\n", `{"a":18446744073709551615}`},
 		{"a: 0x1F\n", `{"a":31}`},
 		{"a: !!float 12\n", `{"a":12.0}`},
-		{"a: .inf\n", `{"a":null}`},
-		{"a: .nan\n", `{"a":null}`},
 		{"a: 18446744073709551616\n", `{"a":18446744073709551616}`},
 		{"a: 123456789012345678901234567890\n", `{"a":123456789012345678901234567890}`},
 		{"a: 07\n", `{"a":7}`},
@@ -60,6 +60,39 @@ func TestToJSONSpelling(t *testing.T) {
 			got, err := codec.ToJSON([]byte(tc.src))
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+// TestToJSONRefusesWhatJSONCannotSpell records the documents ToJSON stops on
+// rather than inventing a spelling for.
+//
+// It parses with parser.WithJSONCompatible. A collection used as a mapping key
+// used to be written as the key's own JSON text -- {"[\"a\",\"b\"]":1} -- which
+// no reader takes apart again, and the infinities and NaN used to be written as
+// null, which loses them without saying so.
+func TestToJSONRefusesWhatJSONCannotSpell(t *testing.T) {
+	for src, want := range map[string]string{
+		"? [a, b]\n: 1\n":  "a sequence cannot be a JSON key",
+		"? {a: 1}\n: 2\n":  "a mapping cannot be a JSON key",
+		"{? [a]: 1}\n":     "a sequence cannot be a JSON key",
+		"? &x [a]\n: 1\n":  "a sequence cannot be a JSON key",
+		"? !!seq [a]\n: 1": "a sequence cannot be a JSON key",
+		"a: .inf\n":        "JSON has no number for .inf",
+		"a: -.inf\n":       "JSON has no number for -.inf",
+		"a: .nan\n":        "JSON has no number for .nan",
+		".inf: a\n":        "JSON has no number for .inf",
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := codec.ToJSON([]byte(src))
+			require.Error(t, err)
+			assert.ErrorIs(t, err, yamlerrors.ErrNotJSON)
+			assert.Contains(t, err.Error(), want)
+
+			// The same document parses, since it is well-formed YAML and only
+			// the conversion is impossible.
+			_, err = parser.ParseBytes([]byte(src))
+			assert.NoError(t, err)
 		})
 	}
 }

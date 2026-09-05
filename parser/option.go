@@ -74,3 +74,31 @@ func WithYAMLVersion(v YAMLVersion) Option {
 		p.version = v
 	}
 }
+
+// WithJSONCompatible refuses a document JSON has no spelling for, so a
+// converter fails on the document rather than inventing one.
+//
+// Two things go. A sequence or a mapping used as a mapping key:
+// [github.com/go-openapi/go-yaml/codec.ToJSON] wrote the key's own JSON text,
+// {"[\"a\",\"b\"]":1}, and the decoder wrote what Go printed, {"[a b]":1} --
+// two spellings, neither of which reads back as the key. And the infinities and
+// NaN, which JSON has no number for and which both wrote as null.
+//
+// Everything else YAML holds converts and is left alone: a non-string scalar
+// key is quoted, so "1.5: a" is {"1.5":"a"}; an alias writes what its anchor
+// wrote; a "<<" folds the mapping it names into the one holding it; and a tag
+// resolves.
+//
+// One case it does not catch: an alias standing as a key, "? *x", where the
+// anchor names a collection. The parser does not substitute aliases, so it
+// cannot see what the key will be, and the conversion invents a spelling as
+// before.
+//
+// [github.com/go-openapi/go-yaml/codec.ToJSON] parses with this on. Use it on a
+// parse of your own to find out whether a document converts before converting
+// it.
+func WithJSONCompatible() Option {
+	return func(p *Parser) {
+		p.jsonCompatible = true
+	}
+}

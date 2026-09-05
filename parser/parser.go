@@ -112,6 +112,7 @@ type Parser struct {
 	version              YAMLVersion
 	allowDuplicateMapKey bool
 	omitNodePaths        bool
+	jsonCompatible       bool
 	// tagHandles maps a handle a TAG directive declared to the prefix it
 	// expands to.
 	tagHandles map[string]string
@@ -465,6 +466,11 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 // the parser makes goes through here, block and flow alike, which is what lets
 // a consumer fold entries without walking the tree. EXPERIMENT (2026-08-27).
 func (p *Parser) mappingValue(ctx context, colon, entry *tapeToken, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
+	if p.jsonCompatible {
+		if err := refuseCollectionKey(key); err != nil {
+			return nil, err
+		}
+	}
 	n, err := newMappingValueNode(ctx, colon, entry, key, value)
 	if err == nil && p.onComplete != nil {
 		p.onComplete(n)
@@ -627,9 +633,15 @@ func (p *Parser) parseScalarValue(ctx context, tk *tapeToken) (ast.ScalarNode, e
 		return newIntegerNode(ctx, tk)
 	case token.FloatType:
 		return newFloatNode(ctx, tk)
-	case token.InfinityType:
-		return newInfinityNode(ctx, tk)
-	case token.NanType:
+	case token.InfinityType, token.NanType:
+		if p.jsonCompatible {
+			return nil, yamlerrors.NewNotJSON(
+				fmt.Sprintf("JSON has no number for %s", tk.RawToken().Value), tk.RawToken())
+		}
+		if tk.Type() == token.InfinityType {
+			return newInfinityNode(ctx, tk)
+		}
+
 		return newNanNode(ctx, tk)
 	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
 		return newStringNode(ctx, tk)
@@ -1691,6 +1703,34 @@ func (p *Parser) resolveTag(text string) string {
 	}
 
 	return text
+}
+
+// refuseCollectionKey reports the error for a mapping key JSON has no spelling
+// for, or nil where the key is a scalar.
+//
+// A "?" key, an anchor and a tag are stood around the key rather than being the
+// key, so they are unwrapped to reach what a converter would have to write.
+func refuseCollectionKey(key ast.MapKeyNode) error {
+	var node ast.Node = key
+	for {
+		switch n := node.(type) {
+		case *ast.MappingKeyNode:
+			node = n.Value
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		case *ast.MappingNode, *ast.MappingValueNode:
+			return yamlerrors.NewNotJSON("a mapping cannot be a JSON key", node.GetToken())
+		case *ast.SequenceNode:
+			return yamlerrors.NewNotJSON("a sequence cannot be a JSON key", node.GetToken())
+		default:
+			return nil
+		}
+		if node == nil {
+			return nil
+		}
+	}
 }
 
 // resolvedBySchema reports whether the scanner typed a plain scalar by the core

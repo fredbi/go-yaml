@@ -5,6 +5,7 @@ package codec_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
 	"github.com/go-openapi/go-yaml/internal/yamltestsuite"
@@ -44,7 +46,7 @@ func toJSONViaValues(src []byte) ([]byte, error) {
 func TestToJSONMatchesTheValueConverter(t *testing.T) {
 	t.Parallel()
 
-	var compared, skipped int
+	var compared, skipped, refused int
 	for _, src := range jsonSources(t) {
 		if strings.Contains(src.text, "&!") {
 			// The parse reads "&!a1" as an anchor with no name followed by the
@@ -61,6 +63,17 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 		want, wantErr := toJSONViaValues([]byte(src.text))
 		got, gotErr := codec.ToJSON([]byte(src.text))
 
+		if errors.Is(gotErr, yamlerrors.ErrNotJSON) {
+			// ToJSON parses with parser.WithJSONCompatible, so it refuses a
+			// document JSON has no spelling for -- a collection used as a
+			// mapping key, or an infinity or NaN. The value converter answered
+			// each of those by inventing a spelling, "[a b]" for the key and
+			// null for the number, so there is nothing here to agree about.
+			assert.NoErrorf(t, wantErr, "%s: %v", src.name, wantErr)
+			refused++
+
+			continue
+		}
 		if wantErr != nil || gotErr != nil {
 			// Both must refuse, and for the same reason: a converter that
 			// accepts what the other refuses is a different converter.
@@ -99,7 +112,8 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 		compared++
 	}
 
-	t.Logf("%d documents converted the same way, %d diverge on purpose", compared, skipped)
+	t.Logf("%d documents converted the same way, %d diverge on purpose, %d refused as not JSON",
+		compared, skipped, refused)
 }
 
 // knownJSONDivergence names a difference the folding converter makes on
@@ -108,20 +122,24 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 // Two so far, both places where the value converter lost something on its way
 // through Go values:
 //
-//   - A sequence or a mapping used as a mapping key went out as Go printed it,
-//     "[a b]", which no reader can take apart again. The folding converter
-//     writes the key's own JSON, ["a","b"].
+//   - A collection reached through an alias key -- "? *x", where the anchor
+//     names one -- went out as Go printed it, "[a b]". The folding converter
+//     writes the key's own JSON, ["a","b"]. Neither reads back as the key; a
+//     collection written as a key outright is refused by
+//     parser.WithJSONCompatible, and the parser keeps no anchor table to see
+//     through the alias.
 //   - A number too wide for int64 or float64 went out as a quoted string. It is
 //     a number and is written as one.
 //
-// The other three are not visible here because the value converter's output is
-// not JSON at all and the comparison never reaches this: infinity and NaN went
-// out bare as ".inf" and ".nan"; a control character went out with YAML's "\a"
-// escape, which JSON has no spelling for; and a merge key wrote every merged
-// entry and then the mapping's own, so an overridden key was written twice.
+// Two more are not visible here because the value converter's output is not
+// JSON at all and the comparison never reaches this: a control character went
+// out with YAML's "\a" escape, which JSON has no spelling for, and a merge key
+// wrote every merged entry and then the mapping's own, so an overridden key was
+// written twice. Infinity and NaN used to be a third, written bare as ".inf"
+// and ".nan"; the folding converter now refuses them.
 func knownJSONDivergence(want, got any) (string, bool) {
 	if sameExceptCollectionKeys(want, got) {
-		return "a collection used as a mapping key is written as JSON, not as Go printed it", true
+		return "a collection reached through an alias key is written as JSON, not as Go printed it", true
 	}
 
 	wantText, isText := want.(string)
@@ -134,8 +152,54 @@ func knownJSONDivergence(want, got any) (string, bool) {
 	return "", false
 }
 
+type jsonSource struct{ name, text string }
+
+// jsonSources is every document the converters are held to: the YAML test
+// suite, the generated shapes and the fuzz seeds.
+func jsonSources(t *testing.T) []jsonSource {
+	t.Helper()
+
+	var srcs []jsonSource
+
+	suites, err := yamltestsuite.TestSuites()
+	require.NoError(t, err)
+	for _, s := range suites {
+		srcs = append(srcs, jsonSource{name: "suite/" + s.Name, text: string(s.InYAML)})
+	}
+
+	for _, c := range []struct {
+		name string
+		gen  func(int) string
+	}{
+		{"flat-map", corpus.FlatMap},
+		{"flat-sequence", corpus.FlatSequence},
+		{"nested-doc", corpus.NestedDoc},
+		{"anchored", corpus.Anchored},
+		{"block-scalars", corpus.BlockScalars},
+	} {
+		for _, n := range []int{1, 10, 200} {
+			srcs = append(srcs, jsonSource{
+				name: fmt.Sprintf("corpus/%s-%d", c.name, n),
+				text: c.gen(n),
+			})
+		}
+	}
+
+	seeds, err := fuzzseeds.All()
+	require.NoError(t, err)
+	for i, seed := range seeds {
+		srcs = append(srcs, jsonSource{name: fmt.Sprintf("fuzzseed/%04d", i), text: seed})
+	}
+
+	return srcs
+}
+
 // sameExceptCollectionKeys reports whether two values hold the same document
 // once the mapping keys that YAML wrote as collections are allowed to differ.
+//
+// Only one shape reaches this now: "? *x" where the anchor names a collection.
+// parser.WithJSONCompatible refuses a collection written as a key, and the
+// parser keeps no anchor table to see through the alias.
 //
 // Keys the two agree on are compared as they stand. A key only one of them has
 // must read as a collection -- it starts with "[" or "{" -- and the values
@@ -220,46 +284,4 @@ func pairUp(left, right []any) bool {
 // a mapping rather than from a scalar.
 func isCollectionKey(key string) bool {
 	return strings.HasPrefix(key, "[") || strings.HasPrefix(key, "{")
-}
-
-type jsonSource struct{ name, text string }
-
-// jsonSources is every document the converters are held to: the YAML test
-// suite, the generated shapes and the fuzz seeds.
-func jsonSources(t *testing.T) []jsonSource {
-	t.Helper()
-
-	var srcs []jsonSource
-
-	suites, err := yamltestsuite.TestSuites()
-	require.NoError(t, err)
-	for _, s := range suites {
-		srcs = append(srcs, jsonSource{name: "suite/" + s.Name, text: string(s.InYAML)})
-	}
-
-	for _, c := range []struct {
-		name string
-		gen  func(int) string
-	}{
-		{"flat-map", corpus.FlatMap},
-		{"flat-sequence", corpus.FlatSequence},
-		{"nested-doc", corpus.NestedDoc},
-		{"anchored", corpus.Anchored},
-		{"block-scalars", corpus.BlockScalars},
-	} {
-		for _, n := range []int{1, 10, 200} {
-			srcs = append(srcs, jsonSource{
-				name: fmt.Sprintf("corpus/%s-%d", c.name, n),
-				text: c.gen(n),
-			})
-		}
-	}
-
-	seeds, err := fuzzseeds.All()
-	require.NoError(t, err)
-	for i, seed := range seeds {
-		srcs = append(srcs, jsonSource{name: fmt.Sprintf("fuzzseed/%04d", i), text: seed})
-	}
-
-	return srcs
 }

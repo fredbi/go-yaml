@@ -38,7 +38,7 @@ func ToJSON(src []byte) ([]byte, error) {
 	// what the conversion allocated, almost all of it doubling.
 	w := &jsonWriter{out: make([]byte, 0, len(src))}
 
-	if _, err := parser.New(parser.WithOmitNodePaths()).Walk(src, w); err != nil {
+	if _, err := parser.New(parser.WithOmitNodePaths(), parser.WithJSONCompatible()).Walk(src, w); err != nil {
 		return nil, err
 	}
 	if w.err != nil {

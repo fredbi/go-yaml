@@ -59,6 +59,12 @@ var (
 	// ErrUnexpectedNodeType reports a node of the wrong shape, such as a
 	// sequence where a mapping is required.
 	ErrUnexpectedNodeType = stderrors.New("unexpected node type")
+	// ErrNotJSON reports a well-formed YAML document that JSON has no spelling
+	// for, found with
+	// [github.com/go-openapi/go-yaml/parser.WithJSONCompatible] on. It is not a
+	// syntax error: the document is valid YAML and only the conversion is
+	// impossible.
+	ErrNotJSON = stderrors.New("not convertible to JSON")
 )
 
 const (
@@ -100,6 +106,11 @@ type Error struct {
 // NewSyntax reports msg as a malformed document at tk.
 func NewSyntax(msg string, tk *token.Token) *Error {
 	return &Error{kind: ErrSyntax, msg: msg, token: tk}
+}
+
+// NewNotJSON reports msg as a document JSON cannot hold, at tk.
+func NewNotJSON(msg string, tk *token.Token) *Error {
+	return &Error{kind: ErrNotJSON, msg: msg, token: tk}
 }
 
 // NewTypeMismatch reports a value of type src decoded into a Go value of type
