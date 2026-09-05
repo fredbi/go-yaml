@@ -51,6 +51,22 @@ func ToJSON(src []byte) ([]byte, error) {
 	return w.out[:w.firstEnd], nil
 }
 
+// isMergeKey reports whether a mapping key is a "<<".
+//
+// A document may write the tag out -- "!!merge <<: *base" -- and the key then
+// arrives wrapped in a tag. The tag's own Value is nil until it closes, so the
+// wrapper is read by its text rather than by what it stands on.
+func isMergeKey(n ast.Node) bool {
+	switch t := n.(type) {
+	case *ast.MergeKeyNode:
+		return true
+	case *ast.TagNode:
+		return t.Start != nil && token.ReservedTagKeyword(t.Start.Value) == token.MergeTag
+	default:
+		return false
+	}
+}
+
 // jsonWriter writes JSON as the walk hands each part of the document over.
 //
 // Everything it holds is bounded by the document's shape rather than its size:
@@ -139,7 +155,7 @@ func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
 		return w.collectMerge(node, at)
 	}
 
-	if _, merge := node.(*ast.MergeKeyNode); merge {
+	if isMergeKey(node) {
 		// "<<" names no key of its own: what it brings in is written at the end
 		// of the mapping, where the keys the mapping writes itself are known.
 		// Nothing goes over here, not even the comma an entry would take.
