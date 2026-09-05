@@ -714,11 +714,15 @@ func isFloatKind(k reflect.Kind) bool { return k == reflect.Float32 || k == refl
 // [big.Float], which it does for one no native type holds.
 //
 // A float destination takes the nearest float64, and is refused where the
-// number reaches past what one holds: ±Inf, or zero from a number that is not
-// zero. strconv.ParseFloat answers the same values and returns ErrRange with
-// them, and dropping that gave a document holding 1e400 a field reading +Inf
-// with nothing said. A caller who wants the number whole decodes into a
-// *big.Int or a *big.Float, which take it exactly.
+// number reaches past what one holds. strconv.ParseFloat answers the same
+// values and returns ErrRange with them, and dropping that gave a document
+// holding 1e400 a field reading +Inf with nothing said. A caller who wants the
+// number whole decodes into a *big.Int or a *big.Float, which take it exactly.
+//
+// ±Inf is a float64 like any other and a document naming one gets it: ".inf"
+// resolves to an ast.InfinityNode, which holds a float64 already and never
+// reaches here. Only a finite big.Int or big.Float does, and a float64 of ±Inf
+// from finite digits has lost the number rather than named it.
 //
 // A string destination takes the digits. Anything else is left to convertValue's
 // own rules, which end in a type mismatch.
@@ -752,9 +756,8 @@ func convertBigNumber(v reflect.Value, typ reflect.Type) (reflect.Value, bool) {
 	}
 }
 
-// outOfFloatRange reports whether the float64 nearest to a number has lost it
-// rather than rounded it: infinite where the digits are finite, or zero where
-// they are not.
+// outOfFloatRange reports whether the float64 nearest to a finite number has
+// lost it rather than rounded it: infinite, or zero from digits that are not.
 func outOfFloatRange(f float64, text string) bool {
 	if math.IsInf(f, 0) {
 		return true
