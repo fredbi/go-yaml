@@ -719,6 +719,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			node.Values = append(node.Values, value)
 			ctx.goNext()
 		case TokenGroupMapKey:
+			p.markKey()
 			key, err := p.parseMapKey(ctx.withGroup(p, mapKeyTk.Group), mapKeyTk.Group)
 			if err != nil {
 				return nil, err
@@ -766,6 +767,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			// The key is read without going over on its own account: it is a
 			// key, not a value, and parseScalarValue would hand a property
 			// group -- the "&a" of "{&a}" -- over as a value.
+			p.markKey()
 			loud := p.quiet()
 			key, err := p.parseScalarValue(ctx, mapKeyTk)
 			loud()
@@ -848,6 +850,7 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *tapeToken) (*ast.MappingValue
 		return node, nil
 	}
 
+	p.markKey()
 	key, err := p.parseMapKey(ctx.withGroup(p, keyTk.Group), keyTk.Group)
 	if err != nil {
 		return nil, err
@@ -1026,6 +1029,7 @@ func (p *Parser) parseMapKeyValue(ctx context, g *tokenGroup, entryTk *tapeToken
 		return nil, yamlerrors.NewSyntax("unexpected map key", g.RawToken())
 	}
 	keyGroup := g.First().Group
+	p.markKey()
 	key, err := p.parseMapKey(ctx.withGroup(p, keyGroup), keyGroup)
 	if err != nil {
 		return nil, err
@@ -1069,6 +1073,15 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 		if err != nil {
 			return nil, err
 		}
+
+		// A "?" stands around the node that addresses the entry, so it goes
+		// over before that node and closes after it -- the shape an anchor and
+		// a tag take. Handed over afterwards, as parseMapEntry hands a plain
+		// key, it arrived after its own content and the content arrived as a
+		// value: "? a\n: b" read as the three values a, ? and b.
+		p.enterKey(ctx, key, KindKey)
+		defer p.leave(ctx, key)
+
 		ctx.goNext() // skip mapping key token
 		if ctx.isTokenNotFound() {
 			return nil, yamlerrors.NewSyntax("could not find value for mapping key", mapKeyTk.RawToken())

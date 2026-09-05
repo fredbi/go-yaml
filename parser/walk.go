@@ -22,6 +22,9 @@ const (
 	KindAnchor
 	// KindTag is a tag, which stands around the one node it types.
 	KindTag
+	// KindKey is a mapping key written with "?", which stands around the one
+	// node it addresses the entry by.
+	KindKey
 )
 
 func (k Kind) String() string {
@@ -34,6 +37,8 @@ func (k Kind) String() string {
 		return "anchor"
 	case KindTag:
 		return "tag"
+	case KindKey:
+		return "key"
 	default:
 		return "none"
 	}
@@ -83,9 +88,16 @@ type Visitor interface {
 type walkState struct {
 	visitor Visitor
 	// in and index hold the collection at each depth, so a node knows what it
-	// stands in and which entry of it it is.
+	// stands in and which entry of it it is. key says whether the node opened
+	// at that depth was a mapping key, so Leave says what Enter did.
 	in    []Kind
 	index []int
+	key   []bool
+	// keyNext says the next node handed over is a mapping's key. A key may turn
+	// out to be a scalar, an anchor, a tag or a "?" standing around one of
+	// those, and each of them goes over through a different path; the flag
+	// reaches whichever it is, so the key is announced once and as a key.
+	keyNext bool
 	// skip counts the depths below a node Enter refused, which are walked
 	// without being handed over.
 	skip int
@@ -196,6 +208,16 @@ func (p *Parser) releaseDocument() {
 // enter hands a node over before what it holds, and reports whether to go on
 // into it.
 func (p *Parser) enter(ctx context, node ast.Node, in Kind) bool {
+	return p.enterAs(ctx, node, in, false)
+}
+
+// enterKey hands a mapping key over before what it holds, for the "?" that
+// stands around a key rather than being one.
+func (p *Parser) enterKey(ctx context, node ast.Node, in Kind) bool {
+	return p.enterAs(ctx, node, in, true)
+}
+
+func (p *Parser) enterAs(ctx context, node ast.Node, in Kind, key bool) bool {
 	if p.walk == nil || node == nil {
 		return true
 	}
@@ -212,12 +234,23 @@ func (p *Parser) enter(ctx context, node ast.Node, in Kind) bool {
 		return true
 	}
 
-	if !p.walk.visitor.Enter(node, p.step(node)) {
+	// takeKey comes after the guards above: a node that is not handed over has
+	// not announced the key, and handKey still has it to hand. It is called
+	// whatever key says, so the flag is cleared either way -- left standing it
+	// would mark the entry's value as a key too.
+	if p.takeKey() {
+		key = true
+	}
+
+	at := p.step(node)
+	at.Key = key
+	if !p.walk.visitor.Enter(node, at) {
 		p.walk.skip = 1
 
 		return false
 	}
 
+	p.walk.key = append(p.walk.key, key)
 	p.walk.in = append(p.walk.in, in)
 	p.walk.index = append(p.walk.index, 0)
 
@@ -237,13 +270,46 @@ func (p *Parser) leave(ctx context, node ast.Node) {
 
 	p.walk.in = p.walk.in[:len(p.walk.in)-1]
 	p.walk.index = p.walk.index[:len(p.walk.index)-1]
-	p.walk.visitor.Leave(node, p.step(node))
+	at := p.step(node)
+	at.Key = p.walk.key[len(p.walk.key)-1]
+	p.walk.key = p.walk.key[:len(p.walk.key)-1]
+	p.walk.visitor.Leave(node, at)
 	p.count()
 	p.readTo(ctx)
 }
 
+// markKey says the next node handed over is a mapping's key.
+//
+// It is set before the key is parsed rather than after, because a key that is
+// an anchor, a tag or a "?" stands around what it holds and goes over as it
+// opens -- before parseMapKey has returned anything to hand over.
+func (p *Parser) markKey() {
+	if p.walk != nil {
+		p.walk.keyNext = true
+	}
+}
+
+// takeKey reports whether the node about to go over is the key that markKey
+// announced, and forgets it.
+func (p *Parser) takeKey() bool {
+	if p.walk == nil || !p.walk.keyNext {
+		return false
+	}
+	p.walk.keyNext = false
+
+	return true
+}
+
 // handKey gives a mapping's key over, before its value is parsed.
+//
+// A key that opened on its way here -- a "?", an anchor, a tag, a collection --
+// took markKey's flag as it went over, and handing it again would put it in the
+// mapping twice. The flag still standing is what says nothing has gone over
+// yet: parseScalarValue builds a scalar key without handing it anywhere.
 func (p *Parser) handKey(ctx context, node ast.Node) {
+	if p.walk != nil && !p.walk.keyNext {
+		return
+	}
 	p.handAs(ctx, node, true)
 }
 
@@ -255,6 +321,11 @@ func (p *Parser) hand(ctx context, node ast.Node) {
 func (p *Parser) handAs(ctx context, node ast.Node, key bool) {
 	if p.walk == nil || node == nil || p.walk.skip > 0 || p.walk.quiet > 0 {
 		return
+	}
+	// takeKey is called whatever key says, so the flag is cleared either way:
+	// left standing it would mark the entry's value as a key too.
+	if p.takeKey() {
+		key = true
 	}
 
 	at := p.step(node)
