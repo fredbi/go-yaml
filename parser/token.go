@@ -124,6 +124,7 @@ func (t *tapeToken) RawToken() *token.Token {
 	if t == nil {
 		return nil
 	}
+	t.checkLive("tapeToken.RawToken")
 	if t.Group != nil {
 		return t.Group.RawToken()
 	}
@@ -135,6 +136,7 @@ func (t *tapeToken) Type() token.Type {
 	if t == nil {
 		return 0
 	}
+	t.checkLive("tapeToken.Type")
 	if t.Group != nil {
 		return t.Group.TokenType()
 	}
@@ -146,6 +148,7 @@ func (t *tapeToken) GroupType() tokenGroupType {
 	if t == nil {
 		return TokenGroupNone
 	}
+	t.checkLive("tapeToken.GroupType")
 	if t.Group == nil {
 		return TokenGroupNone
 	}
@@ -250,6 +253,7 @@ func (g *tokenGroup) set(typ tokenGroupType, tks []*tapeToken) {
 
 // Len returns how many members g holds.
 func (g *tokenGroup) Len() int {
+	g.checkLive("tokenGroup.Len")
 	if g.more != nil {
 		return len(*g.more)
 	}
@@ -259,6 +263,7 @@ func (g *tokenGroup) Len() int {
 
 // At returns the i'th member.
 func (g *tokenGroup) At(i int) *tapeToken {
+	g.checkLive("tokenGroup.At")
 	if g.more != nil {
 		return (*g.more)[i]
 	}
@@ -391,8 +396,11 @@ type grouper struct {
 	// ahead of the descent the grouping has to keep the tape.
 	heldHigh int
 
-	tokens []tapeToken
-	groups []tokenGroup
+	// leaves holds the tokens the grouper mints of its own -- the leaf keyBefore
+	// displaces, and the token a group stands in -- and groups the groups. Both
+	// go back once nothing reads the tokens they stand for.
+	leaves runArena[tapeToken]
+	groups runArena[tokenGroup]
 	// grouped is what the stages hand out, reused from one run to the next.
 	// One buffer suffices now that a token walks the stages rather than each
 	// stage walking the run: nothing reads what an earlier stage wrote.
@@ -409,6 +417,8 @@ type grouper struct {
 	lineComments map[*tapeToken]*token.Token
 	// block is how many of each one allocation covers.
 	block int
+	// sweptAt is what the tape had released when this last swept.
+	sweptAt int
 }
 
 // setLineComment records that comment closes the line tk stands on.
@@ -472,15 +482,17 @@ func newGrouper(n int) grouper {
 		block = maxGroupBlock
 	}
 
-	return grouper{block: block}
+	return grouper{
+		block:  block,
+		leaves: runArena[tapeToken]{size: block},
+		groups: runArena[tokenGroup]{size: block},
+	}
 }
 
-func (g *grouper) token() *tapeToken {
-	if len(g.tokens) == 0 {
-		g.tokens = make([]tapeToken, g.block)
-	}
-	tk := &g.tokens[0]
-	g.tokens = g.tokens[1:]
+// token returns a cell for a token standing at seq in the stream.
+func (g *grouper) token(seq int32) *tapeToken {
+	tk := g.leaves.take(seq)
+	reviveLeaf(tk)
 
 	return tk
 }
@@ -488,41 +500,72 @@ func (g *grouper) token() *tapeToken {
 // newGroup1 and newGroup2 return a group over one and two tokens, taken from
 // the block and filled without a list.
 func (g *grouper) newGroup1(typ tokenGroupType, a *tapeToken) *tokenGroup {
-	grp := g.nextGroup()
+	grp := g.nextGroup(a.Seq())
 	grp.Type, grp.a, grp.b, grp.more, grp.n = typ, a, nil, nil, 1
 
 	return grp
 }
 
 func (g *grouper) newGroup2(typ tokenGroupType, a, b *tapeToken) *tokenGroup {
-	grp := g.nextGroup()
+	grp := g.nextGroup(a.Seq())
 	grp.Type, grp.a, grp.b, grp.more, grp.n = typ, a, b, nil, 2
 
 	return grp
 }
 
-// nextGroup returns the next unused group of the block.
-func (g *grouper) nextGroup() *tokenGroup {
-	if len(g.groups) == 0 {
-		g.groups = make([]tokenGroup, g.block)
-	}
-	grp := &g.groups[0]
-	g.groups = g.groups[1:]
+// nextGroup returns a cell for a group ending at seq in the stream.
+func (g *grouper) nextGroup(seq int32) *tokenGroup {
+	grp := g.groups.take(seq)
+	reviveGroup(grp)
 
 	return grp
 }
 
+// release hands back every cell nothing reads any more. dead answers whether
+// the tokens a cell stands for are finished with.
+//
+// Only a walk calls it: a parse gathering a tree holds every node it builds,
+// and a key node built through keyBefore points into a leaf.
+func (g *grouper) release(released int, dead func(seq int32) bool) {
+	if released == g.sweptAt {
+		// The tape has let go of nothing since the last sweep, so nothing the
+		// grouper holds can have died either. A document the grouping cannot
+		// let go of -- one flow collection spanning it, which is what a JSON
+		// document is -- would otherwise be asked on every node and answer no.
+		return
+	}
+	g.sweptAt = released
+
+	g.leaves.release(dead, poisonLeaves)
+	g.groups.release(dead, poisonGroups)
+}
+
 // newGroup returns a group of typ over tks.
 func (g *grouper) newGroup(typ tokenGroupType, tks []*tapeToken) *tokenGroup {
-	grp := g.nextGroup()
+	grp := g.nextGroup(firstSeq(tks))
 	grp.set(typ, tks)
 
 	return grp
 }
 
 // group returns a token holding a group of typ over tks.
+// firstSeq is where a run of tokens begins in the stream.
+//
+// A cell stands for the beginning of its construct and not the end: holdRun
+// keeps the chunk a construct began in while the descent reads everything under
+// it, because parseMapEntry reads its key's group again once the value below it
+// is parsed. Keyed on the end, a group goes back while that read is still to
+// come -- 598 of them over the corpus, which is what the probe reported.
+func firstSeq(tks []*tapeToken) int32 {
+	if len(tks) == 0 {
+		return 0
+	}
+
+	return tks[0].Seq()
+}
+
 func (g *grouper) group(typ tokenGroupType, tks []*tapeToken) *tapeToken {
-	tk := g.token()
+	tk := g.token(firstSeq(tks))
 	tk.Group = g.newGroup(typ, tks)
 
 	return tk
@@ -531,14 +574,14 @@ func (g *grouper) group(typ tokenGroupType, tks []*tapeToken) *tapeToken {
 // group1 and group2 are group over one and two tokens, which is most of them.
 // Both members are held in the group itself, so neither builds a list.
 func (g *grouper) group1(typ tokenGroupType, a *tapeToken) *tapeToken {
-	tk := g.token()
+	tk := g.token(a.Seq())
 	tk.Group = g.newGroup1(typ, a)
 
 	return tk
 }
 
 func (g *grouper) group2(typ tokenGroupType, a, b *tapeToken) *tapeToken {
-	tk := g.token()
+	tk := g.token(a.Seq())
 	tk.Group = g.newGroup2(typ, a, b)
 
 	return tk
@@ -834,7 +877,7 @@ func (g *grouper) keyBefore(w *keyWindow, tk *tapeToken) bool {
 	// The key stays where it stands in the window and becomes the group, so
 	// that the comments written between it and its ':' keep their place after
 	// it.
-	held := g.token()
+	held := g.token(key.Seq())
 	held.raw, held.Group, held.seq = key.raw, key.Group, key.seq
 	key.Group = g.newGroup2(TokenGroupMapKey, held, tk)
 
@@ -1076,7 +1119,7 @@ func (g *grouper) implicitNullKeyToken(colon *tapeToken) *tapeToken {
 	tk := token.New("null", "null", pos)
 	tk.Type = token.ImplicitNullType
 
-	wrapped := g.token()
+	wrapped := g.token(colon.Seq())
 	wrapped.raw = *tk
 
 	return wrapped

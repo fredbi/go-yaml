@@ -149,6 +149,12 @@ type Parser struct {
 	// chunkSize is how many tokens one chunk of the token arena holds.
 	chunkSize int
 
+	// deadIn and deadWas remember what releasedByTape last answered, and for
+	// which chunk of the tape. They are cleared at the start of every sweep,
+	// since the answer changes between them.
+	deadIn  int
+	deadWas bool
+
 	// arena is where the nodes of the parse in hand come from. It is kept so
 	// that what a tree cost can be read after the parse rather than guessed at
 	// from a heap profile -- see [Parser.ArenaStats].

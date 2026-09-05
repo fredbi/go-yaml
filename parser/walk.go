@@ -381,9 +381,40 @@ func (p *Parser) readTo(ctx context) {
 	if p.tokens == nil || p.body == nil {
 		return
 	}
-	if tk := p.body.at(p.body.idx); tk != nil {
-		p.tokens.SetTail(int(tk.Seq()))
+	tk := p.body.at(p.body.idx)
+	if tk == nil {
+		return
 	}
+	p.tokens.SetTail(int(tk.Seq()))
+
+	if p.reader != nil {
+		p.deadIn, p.deadWas = -1, false
+		p.reader.g.release(p.tokens.Released(), p.releasedByTape)
+	}
+}
+
+// releasedByTape answers whether the tape has given up the chunk holding seq.
+//
+// It stands in for the grouper's own liveness: a cell of its own belongs to a
+// run of the stream, and the tape knows what it still holds -- the tail it has
+// been given, what holdRun saved, and what an anchor pinned.
+func (p *Parser) releasedByTape(seq int32) bool {
+	// The answer is the same for every sequence in one chunk of the tape, and
+	// the cells asked about run in order, so the last answer serves most of
+	// them. Generation walks the chunks in hand to find the one holding a
+	// sequence, which was 44% of the CPU of a document the tape cannot recycle:
+	// nothing is ever released there, so every cell asked and every ask walked
+	// the whole tape.
+	if in := int(seq) / p.chunkSize; in == p.deadIn {
+		return p.deadWas
+	} else { //nolint:revive // the branch sets what the one above reads
+		p.deadIn = in
+	}
+
+	_, held := p.tokens.Generation(int(seq))
+	p.deadWas = !held
+
+	return p.deadWas
 }
 
 // saveHere keeps the chunks holding [from, to] without holding the tape first,
