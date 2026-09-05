@@ -28,9 +28,8 @@ import (
 // stricter than either for "1e3" -- because it fell out of a
 // normalize-then-strconv routine rather than out of a reading of any schema.
 //
-// YAML 1.1 is not gone, it is a schema the scanner can be told to read
-// (token.Schema11). What is missing is the parser end: the "%YAML 1.1"
-// directive and the option have to reach Scanner.SetSchema.
+// YAML 1.1 is not gone: a document says "%YAML 1.1" or a caller passes
+// parser.WithYAMLVersion, and resolved11 below records what that gives.
 var resolved = map[string]string{
 	// 1.2, and not 1.1: these are strings here, where YAML 1.1 read booleans.
 	"yes": "string", "no": "string", "on": "string", "off": "string",
@@ -87,6 +86,92 @@ func TestTheSchemaPositionIsWhatItWas(t *testing.T) {
 	}
 }
 
+// resolved11 is the same measurement under YAML 1.1, which a document reaches
+// by saying "%YAML 1.1" and a caller by passing parser.WithYAMLVersion.
+//
+// It records the value as well as the type. The type alone would miss the entry
+// that matters most: "0777" is a uint64 under both, and 777 under one and 511
+// under the other.
+var resolved11 = map[string]struct{ typ, value string }{
+	// The booleans 1.1 reads and 1.2 leaves as text.
+	"yes": {"bool", "true"}, "no": {"bool", "false"},
+	"on": {"bool", "true"}, "off": {"bool", "false"},
+	"y": {"bool", "true"}, "Yes": {"bool", "true"},
+
+	// A leading zero opens an octal number, so the quantity changes.
+	"0777": {"uint64", "511"},
+
+	// The "_" separator, the "0b" prefix and base 60, all 1.1's alone.
+	"1_000":    {"uint64", "1000"},
+	"0b1010":   {"uint64", "10"},
+	"1:30":     {"uint64", "90"},
+	"12:34:56": {"uint64", "45296"},
+
+	// Hexadecimal is the same in both.
+	"0x1A": {"uint64", "26"},
+
+	// "0o17" is how 1.2 writes octal and 1.1 does not read it at all, and 1.1
+	// requires an exponent to carry a sign, so "1e3" is text where 1.2 has a
+	// float.
+	"0o17": {"string", "0o17"},
+	"1e3":  {"string", "1e3"},
+
+	// The same in both.
+	".inf": {"float64", "+Inf"}, "-.Inf": {"float64", "-Inf"}, ".nan": {"float64", "NaN"},
+
+	// ⚠️ 1.1 has a !!timestamp type and this library does not implement it, so
+	// a date is text under both. The entry is here to record the gap rather
+	// than to claim the position is 1.1 whole.
+	"2001-12-14": {"string", "2001-12-14"},
+}
+
+// TestTheSchemaPositionUnderYAML11 holds the 1.1 measurement still, and reaches
+// it the way a document does.
+//
+// Through yaml.Unmarshal rather than the parser directly: the directive has to
+// survive the scanner resolving scalars, the parser scoping it to its document
+// and the decoder materializing what the tokens were typed as, and a test that
+// called the parser would check none of that.
+func TestTheSchemaPositionUnderYAML11(t *testing.T) {
+	for _, r := range yamlcorpus.Resolutions() {
+		t.Run(r.Scalar, func(t *testing.T) {
+			want, ok := resolved11[r.Scalar]
+			if !ok {
+				t.Fatalf("%q is in the resolutions and has never been measured under 1.1", r.Scalar)
+			}
+
+			var v any
+			if err := yaml.Unmarshal([]byte("%YAML 1.1\n---\nk: "+r.Scalar+"\n"), &v); err != nil {
+				t.Fatalf("refused, which no schema does: %v", err)
+			}
+
+			got := v.(map[string]any)["k"]
+			if typ := fmt.Sprintf("%T", got); typ != want.typ {
+				t.Errorf("resolves to %s, and was measured as %s -- the position moved", typ, want.typ)
+			}
+			if value := fmt.Sprintf("%v", got); value != want.value {
+				t.Errorf("reads as %s, and was measured as %s", value, want.value)
+			}
+		})
+	}
+}
+
+// TestALeadingZeroIsOctalUnderYAML11 is the companion to the test below it.
+//
+// The core schema keeps 0777's quantity and loses its spelling. A reader who
+// meant octal 511 asks for YAML 1.1, which is the schema that reads it, and
+// this is that claim made good rather than asserted.
+func TestALeadingZeroIsOctalUnderYAML11(t *testing.T) {
+	var v any
+	if err := yaml.Unmarshal([]byte("%YAML 1.1\n---\nmode: 0777\n"), &v); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := fmt.Sprintf("%v", v.(map[string]any)["mode"]); got != "511" {
+		t.Errorf("0777 reads as %s under YAML 1.1, where octal makes it 511", got)
+	}
+}
+
 // TestALeadingZeroKeepsItsQuantity is the one entry worth its own test.
 //
 // Every other entry above records a type. This one used to record a changed
@@ -97,8 +182,8 @@ func TestTheSchemaPositionIsWhatItWas(t *testing.T) {
 //
 // The core schema reads "[-+]? [0-9]+", so the quantity now survives. The
 // spelling does not: 0777 comes back as 777, which is the same number said
-// plainly. A reader who meant octal 511 wants YAML 1.1, and that is a schema
-// this library can be told to read rather than a defect to fix here.
+// plainly. A reader who meant octal 511 asks for YAML 1.1 -- see
+// TestALeadingZeroIsOctalUnderYAML11, which is that claim made good.
 func TestALeadingZeroKeepsItsQuantity(t *testing.T) {
 	var v any
 	if err := yaml.Unmarshal([]byte("mode: 0777\n"), &v); err != nil {
