@@ -20,456 +20,368 @@ import (
 
 // ToJSON converts a YAML document to the JSON that holds the same values.
 //
-// The document is written as the parser finishes each node: a scalar becomes
-// its JSON text, a collection joins the text of its children and forgets them.
-// Only the frontier is live -- what has been written and not yet taken by an
-// enclosing collection -- so a caller pays for the output and the tree, not for
-// a second copy of the document as Go values.
+// The document is written as the parse reaches each node, into one buffer: a
+// scalar becomes its JSON text where it stands, a collection writes its
+// brackets around what it holds. Nothing is kept but the output and the text of
+// the anchors an alias may still name, so the parse hands its tokens and its
+// nodes back as it goes and a document of any size is read from a handful of
+// them.
 //
 // A stream of several documents converts its first, which is the one
-// [Unmarshal] reads.
+// [Unmarshal] reads. The rest are still read, so a stream whose later documents
+// cannot be converted is refused rather than half-answered.
 func ToJSON(src []byte) ([]byte, error) {
-	w := jsonFolder{done: make(map[ast.Node][]byte)}
+	w := &jsonWriter{}
 
-	file, err := parser.ParseBytes(src, parser.OmitNodePaths(), parser.OnComplete(w.complete))
-	if err != nil {
+	if _, err := parser.New(parser.OmitNodePaths()).Walk(src, w); err != nil {
 		return nil, err
 	}
 	if w.err != nil {
 		return nil, w.err
 	}
-	body, ok := firstDocumentBody(file)
-	if !ok {
+	if w.documents == 0 {
 		return []byte("null"), nil
 	}
 
-	return w.claim(body), nil
+	return w.out[:w.firstEnd], nil
 }
 
-// firstDocumentBody is the body of the first document of the stream that holds
-// a value.
+// jsonWriter writes JSON as the walk hands each part of the document over.
 //
-// A "%YAML" or "%TAG" line opens a document of its own, ahead of the one it
-// applies to, so the directives are stepped over. An empty document is not: it
-// holds no value and converts to null, which is what the stream says.
-func firstDocumentBody(file *ast.File) (ast.Node, bool) {
-	for _, doc := range file.Docs {
-		if _, isDirective := doc.Body.(*ast.DirectiveNode); isDirective {
-			continue
-		}
+// Everything it holds is bounded by the document's shape rather than its size:
+// the anchors named so far, the collections still open, and the output. A
+// mapping records where it began only so that a merge key can be answered at
+// the end of it, which is the one thing a converter cannot write as it goes.
+type jsonWriter struct {
+	out []byte
+	// documents counts the document bodies seen, and firstEnd is where the
+	// first one ended in out. Later documents are converted and thrown away.
+	documents int
+	firstEnd  int
+	// named holds what each anchor of the document wrote, for an alias to write
+	// again. It is emptied at each document, since an alias names an anchor of
+	// its own document.
+	named map[string][]byte
+	// open is the anchors being written, innermost last. Anchors nest.
+	open []anchorMark
+	// maps is the mappings being written, innermost last.
+	maps []mapFrame
+	// keys is where each explicit key being written begins in out. A "?" key
+	// may hold a collection, which is written as JSON and then held as the
+	// string JSON addresses the entry by.
+	keys []int
+	// tags is the tags being written. A tag opens before its value is parsed,
+	// so what it stands on is read when it closes.
+	tags []tagMark
+	err  error
+}
 
-		return doc.Body, doc.Body != nil
+// anchorMark is one anchor still being written: its name, and where in out the
+// node it names begins.
+type anchorMark struct {
+	name string
+	at   int
+	// key says the anchor stands as a mapping key, so what it wrote becomes
+	// the string JSON addresses the entry by -- and that string is what an
+	// alias naming it writes later.
+	key bool
+}
+
+// tagMark is one tag being written: where what it types begins in out, and
+// whether the tag stands as a mapping key.
+type tagMark struct {
+	at  int
+	key bool
+}
+
+// mapFrame is one mapping being written.
+type mapFrame struct {
+	// at is where its '{' stands in out, and entries how many of its own it has
+	// written -- which is not the step's index, since a merge key writes none.
+	at      int
+	entries int
+	// valueAt is where the value of the entry being written begins, and -1
+	// where the entry has none yet.
+	valueAt int
+	// merged holds what each "<<" of this mapping names, in the order they were
+	// written. Empty for the mappings that have none, which is nearly all.
+	merged [][]byte
+	// mergeValue says the next value handed over belongs to a "<<" and is to be
+	// collected rather than written. mergeSeq says that value is a sequence of
+	// aliases and its depth, so its own brackets are not written either.
+	mergeValue bool
+	mergeSeq   int
+	// mergedInto says this mapping is the value of a "<<" written out rather
+	// than named, so what it writes goes to the mapping around it rather than
+	// into the output. It is -1 for every other mapping.
+	mergedInto int
+}
+
+func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
+	if w.err != nil {
+		return false
+	}
+	if at.Depth == 0 && at.In == parser.KindNone {
+		if _, isDirective := node.(*ast.DirectiveNode); isDirective {
+			// A "%YAML" or "%TAG" line opens a document of its own, ahead of
+			// the one it applies to. It holds no value.
+			return false
+		}
+		w.openDocument()
 	}
 
-	return nil, false
+	if frame := w.frame(); frame != nil && frame.mergeValue {
+		return w.collectMerge(node, at)
+	}
+
+	if _, merge := node.(*ast.MergeKeyNode); merge {
+		// "<<" names no key of its own: what it brings in is written at the end
+		// of the mapping, where the keys the mapping writes itself are known.
+		// Nothing goes over here, not even the comma an entry would take.
+		if frame := w.frame(); frame != nil {
+			frame.mergeValue = true
+			frame.mergeSeq = -1
+		}
+
+		return false
+	}
+
+	w.separate(at)
+
+	switch n := node.(type) {
+	case *ast.MappingKeyNode:
+		// "? k" addresses the entry by whatever k writes. What that is comes
+		// over inside this node; closing it turns what was written into the
+		// string a JSON key has to be.
+		w.keys = append(w.keys, len(w.out))
+
+		return true
+	case *ast.MappingNode:
+		w.openCollectionKey(at)
+		w.maps = append(w.maps, mapFrame{at: len(w.out), valueAt: -1, mergedInto: -1})
+		w.out = append(w.out, '{')
+	case *ast.SequenceNode:
+		w.openCollectionKey(at)
+		w.out = append(w.out, '[')
+	case *ast.AnchorNode:
+		w.openAnchor(n, at.Key)
+	case *ast.AliasNode:
+		w.writeAlias(n, at)
+	case *ast.TagNode:
+		// A tag opens before the node it types is parsed, so TagNode.Value is
+		// nil here and what the tag stands on is written when it closes.
+		w.tags = append(w.tags, tagMark{at: len(w.out), key: at.Key})
+	default:
+		w.scalar(node, at)
+	}
+
+	return true
 }
 
-// jsonFolder writes each node as JSON as the parser finishes it.
-//
-// done holds the text written for a node and not yet taken by the collection
-// around it. claim deletes as it reads, so a node's text lives here from the
-// moment the node is finished to the moment its collection takes it.
-//
-// named and anchored record what an anchor stands for: the text its node wrote,
-// which an alias writes again, and the node itself, which a merge key reads
-// entries out of.
-type jsonFolder struct {
-	done     map[ast.Node][]byte
-	named    map[string][]byte
-	anchored map[string]ast.Node
-	err      error
-}
-
-// complete writes n as JSON. The parser calls it in completion order, so every
-// child of n has already been written and is waiting in done.
-func (w *jsonFolder) complete(n ast.Node) {
+func (w *jsonWriter) Leave(node ast.Node, at parser.Step) {
 	if w.err != nil {
 		return
 	}
 
-	switch t := n.(type) {
-	case *ast.MappingValueNode:
-		w.done[t] = w.entry(nil, t)
-	case *ast.MappingNode:
-		w.done[t] = w.mapping(t)
-	case *ast.SequenceNode:
-		w.done[t] = w.sequence(t)
-	case *ast.AnchorNode:
-		w.done[t] = w.anchor(t)
-	case *ast.AliasNode:
-		w.done[t] = w.alias(t)
-	case *ast.TagNode:
-		w.done[t] = w.tagged(t)
-	case *ast.DocumentNode:
-		// An anchor belongs to the document it was written in: a stream is a
-		// run of documents, each independent of the rest, and an alias naming
-		// an anchor from an earlier one has nothing to name.
-		clear(w.named)
-		clear(w.anchored)
-	case *ast.DirectiveNode, *ast.CommentNode, *ast.CommentGroupNode:
-		// Not values. The document hands its body over to ToJSON directly.
-	default:
-		w.done[n] = w.render(n)
-	}
-}
-
-// claim takes what was written for n and forgets n was ever here.
-//
-// A node the parser built without reporting it -- a key, or a null standing in
-// for an absent value -- is written here instead.
-func (w *jsonFolder) claim(n ast.Node) []byte {
-	if n == nil {
-		return []byte("null")
-	}
-	if out, ok := w.done[n]; ok {
-		delete(w.done, n)
-
-		return out
-	}
-
-	return w.render(n)
-}
-
-// entry writes one mapping entry, "key":value.
-func (w *jsonFolder) entry(out []byte, t *ast.MappingValueNode) []byte {
-	out = w.appendKey(out, t.Key)
-	out = append(out, ':')
-
-	return append(out, w.claim(t.Value)...)
-}
-
-// mapping writes a mapping, joining the entries it has already written.
-func (w *jsonFolder) mapping(t *ast.MappingNode) []byte {
-	if hasMergeKey(t) {
-		return w.mergedMapping(t)
-	}
-
-	out := []byte{'{'}
-	for i, entry := range t.Values {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = append(out, w.claim(entry)...)
-	}
-
-	return append(out, '}')
-}
-
-// sequence writes a sequence, joining the values it has already written.
-func (w *jsonFolder) sequence(t *ast.SequenceNode) []byte {
-	out := []byte{'['}
-	for i, value := range t.Values {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = append(out, w.claim(value)...)
-	}
-
-	return append(out, ']')
-}
-
-// anchor writes the node it names and keeps the text under the name, so an
-// alias can write it again and a merge key can read the node's entries.
-func (w *jsonFolder) anchor(t *ast.AnchorNode) []byte {
-	out := w.claim(t.Value)
-
-	name := anchorName(t.Name)
-	if name == "" {
-		return out
-	}
-	if w.named == nil {
-		w.named = make(map[string][]byte)
-		w.anchored = make(map[string]ast.Node)
-	}
-	w.named[name] = out
-	w.anchored[name] = t.Value
-
-	return out
-}
-
-// alias writes again what the anchor it names wrote.
-//
-// An anchor is readable from the moment it closes, so an alias naming one that
-// has not closed -- a forward reference, or a node aliasing itself -- names
-// nothing and is refused, as it is when the document is read into Go values.
-func (w *jsonFolder) alias(t *ast.AliasNode) []byte {
-	name := anchorName(t.Value)
-	if out, ok := w.named[name]; ok {
-		return out
-	}
-	w.fail(yamlerrors.NewSyntax(fmt.Sprintf("could not find alias %q", name), t.Value.GetToken()))
-
-	return []byte("null")
-}
-
-func (w *jsonFolder) fail(err error) {
-	if w.err == nil {
-		w.err = err
-	}
-}
-
-// anchorName reads the name off an anchor or an alias.
-func anchorName(n ast.Node) string {
-	s, ok := n.(*ast.StringNode)
-	if !ok {
-		return ""
-	}
-
-	return s.Value
-}
-
-// appendKey writes a mapping key, which JSON holds as a string whatever YAML
-// read it as.
-func (w *jsonFolder) appendKey(out []byte, n ast.Node) []byte {
-	if key, ok := w.scalarKeyText(n); ok {
-		w.claim(n)
-
-		return appendJSONString(out, key)
-	}
-
-	text := w.claim(n)
-	if len(text) != 0 && text[0] == '"' {
-		return append(out, text...)
-	}
-
-	return appendJSONString(out, string(text))
-}
-
-// scalarKeyText is a scalar key as the string a mapping holds it under.
-//
-// JSON keys are strings, so the key is the value written out: 4.0 and 4 address
-// the same entry and are both "4". A collection used as a key has no such
-// spelling and is written as its own JSON instead.
-func (w *jsonFolder) scalarKeyText(n ast.Node) (string, bool) {
-	n = w.keyNode(n)
-	if !isScalarNode(n) {
-		return "", false
-	}
-
-	switch t := jsonScalarOf(n).(type) {
-	case nil:
-		return "", false
-	case string:
-		return t, true
-	default:
-		return fmt.Sprint(t), true
-	}
-}
-
-// keyNode is the node a key stands for: "? k" is written for k, and an alias
-// key addresses what its anchor names.
-func (w *jsonFolder) keyNode(n ast.Node) ast.Node {
-	if k, ok := n.(*ast.MappingKeyNode); ok {
-		n = k.Value
-	}
-	if alias, ok := n.(*ast.AliasNode); ok {
-		if named := w.anchored[anchorName(alias.Value)]; named != nil {
-			return named
-		}
-	}
-
-	return n
-}
-
-// isScalarNode reports whether n is one of the nodes holding a single value.
-//
-// The ast.ScalarNode interface is wider than that -- an anchor and an alias
-// answer GetValue with their own name -- so the types are named here.
-func isScalarNode(n ast.Node) bool {
-	switch n.(type) {
-	case *ast.StringNode, *ast.IntegerNode, *ast.FloatNode, *ast.BoolNode,
-		*ast.NullNode, *ast.InfinityNode, *ast.NanNode, *ast.LiteralNode:
-		return true
-	default:
-		return false
-	}
-}
-
-// render writes n from the tree, taking any child the parser already reported.
-//
-// complete goes through here, and so does claim for the nodes the parser builds
-// without reporting -- so the two arms cannot drift: what a node converts to is
-// written once, here.
-func (w *jsonFolder) render(n ast.Node) []byte {
-	switch t := n.(type) {
-	case *ast.MappingValueNode:
-		return w.entry(nil, t)
-	case *ast.MappingNode:
-		return w.mapping(t)
-	case *ast.SequenceNode:
-		return w.sequence(t)
-	case *ast.AnchorNode:
-		return w.anchor(t)
-	case *ast.AliasNode:
-		return w.alias(t)
-	case *ast.TagNode:
-		out := w.tagged(t)
-		// "!!int &c 4" tags the value the anchor names. The anchor was written
-		// before the tag was read, so what it stands for is corrected here.
-		w.retagAnchor(t, out)
-
-		return out
-	case *ast.DocumentNode:
-		return w.claim(t.Body)
+	switch n := node.(type) {
 	case *ast.MappingKeyNode:
-		return w.claim(t.Value)
-	case *ast.FloatNode:
-		return appendJSONFloat(nil, t.GetValue())
-	default:
-		return appendJSONScalar(nil, jsonScalarOf(n))
-	}
-}
+		w.closeKey(parser.Step{Key: true})
+	case *ast.TagNode:
+		w.closeTag(n)
+	case *ast.MappingNode:
+		w.closeMapping()
+		w.closeKey(at)
+	case *ast.SequenceNode:
+		if frame := w.frame(); frame != nil && frame.mergeSeq == at.Depth {
+			frame.mergeSeq, frame.mergeValue = -1, false
 
-// hasMergeKey reports whether any entry of t is a "<<".
-func hasMergeKey(t *ast.MappingNode) bool {
-	for _, entry := range t.Values {
-		if _, ok := entry.Key.(*ast.MergeKeyNode); ok {
-			return true
-		}
-	}
-
-	return false
-}
-
-// mergedMapping writes a mapping holding a "<<" entry.
-//
-// The merged keys go where the "<<" stands and the mapping's own win: a key
-// written here overrides the one merged in, and the first merge to name a key
-// beats a later one. JSON has no way to write a key twice, so the entries are
-// gathered and deduplicated before any of them is written.
-func (w *jsonFolder) mergedMapping(t *ast.MappingNode) []byte {
-	local := make(map[string]struct{}, len(t.Values))
-	for _, entry := range t.Values {
-		if _, ok := entry.Key.(*ast.MergeKeyNode); ok {
-			continue
-		}
-		local[string(w.keyText(entry.Key))] = struct{}{}
-	}
-
-	var (
-		out  = []byte{'{'}
-		seen = make(map[string]struct{}, len(t.Values))
-	)
-	write := func(key, value []byte) {
-		if _, ok := seen[string(key)]; ok {
 			return
 		}
-		seen[string(key)] = struct{}{}
-		if len(out) > 1 {
-			out = append(out, ',')
-		}
-		out = appendJSONString(out, string(key))
-		out = append(out, ':')
-		out = append(out, value...)
+		w.out = append(w.out, ']')
+		w.closeKey(at)
+	case *ast.AnchorNode:
+		w.closeAnchor(n)
 	}
 
-	for _, entry := range t.Values {
-		if _, ok := entry.Key.(*ast.MergeKeyNode); ok {
-			w.eachMerged(entry.Value, func(key, value []byte) {
-				if _, ok := local[string(key)]; ok {
-					return
-				}
-				write(key, value)
-			})
-
-			continue
-		}
-		delete(w.done, entry)
-		write(w.keyText(entry.Key), w.claim(entry.Value))
+	if at.Depth == 0 && at.In == parser.KindNone && w.documents == 1 {
+		w.firstEnd = len(w.out)
 	}
-
-	return append(out, '}')
 }
 
-// eachMerged calls do with every entry a "<<" value brings in.
+// openCollectionKey records where a collection standing as a mapping key
+// begins, so that closeKey can hold it to the string JSON keys are.
+func (w *jsonWriter) openCollectionKey(at parser.Step) {
+	if at.Key {
+		w.keys = append(w.keys, len(w.out))
+	}
+}
+
+// closeKey turns what a key wrote into the string it addresses the entry by.
 //
-// The value is an alias naming a mapping, a mapping written out, or a sequence
-// of either -- earlier first, since an earlier merge wins.
-func (w *jsonFolder) eachMerged(value ast.Node, do func(key, value []byte)) {
-	switch t := w.resolveAlias(value).(type) {
-	case *ast.MappingNode:
-		for _, entry := range t.Values {
-			if _, ok := entry.Key.(*ast.MergeKeyNode); ok {
-				w.eachMerged(entry.Value, do)
+// A key may be written as any JSON at all -- "? [a, b]" and "[a, b]: v" both
+// address the entry by a sequence -- and JSON holds a key as a string, so what
+// was written is read back as one.
+func (w *jsonWriter) closeKey(at parser.Step) {
+	if !at.Key {
+		return
+	}
+	from := w.keys[len(w.keys)-1]
+	w.keys = w.keys[:len(w.keys)-1]
 
-				continue
+	text := unquoted(w.out[from:])
+	w.out = appendJSONString(w.out[:from], text)
+}
+
+// openDocument starts a document of the stream.
+//
+// An anchor belongs to the document it was written in, so what the last one
+// named is forgotten here. The first document's text is what ToJSON returns;
+// the rest are written after it and cut off, so that an alias naming nothing is
+// still refused wherever it stands.
+func (w *jsonWriter) openDocument() {
+	w.documents++
+	clear(w.named)
+	w.maps = w.maps[:0]
+	w.open = w.open[:0]
+}
+
+// frame is the mapping being written, or nil outside one.
+func (w *jsonWriter) frame() *mapFrame {
+	if len(w.maps) == 0 {
+		return nil
+	}
+
+	return &w.maps[len(w.maps)-1]
+}
+
+// separate writes what goes between two entries of a collection, and keeps the
+// count the next one needs.
+//
+// A mapping hands a key over and then its value, so the step says which this
+// is: a comma before a key that is not the first written, and a colon before a
+// value. The count is the mapping's own rather than the step's index, since a
+// "<<" takes an index and writes nothing.
+//
+// It runs before anything is written and before any frame is pushed, so the
+// mapping it reads is the one the node stands in rather than one the node is
+// about to open.
+func (w *jsonWriter) separate(at parser.Step) {
+	switch at.In {
+	case parser.KindMapping:
+		frame := w.frame()
+		if frame == nil {
+			return
+		}
+		if at.Key {
+			if frame.entries > 0 {
+				w.out = append(w.out, ',')
 			}
-			do(w.keyText(entry.Key), w.render(entry.Value))
+			frame.entries++
+			frame.valueAt = -1
+
+			return
 		}
-	case *ast.SequenceNode:
-		for _, elem := range t.Values {
-			w.eachMerged(elem, do)
+		if frame.valueAt >= 0 {
+			// A second value for one key. The parse can hand two over -- "&!"
+			// reads as a tag on nothing and an anchor, both entries of the
+			// mapping -- and the last of them is the one the document is read
+			// into Go values as.
+			w.out = w.out[:frame.valueAt]
+
+			return
 		}
-	case *ast.MappingValueNode:
-		do(w.keyText(t.Key), w.render(t.Value))
+		w.out = append(w.out, ':')
+		frame.valueAt = len(w.out)
+	case parser.KindSequence:
+		if at.Index > 0 {
+			w.out = append(w.out, ',')
+		}
+	}
+}
+
+// scalar writes one value, as a string where it stands as a mapping's key.
+func (w *jsonWriter) scalar(node ast.Node, at parser.Step) {
+	if at.Key {
+		w.out = appendJSONString(w.out, keyText(node))
+
+		return
+	}
+
+	w.out = appendJSONScalar(w.out, jsonScalarOf(node))
+}
+
+// keyText is a scalar key as the string a mapping holds it under. JSON keys are
+// strings, so 4.0 and 4 address the same entry and are both "4".
+func keyText(node ast.Node) string {
+	switch t := jsonScalarOf(node).(type) {
 	case nil:
-		w.fail(yamlerrors.NewSyntax("could not find the anchor a merge key names", value.GetToken()))
+		// A key left empty addresses the entry by the word JSON writes for it,
+		// which is what the value converter held it under.
+		return "null"
+	case string:
+		return t
 	default:
-		w.fail(yamlerrors.NewUnexpectedNodeType(t.Type(), ast.MappingType, t.GetToken()))
+		return fmt.Sprint(t)
 	}
 }
 
-// resolveAlias follows an alias to the node its anchor names.
-func (w *jsonFolder) resolveAlias(n ast.Node) ast.Node {
-	alias, ok := n.(*ast.AliasNode)
-	if !ok {
-		return n
-	}
-
-	return w.anchored[anchorName(alias.Value)]
-}
-
-// keyText is a mapping key as the string JSON holds it, unquoted.
-func (w *jsonFolder) keyText(n ast.Node) []byte {
-	if key, ok := w.scalarKeyText(n); ok {
-		w.claim(n)
-
-		return []byte(key)
-	}
-
-	return w.claim(n)
-}
-
-// tagged writes a node carrying a tag.
+// closeTag writes what a tag stands on, once the walk has read it.
+//
+// A tag on a collection is written by the collection itself, which went over
+// between this tag's Enter and Leave; there is nothing left to do but hold the
+// text to a string where the tag stands as a mapping key. A tag on a scalar
+// writes nothing of its own -- parseScalarValue builds the value without
+// handing it over -- so the scalar is written here, from the node.
 //
 // The eight tags that name a scalar type are read off the text the scalar was
 // written with, so "!!str 1" is the string "1" and "!!int \"3\"" the number 3.
 // Every other tag -- !!seq, !!map, !!set, !!omap, !!timestamp, !!merge and any
-// the document defines itself -- writes the value it stands on.
-func (w *jsonFolder) tagged(t *ast.TagNode) []byte {
-	if t.Start == nil {
-		return w.claim(t.Value)
-	}
-	if t.Directive != nil {
-		// A "%TAG" line gives the handle a prefix of the document's own, so
-		// "!!int" under one names the document's type and not YAML's.
-		return w.claim(t.Value)
+// the document defines itself -- writes the value as it stands.
+func (w *jsonWriter) closeTag(t *ast.TagNode) {
+	mark := w.tags[len(w.tags)-1]
+	w.tags = w.tags[:len(w.tags)-1]
+
+	switch resolved, ok := w.taggedValue(t); {
+	case ok:
+		// The tag names a scalar type, so it says what the value is whatever
+		// the value wrote for itself: "!!str" on an empty node is "", not null.
+		w.out = append(w.out[:mark.at], resolved...)
+	case len(w.out) == mark.at:
+		// A tag on a scalar writes nothing of its own -- parseScalarValue
+		// builds the value without handing it over -- so it is written here.
+		w.out = appendJSONScalar(w.out, jsonScalarOf(t.Value))
 	}
 
+	if mark.key {
+		w.out = appendJSONString(w.out[:mark.at], unquoted(w.out[mark.at:]))
+	}
+}
+
+// taggedValue is the JSON a tagged scalar is written as, and whether the tag
+// names a scalar type at all.
+//
+// A "%TAG" line gives the handle a prefix of the document's own, so "!!int"
+// under one names the document's type and not YAML's, and the value stands as
+// it is written.
+func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	text, isScalar := taggedText(t.Value)
-	if !isScalar {
-		return w.claim(t.Value)
+	if t.Start == nil || t.Directive != nil || !isScalar {
+		return nil, false
 	}
 
+	var written []byte
 	switch token.ReservedTagKeyword(t.Start.Value) {
 	case token.StringTag:
-		w.claim(t.Value)
-
-		return appendJSONString(nil, text)
+		written = appendJSONString(nil, text)
 	case token.IntegerTag:
-		w.claim(t.Value)
-
-		return strconv.AppendInt(nil, taggedInteger(text), 10)
+		written = strconv.AppendInt(nil, taggedInteger(text), 10)
 	case token.FloatTag:
-		w.claim(t.Value)
 		f, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			f = 0
 		}
-
-		return appendJSONFloat(nil, f)
+		written = appendJSONFloat(nil, f)
 	case token.BooleanTag:
-		w.claim(t.Value)
 		b, ok := token.ParseBool(text)
 		if !ok {
 			// The tag says boolean whatever the text is, so a spelling neither
@@ -480,32 +392,322 @@ func (w *jsonFolder) tagged(t *ast.TagNode) []byte {
 		if !ok {
 			w.fail(yamlerrors.NewSyntax(fmt.Sprintf("cannot convert %q to boolean", text), t.Value.GetToken()))
 
-			return []byte("false")
+			return []byte("false"), true
 		}
-
-		return strconv.AppendBool(nil, b)
+		written = strconv.AppendBool(nil, b)
 	case token.NullTag:
-		w.claim(t.Value)
-
-		return []byte("null")
+		written = []byte("null")
 	case token.BinaryTag:
-		w.claim(t.Value)
-
-		return appendJSONBinary(nil, text)
+		written = appendJSONBinary(nil, text)
 	default:
-		return w.claim(t.Value)
+		return nil, false
+	}
+
+	return written, true
+}
+
+// openAnchor records the name and where the node it names will start.
+func (w *jsonWriter) openAnchor(node *ast.AnchorNode, key bool) {
+	// An anchor whose name the scan could not read -- "&\"\"" and the like --
+	// names nothing an alias can reach, so nothing is remembered under it. The
+	// node it stands on is written as it would be without the anchor.
+	w.open = append(w.open, anchorMark{name: anchorName(node.Name), at: len(w.out), key: key})
+}
+
+// closeAnchor keeps what the anchored node wrote.
+//
+// An anchor standing as a mapping key holds whatever JSON its node wrote, and a
+// JSON key is a string: "&n x" as a key addresses the entry by "x", and that is
+// what "*n" writes later.
+func (w *jsonWriter) closeAnchor(node *ast.AnchorNode) {
+	if len(w.open) == 0 {
+		return
+	}
+	mark := w.open[len(w.open)-1]
+	w.open = w.open[:len(w.open)-1]
+
+	if len(w.out) == mark.at {
+		// A key written as "{&a 21}" is read without its parts going over on
+		// their own, so the anchor stands around a node the walk never handed
+		// over. It is written here, from the node.
+		w.out = appendJSONScalar(w.out, jsonScalarOf(node.Value))
+	}
+
+	// What the anchor stands for is the value its node wrote, not the string a
+	// key is held to: "&a FALSE" as a key addresses the entry by "false" and
+	// "*a" as a value elsewhere is still the boolean.
+	w.remember(mark.name, w.out[mark.at:])
+
+	if mark.key {
+		w.out = appendJSONString(w.out[:mark.at], unquoted(w.out[mark.at:]))
 	}
 }
 
-// retagAnchor writes down what an anchor standing under a tag now stands for.
-func (w *jsonFolder) retagAnchor(t *ast.TagNode, out []byte) {
-	anchor, ok := t.Value.(*ast.AnchorNode)
-	if !ok {
+// remember keeps a copy of what an anchor wrote. The text is copied because out
+// grows as the rest of the document is written and a slice of it would not
+// survive the next append.
+func (w *jsonWriter) remember(name string, text []byte) {
+	if name == "" {
 		return
 	}
-	if name := anchorName(anchor.Name); name != "" {
-		w.named[name] = out
+	if w.named == nil {
+		w.named = make(map[string][]byte)
 	}
+	w.named[name] = append([]byte(nil), text...)
+}
+
+// writeAlias writes again what the anchor of the same name wrote.
+//
+// An anchor is readable from the moment it closes, so an alias naming one that
+// has not closed -- a forward reference, or a node aliasing itself -- names
+// nothing and is refused, as it is when the document is read into Go values.
+func (w *jsonWriter) writeAlias(node *ast.AliasNode, at parser.Step) {
+	name := anchorName(node.Value)
+	text, ok := w.named[name]
+	if !ok {
+		w.fail(yamlerrors.NewSyntax(fmt.Sprintf("could not find alias %q", name), node.GetToken()))
+
+		return
+	}
+	if at.Key {
+		// A JSON key is a string whatever the anchored node was.
+		w.out = appendJSONString(w.out, unquoted(text))
+
+		return
+	}
+	w.out = append(w.out, text...)
+}
+
+// unquoted is the text of a JSON string, or the JSON itself where it is not
+// one. "null" is the word, not the empty string a JSON null reads as.
+func unquoted(text []byte) string {
+	if len(text) == 0 || text[0] != '"' {
+		return string(text)
+	}
+	var s string
+	if err := json.Unmarshal(text, &s); err != nil {
+		return string(text)
+	}
+
+	return s
+}
+
+// anchorName reads the name off an anchor or an alias.
+func anchorName(n ast.Node) string {
+	if n == nil || n.GetToken() == nil {
+		return ""
+	}
+
+	return n.GetToken().Value
+}
+
+func (w *jsonWriter) fail(err error) {
+	if w.err == nil {
+		w.err = err
+	}
+}
+
+// collectMerge takes what a "<<" names instead of writing it.
+//
+// The value is an alias naming a mapping, or a sequence of them -- earlier
+// first, since an earlier merge wins. Nothing is written here: the entries go in
+// at the end of the mapping, where the keys it writes itself are known.
+func (w *jsonWriter) collectMerge(node ast.Node, at parser.Step) bool {
+	frame := w.frame()
+
+	switch n := node.(type) {
+	case *ast.SequenceNode:
+		frame.mergeSeq = at.Depth
+
+		return true
+	case *ast.AliasNode:
+		name := anchorName(n.Value)
+		text, ok := w.named[name]
+		if !ok {
+			w.fail(yamlerrors.NewSyntax(fmt.Sprintf("could not find alias %q", name), n.GetToken()))
+
+			return false
+		}
+		if len(text) == 0 || text[0] != '{' {
+			// "<<" takes a mapping, or a sequence of them. An anchor naming a
+			// scalar or a sequence brings in no entries and is refused, as it
+			// is when the document is read into Go values.
+			w.fail(yamlerrors.NewUnexpectedNodeType(n.Type(), ast.MappingType, n.GetToken()))
+
+			return false
+		}
+		frame.merged = append(frame.merged, text)
+		if frame.mergeSeq < 0 {
+			frame.mergeValue = false
+		}
+
+		return false
+	case *ast.MappingNode:
+		// "<<: {a: 1}" merges a mapping written out. It is not read here --
+		// nothing has written it yet -- so the walk goes into it and what it
+		// writes is taken at its own Leave.
+		frame.mergeValue = false
+		w.separate(at)
+		w.maps = append(w.maps, mapFrame{at: len(w.out), valueAt: -1, mergedInto: frame.at})
+		w.out = append(w.out, '{')
+
+		return true
+	default:
+		w.fail(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+
+		return false
+	}
+}
+
+// closeMapping writes what the mapping's "<<" entries bring in, and closes it.
+//
+// The merged keys go in at the end, and the mapping's own win: a key written
+// here overrides the one merged in, and the first merge to name a key beats a
+// later one. JSON has no way to write a key twice, so what the mapping already
+// holds is read back out of what was written before anything is added.
+func (w *jsonWriter) closeMapping() {
+	frame := w.maps[len(w.maps)-1]
+	w.maps = w.maps[:len(w.maps)-1]
+
+	if frame.mergedInto >= 0 {
+		// "<<: {a: 1}" merges a mapping written out. It had to be walked to be
+		// read, so it was written where it stood; it comes back out of the
+		// output and goes in with the rest of what the "<<" brings.
+		w.out = append(w.out, '}')
+		text := append([]byte(nil), w.out[frame.at:]...)
+		w.out = w.out[:frame.at]
+		if into := w.frame(); into != nil {
+			into.merged = append(into.merged, text)
+		}
+
+		return
+	}
+
+	if len(frame.merged) == 0 {
+		w.out = append(w.out, '}')
+
+		return
+	}
+
+	held := make(map[string]struct{}, frame.entries)
+	for _, pair := range jsonPairs(w.out[frame.at:]) {
+		held[pair.key] = struct{}{}
+	}
+	for _, text := range frame.merged {
+		for _, pair := range jsonPairs(text) {
+			if _, ok := held[pair.key]; ok {
+				continue
+			}
+			held[pair.key] = struct{}{}
+			if frame.entries > 0 {
+				w.out = append(w.out, ',')
+			}
+			w.out = append(w.out, text[pair.from:pair.to]...)
+			frame.entries++
+		}
+	}
+	w.out = append(w.out, '}')
+}
+
+// jsonPair is one entry of a JSON object: its key, and where the whole
+// "key":value stands in the object's text.
+type jsonPair struct {
+	key      string
+	from, to int
+}
+
+// jsonPairs reads the entries of a JSON object back out of the text.
+//
+// The text is what this converter wrote, so the shapes are the ones it writes
+// and nothing else: a value is a string, a number, a literal, an object or an
+// array, and a string escapes with a backslash. Anything that does not open
+// with '{' has no entries.
+func jsonPairs(text []byte) []jsonPair {
+	if len(text) == 0 || text[0] != '{' {
+		return nil
+	}
+
+	var (
+		pairs []jsonPair
+		i     = 1
+	)
+	for i < len(text) && text[i] != '}' {
+		if text[i] == ',' {
+			i++
+
+			continue
+		}
+		start := i
+		key, next, ok := jsonString(text, i)
+		if !ok {
+			return pairs
+		}
+		i = next
+		if i >= len(text) || text[i] != ':' {
+			return pairs
+		}
+		i = jsonValueEnd(text, i+1)
+		pairs = append(pairs, jsonPair{key: key, from: start, to: i})
+	}
+
+	return pairs
+}
+
+// jsonString reads the string at i and returns it, and where it ends.
+func jsonString(text []byte, i int) (string, int, bool) {
+	if i >= len(text) || text[i] != '"' {
+		return "", i, false
+	}
+	end := jsonValueEnd(text, i)
+	var s string
+	if err := json.Unmarshal(text[i:end], &s); err != nil {
+		return "", i, false
+	}
+
+	return s, end, true
+}
+
+// jsonValueEnd returns where the value starting at i ends.
+func jsonValueEnd(text []byte, i int) int {
+	depth := 0
+	for i < len(text) {
+		switch text[i] {
+		case '"':
+			for i++; i < len(text); i++ {
+				if text[i] == '\\' {
+					i++
+
+					continue
+				}
+				if text[i] == '"' {
+					break
+				}
+			}
+			i++
+			if depth == 0 {
+				return i
+			}
+
+			continue
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth <= 0 {
+				return i + 1
+			}
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		}
+		i++
+		if depth == 0 && i < len(text) && (text[i] == ',' || text[i] == '}' || text[i] == ']') {
+			return i
+		}
+	}
+
+	return i
 }
 
 // taggedInteger reads the whole number a "!!int" stands on. A text that is not
@@ -539,7 +741,6 @@ func taggedText(n ast.Node) (string, bool) {
 
 		return l.Value.Value, true
 	}
-
 	if _, isNull := n.(*ast.NullNode); isNull {
 		// "!!str" on its own tags the empty string, not the word "null".
 		return "", true
@@ -547,13 +748,26 @@ func taggedText(n ast.Node) (string, bool) {
 	if !isScalarNode(n) {
 		return "", false
 	}
-
 	tk := n.GetToken()
 	if tk == nil {
 		return "", false
 	}
 
 	return tk.Value, true
+}
+
+// isScalarNode reports whether n is one of the nodes holding a single value.
+//
+// The ast.ScalarNode interface is wider than that -- an anchor and an alias
+// answer GetValue with their own name -- so the types are named here.
+func isScalarNode(n ast.Node) bool {
+	switch n.(type) {
+	case *ast.StringNode, *ast.IntegerNode, *ast.FloatNode, *ast.BoolNode,
+		*ast.NullNode, *ast.InfinityNode, *ast.NanNode, *ast.LiteralNode:
+		return true
+	default:
+		return false
+	}
 }
 
 // jsonScalarOf is the Go value a scalar node holds.
