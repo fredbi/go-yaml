@@ -661,9 +661,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.enter(ctx, node, KindMapping) {
-		return node, nil
-	}
+	p.enter(ctx, node, KindMapping)
 	defer p.leave(ctx, node)
 	ctx.goNext() // skip MappingStart token
 
@@ -904,9 +902,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	// over instead.
 	mapNode := ctx.arena.Mapping(keyTk.RawToken(), false, nil)
 	mapNode.SetPathNode(ctx.path)
-	if !p.enter(ctx, mapNode, KindMapping) {
-		return mapNode, nil
-	}
+	p.enter(ctx, mapNode, KindMapping)
 
 	// Where the arena stands before an entry is read. A walk has seen the entry
 	// by the time the next one starts and keeps none of it, so the cells go out
@@ -1471,9 +1467,7 @@ func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 	// node and closes after it. Handing it over afterwards, as a node holding
 	// nothing does, put it beside its own value at the same depth and lost the
 	// nesting: "a: &x 1" read as the two values 1 and &x.
-	if !p.enter(ctx, anchor, KindAnchor) {
-		return nil, nil
-	}
+	p.enter(ctx, anchor, KindAnchor)
 	defer p.leave(ctx, anchor)
 
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
@@ -1725,9 +1719,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.enter(ctx, node, KindSequence) {
-		return node, nil
-	}
+	p.enter(ctx, node, KindSequence)
 	defer p.leave(ctx, node)
 
 	ctx.goNext() // skip SequenceStart token
@@ -1880,9 +1872,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		return nil, err
 	}
 
-	if !p.enter(ctx, seqNode, KindSequence) {
-		return seqNode, nil
-	}
+	p.enter(ctx, seqNode, KindSequence)
 	defer p.leave(ctx, seqNode)
 
 	// The entries are gathered on a stack the parser reuses for every sequence,
