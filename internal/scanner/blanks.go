@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"unicode/utf8"
 
-	"github.com/go-openapi/go-yaml/internal/swar"
+	"github.com/go-openapi/go-yaml/internal/scanner/swar"
 	"github.com/go-openapi/go-yaml/token"
 )
 

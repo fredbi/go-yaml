@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"fmt"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/token"
@@ -67,8 +68,8 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 		if isNewLineChar(c) {
 			keep(idx)
 			notSpaceIdx := -1
-			for i := len(value) - 1; i >= 0; i-- {
-				if value[i] == ' ' {
+			for i, v := range slices.Backward(value) {
+				if v == ' ' {
 					continue
 				}
 				notSpaceIdx = i
@@ -170,8 +171,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 		if isNewLineChar(c) {
 			keep(idx)
 			notSpaceIdx := -1
-			for i := len(value) - 1; i >= 0; i-- {
-				if value[i] == ' ' {
+			for i, v := range slices.Backward(value) {
+				if v == ' ' {
 					continue
 				}
 				notSpaceIdx = i

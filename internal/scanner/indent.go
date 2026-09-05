@@ -3,7 +3,7 @@ package scanner
 import (
 	"fmt"
 
-	"github.com/go-openapi/go-yaml/internal/probe"
+	"github.com/go-openapi/go-yaml/internal/scanner/probe"
 	"github.com/go-openapi/go-yaml/token"
 )
 

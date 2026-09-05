@@ -146,7 +146,7 @@ func TestControlMasksMatchTheByteRule(t *testing.T) {
 	neighbors := []byte{0x00, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x1F, 0x20, 0x21, 0x7E, 0x7F}
 
 	for _, filler := range neighbors {
-		for c := 0; c < 0x80; c++ {
+		for c := range 0x80 {
 			for lane := range 8 {
 				var b [8]byte
 				for i := range b {

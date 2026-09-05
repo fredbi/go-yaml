@@ -3,11 +3,12 @@ package scanner
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/go-openapi/go-yaml/internal/probe"
+	"github.com/go-openapi/go-yaml/internal/scanner/probe"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -633,8 +634,8 @@ func (c *Context) bufferedSrc() []byte {
 		} else if !mstate.hasKeepAllEndNewlineOpt() {
 			// Normally, all but one of the trailing newline characters are removed.
 			var newLineCharCount int
-			for i := len(src) - 1; i >= 0; i-- {
-				if src[i] == '\n' {
+			for _, s := range slices.Backward(src) {
+				if s == '\n' {
 					newLineCharCount++
 					continue
 				}

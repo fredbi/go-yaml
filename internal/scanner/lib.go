@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/go-openapi/go-yaml/internal/swar"
+	"github.com/go-openapi/go-yaml/internal/scanner/swar"
 	"github.com/go-openapi/go-yaml/token"
 )
 

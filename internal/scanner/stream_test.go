@@ -101,7 +101,7 @@ func scanErr(src string) error {
 	var s scanner.Scanner
 	s.Init([]byte(src))
 
-	for calls := 0; calls < maxScanCalls; calls++ {
+	for range maxScanCalls {
 		if _, ok := s.NextToken(); !ok {
 			return s.Err()
 		}

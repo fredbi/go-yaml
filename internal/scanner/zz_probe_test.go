@@ -13,8 +13,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
-	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/internal/scanner"
+	"github.com/go-openapi/go-yaml/internal/scanner/probe"
 )
 
 // stateLedger records how often two pieces of the scanner's state that look
