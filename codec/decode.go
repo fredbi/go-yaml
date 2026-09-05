@@ -1374,13 +1374,25 @@ func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFi
 	return nil
 }
 
-// This is a subset of the formats allowed by the regular expression
-// defined at http://yaml.org/type/timestamp.html.
+// allowedTimestampFormats is a subset of what the regular expression at
+// http://yaml.org/type/timestamp.html allows.
+//
+// A subset, and the gaps are worth naming. The expression writes the zone as
+// "[-+][0-9][0-9]?(:[0-9][0-9])?", so "-5" and "-05" are as good as "-05:00",
+// and Go's reference layouts spell none of the short ones. It also allows any
+// run of spaces or tabs between the date and the time and before the zone,
+// where a layout carries exactly one space.
+//
+// YAML 1.2's core schema resolves null, bool, int, float and str and no
+// timestamp, so nothing here is reached by resolution: a document gets a
+// time.Time by being decoded into one, or by writing !!timestamp.
 var allowedTimestampFormats = []string{
 	"2006-1-2T15:4:5.999999999Z07:00", // RCF3339Nano with short date fields.
 	"2006-1-2t15:4:5.999999999Z07:00", // RFC3339Nano with short date fields and lower-case "t".
-	"2006-1-2 15:4:5.999999999",       // space separated with no time zone
-	"2006-1-2",                        // date only
+	"2006-1-2 15:4:5.999999999Z07:00", // space separated, with a zone
+	"2006-1-2 15:4:5.999999999 Z07:00",
+	"2006-1-2 15:4:5.999999999", // space separated with no time zone
+	"2006-1-2",                  // date only
 }
 
 func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, error) {
@@ -1406,7 +1418,13 @@ func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, erro
 		}
 		return t, nil
 	}
-	return time.Time{}, nil
+
+	// Refused rather than answered with the zero time. A text no format reads
+	// used to come back as 0001-01-01 with no error, so a document holding
+	// "2001-12-14 21:59:43.10 -5" -- which the timestamp expression allows and
+	// the layouts above do not spell -- decoded to a date nobody wrote.
+	return time.Time{}, yamlerrors.NewSyntax(
+		fmt.Sprintf("cannot read %q as a timestamp", s), src.GetToken())
 }
 
 func (d *Decoder) decodeTime(ctx context.Context, dst reflect.Value, src ast.Node) error {
