@@ -838,7 +838,9 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *tapeToken) (*ast.MappingValue
 
 	// The entry's own tokens are read again once the value under it is parsed,
 	// and the tail passes them meanwhile.
-	defer p.holdRun(keyTk.Seq())()
+	runSeq := keyTk.Seq()
+	p.holdRun(runSeq)
+	defer p.releaseRun(runSeq)
 	if keyTk.GroupType() == TokenGroupMapKeyValue {
 		node, err := p.parseMapKeyValue(ctx.withGroup(p, keyTk.Group), keyTk.Group, nil)
 		if err != nil {
@@ -886,7 +888,9 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *tapeToken) (*ast.MappingValue
 }
 
 func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
-	defer p.holdRun(ctx.currentToken().Seq())()
+	runSeq := ctx.currentToken().Seq()
+	p.holdRun(runSeq)
+	defer p.releaseRun(runSeq)
 
 	base := len(p.keyStack)
 	defer p.closeMapping(base)
@@ -1887,7 +1891,9 @@ func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
 
 func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	seqTk := ctx.currentToken()
-	defer p.holdRun(seqTk.Seq())()
+	runSeq := seqTk.Seq()
+	p.holdRun(runSeq)
+	defer p.releaseRun(runSeq)
 	seqNode, err := newSequenceNode(ctx, seqTk, false)
 	if err != nil {
 		return nil, err

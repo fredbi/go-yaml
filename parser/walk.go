@@ -396,7 +396,7 @@ func (p *Parser) saveHere(from, to int32) {
 }
 
 // holdRun keeps the chunk holding seq while a construct that began there is
-// read, and returns what gives it back.
+// read. releaseRun gives it back, and every caller defers one against the other.
 //
 // The descent reads a construct's own tokens again after everything under it:
 // parseMapEntry reads its key's group once the value below it is parsed, and a
@@ -405,11 +405,21 @@ func (p *Parser) saveHere(from, to int32) {
 //
 // One chunk per level open at once, so what this holds is the depth of the
 // document and not its length.
-func (p *Parser) holdRun(seq int32) func() {
+//
+// The pair takes the sequence rather than holdRun returning what undoes it: a
+// closure escapes, and this runs once per mapping and once per sequence -- a
+// megabyte of them on citm_catalog, 14% of what the conversion allocated.
+func (p *Parser) holdRun(seq int32) {
 	if p.walk == nil || p.tokens == nil {
-		return func() {}
+		return
 	}
 	p.tokens.Save(int(seq), int(seq))
+}
 
-	return func() { p.tokens.Release(int(seq), int(seq)) }
+// releaseRun gives back the chunk holdRun kept.
+func (p *Parser) releaseRun(seq int32) {
+	if p.walk == nil || p.tokens == nil {
+		return
+	}
+	p.tokens.Release(int(seq), int(seq))
 }
