@@ -20,6 +20,8 @@ const (
 	KindSequence
 	// KindAnchor is an anchor, which stands around the one node it names.
 	KindAnchor
+	// KindTag is a tag, which stands around the one node it types.
+	KindTag
 )
 
 func (k Kind) String() string {
@@ -30,6 +32,8 @@ func (k Kind) String() string {
 		return "sequence"
 	case KindAnchor:
 		return "anchor"
+	case KindTag:
+		return "tag"
 	default:
 		return "none"
 	}

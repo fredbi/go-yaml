@@ -472,11 +472,11 @@ func (p *Parser) parseToken(ctx context, tk *tapeToken) (ast.Node, error) {
 		p.onComplete(n)
 	}
 
-	// A collection hands itself over as it opens and closes, and so does an
-	// anchor, which stands around the node it names; everything else goes over
-	// here, once, when it is built.
+	// A collection hands itself over as it opens and closes, and so do an anchor
+	// and a tag, which stand around the node they name; everything else goes
+	// over here, once, when it is built.
 	switch n.(type) {
-	case *ast.MappingNode, *ast.SequenceNode, *ast.AnchorNode:
+	case *ast.MappingNode, *ast.SequenceNode, *ast.AnchorNode, *ast.TagNode:
 	default:
 		p.hand(ctx, n)
 	}
@@ -1588,6 +1588,17 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// The tag stands around the node it types, so it goes over before that node
+	// and closes after it -- the same shape parseAnchorValue gives an anchor,
+	// and for the same reason. Handed over afterwards, as a node holding
+	// nothing is, a tag on a collection stood beside its own value at the same
+	// depth: "a: !!seq [1, 2]" read as the two entries [1,2] and !!seq. A tag
+	// on a scalar keeps its value on the node rather than handing it over,
+	// since parseScalarValue builds it without going through parseToken.
+	p.enter(ctx, node, KindTag)
+	defer p.leave(ctx, node)
+
 	ctx.goNext()
 
 	comment := p.parseHeadComment(ctx)
