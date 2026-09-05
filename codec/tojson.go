@@ -312,12 +312,50 @@ func (w *jsonWriter) scalar(node ast.Node, at parser.Step) {
 		return
 	}
 
-	w.out = appendJSONScalar(w.out, jsonScalarOf(node))
+	w.out = appendScalarNode(w.out, node)
+}
+
+// appendScalarNode writes a scalar node as JSON, reading the node's own fields
+// rather than the any GetValue boxes them into.
+//
+// Boxing a string costs an allocation apiece, and a document is mostly strings:
+// ast.StringNode.GetValue was 9% of everything a conversion allocated.
+func appendScalarNode(out []byte, n ast.Node) []byte {
+	switch t := n.(type) {
+	case *ast.StringNode:
+		return appendJSONString(out, t.Value)
+	case *ast.NullNode:
+		return append(out, "null"...)
+	case *ast.BoolNode:
+		return strconv.AppendBool(out, t.Value)
+	case *ast.InfinityNode, *ast.NanNode:
+		return append(out, "null"...)
+	case *ast.FloatNode:
+		if tk := t.GetToken(); tk != nil {
+			if f, ok := token.ParseFloat(tk.Value, tk.Type); ok {
+				return appendJSONFloat64(out, f)
+			}
+		}
+
+		return appendJSONFloat(out, jsonScalarOf(t))
+	case *ast.LiteralNode:
+		if t.Value == nil {
+			return append(out, "null"...)
+		}
+
+		return appendJSONString(out, t.Value.Value)
+	default:
+		return appendJSONScalar(out, jsonScalarOf(n))
+	}
 }
 
 // keyText is a scalar key as the string a mapping holds it under. JSON keys are
 // strings, so 4.0 and 4 address the same entry and are both "4".
 func keyText(node ast.Node) string {
+	if s, ok := node.(*ast.StringNode); ok {
+		return s.Value
+	}
+
 	switch t := jsonScalarOf(node).(type) {
 	case nil:
 		// A key left empty addresses the entry by the word JSON writes for it,
@@ -858,7 +896,23 @@ func appendJSONScalar(out []byte, v any) []byte {
 // bare "1" reads as an integer. The fractional part is kept for that.
 func appendJSONFloat(out []byte, v any) []byte {
 	at := len(out)
-	out = appendJSONScalar(out, v)
+
+	return withFraction(appendJSONScalar(out, v), at)
+}
+
+// appendJSONFloat64 is appendJSONFloat for a value already read as a float64,
+// which is every float a document writes that one can hold.
+func appendJSONFloat64(out []byte, f float64) []byte {
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return append(out, "null"...)
+	}
+	at := len(out)
+
+	return withFraction(strconv.AppendFloat(out, f, 'g', -1, 64), at)
+}
+
+// withFraction keeps what was written from at looking like a float.
+func withFraction(out []byte, at int) []byte {
 	for _, c := range out[at:] {
 		switch c {
 		case '.', 'e', 'E', 'n': // n for the null an infinity writes
