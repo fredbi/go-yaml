@@ -172,7 +172,6 @@ func (t NodeType) YAMLName() string {
 
 // Node type of node
 type Node interface {
-	io.Reader
 	// String node to text
 	String() string
 	// GetToken returns token instance
@@ -195,12 +194,6 @@ type Node interface {
 	SetPathNode(*PathNode)
 	// MarshalYAML
 	MarshalYAML() ([]byte, error)
-	// already read length
-	readLen() int
-	// append read length
-	addReadLen(int)
-	// clean read length
-	clearLen()
 }
 
 // MapKeyNode type for map key node
@@ -228,23 +221,10 @@ type ScalarNode interface {
 type BaseNode struct {
 	path    *PathNode
 	Comment *CommentGroupNode
-	read    int
 }
 
 func addCommentString(base string, node *CommentGroupNode) string {
 	return fmt.Sprintf("%s %s", base, node.String())
-}
-
-func (n *BaseNode) readLen() int {
-	return n.read
-}
-
-func (n *BaseNode) clearLen() {
-	n.read = 0
-}
-
-func (n *BaseNode) addReadLen(len int) {
-	n.read += len
 }
 
 // GetPath returns YAMLPath for the current node.
@@ -290,29 +270,6 @@ func (n *BaseNode) GetComment() *CommentGroupNode {
 func (n *BaseNode) SetComment(node *CommentGroupNode) error {
 	n.Comment = node
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func readNode(p []byte, node Node) (int, error) {
-	s := node.String()
-	readLen := node.readLen()
-	remain := len(s) - readLen
-	if remain == 0 {
-		node.clearLen()
-		return 0, io.EOF
-	}
-	size := min(remain, len(p))
-	for idx, b := range []byte(s[readLen : readLen+size]) {
-		p[idx] = byte(b)
-	}
-	node.addReadLen(size)
-	return size, nil
 }
 
 // Null create node for null value
@@ -476,18 +433,34 @@ func Tag(tk *token.Token) *TagNode {
 type File struct {
 	Name string
 	Docs []*DocumentNode
+	// text and read hold what Read is handing out. They are the file's own
+	// rather than each node's: a cursor on every node cost 8 bytes of every
+	// node in the document to serve a reader nothing asks a node for.
+	text []byte
+	read int
 }
 
-// Read implements (io.Reader).Read
+// Read renders the file and reads the text out, so that a parsed document may
+// be handed to anything taking an [io.Reader].
+//
+// The text is taken once, at the first Read, and the documents are not looked
+// at again until it runs out: a node changed while a read is running does not
+// change what is left to read. Reading to [io.EOF] starts the next read from
+// the top of the file as it stands then.
 func (f *File) Read(p []byte) (int, error) {
-	for _, doc := range f.Docs {
-		n, err := doc.Read(p)
-		if err == io.EOF {
-			continue
-		}
-		return n, nil
+	if f.text == nil {
+		f.text = []byte(f.String())
 	}
-	return 0, io.EOF
+	if f.read >= len(f.text) {
+		f.text, f.read = nil, 0
+
+		return 0, io.EOF
+	}
+
+	n := copy(p, f.text[f.read:])
+	f.read += n
+
+	return n, nil
 }
 
 // String all documents to text
@@ -501,11 +474,6 @@ type DocumentNode struct {
 	Start *token.Token // position of DocumentHeader ( `---` )
 	End   *token.Token // position of DocumentEnd ( `...` )
 	Body  Node
-}
-
-// Read implements (io.Reader).Read
-func (d *DocumentNode) Read(p []byte) (int, error) {
-	return readNode(p, d)
 }
 
 // Type returns DocumentNodeType
@@ -543,11 +511,6 @@ func (d *DocumentNode) MarshalYAML() ([]byte, error) {
 type NullNode struct {
 	BaseNode
 	Token *token.Token
-}
-
-// Read implements (io.Reader).Read
-func (n *NullNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns NullType
@@ -606,11 +569,6 @@ func (n *NullNode) IsMergeKey() bool {
 type IntegerNode struct {
 	BaseNode
 	Token *token.Token
-}
-
-// Read implements (io.Reader).Read
-func (n *IntegerNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns IntegerType
@@ -681,11 +639,6 @@ type FloatNode struct {
 	Token *token.Token
 }
 
-// Read implements (io.Reader).Read
-func (n *FloatNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns FloatType
 func (n *FloatNode) Type() NodeType { return FloatType }
 
@@ -749,11 +702,6 @@ type StringNode struct {
 	BaseNode
 	Token *token.Token
 	Value string
-}
-
-// Read implements (io.Reader).Read
-func (n *StringNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns StringType
@@ -898,11 +846,6 @@ type LiteralNode struct {
 	Source string
 }
 
-// Read implements (io.Reader).Read
-func (n *LiteralNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns LiteralType
 func (n *LiteralNode) Type() NodeType { return LiteralType }
 
@@ -949,11 +892,6 @@ type MergeKeyNode struct {
 	Token *token.Token
 }
 
-// Read implements (io.Reader).Read
-func (n *MergeKeyNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns MergeKeyType
 func (n *MergeKeyNode) Type() NodeType { return MergeKeyType }
 
@@ -996,11 +934,6 @@ type BoolNode struct {
 	BaseNode
 	Token *token.Token
 	Value bool
-}
-
-// Read implements (io.Reader).Read
-func (n *BoolNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns BoolType
@@ -1050,11 +983,6 @@ type InfinityNode struct {
 	Value float64
 }
 
-// Read implements (io.Reader).Read
-func (n *InfinityNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns InfinityType
 func (n *InfinityNode) Type() NodeType { return InfinityType }
 
@@ -1099,11 +1027,6 @@ func (n *InfinityNode) IsMergeKey() bool {
 type NanNode struct {
 	BaseNode
 	Token *token.Token
-}
-
-// Read implements (io.Reader).Read
-func (n *NanNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns NanType
@@ -1228,11 +1151,6 @@ func (n *MappingNode) SetIsFlowStyle(isFlow bool) {
 	}
 }
 
-// Read implements (io.Reader).Read
-func (n *MappingNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns MappingType
 func (n *MappingNode) Type() NodeType { return MappingType }
 
@@ -1284,11 +1202,6 @@ type MappingKeyNode struct {
 	BaseNode
 	Start *token.Token
 	Value Node
-}
-
-// Read implements (io.Reader).Read
-func (n *MappingKeyNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns MappingKeyType
@@ -1350,11 +1263,6 @@ func (n *MappingValueNode) Replace(value Node) error {
 	value.AddColumn(int(column))
 	n.Value = value
 	return nil
-}
-
-// Read implements (io.Reader).Read
-func (n *MappingValueNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns MappingValueType
@@ -1489,11 +1397,6 @@ func (n *SequenceNode) SetIsFlowStyle(isFlow bool) {
 	}
 }
 
-// Read implements (io.Reader).Read
-func (n *SequenceNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns SequenceType
 func (n *SequenceNode) Type() NodeType { return SequenceType }
 
@@ -1585,10 +1488,6 @@ func (n *SequenceEntryNode) MarshalYAML() ([]byte, error) {
 	return []byte(n.String()), nil
 }
 
-func (n *SequenceEntryNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // SequenceEntry creates SequenceEntryNode instance.
 func SequenceEntry(start *token.Token, value Node, headComment *CommentGroupNode) *SequenceEntryNode {
 	return &SequenceEntryNode{
@@ -1642,11 +1541,6 @@ func (n *AnchorNode) SetName(name string) error {
 	}
 	s.Value = name
 	return nil
-}
-
-// Read implements (io.Reader).Read
-func (n *AnchorNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns AnchorType
@@ -1719,11 +1613,6 @@ func (n *AliasNode) SetName(name string) error {
 	return nil
 }
 
-// Read implements (io.Reader).Read
-func (n *AliasNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns AliasType
 func (n *AliasNode) Type() NodeType { return AliasType }
 
@@ -1768,11 +1657,6 @@ type DirectiveNode struct {
 	Name Node
 	// Values is directive values e.g.) "1.2" or "!!" and "tag:clarkevans.com,2002:app/".
 	Values []Node
-}
-
-// Read implements (io.Reader).Read
-func (n *DirectiveNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns DirectiveType
@@ -1827,11 +1711,6 @@ func (n *TagNode) stringWithoutComment() string {
 	return bareRenderer.String(n)
 }
 
-// Read implements (io.Reader).Read
-func (n *TagNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns TagType
 func (n *TagNode) Type() NodeType { return TagType }
 
@@ -1884,11 +1763,6 @@ type CommentNode struct {
 	Token *token.Token
 }
 
-// Read implements (io.Reader).Read
-func (n *CommentNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
-}
-
 // Type returns TagType
 func (n *CommentNode) Type() NodeType { return CommentType }
 
@@ -1917,11 +1791,6 @@ func (n *CommentNode) MarshalYAML() ([]byte, error) {
 type CommentGroupNode struct {
 	BaseNode
 	Comments []*CommentNode
-}
-
-// Read implements (io.Reader).Read
-func (n *CommentGroupNode) Read(p []byte) (int, error) {
-	return readNode(p, n)
 }
 
 // Type returns TagType

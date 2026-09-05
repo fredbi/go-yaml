@@ -27,14 +27,13 @@ func TestDocumentNodeGetTokenWithoutBody(t *testing.T) {
 func TestReadNode(t *testing.T) {
 	t.Run("utf-8", func(t *testing.T) {
 		const value = "éɛทᛞ⠻チ▓🦄"
-		node := &StringNode{
-			BaseNode: BaseNode{},
-			Token:    &token.Token{},
-			Value:    value,
-		}
+		file := &File{Docs: []*DocumentNode{{Body: &StringNode{
+			Token: &token.Token{Value: value},
+			Value: value,
+		}}}}
 
 		buffer := make([]byte, len(value))
-		size, err := readNode(buffer, node)
+		size, err := file.Read(buffer)
 		require.NoError(t, err)
 
 		assert.Equal(t, len(value), size)
