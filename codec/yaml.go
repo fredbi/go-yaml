@@ -146,19 +146,6 @@ func NodeToValue(node ast.Node, v interface{}, opts ...DecodeOption) error {
 	return nil
 }
 
-// ToJSON convert YAML bytes to JSON.
-func ToJSON(bytes []byte) ([]byte, error) {
-	var v interface{}
-	if err := UnmarshalWithOptions(bytes, &v, UseOrderedMap()); err != nil {
-		return nil, err
-	}
-	out, err := MarshalWithOptions(v, JSON())
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // FromJSON convert JSON bytes to YAML.
 func FromJSON(bytes []byte) ([]byte, error) {
 	var v interface{}

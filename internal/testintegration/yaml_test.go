@@ -349,8 +349,8 @@ a: 1
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := `{"foo": {"bar": ["a", "b", "c"]}, "a": 1}`
-	if expected+"\n" != string(actual) {
+	expected := `{"foo":{"bar":["a","b","c"]},"a":1}`
+	if expected != string(actual) {
 		t.Fatalf("failed to convert yaml to json: expected [%q] but got [%q]", expected, actual)
 	}
 }
