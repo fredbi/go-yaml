@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"github.com/go-openapi/go-yaml/internal/scanner/probe"
+	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/token"
 )
 
