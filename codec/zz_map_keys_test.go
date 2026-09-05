@@ -78,3 +78,48 @@ func TestUseStringKeysReadsEveryKeyAsText(t *testing.T) {
 			"unexpected kind: %v", err)
 	})
 }
+
+// TestANullKeyIsTheWordNull records that every path addresses a null key by
+// "null", not by the empty string.
+//
+// decodeMap read it through the general value decoder, which gives a string
+// its Go zero, so a null key and a genuinely empty key both came back as "" --
+// two entries of the document read as one, and the document then refused as
+// holding a duplicate key. nodeToValue and ToJSON already said "null".
+func TestANullKeyIsTheWordNull(t *testing.T) {
+	for _, src := range []string{"null: a\n", ": a\n", "~: a\n", "NULL: a\n", "!!null x: a\n"} {
+		t.Run(src, func(t *testing.T) {
+			var into map[string]any
+			require.NoError(t, codec.Unmarshal([]byte(src), &into))
+			assert.Equal(t, map[string]any{"null": "a"}, into)
+
+			var asAny any
+			require.NoError(t, codec.Unmarshal([]byte(src), &asAny))
+			assert.Equal(t, map[string]any{"null": "a"}, asAny)
+
+			converted, err := codec.ToJSON([]byte(src))
+			require.NoError(t, err)
+			assert.JSONEq(t, `{"null":"a"}`, string(converted))
+		})
+	}
+
+	t.Run("so it stays apart from the empty key", func(t *testing.T) {
+		const src = "null: a\n\"\": b\n"
+		want := map[string]any{"null": "a", "": "b"}
+
+		var into map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &into))
+		assert.Equal(t, want, into)
+
+		var asAny any
+		require.NoError(t, codec.Unmarshal([]byte(src), &asAny))
+		assert.Equal(t, want, asAny)
+	})
+
+	t.Run("and two null keys are the duplicate they are", func(t *testing.T) {
+		var into map[string]any
+		err := codec.Unmarshal([]byte("null: a\n~: b\n"), &into)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, yamlerrors.ErrDuplicateKey)
+	})
+}

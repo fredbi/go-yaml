@@ -201,13 +201,24 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 	if err != nil {
 		return "", err
 	}
+
+	return mapKeyString(key), nil
+}
+
+// mapKeyString is the text a decoded mapping key is addressed by.
+//
+// A null gives "null" rather than the empty string, which is what the document
+// wrote and what keeps it apart from the empty key: "null: a" and "\"\": b" are
+// two entries.
+func mapKeyString(key any) string {
 	if key == nil {
-		return "null", nil
+		return "null"
 	}
 	if k, ok := key.(string); ok {
-		return k, nil
+		return k
 	}
-	return fmt.Sprint(key), nil
+
+	return fmt.Sprint(key)
 }
 
 func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]interface{}) error {
@@ -1996,11 +2007,30 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			decodeKeyAs = stringType
 		}
 		k := d.createDecodableValue(decodeKeyAs)
-		if d.canDecodeByUnmarshaler(k) {
+		switch {
+		case d.canDecodeByUnmarshaler(k):
 			if err := d.decodeByUnmarshaler(ctx, k, key); err != nil {
 				return err
 			}
-		} else {
+		case decodeKeyAs.Kind() == reflect.String:
+			// Read the key the way nodeToValue reads it for the map[string]any
+			// it builds, so a document decoded into either gives the same keys.
+			// Decoding a null through createDecodedNewValue gave "", the Go
+			// zero, which collides with the empty key: "null: a" and "\"\": b"
+			// are two entries and were read as one, so the document was refused
+			// as holding a duplicate key.
+			keyValue, err := d.nodeToValue(ctx, key)
+			if err != nil {
+				return err
+			}
+			if keyValue != nil && !reflect.TypeOf(keyValue).Comparable() {
+				// A sequence or a mapping used as a key. mapKeyString would
+				// give it the spelling Go prints, "[a b]", which no reader
+				// takes apart again.
+				return yamlerrors.NewUnhashableKey(reflect.TypeOf(keyValue), key.GetToken())
+			}
+			k = reflect.ValueOf(mapKeyString(keyValue)).Convert(decodeKeyAs)
+		default:
 			keyVal, err := d.createDecodedNewValue(ctx, decodeKeyAs, reflect.Value{}, key)
 			if err != nil {
 				return err
