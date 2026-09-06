@@ -188,6 +188,12 @@ type Doc struct {
 	Opaque bool
 	// Tags are the implementation-defined properties the raw bytes exhibit.
 	Tags []Tag
+	// Features name what the document contains, as against what it asks.
+	//
+	// Nothing here reads them. [Table.Expect] does not consult them and a
+	// feature can never leave a case unscored -- that is the whole difference
+	// between the two lists, and [Feature] argues it.
+	Features []Feature
 	// VerdictAt is the furthest stage at which WellFormed is evidence.
 	//
 	// The zero value is Parse, the least this can claim, and the default is
@@ -207,8 +213,11 @@ type Doc struct {
 //   - A rule the language settled outright decides first, and the stance does
 //     not get a vote. Declining it -- declaring Either -- leaves the document
 //     unscored, which is the honest answer for a parser that does not
-//     implement the check; claiming Accepts is reported by
-//     [Rules.Contradicted] and ignored here.
+//     implement the check. That holds for a rule declaring a construct legal
+//     as much as for one demanding a rejection: a consumer that cannot read
+//     verbatim tags at all is not answering the question either way. Claiming
+//     Accepts on a rejection is reported by [Rules.Contradicted] and ignored
+//     here.
 //   - A property the parser refuses forces a rejection, whatever else is true.
 //     Refusing on purpose is conformant.
 //   - A property the parser has not ruled on, or declines to guarantee, makes
@@ -229,14 +238,23 @@ func (t Table) Expect(d Doc) (Outcome, string) {
 		}
 
 		rule, settled := t.Requires.Of(tag)
-		if !settled || rule.Then != Reject {
-			// An Accept rule says the construct is legal, not that this
-			// document is. The grammar still has to agree, so it falls through.
+		if !settled {
 			continue
 		}
 
+		// Declining a settled rule works on an Accept one too, and saying so
+		// out loud is the only way to do it. Undeclared is the zero value, so
+		// silence still scores -- which is what lets a corpus label everything
+		// it contains without handing a free pass to every consumer that has
+		// not enumerated the vocabulary.
 		if t.Stand(tag) == Either {
 			return Undecided, string(tag) + ": " + t.Name + " does not implement this check"
+		}
+
+		if rule.Then != Reject {
+			// An Accept rule says the construct is legal, not that this
+			// document is. The grammar still has to agree, so it falls through.
+			continue
 		}
 
 		return Reject, string(tag) + ": " + rule.Because
