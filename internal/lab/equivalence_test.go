@@ -77,11 +77,20 @@ func TestLabParserMatchesProduction(t *testing.T) {
 // afterwards; the shipped parser owns the anchors and refuses the alias where it
 // stands. A cycle is not one of these: "&x [ *x ]" resolves in both.
 //
+// And 7.1 says an alias node carries no properties and no content, so
+// "k: !!null *a" is not a YAML 1.2 document -- grammar.NewRecognizer refuses it
+// too. refparser builds a TagNode over an AliasNode and renders it back;
+// the shipped parser stops with "unexpected scalar value type".
+//
 // Matching the reason rather than the document, because the fuzz seeds hold
 // many shapes of each and they are one finding apiece. A duplicate the shipped
 // parser reports wrongly would still be caught: yamlcorpus holds the key rules,
 // and the conformance suite the documents.
-func divergesOnPurpose(err error) (string, bool) {
+//
+// want is refparser's tree, and the tag-over-alias rule needs it: "unexpected
+// scalar value type" is the parse's catch-all and would cover a regression on
+// its own.
+func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 	if err == nil {
 		return "", false
 	}
@@ -95,9 +104,33 @@ func divergesOnPurpose(err error) (string, bool) {
 		return "a flow entry written as a key alone repeats its key (3.2.1.1)", true
 	case strings.Contains(msg, "map key-value is pre-defined"):
 		return "a flow mapping entry takes a single ':' (7.4.2)", true
+	case strings.Contains(msg, "unexpected scalar value type") && holdsTaggedAlias(want):
+		return "an alias node carries no tag (7.1)", true
 	default:
 		return "", false
 	}
+}
+
+// holdsTaggedAlias reports whether f carries a tag standing on an alias.
+func holdsTaggedAlias(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			tag, ok := n.(*ast.TagNode)
+			if !ok {
+				return
+			}
+			if _, alias := tag.Value.(*ast.AliasNode); alias {
+				found = true
+			}
+		}), doc)
+	}
+
+	return found
 }
 
 // acceptsOnPurpose reports whether a refusal the frozen parser makes is one the
@@ -234,7 +267,7 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 
 		t.Fatalf("production refuses the document and the lab accepts it\nproduction: %v\nsource:\n%s", wantErr, text)
 	case gotErr != nil:
-		if why, ok := divergesOnPurpose(gotErr); ok {
+		if why, ok := divergesOnPurpose(gotErr, want); ok {
 			t.Skipf("refused on purpose: %s\nlab: %v", why, gotErr)
 		}
 
