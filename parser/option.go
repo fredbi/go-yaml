@@ -102,3 +102,22 @@ func WithJSONCompatible() Option {
 		p.jsonCompatible = true
 	}
 }
+
+// WithAnchors publishes anchors declared elsewhere, which an alias of any
+// document of this stream may name.
+//
+// The parser resolves every alias against the anchors of the document holding
+// it and refuses one that names none, so a document meant to be read alongside
+// others -- the files [github.com/go-openapi/go-yaml.Decoder] is given by
+// ReferenceFiles, which exist to publish their anchors -- needs the outside
+// names handed to it. Pass [ast.DocumentNode.Anchors] from the parse that
+// declared them.
+//
+// What this publishes is not what a document declares: it does not reach
+// [ast.DocumentNode.Anchors], and a name the document declares itself hides the
+// published one for that document.
+func WithAnchors(anchors map[string]ast.Node) Option {
+	return func(p *Parser) {
+		p.declaredAnchors = anchors
+	}
+}

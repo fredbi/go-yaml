@@ -474,6 +474,16 @@ type DocumentNode struct {
 	Start *token.Token // position of DocumentHeader ( `---` )
 	End   *token.Token // position of DocumentEnd ( `...` )
 	Body  Node
+	// Anchors holds the node each anchor of this document names, under the
+	// anchor's name. The parser fills it as it reads, so a caller walking the
+	// tree as it is built sees the anchors that stand before it; it is nil for
+	// a document that declares none.
+	//
+	// An anchor belongs to the document it was written in, so each document of
+	// a stream carries its own. Where a name is declared twice the last
+	// declaration is the one kept here -- read [AliasNode.Target] to expand a
+	// particular alias, which names the declaration that stood before it.
+	Anchors map[string]Node
 }
 
 // Type returns DocumentNodeType
@@ -1593,6 +1603,23 @@ type AliasNode struct {
 	BaseNode
 	Start *token.Token
 	Value Node
+	// Target is the node the alias names, which the parser fills as it reads
+	// the alias. Read it to expand an alias without collecting anchors of your
+	// own; the parser resolves the name where the alias stands, so two aliases
+	// of one name written either side of a redefined anchor point at the two
+	// nodes and not both at the last.
+	//
+	// It is nil for an alias built by hand and for one the encoder writes,
+	// neither of which went through a parse.
+	//
+	// ⚠️ Target may reach back to a node the alias stands inside: "&x [ *x ]"
+	// is a document, and YAML's representation is a graph. Expand it with a
+	// guard, as [github.com/go-openapi/go-yaml.Decoder] does -- it refuses a
+	// cycle, because a Go value built by walking has nowhere to put one.
+	//
+	// Nothing follows Target on its own: [Walk] does not, and neither does the
+	// renderer, which writes an alias as the "*name" it was written as.
+	Target Node
 }
 
 func (n *AliasNode) stringWithoutComment() string {

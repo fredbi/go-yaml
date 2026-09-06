@@ -2424,12 +2424,21 @@ map: *map`
 		}
 	})
 	t.Run("with reference option", func(t *testing.T) {
-		anchor := strings.NewReader(`
+		const reference = `
 map: &map
-  text: hello`)
+  text: hello`
 		var buf bytes.Buffer
-		dec := codec.NewDecoder(&buf, codec.ReferenceReaders(anchor))
-		f, err := parser.ParseBytes([]byte("map: *map"))
+		dec := codec.NewDecoder(&buf, codec.ReferenceReaders(strings.NewReader(reference)))
+
+		// "map: *map" names an anchor it does not declare, so the parse that
+		// builds the node has to be told where that anchor comes from. The
+		// decoder reads the reference for the value; the parser reads it for
+		// the name.
+		ref, err := parser.ParseBytes([]byte(reference))
+		if err != nil {
+			t.Fatalf("failed to parse the reference: %s", err)
+		}
+		f, err := parser.ParseBytes([]byte("map: *map"), parser.WithAnchors(ref.Docs[0].Anchors))
 		if err != nil {
 			t.Fatalf("failed to parse: %s", err)
 		}

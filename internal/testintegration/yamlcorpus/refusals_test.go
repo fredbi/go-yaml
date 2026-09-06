@@ -177,6 +177,7 @@ var parserComplaints = []string{
 	"block sequence entries are not allowed in this context",
 	"comment must be separated from the block scalar header by a space",
 	"could not find _ character corresponding to _",
+	"could not find alias _",
 	"could not find end character of double-quoted text",
 	"could not find end character of single-quoted text",
 	"could not find flow map content",

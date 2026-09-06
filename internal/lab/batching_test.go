@@ -55,7 +55,7 @@ func TestGroupingSurvivesEveryJoin(t *testing.T) {
 // do not, each read one token at a time.
 func TestGroupingSurvivesEveryJoinOnSmallDocuments(t *testing.T) {
 	for _, src := range []string{
-		"a: |\n  text\n", "a: >\n  folded\n", "&a x\n", "&a\n", "*a\n",
+		"a: |\n  text\n", "a: >\n  folded\n", "&a x\n", "&a\n", "[&a x, *a]\n",
 		"? foo\n: bar\n", "%YAML 1.2\n---\na: 1\n", "!!str x\n", "&a !!str x\n",
 		"a: [1, 2, {b: c}]\n", "- &x 1\n- *x\n", "a: # comment\n  b: 1\n",
 		"? [a, b]\n: c\n", "--- a\n--- b\n", "a: 1\n...\nb: 2\n",

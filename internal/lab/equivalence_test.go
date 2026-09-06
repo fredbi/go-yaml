@@ -4,6 +4,7 @@
 package lab_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/corpus"
 	"github.com/go-openapi/go-yaml/internal/fuzzseeds"
 	"github.com/go-openapi/go-yaml/internal/refparser"
@@ -69,6 +71,11 @@ func TestLabParserMatchesProduction(t *testing.T) {
 // validateMapKeyValueNextToken refuses it, and grammar.NewRecognizer reads the
 // document as not YAML 1.2 (7.4.2).
 //
+// An alias names an anchor its own document declared before it. refparser hands
+// the document over whatever the alias names, because the decoder checked
+// afterwards; the shipped parser owns the anchors and refuses the alias where it
+// stands. A cycle is not one of these: "&x [ *x ]" resolves in both.
+//
 // Matching the reason rather than the document, because the fuzz seeds hold
 // many shapes of each and they are one finding apiece. A duplicate the shipped
 // parser reports wrongly would still be caught: yamlcorpus holds the key rules,
@@ -76,6 +83,10 @@ func TestLabParserMatchesProduction(t *testing.T) {
 func divergesOnPurpose(err error) (string, bool) {
 	if err == nil {
 		return "", false
+	}
+
+	if errors.Is(err, yamlerrors.ErrUnknownAnchor) {
+		return "an alias names an anchor its document does not declare (3.2.2.2)", true
 	}
 
 	switch msg := err.Error(); {

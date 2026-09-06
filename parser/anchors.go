@@ -1,0 +1,138 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
+package parser
+
+import (
+	"slices"
+
+	"github.com/go-openapi/go-yaml/ast"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
+	"github.com/go-openapi/go-yaml/token"
+)
+
+// The parser keeps the anchors of the document it is reading and points every
+// alias at the node its anchor names, so a consumer reads
+// [ast.AliasNode.Target] rather than collecting anchors of its own. It does not
+// substitute: the alias stays an alias in the tree, and expanding it is the
+// consumer's to do.
+//
+// Three rules decide what an alias may name, and all three fall out of reading
+// the document once, front to back:
+//
+//   - An alias names the anchor declared before it. §3.2.2.2: "an alias event
+//     refers to the most recent event in the serialization having the specified
+//     anchor". So a name declared later, or never, is
+//     [yamlerrors.ErrUnknownAnchor], and a name declared twice resolves to
+//     whichever declaration the alias stands after.
+//   - An anchor belongs to the document it was written in. The table is emptied
+//     at each document boundary, so an alias naming an earlier document's
+//     anchor names nothing -- and the nodes the table pins are let go of there.
+//   - An anchor names its node from where the node starts, not from where it
+//     ends, so "&x [ *x ]" resolves and the tree it builds holds a cycle. The
+//     parser reads that document because YAML's representation is a graph.
+//     Whether a cycle can be held is the consumer's question and it is asked
+//     later: the decoder refuses one, because a Go value built by walking has
+//     nowhere to put it.
+
+// openAnchor is an anchor whose node is being read: the name, and the node that
+// will hold what the name stands for once it has been read.
+type openAnchor struct {
+	name string
+	node *ast.AnchorNode
+}
+
+// cyclicAlias is an alias that named an anchor still being read. Its target is
+// set once the document is done, which is the first moment the anchored node
+// exists.
+type cyclicAlias struct {
+	alias  *ast.AliasNode
+	anchor *ast.AnchorNode
+}
+
+// openAnchorName records that the node name stands for is being read.
+//
+// It is a stack and not a set because anchors nest -- "&x [&y 1]" -- and the
+// names come off in the order they went on. Looking one up is a walk down it,
+// over as many entries as there are anchors open at once, which is the
+// document's nesting and not its length.
+func (p *Parser) openAnchorName(name string, node *ast.AnchorNode) {
+	p.openAnchors = append(p.openAnchors, openAnchor{name: name, node: node})
+}
+
+// keepAnchor enters the node an anchor names, and closes the name.
+func (p *Parser) keepAnchor(name string, value ast.Node) {
+	p.dropAnchorName()
+
+	if name == "" || value == nil {
+		// Nothing an alias can reach. The scanner refuses a '&' with no name
+		// after it, so this is the guard and not the path.
+		return
+	}
+	if p.anchors == nil {
+		p.anchors = make(map[string]ast.Node, 4)
+	}
+	p.anchors[name] = value
+}
+
+// dropAnchorName closes the innermost open name.
+func (p *Parser) dropAnchorName() {
+	if n := len(p.openAnchors); n > 0 {
+		p.openAnchors = p.openAnchors[:n-1]
+	}
+}
+
+// openAnchorNode returns the anchor of this name whose node is being read right
+// now, which is what an alias inside that node names.
+func (p *Parser) openAnchorNode(name string) (*ast.AnchorNode, bool) {
+	// Innermost first: "&x [&x 1, *x]" names the inner one, which is the most
+	// recent declaration and the one §3.2.2.2 asks for.
+	for _, open := range slices.Backward(p.openAnchors) {
+		if open.name == name {
+			return open.node, true
+		}
+	}
+
+	return nil, false
+}
+
+// resolveAlias points the alias at the node its name stands for.
+func (p *Parser) resolveAlias(alias *ast.AliasNode, name string, tk *token.Token) error {
+	if anchor, open := p.openAnchorNode(name); open {
+		// The alias stands inside what its own anchor names. The anchored node
+		// is not built yet -- a sequence is built once its entries are read --
+		// so the target is filled at the document's end, where it exists.
+		p.cyclicAliases = append(p.cyclicAliases, cyclicAlias{alias: alias, anchor: anchor})
+
+		return nil
+	}
+	if node, declared := p.anchors[name]; declared {
+		alias.Target = node
+
+		return nil
+	}
+	if node, declared := p.declaredAnchors[name]; declared {
+		// An anchor [WithAnchors] published, which no document of this stream
+		// wrote and an alias may still name.
+		alias.Target = node
+
+		return nil
+	}
+
+	return yamlerrors.NewUnknownAnchor(name, tk)
+}
+
+// takeAnchors returns what the document just read declared, and empties the
+// table for the next one.
+func (p *Parser) takeAnchors() map[string]ast.Node {
+	for _, cyclic := range p.cyclicAliases {
+		cyclic.alias.Target = cyclic.anchor.Value
+	}
+	p.cyclicAliases = p.cyclicAliases[:0]
+
+	anchors := p.anchors
+	p.anchors = nil
+	p.openAnchors = p.openAnchors[:0]
+
+	return anchors
+}

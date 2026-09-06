@@ -70,6 +70,15 @@ var (
 	// syntax error: the document is valid YAML and only the conversion is
 	// impossible.
 	ErrNotJSON = stderrors.New("not convertible to JSON")
+	// ErrUnknownAnchor reports an alias naming an anchor the document does not
+	// declare before it. An anchor belongs to the document it was written in
+	// and an alias names the most recent one of that name, so an anchor
+	// declared later, or in another document, is not one this alias can name.
+	ErrUnknownAnchor = stderrors.New("unknown anchor")
+	// ErrRecursiveAlias reports an alias standing inside the node its own
+	// anchor names, directly or through another anchor. The node is not
+	// resolved yet, so there is nothing for the alias to stand for.
+	ErrRecursiveAlias = stderrors.New("recursive alias")
 )
 
 const (
@@ -125,6 +134,25 @@ func NewUnhashableKey(src reflect.Type, tk *token.Token) *Error {
 // NewNotJSON reports msg as a document JSON cannot hold, at tk.
 func NewNotJSON(msg string, tk *token.Token) *Error {
 	return &Error{kind: ErrNotJSON, msg: msg, token: tk}
+}
+
+// NewUnknownAnchor reports the alias name as naming no anchor, at tk.
+func NewUnknownAnchor(name string, tk *token.Token) *Error {
+	return &Error{
+		kind:  ErrUnknownAnchor,
+		msg:   fmt.Sprintf("could not find alias %q", name),
+		token: tk,
+	}
+}
+
+// NewRecursiveAlias reports the alias name as standing inside what its own
+// anchor names, at tk.
+func NewRecursiveAlias(name string, tk *token.Token) *Error {
+	return &Error{
+		kind:  ErrRecursiveAlias,
+		msg:   fmt.Sprintf("alias %q names an anchor that is not resolved yet", name),
+		token: tk,
+	}
 }
 
 // NewTypeMismatch reports a value of type src decoded into a Go value of type

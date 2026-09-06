@@ -147,6 +147,20 @@ type Parser struct {
 	// begins, innermost last. Anchors nest, so it is a stack.
 	anchorFrom []int32
 
+	// anchors holds the node each anchor of the document in hand names, under
+	// the anchor's name. It goes to the document as that one closes, and the
+	// next starts with none. See anchors.go.
+	anchors map[string]ast.Node
+	// openAnchors holds the anchors whose node is being read at this point in
+	// the descent, innermost last. An alias naming one of them stands inside
+	// what it names, and cyclicAliases holds it until that node exists.
+	openAnchors   []openAnchor
+	cyclicAliases []cyclicAlias
+	// declaredAnchors holds what [WithAnchors] published, which an alias of any
+	// document of this stream may name. It is not what a document declares and
+	// does not reach [ast.DocumentNode.Anchors].
+	declaredAnchors map[string]ast.Node
+
 	// scan reads src into tokens, one at a time, as the reader asks.
 	scan scanner.Scanner
 	// reader groups what the scanner reads and hands over a document at a time.
@@ -428,6 +442,9 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	}
 
 	node := ast.Document(start, body)
+	// An anchor belongs to the document it was written in, so the table goes
+	// with it here and the next document starts on an empty one.
+	node.Anchors = p.takeAnchors()
 	if body != nil {
 		// A document holding nothing keeps no "...": the pass this replaced
 		// read the marker, then returned on the empty body before it hung the
@@ -1499,6 +1516,22 @@ func startsEntry(tk *tapeToken) bool {
 func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
 	defer p.closeAnchor(ctx)
 
+	value, err := p.readAnchorValue(ctx, anchor)
+	if err != nil {
+		p.dropAnchorName()
+
+		return nil, err
+	}
+	// An anchor names its node only once that node is read. Entering the name
+	// here, and not where the '&' was, is the whole of what makes an alias
+	// standing inside it name nothing.
+	p.keepAnchor(anchorNameOf(anchor.Name), value)
+
+	return value, nil
+}
+
+// readAnchorValue reads the node itself, and hands it over as the anchor's.
+func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
 	// The anchor stands around the node it names, so it goes over before that
 	// node and closes after it. Handing it over afterwards, as a node holding
 	// nothing does, put it beside its own value at the same depth and lost the
@@ -1546,6 +1579,11 @@ func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 		return nil, yamlerrors.NewSyntax("unexpected anchor. anchor name is not scalar value", ctx.currentToken().RawToken())
 	}
 	anchor.Name = anchorName
+	// The name is open from here and not from where the node ends, so an alias
+	// inside that node names it: "&x [ *x ]" is a document, and the tree it
+	// builds holds a cycle.
+	p.openAnchorName(anchorNameOf(anchorName), anchor)
+
 	return anchor, nil
 }
 
@@ -1567,7 +1605,26 @@ func (p *Parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 		return nil, yamlerrors.NewSyntax("unexpected alias. alias name is not scalar value", ctx.currentToken().RawToken())
 	}
 	alias.Value = aliasName
+
+	if err := p.resolveAlias(alias, anchorNameOf(aliasName), aliasName.GetToken()); err != nil {
+		return nil, err
+	}
+
 	return alias, nil
+}
+
+// anchorNameOf reads the name off the scalar an anchor or an alias was written
+// with. It is "" where the scan could not read one, which names nothing.
+func anchorNameOf(n ast.Node) string {
+	if n == nil {
+		return ""
+	}
+	tk := n.GetToken()
+	if tk == nil {
+		return ""
+	}
+
+	return tk.Value
 }
 
 func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {

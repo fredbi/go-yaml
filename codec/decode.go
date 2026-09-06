@@ -559,14 +559,13 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.AliasNode:
 		text := n.Value.String()
 		if _, exists := getAnchorMap(ctx)[text]; exists {
-			// The alias stands inside the node its own anchor names, directly or
-			// through another anchor. That node is not resolved yet, so there is
-			// nothing for the alias to be. Returning nil instead reported a
-			// mapping with a null in it and no error at all.
-			return nil, yamlerrors.NewSyntax(
-				fmt.Sprintf("alias %q names an anchor that is not resolved yet", text),
-				n.Value.GetToken(),
-			)
+			// The alias stands inside the node its own anchor names, directly
+			// or through another anchor. The parser reads that document and
+			// the tree it builds holds a cycle -- YAML's representation is a
+			// graph -- but a Go value is built by walking and has nowhere to
+			// put one. Returning nil instead reported a mapping with a null in
+			// it and no error at all.
+			return nil, yamlerrors.NewRecursiveAlias(text, n.Value.GetToken())
 		}
 		if v, exists := d.anchorValueMap[text]; exists {
 			if !v.IsValid() {
@@ -577,7 +576,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		if node, exists := d.anchorNodeMap[text]; exists {
 			return d.nodeToValue(ctx, node)
 		}
-		return nil, yamlerrors.NewSyntax(fmt.Sprintf("could not find alias %q", text), n.Value.GetToken())
+		return nil, yamlerrors.NewUnknownAnchor(text, n.Value.GetToken())
 	case *ast.LiteralNode:
 		return n.Value.GetValue(), nil
 	case *ast.MappingKeyNode:
@@ -2201,6 +2200,12 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 	}
 	if d.allowDuplicateMapKey {
 		opts = append(opts, parser.WithAllowDuplicateMapKey())
+	}
+	if len(d.referenceAnchorNodeMap) > 0 {
+		// The parser refuses an alias naming no anchor of its own document, and
+		// a reference file exists so that another document may name its
+		// anchors. Publishing them is what lets that alias through.
+		opts = append(opts, parser.WithAnchors(d.referenceAnchorNodeMap))
 	}
 	f, err := parser.ParseBytes(bytes, opts...)
 	if err != nil {

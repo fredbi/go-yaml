@@ -96,17 +96,32 @@ func TestTheLibraryMatchesItsDeclaredStance(t *testing.T) {
 	}
 }
 
-// TestEveryPatternParses separates the two things the library could be doing.
+// TestTheParserAgreesWithEveryPattern holds the parser to the label each
+// pattern carries.
 //
-// The departures below are about composing and constructing, not about syntax,
-// and that only means anything if the parser reads all twelve. A pattern the
-// parser refuses would be a grammar disagreement wearing an anchor's clothes.
-func TestEveryPatternParses(t *testing.T) {
+// The parser resolves aliases, so it answers the one rule a grammar cannot: an
+// alias names the anchor its own document declared before it. The three
+// patterns marked invalid break exactly that rule -- an alias to no anchor, to
+// an anchor written later, and to one in an earlier document -- and the parser
+// refuses all three where it once read them and left the complaint to the
+// decoder.
+//
+// Everything else is a document and the parser reads it, cycles included. An
+// anchor names its node from where the node starts, so "&x [ *x ]" resolves and
+// the tree holds a cycle; refusing it as malformed would be a defect whichever
+// model is underneath, which is what TestACycleParsesAndMayStillBeRefused says
+// and what the decoder's refusal is measured against.
+func TestTheParserAgreesWithEveryPattern(t *testing.T) {
 	for _, p := range yamlcorpus.Patterns() {
 		src := build(t, p.Name)
 
-		if _, err := parser.ParseBytes(src, parser.WithComments()); err != nil {
-			t.Errorf("%s: the parser refuses it, so the pattern tests the wrong layer: %v", p.Name, err)
+		_, err := parser.ParseBytes(src, parser.WithComments())
+
+		switch {
+		case p.Valid && err != nil:
+			t.Errorf("%s: the parser refuses a document the pattern calls valid: %v", p.Name, err)
+		case !p.Valid && err == nil:
+			t.Errorf("%s: the parser reads a document the pattern calls invalid", p.Name)
 		}
 	}
 }
