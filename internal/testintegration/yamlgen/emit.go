@@ -22,8 +22,19 @@ import (
 // collection, a block collection nested in flow -- Emit falls back rather than
 // failing, so that every pairing yields a document.
 func Emit(v Value, st Style) string {
+	// A nil feature set: nothing is recorded, so Emit costs exactly what it did
+	// before the labels existed. [Write] is the call that wants them.
 	e := &emitter{st: st}
+
+	return e.emit(v)
+}
+
+// emit is Emit's body, shared with [Write].
+func (e *emitter) emit(v Value) string {
+	st := e.st
+
 	if st.Markers {
+		e.feat.add(FeatureDocumentMarker)
 		e.buf.WriteString("---\n")
 	}
 	e.root(v)
@@ -35,6 +46,16 @@ func Emit(v Value, st Style) string {
 		// inside a scalar is either escaped by doubleQuote or written as a real
 		// break of the block scalar that carries it, and both are meant to
 		// become the document's break.
+		if strings.Contains(out, "\n") {
+			switch st.Break {
+			case BreakCRLF:
+				e.feat.add(FeatureBreakCRLF)
+			case BreakCR:
+				e.feat.add(FeatureBreakCR)
+			case BreakLF:
+			}
+		}
+
 		out = strings.ReplaceAll(out, "\n", string(st.Break))
 	}
 
@@ -44,6 +65,9 @@ func Emit(v Value, st Style) string {
 type emitter struct {
 	buf strings.Builder
 	st  Style
+	// feat collects the constructs this document is written with. Nil when
+	// nobody asked, which is how Emit stays as cheap as it was.
+	feat features
 	// comments numbers the comments as they are written, so that a test can
 	// check the same set came back rather than merely counting them.
 	comments int
@@ -81,6 +105,7 @@ func (e *emitter) headComment(indent int) {
 	if !e.st.Comments.head() {
 		return
 	}
+	e.feat.add(FeatureCommentAbove)
 	e.pad(indent)
 	e.buf.WriteString(e.comment())
 	e.buf.WriteString("\n")
@@ -94,6 +119,7 @@ func (e *emitter) lineComment() {
 	if !e.st.Comments.line() {
 		return
 	}
+	e.feat.add(FeatureCommentInline)
 	e.buf.WriteString(" ")
 	e.buf.WriteString(e.comment())
 }
@@ -152,7 +178,16 @@ func (p props) none() bool { return p.anchor == "" && p.tag == "" }
 // which anchors were written that way -- and, separately, the two tags that
 // make the parse fail outright rather than merely losing the tag.
 func (e *emitter) propText(p props) string {
+	if p.anchor != "" {
+		e.feat.add(FeatureAnchor)
+	}
+
+	if p.tag != "" {
+		e.feat.add(tagFeature(p.tag))
+	}
+
 	if p.anchor != "" && p.tag != "" && e.st.PropertyOrder == TagFirst {
+		e.feat.add(FeatureTagBeforeAnchor)
 		e.taggedAnchorNames = append(e.taggedAnchorNames, p.anchor)
 
 		if p.tag == TagSeq || p.tag == TagMap {
@@ -209,6 +244,8 @@ func (e *emitter) inlineWith(v Value, flow bool, tag string) (string, bool) {
 	switch n := v.(type) {
 	case Alias:
 		// An alias is always one token, wherever it stands.
+		e.feat.add(FeatureAlias)
+
 		return "*" + n.Name, true
 	case Anchored, Tagged:
 		p, node := strip(v)
@@ -343,6 +380,7 @@ func (e *emitter) child(v Value, indent, depth int) {
 	// going to occupy lines of its own anyway.
 	if e.st.PropertyLine && !p.none() && !flow {
 		if _, ok := e.inlineWith(v, flow, p.tag); !ok {
+			e.feat.add(FeaturePropertyLine)
 			e.propertyLines++
 			e.lineComment()
 			e.buf.WriteString("\n")
@@ -399,12 +437,15 @@ func (e *emitter) literal(s string, indent, stated int) {
 		return
 	}
 
+	e.feat.add(FeatureBlockLiteral)
+
 	body := strings.TrimRight(s, "\n")
 	trailing := len(s) - len(body)
 
 	e.buf.WriteString("|")
 
 	if e.st.BlockIndicator {
+		e.feat.add(FeatureBlockIndicator)
 		e.buf.WriteString(itoa(stated))
 	}
 
@@ -433,6 +474,8 @@ func (e *emitter) literal(s string, indent, stated int) {
 }
 
 func (e *emitter) flowSeq(n Seq) string {
+	e.feat.add(FeatureFlowCollection)
+
 	items := make([]string, 0, len(n.Items))
 	for _, item := range n.Items {
 		if pair, ok := e.flowPair(item); ok {
@@ -468,10 +511,14 @@ func (e *emitter) flowPair(v Value) (string, bool) {
 		return "", false
 	}
 
+	e.feat.add(FeatureFlowPair)
+
 	return e.keyIn(n.Pairs[0].Key, true) + ": " + val, true
 }
 
 func (e *emitter) flowMap(n Map) string {
+	e.feat.add(FeatureFlowCollection)
+
 	pairs := make([]string, 0, len(n.Pairs))
 	for _, p := range n.Pairs {
 		key := e.keyIn(p.Key, true)
@@ -482,10 +529,12 @@ func (e *emitter) flowMap(n Map) string {
 				// The space after the colon is not optional: without it, `p:,`
 				// puts the colon inside the plain scalar rather than between
 				// the key and its value.
+				e.feat.add(FeatureFlowEmptyValue)
 				pairs = append(pairs, key+": ")
 
 				continue
 			case FlowNullKeyAlone:
+				e.feat.add(FeatureFlowKeyAlone)
 				pairs = append(pairs, key)
 
 				continue
@@ -513,15 +562,27 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 		// there being nothing after the `:` or the `-`. Inside a flow
 		// collection the same emptiness runs into the next comma.
 		if flow && e.st.NullSpelling == "" {
+			e.feat.add(FeaturePlain)
+
 			return "null"
+		}
+
+		if e.st.NullSpelling != "" {
+			e.feat.add(FeaturePlain)
 		}
 
 		return e.st.NullSpelling
 	case Bool:
+		e.feat.add(FeaturePlain)
+
 		return e.st.BoolSpelling(n.V)
 	case Int:
+		e.feat.add(FeaturePlain)
+
 		return strconv.Itoa(n.V)
 	case Float:
+		e.feat.add(FeaturePlain)
+
 		// Never exponent form: this library reads 1e3 as a string, so an
 		// exponent would come back as something other than a number.
 		s := strconv.FormatFloat(n.V, 'f', -1, 64)
@@ -545,17 +606,27 @@ func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 	switch e.st.Quoting {
 	case QuotePlain:
 		if canPlain(s, strTagged) {
+			e.feat.add(FeaturePlain)
+
 			return s
 		}
+
+		e.feat.add(FeatureQuotedDouble)
 
 		return doubleQuote(s)
 	case QuoteSingle:
 		if canSingle(s) {
+			e.feat.add(FeatureQuotedSingle)
+
 			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 		}
 
+		e.feat.add(FeatureQuotedDouble)
+
 		return doubleQuote(s)
 	default:
+		e.feat.add(FeatureQuotedDouble)
+
 		return doubleQuote(s)
 	}
 }
@@ -733,9 +804,11 @@ func (e *emitter) foldedScalar(s string, indent, stated int) {
 
 	trailing := len(s) - len(body)
 
+	e.feat.add(FeatureBlockFolded)
 	e.buf.WriteString(">")
 
 	if e.st.BlockIndicator {
+		e.feat.add(FeatureBlockIndicator)
 		e.buf.WriteString(itoa(stated))
 	}
 
