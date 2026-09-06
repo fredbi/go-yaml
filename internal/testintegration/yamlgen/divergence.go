@@ -134,12 +134,13 @@ var Ledger = []Divergence{
 		Name: "parse/a-tag-before-an-anchor-is-dropped",
 		Reason: "YAML 1.2 lets a node's tag and anchor appear in either order and means the " +
 			"same by both. Written second the tag holds; written first it is dropped from " +
-			"the node the anchor names, and the three kinds fail differently. A scalar " +
-			"parses and the anchor resolves to the untagged value, so `a: !!str &a1 5` " +
-			"reads \"5\" at a and 5 at `b: *a1` -- one node, two types. `!!seq &a1 [1]` and " +
-			"`!!map &a1` do not parse at all: `value is not allowed in this context` and " +
-			"`could not find map`. `!!null &a1 null` parses and a later `*a1` reports " +
+			"the node the anchor names. A scalar parses and the anchor resolves to the " +
+			"untagged value, so `a: !!str &a1 5` reads \"5\" at a and 5 at `b: *a1` -- one " +
+			"node, two types. `!!null &a1 null` parses and a later `*a1` reports " +
 			"`could not find alias`.\n\n" +
+			"A collection tag was a third kind and is fixed: `!!seq &a1 [1]` and " +
+			"`!!map &a1 {b: 1}` did not parse at all, and read correctly since " +
+			"2026-09-07. See TestFixedACollectionTagBeforeAnAnchorParses.\n\n" +
 			"On an empty node the tag swallows what follows: `- !!null &a1` over `- x` " +
 			"takes the entry below it, and so do `- !!str &a1` over `- x` and " +
 			"`k: !!null &a1` over `j: x`. Anchor first reads all of them correctly. " +
@@ -148,10 +149,9 @@ var Ledger = []Divergence{
 			"refuses it since 2026-09-07, because the entry the tag swallowed turns the " +
 			"node into a collection and ast.TagNode.Resolve reports a scalar tag " +
 			"standing on one.\n\n" +
-			"So three shapes fail three ways: a collection tag stops the parse, a tag on " +
-			"an empty node eats what follows, and any other tag is dropped so quietly " +
-			"that nothing notices until an alias asks the anchor what it names. The " +
-			"predicate asks for one of the three.\n\n" +
+			"So two shapes fail two ways: a tag on an empty node eats what follows, and " +
+			"any other tag is dropped so quietly that nothing notices until an alias asks " +
+			"the anchor what it names. The predicate asks for one of the two.\n\n" +
 			"It claims all five properties, which no other entry does and this one has " +
 			"earned: a node that eats the rest of the document takes the comments with " +
 			"it, moves what it swallowed -- `a: !!null &a1` over `b: 1` comes back with b " +
@@ -251,7 +251,10 @@ func writesBrokenTaggedAnchor(v Value, st Style) bool {
 	e := &emitter{st: st}
 	e.root(v)
 
-	if e.collectionTagAnchors > 0 || e.emptyTagAnchors > 0 {
+	// collectionTagAnchors is deliberately not asked for: a collection tag
+	// written before an anchor was the third shape of this defect and it was
+	// fixed on 2026-09-07. See TestFixedACollectionTagBeforeAnAnchorParses.
+	if e.emptyTagAnchors > 0 {
 		return true
 	}
 	if len(e.taggedAnchorNames) == 0 {

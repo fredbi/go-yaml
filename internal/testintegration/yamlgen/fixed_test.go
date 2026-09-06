@@ -531,3 +531,57 @@ func TestFixedStrTagKeepsTheSpelling(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "", "b": uint64(1)}, got)
 	})
 }
+
+// TestFixedACollectionTagBeforeAnAnchorParses covers a collection tag written
+// in front of an anchor.
+//
+// YAML 1.2 lets a node's tag and anchor stand in either order and means the
+// same by both. Written second the tag held; written first it stopped the parse
+// outright -- "a: !!seq &a1 [1]" was refused with "value is not allowed in this
+// context" and "a: !!map &a1 {b: 1}" with "could not find map", so a document
+// carrying one could not be read, rendered or reformatted at all.
+//
+// Fixed on 2026-09-07 by parseTagValue reading whatever node follows a
+// collection tag rather than insisting on the kind: what the tag made of the
+// node is ast.TagNode.Resolve's to report, and the load refuses a kind the tag
+// does not name. The tag before the anchor stopped being a parse question on
+// the way.
+//
+// The other two shapes of that defect are still open, in
+// TestDefectTagBeforeAnchorIsDropped: a tag on an empty node swallows what
+// follows it, and any other tag is dropped from the node the anchor names.
+func TestFixedACollectionTagBeforeAnAnchorParses(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{src: "a: !!seq &a1 [1]\n", want: map[string]any{"a": []any{uint64(1)}}},
+		{src: "a: !!map &a1 {b: 1}\n", want: map[string]any{"a": map[string]any{"b": uint64(1)}}},
+
+		// The anchor written first, which always read, so the two orders agree.
+		{src: "a: &a1 !!seq [1]\n", want: map[string]any{"a": []any{uint64(1)}}},
+		{src: "a: &a1 !!map {b: 1}\n", want: map[string]any{"a": map[string]any{"b": uint64(1)}}},
+	} {
+		t.Run(tc.src, func(t *testing.T) {
+			wellFormed(t, tc.src)
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(tc.src), &got))
+			assert.Equal(t, tc.want, got)
+
+			// And the anchor names the tagged node, so an alias to it is the
+			// same value.
+			aliased := strings.TrimSuffix(tc.src, "\n") + "\nb: *a1\n"
+
+			var both map[string]any
+			require.NoError(t, yaml.Unmarshal([]byte(aliased), &both))
+			assert.Equal(t, both["a"], both["b"], "%q", aliased)
+		})
+	}
+
+	t.Run("and the document renders as it was written", func(t *testing.T) {
+		for _, src := range []string{"a: !!seq &a1 [1]\n", "a: !!map &a1 {b: 1}\n"} {
+			assert.Equal(t, src, renderOnce(t, src), "%q", src)
+		}
+	})
+}

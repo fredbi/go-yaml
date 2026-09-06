@@ -52,22 +52,11 @@ func renderOnce(t *testing.T, src string) string {
 // appear in either order. Written second the tag holds; written first it is
 // dropped from the node the anchor names.
 //
-// Three shapes, three failures, and the middle one is the reason this is worth
-// more than a curiosity: a document loses entries and nobody is told.
+// Two shapes left, and the first is the reason this is worth more than a
+// curiosity: a document loses entries and nobody is told. The third -- a
+// collection tag stopping the parse outright -- was fixed on 2026-09-07 and
+// moved to TestFixedACollectionTagBeforeAnAnchorParses.
 func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
-	t.Run("a collection tag stops the parse", func(t *testing.T) {
-		for _, src := range []string{"a: !!seq &a1 [1]\n", "a: !!map &a1 {b: 1}\n"} {
-			wellFormed(t, src)
-			assert.Error(t, yaml.Unmarshal([]byte(src), new(any)), "today: %q is refused", src)
-		}
-
-		// The same documents with the anchor first are read.
-		for _, src := range []string{"a: &a1 !!seq [1]\n", "a: &a1 !!map {b: 1}\n"} {
-			wellFormed(t, src)
-			assert.NoError(t, yaml.Unmarshal([]byte(src), new(any)))
-		}
-	})
-
 	t.Run("on an empty node it swallows what follows, and says so", func(t *testing.T) {
 		// The swallowing is the parse's and has not been fixed: the tag still
 		// takes the entry below it. What has changed is that the document no

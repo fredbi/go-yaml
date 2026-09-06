@@ -186,7 +186,6 @@ var parserComplaints = []string{
 	"could not find end character of single-quoted text",
 	"could not find flow map content",
 	"could not find flow mapping end token _",
-	"could not find map",
 	"could not find map value",
 	"could not find multi-line content",
 	"expected sequence element, but found _",

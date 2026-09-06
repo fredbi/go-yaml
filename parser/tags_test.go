@@ -278,3 +278,71 @@ func TestParseKeepsATagThatEndsWhereTheDocumentDoes(t *testing.T) {
 		})
 	}
 }
+
+// TestParseReadsATagNamingAnotherKind covers "!!seq 5" and its relatives.
+//
+// The grammar puts no constraint on which tag stands on which node, so these
+// are YAML 1.2 and grammar.NewRecognizer reads them. The parse used to refuse
+// them with "could not find map", "value is not allowed in this context" or
+// "unexpected scalar value type" -- none of which names the tag, and each of
+// which put the document out of reach of a consumer that only wanted to read or
+// reformat it.
+//
+// The parse builds the node the document wrote and the tag stays on it, so the
+// document renders as it was written. What the tag made of the node is
+// [github.com/go-openapi/go-yaml/ast.TagNode.Resolve]'s to report, and the load
+// refuses it -- see TestLaxTagsDoesNotExcuseAKindMismatch, which holds that the
+// refusal stands whatever the tag policy.
+func TestParseReadsATagNamingAnotherKind(t *testing.T) {
+	for _, source := range []string{
+		"k: !!seq 5\n",
+		"k: !!map 5\n",
+		"k: !!set 5\n",
+		"k: !!omap 5\n",
+		"k: !!str [1, 2]\n",
+		"k: !!int [1, 2]\n",
+		"k: !!str {a: 1}\n",
+		"k: !!bool [1]\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(source))
+			require.NoError(t, err)
+			assert.Equal(t, source, f.String(), "the document does not render as it was written")
+		})
+	}
+}
+
+// TestParseReadsACollectionTagBeforeAnAnchor covers the shape that made the
+// refusal above worth removing rather than rewording.
+//
+// A tag and an anchor stand in either order and mean the same. "a: !!seq &a1
+// [1]" was refused outright, because the token after the tag was the anchor and
+// not the "[" the tag insisted on.
+func TestParseReadsACollectionTagBeforeAnAnchor(t *testing.T) {
+	for _, source := range []string{
+		"a: !!seq &a1 [1]\n",
+		"a: !!map &a1 {b: 1}\n",
+		"a: &a1 !!seq [1]\n",
+		"a: &a1 !!map {b: 1}\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(source))
+			require.NoError(t, err)
+			assert.Equal(t, source, f.String())
+		})
+	}
+}
+
+// TestParseKeepsTheTagOnAnEmptyCollection holds the line between a tag standing
+// on nothing and one standing on a node of another kind.
+//
+// "k: !!seq" left the value out, which is the tag's own default and not a
+// mismatch, so it must not be caught by the change above.
+func TestParseKeepsTheTagOnAnEmptyCollection(t *testing.T) {
+	for _, source := range []string{"k: !!seq\n", "k: !!map\n", "k: !!seq\nj: 1\n", "[!!seq]\n"} {
+		t.Run(source, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source))
+			assert.NoError(t, err)
+		})
+	}
+}

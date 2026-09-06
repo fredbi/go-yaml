@@ -18,6 +18,7 @@ import (
 	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/internal/yamltestsuite"
 	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestLabParserMatchesProduction is the gate every lab candidate clears before
@@ -99,6 +100,72 @@ func divergesOnPurpose(err error) (string, bool) {
 	}
 }
 
+// acceptsOnPurpose reports whether a refusal the frozen parser makes is one the
+// shipped parser no longer makes.
+//
+// One rule so far, and it is the mirror of the first entry above. A collection
+// tag reads the node under it whatever kind that node is: "!!seq 5" and
+// "!!str [1, 2]" are YAML 1.2, since the grammar puts no constraint on which
+// tag stands on which node, and grammar.NewRecognizer reads both. So they parse
+// and render, and the load refuses them -- which is what lets a consumer that
+// only reformats or colorizes a document still handle one. refparser refuses
+// them at the parse with "could not find map" or "value is not allowed in this
+// context", neither of which names the tag.
+//
+// The same refusal covered "!!map &a1 {b: 1}", a collection tag written before
+// an anchor, which refparser could not read at all and the shipped parser now
+// reads correctly.
+//
+// Both halves are required: refparser's own complaint, and a collection tag in
+// the tree the shipped parser built. The messages are broad enough on their own
+// to hide a real regression.
+func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
+	if err == nil || got == nil {
+		return "", false
+	}
+
+	switch msg := err.Error(); {
+	case strings.Contains(msg, "could not find map"),
+		strings.Contains(msg, "value is not allowed in this context"):
+	default:
+		return "", false
+	}
+
+	if !holdsCollectionTag(got) {
+		return "", false
+	}
+
+	return "a collection tag reads the node under it, and the load refuses a kind it does not name", true
+}
+
+// holdsCollectionTag reports whether f carries a tag naming a kind.
+func holdsCollectionTag(f *ast.File) bool {
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			tag, ok := n.(*ast.TagNode)
+			if !ok {
+				return
+			}
+			switch keyword, _ := token.ReservedTagOf(tag.URI); keyword {
+			case token.MappingTag, token.SequenceTag, token.SetTag, token.OrderedMapTag:
+				found = true
+			}
+		}), doc)
+	}
+
+	return found
+}
+
+// visitFunc adapts a function to ast.Visitor.
+type visitFunc func(ast.Node)
+
+func (v visitFunc) Visit(n ast.Node) ast.Visitor {
+	v(n)
+
+	return v
+}
+
 func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	t.Helper()
 
@@ -117,6 +184,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 		// compared, not the text of it.
 		return
 	case wantErr != nil:
+		if why, ok := acceptsOnPurpose(wantErr, got); ok {
+			t.Skipf("accepted on purpose: %s\nproduction: %v", why, wantErr)
+		}
+
 		t.Fatalf("production refuses the document and the lab accepts it\nproduction: %v\nsource:\n%s", wantErr, text)
 	case gotErr != nil:
 		if why, ok := divergesOnPurpose(gotErr); ok {

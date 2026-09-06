@@ -1854,7 +1854,7 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 	switch tag {
 	case token.MappingTag, token.SetTag:
 		if !p.isMapToken(tk) {
-			return nil, yamlerrors.NewSyntax("could not find map", tk.RawToken())
+			return p.parseTaggedOtherKind(ctx, uri, tagRawTk, tk)
 		}
 		if tk.Type() == token.MappingStartType {
 			return p.parseFlowMap(ctx.withFlow(true))
@@ -1870,6 +1870,9 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 			// mapping has begun. The tag is on the empty node.
 			return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 		}
+		if opensCollection(tk) || p.isMapToken(tk) {
+			return p.parseTaggedOtherKind(ctx, uri, tagRawTk, tk)
+		}
 		scalar, err := p.parseScalarValue(ctx, tk)
 		if err != nil {
 			return nil, err
@@ -1879,6 +1882,9 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 	case token.SequenceTag, token.OrderedMapTag:
 		if tk.Type() == token.SequenceStartType {
 			return p.parseFlowSequence(ctx.withFlowSequence())
+		}
+		if tk.Type() != token.SequenceEntryType {
+			return p.parseTaggedOtherKind(ctx, uri, tagRawTk, tk)
 		}
 		return p.parseSequence(ctx)
 	}
@@ -1900,6 +1906,41 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 	}
 
 	return p.parseToken(ctx, tk)
+}
+
+// parseTaggedOtherKind reads the node a tag names the wrong kind for.
+//
+// "!!seq 5" and "!!str [1, 2]" are YAML 1.2: the grammar puts no constraint on
+// which tag stands on which node, and grammar.NewRecognizer reads both. So the
+// parse builds the node the document wrote, the tag stays on it, and the
+// document renders as it was written.
+//
+// What the tag made of it is [ast.TagNode.Resolve]'s to report, and the load
+// refuses it whatever the tag policy: no text stands in for a sequence, and
+// writing "!!seq" was a claim about shape rather than about a value. This used
+// to be three complaints from the parse -- "could not find map", "value is not
+// allowed in this context", "unexpected scalar value type" -- none of which
+// named the tag, and each of which put the document out of reach of anything
+// that only wanted to read or reformat it.
+func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.Token, tk *tapeToken) (ast.Node, error) {
+	if endsValue(tk) || startsEntry(tk) {
+		// The tag stands on the empty node, which is not a mismatch: the
+		// document left the value out rather than writing one of another kind.
+		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
+	}
+
+	return p.parseToken(ctx, tk)
+}
+
+// opensCollection reports whether tk begins a flow collection or a block
+// sequence entry.
+func opensCollection(tk *tapeToken) bool {
+	switch tk.Type() {
+	case token.SequenceStartType, token.MappingStartType, token.SequenceEntryType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
