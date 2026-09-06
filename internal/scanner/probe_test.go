@@ -30,40 +30,44 @@ import (
 // A pair that starts disagreeing more has lost an invariant; one that starts disagreeing less may have become
 // removable, and the entry comes down to say so.
 var stateLedger = map[string]int64{ //nolint:gochecknoglobals // ok to store and immutable map as a global
-	// Outside a block scalar the mark is the buffer's length less the whitespace and the fold break it ends with, exactly:
-	// 135,723 reads and no disagreement.
+	// Outside a block scalar the mark is the buffer's length less the whitespace and the fold break it ends with,
+	// exactly, over every read.
 	// It was three until bufferedToken stopped clearing the value buffer and leaving the mark past the end of it.
 	//
-	// So it could be worked out at the read -- a scan back over the buffer, once per token -- instead of a compare and a
+	// So it could be worked out at the read, a scan back over the buffer once per token, instead of a compare and a
 	// store for every character written.
 	// Inside a block scalar it could not: the two sites that rewrite the buffer set it outright, keeping the space that
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
+	// 3 of 1,348 measured 2026-09-07.
 	"buf.notSpaceCharPos==trimmed/plain": 0,
-	"buf.notSpaceCharPos==trimmed/block": 4,
+	"buf.notSpaceCharPos==trimmed/block": 3,
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
 	"buf.notSpaceCharPos<=len(buf)": 0,
 
-	// One cause, in two shapes: isFirstCharAtLine is still true after characters have been read on the line by a path that
-	// does not reach updateIndent's space branch, so the column has moved and the indentation has not.
+	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
+	// causes, and only the second is a surprise.
 	//
-	// The three with indentHasTab are a tab inside a block scalar's content, past the indentation the header set -- which
-	// is content and not indentation, YAML having none of the latter but spaces (s-indent(n) is s-space x n, and a tab
-	// there is refused). updateIndent runs for every character the main loop reads, block scalar content included, so it
-	// sets indentHasTab for a tab that indents nothing.
+	// The /tab bucket is 100% by construction, and reading it as a count of anything else is a mistake made once
+	// already. updateIndent takes a tab in leading whitespace, sets indentHasTab and returns without counting it,
+	// because s-indent(n) is s-space x n and a tab is separation and not indentation. The main loop advances the column
+	// for it regardless, so from that tab to the end of the line indentNum lags column-1 and every following space
+	// trips the probe. 6 of 6 measured 2026-09-07: one a tab in a folded scalar's content, three a tab among the
+	// spaces before a comment, two a tab before a quoted scalar. The number counts spaces after a tab in the corpus,
+	// nothing more. What it would catch is a tab starting to count as indentation, which would break s-indent(n).
 	//
-	// Harmless: progressLine clears it, and nothing between reads it inside a block.
-	//
-	// The nine without are a quoted scalar spanning a line break.
-	// The quote scanners call progressLine, which says the next character opens a line, then read the rest of the scalar
-	// with progressColumn, which never reaches updateIndent.
-	"indent.indentNum==column-1/tab":    3,
-	"indent.indentNum==column-1/spaces": 9,
+	// The /spaces bucket is the one worth watching, and it holds one cause: a quoted scalar spanning a line break.
+	// The quote scanners call progressLine, which says the next character opens a line, then read the rest of the
+	// scalar with progressColumn, which never reaches updateIndent. So isFirstCharAtLine is still true after the line
+	// has been read into. 7 of 11,729 measured 2026-09-07.
+	"indent.indentNum==column-1/tab":    6,
+	"indent.indentNum==column-1/spaces": 7,
 
-	// The indent level a token was given and the level the scanner stands at part company where a block opens: 3,000 of
-	// 76,279. Not a pair.
-	"indent.lastIndentLevel==indentLevel": 3000,
+	// The indent level a token was given and the level the scanner stands at part company where a block opens, so the
+	// two are not a redundant pair. 2,793 of 69,177 measured 2026-09-07, against 3,000 of 76,279 on the corpus before
+	// it: the ratio holds at 3.9% and the corpus simply cuts fewer tokens.
+	"indent.lastIndentLevel==indentLevel": 2793,
 
 	// bufferedToken assembles a token's extent from what the scanner already holds -- where the origin began, how long it
 	// is, and the line the text ends on -- instead of reading the origin back to work it out.
