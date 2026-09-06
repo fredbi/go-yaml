@@ -83,7 +83,10 @@ func TestTheCorpusDrawsEveryComplaint(t *testing.T) {
 	}
 	sort.Strings(got)
 
-	t.Logf("%d of %d cases refused, %d distinct complaints (93 message templates in the parser and scanner sources)",
+	// The template count is measured rather than written down here. See
+	// TestTheParserVocabularyGapIsMeasured, which reads them out of the source
+	// and names the ones nothing reaches.
+	t.Logf("%d of %d cases refused, %d distinct complaints",
 		refused, len(cases), len(got))
 
 	if !assert.Equal(t, parserComplaints, got, "the parser's vocabulary over this corpus has changed") {

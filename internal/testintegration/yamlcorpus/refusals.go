@@ -31,8 +31,9 @@ import (
 // gone, quoted text gone, numbers gone -- so that the same complaint about
 // different documents is one signature. Counting the distinct signatures a
 // corpus provokes measures how much the parser can still tell you: 54 over the
-// smoke tier's 3,908 refused documents, against 93 message templates in the
-// parser and scanner sources. A parser that got vaguer would lose signatures
+// smoke tier's refused documents. The parser's whole vocabulary, and the part
+// of it nothing reaches, are measured by TestTheParserVocabularyGapIsMeasured
+// rather than counted by hand here
 // while every verdict stayed exactly where it was.
 //
 // # What a signature deliberately throws away
@@ -117,6 +118,58 @@ type Refusal struct {
 // throw away. [TestTheCorpusDrawsEveryComplaint] is the wider net.
 func Refusals() []Refusal {
 	return []Refusal{
+		// Eight complaints nothing in the corpus reached, provoked on purpose
+		// on 2026-09-10. The parser can say ninety-odd things and the generated
+		// documents draw sixty of them; these are the ones a document could be
+		// written for. See TestTheParserVocabularyGapIsMeasured, which reports
+		// what is left.
+		{
+			Name: "a byte order mark inside a line",
+			Src:  "a: \ufeffb\n", Says: "byte order mark inside a line",
+		},
+		{
+			Name: "a byte order mark where no document begins",
+			Src:  "---\na: 1\n\ufeffb: 2\n", Says: "byte order mark where no document begins",
+		},
+		{
+			Name: "a value after a document separator",
+			Src:  "--- a\n--- b: 1\n", Says: "cannot be placed after document separator",
+		},
+		{
+			// The escape is two hex digits and this has one, so the parser
+			// reads the closing quote as the second and complains about it
+			// rather than about the length.
+			Name: "an eight-bit escape with a digit missing",
+			Src:  `"\x1"` + "\n", Says: "is not a hexadecimal digit",
+		},
+		{
+			Name: "a surrogate pair cut short",
+			Src:  `"\uD800\uD"` + "\n", Says: "not enough length for escaped",
+		},
+		{
+			Name: "a low surrogate whose digits are not hexadecimal",
+			Src:  `"\uD800\uDCZZ"` + "\n", Says: "not a hexadecimal digit in the low surrogate",
+		},
+		{
+			// A high surrogate has to be followed by a low one, and this is
+			// followed by another character in the basic plane.
+			//
+			// WellFormed, and that is the point: pairing surrogates is a rule
+			// about what the escapes denote, which no production expresses. The
+			// message is the only statement anywhere that this library applies
+			// it.
+			Name: "a high surrogate followed by something that is not a low one",
+			Src:  `"\uD800\uAAAA"` + "\n", Says: "after high surrogate",
+			WellFormed: true,
+		},
+		{
+			// Also well formed. The grammar takes a directive it does not
+			// recognize as a reserved one and moves on, so the shape of a %TAG
+			// is a rule stated in 6.8.2.2 and nowhere in the productions.
+			Name: "a TAG directive with no prefix",
+			Src:  "%TAG !e!\n---\nx\n", Says: "unexpected format TAG directive",
+			WellFormed: true,
+		},
 		{
 			Name: "a reserved character opening a document",
 			Src:  "@ x\n", Says: "is a reserved character",
