@@ -87,29 +87,32 @@ var GoYAML = stance.Table{
 		// a choice, and libfyaml makes the same one.
 		TagYAMLMinorVersion: stance.Refuses,
 
-		// A tag naming a type the scalar cannot be read as, measured, and the
-		// library does not answer it the same way twice.
+		// A tag naming a type the scalar cannot be read as. All six refuse, and
+		// each names the text and the tag: "cannot read \"abc\" as !!int".
 		//
-		// Three refusals, each naming what it could not read: "cannot convert
-		// \"7\" to boolean", "cannot read \"not-a-date\" as a timestamp",
-		// "cannot read \"not base64!\" as base64".
+		// Every one is a position YAML permits rather than a rule it states, so
+		// none is a Departure. 3.1.2 builds a representation from the
+		// serialization and a node whose tag will not apply has none to build;
+		// what a processor then owes the caller the specification leaves open,
+		// and refusing, zeroing and echoing the text are all conformant.
 		//
-		// And three acceptances that lose the value with nothing reported:
-		// "!!int abc" reads 0, "!!float xyz" reads 0, "!!null 5" reads nil. A
-		// caller gets a number it can neither distinguish from a written zero
-		// nor trace back to the four characters that produced it.
+		// Measured on 2026-09-07, this table read three ways at once: "!!bool
+		// 7" was refused, "!!int abc" read 0, and "!!timestamp not-a-date" was
+		// refused by the decoder while codec.ToJSON wrote it through as a
+		// string. A caller could not tell a written zero from a tag that failed,
+		// and the two processors disagreed about the same document.
 		//
-		// Every one of the six is a position YAML permits, so none is a
-		// Departure. The split is the thing worth writing down: a consumer
-		// reading this table learns that "!!int" and "!!bool" behave
-		// differently here, which nothing in the specification would have told
-		// them.
+		// ast.TagNode.Resolve settles it in one place for every consumer, and
+		// Fred's ruling on the same day made the strict answer the default: a
+		// tag is an assertion, and an assertion that does not hold is reported.
+		// A laxer policy is to follow as an option, and will fall back to the
+		// text rather than to a zero.
 		TagBoolNotABoolean:   stance.Refuses,
 		TagTimestampNotADate: stance.Refuses,
 		TagBinaryNotBase64:   stance.Refuses,
-		TagIntNotAnInteger:   stance.Accepts,
-		TagFloatNotANumber:   stance.Accepts,
-		TagNullNotNull:       stance.Accepts,
+		TagIntNotAnInteger:   stance.Refuses,
+		TagFloatNotANumber:   stance.Refuses,
+		TagNullNotNull:       stance.Refuses,
 	},
 }
 

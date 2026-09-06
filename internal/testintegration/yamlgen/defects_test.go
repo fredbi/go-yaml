@@ -68,23 +68,27 @@ func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
 		}
 	})
 
-	t.Run("on an empty node it swallows what follows", func(t *testing.T) {
-		wellFormed(t, "- !!null &a1\n- x\n")
+	t.Run("on an empty node it swallows what follows, and says so", func(t *testing.T) {
+		// The swallowing is the parse's and has not been fixed: the tag still
+		// takes the entry below it. What has changed is that the document no
+		// longer comes back short with a nil error. ast.TagNode.Resolve reports
+		// a scalar tag standing on a collection, which is what the swallowed
+		// entry turns the node into, so the load refuses.
+		for _, src := range []string{
+			"- !!null &a1\n- x\n",
+			"- !!str &a1\n- x\n",
+			"k: !!null &a1\nj: x\n",
+		} {
+			wellFormed(t, src)
 
+			var got any
+			err := yaml.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "names a kind this node is not", "%q", src)
+		}
+
+		// Anchor first, and all three read correctly.
 		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("- !!null &a1\n- x\n"), &got))
-		assert.Equal(t, []any{nil}, got, "today: the second entry is gone, with no error")
-
-		got = nil
-		require.NoError(t, yaml.Unmarshal([]byte("- !!str &a1\n- x\n"), &got))
-		assert.Equal(t, []any{"[x]"}, got, "today: the second entry is swallowed as text")
-
-		got = nil
-		require.NoError(t, yaml.Unmarshal([]byte("k: !!null &a1\nj: x\n"), &got))
-		assert.Equal(t, map[string]any{"k": nil}, got, "today: j is gone")
-
-		// Anchor first, all three read correctly.
-		got = nil
 		require.NoError(t, yaml.Unmarshal([]byte("- &a1 !!null\n- x\n"), &got))
 		assert.Equal(t, []any{nil, "x"}, got)
 	})

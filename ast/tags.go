@@ -67,10 +67,15 @@ type Resolution struct {
 	// read anything into it: "!!str 0x10" carries "0x10" and not "16". It is ""
 	// where the node is not a scalar.
 	Text string
-	// Empty says the tag stands on a node the document left out -- "k: !!int"
-	// with nothing after it. Such a node takes the tag's own default rather
-	// than failing to be read, which is what parser's
-	// newTagDefaultScalarValueNode builds.
+	// Empty says there is no text under the tag: the document left the node out
+	// as in "k: !!int", or wrote an empty scalar. Such a node takes the tag's
+	// own default rather than failing to be read.
+	//
+	// Both spellings land here because the parser writes the missing node two
+	// ways -- handNull builds a null where the document ends, and
+	// newTagDefaultScalarValueNode builds the tag's default value where it does
+	// not -- and a caller reading a tagged node should not have to tell them
+	// apart.
 	Empty bool
 }
 
@@ -87,6 +92,7 @@ type Resolution struct {
 func (n *TagNode) Resolve() Resolution {
 	tag, reserved := token.ReservedTagOf(n.URI)
 	text, scalar, empty := taggedScalarText(n.Value)
+	_, isNull := unwrapAnchor(n.Value).(*NullNode)
 
 	if !reserved {
 		return Resolution{Verdict: TagUnresolved, Text: text, Empty: empty}
@@ -97,7 +103,7 @@ func (n *TagNode) Resolve() Resolution {
 	if collectionTag(tag) {
 		// A collection tag on a scalar, and the other way about. n.Value is nil
 		// where the tag stands on nothing, which every tag may do.
-		if scalar && !empty {
+		if scalar && !empty && text != "" {
 			res.Verdict = TagKindMismatch
 		}
 
@@ -109,10 +115,19 @@ func (n *TagNode) Resolve() Resolution {
 
 		return res
 	}
-	if empty || n.Value == nil {
-		// The tag's own default: 0 for "!!int", false for "!!bool", the empty
-		// string for "!!str". Reading it as a failure made "k: !!bool" an error
-		// where "k: !!int" was 0.
+	if empty || n.Value == nil || text == "" || (isNull && !readsTheText(tag)) {
+		// The tag stands on no value: the document left the node out, wrote an
+		// empty scalar, or wrote a null. It takes the tag's own default -- 0
+		// for "!!int", false for "!!bool", the zero time for "!!timestamp".
+		// Reading that as a failure made "k: !!bool" an error where "k: !!int"
+		// was 0.
+		//
+		// "!!str" and "!!null" are the exceptions. Every scalar is a string,
+		// including the four characters of a null, so "!!str Null" is "Null"
+		// and not the empty string; and a null under "!!null" is the value the
+		// tag names rather than the absence of one.
+		res.Empty = true
+
 		return res
 	}
 	if !readsAs(tag, text) {
@@ -120,6 +135,16 @@ func (n *TagNode) Resolve() Resolution {
 	}
 
 	return res
+}
+
+// readsTheText reports whether the tag reads the characters of a null rather
+// than taking it as the absence of a value.
+//
+// "!!str Null" is the three-and-one characters and "!!null null" is the null
+// the tag names. Under any other tag a null is no value at all, so
+// "!!timestamp null" is the zero time and not a date that failed to parse.
+func readsTheText(tag token.ReservedTagKeyword) bool {
+	return tag == token.StringTag || tag == token.NullTag
 }
 
 // collectionTag reports whether the tag names a kind rather than a scalar type.
@@ -248,6 +273,16 @@ func ParseTimestamp(text string) (time.Time, bool) {
 	}
 
 	return time.Time{}, false
+}
+
+// unwrapAnchor steps over an anchor standing between a tag and the node it
+// types: "!!int &c 4" tags the 4.
+func unwrapAnchor(n Node) Node {
+	if a, ok := n.(*AnchorNode); ok {
+		return unwrapAnchor(a.Value)
+	}
+
+	return n
 }
 
 // taggedScalarText is the text a tagged scalar was written with, whether the

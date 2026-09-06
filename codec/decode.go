@@ -457,11 +457,34 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.NanNode:
 		return n.GetValue(), nil
 	case *ast.TagNode:
-		// Match on the URI rather than on the shorthand the tag was written
-		// with, so "!!int" and "!<tag:yaml.org,2002:int>" agree and a "%TAG"
-		// line that repoints "!!" takes "!!int" out of YAML's namespace.
-		tag, _ := token.ReservedTagOf(n.URI)
-		switch tag {
+		// What the tag made of the node is ast.TagNode.Resolve's answer and not
+		// this switch's. The converter in codec/tojson.go asks the same
+		// question; before it did, the two disagreed about "!!timestamp
+		// not-a-date" and about "!!binary" on an empty node.
+		res := n.Resolve()
+
+		switch res.Verdict {
+		case ast.TagUnresolved:
+			// A local tag such as "!Ref", a foreign one, or a name YAML's type
+			// repository does not define. 6.9.1 hands it to the application, so
+			// the node is read by its kind.
+			return d.nodeToValue(ctx, n.Value)
+		case ast.TagKindMismatch:
+			return nil, yamlerrors.NewSyntax(
+				fmt.Sprintf("%s names a kind this node is not", res.Tag), n.GetToken())
+		case ast.TagValueMismatch:
+			return nil, yamlerrors.NewSyntax(
+				fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), n.Value.GetToken())
+		}
+
+		if res.Empty {
+			// A tag with nothing after it takes the tag's own default, which
+			// parser's newTagDefaultScalarValueNode builds and nothing read:
+			// "k: !!int" was 0 while "k: !!bool" and "k: !!binary" were errors.
+			return tagZero(res.Tag)
+		}
+
+		switch res.Tag {
 		case token.TimestampTag:
 			return d.castToTime(ctx, n.Value)
 		case token.IntegerTag:
@@ -480,67 +503,30 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		case token.NullTag:
 			return nil, nil
 		case token.BinaryTag:
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-			str, ok := v.(string)
-			if !ok {
-				return nil, yamlerrors.NewSyntax(
-					fmt.Sprintf("cannot convert %q to string", fmt.Sprint(v)),
-					n.Value.GetToken(),
-				)
-			}
-			b, err := base64.StdEncoding.DecodeString(str)
-			if err != nil {
-				// Refused rather than answered with the bytes decoded so far.
-				// "!!binary" on a text base64 cannot read used to come back as
-				// an empty []byte with no error.
-				return nil, yamlerrors.NewSyntax(
-					fmt.Sprintf("cannot read %q as base64: %v", str, err), n.Value.GetToken())
-			}
+			// Resolve has read the text as base64 already, so this cannot fail.
+			return base64.StdEncoding.DecodeString(res.Text)
+		case token.BooleanTag:
+			// The tag says boolean whatever the text is, so a spelling neither
+			// schema resolves is read in lower case: "!!bool Yes" and
+			// "!!bool YES" are the same request. Resolve has agreed there is
+			// one to read.
+			b, _ := token.ParseBool(strings.ToLower(res.Text))
 
 			return b, nil
-		case token.BooleanTag:
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-			str := fmt.Sprint(v)
-			if b, ok := token.ParseBool(str); ok {
-				return b, nil
-			}
-			// The tag says boolean whatever the text is, so a spelling neither
-			// schema resolves is tried once more in lower case: "!!bool Yes"
-			// and "!!bool YES" are the same request.
-			if b, ok := token.ParseBool(strings.ToLower(str)); ok {
-				return b, nil
-			}
-			return nil, yamlerrors.NewSyntax(fmt.Sprintf("cannot convert %q to boolean", fmt.Sprint(v)), n.Value.GetToken())
 		case token.StringTag:
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
+			// The tag names the type, so the scalar keeps the text it was
+			// written with rather than what the core schema resolved it to:
+			// "!!str 0x10" is "0x10" and not "16", and "!!str False" keeps its
+			// capital F. An anchor over that scalar names the same string, so
+			// its recorded value is replaced too.
+			if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
+				d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(res.Text)
 			}
-			if text, ok := taggedText(n.Value); ok {
-				// The tag names the type, so the scalar keeps the text it was
-				// written with rather than what the core schema resolved it
-				// to: "!!str 0x10" is "0x10" and not "16", and "!!str False"
-				// keeps its capital F. An anchor over that scalar names the
-				// same string, so its recorded value is replaced too.
-				if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
-					d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(text)
-				}
 
-				return text, nil
-			}
-			if v == nil {
-				return "", nil
-			}
-			return fmt.Sprint(v), nil
-		case token.MappingTag:
-			return d.nodeToValue(ctx, n.Value)
+			return res.Text, nil
 		default:
+			// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The
+			// node is read as it stands.
 			return d.nodeToValue(ctx, n.Value)
 		}
 	case *ast.AnchorNode:
@@ -1421,25 +1407,26 @@ func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFi
 	return nil
 }
 
-// allowedTimestampFormats is a subset of what the regular expression at
-// http://yaml.org/type/timestamp.html allows.
-//
-// A subset, and the gaps are worth naming. The expression writes the zone as
-// "[-+][0-9][0-9]?(:[0-9][0-9])?", so "-5" and "-05" are as good as "-05:00",
-// and Go's reference layouts spell none of the short ones. It also allows any
-// run of spaces or tabs between the date and the time and before the zone,
-// where a layout carries exactly one space.
-//
-// YAML 1.2's core schema resolves null, bool, int, float and str and no
-// timestamp, so nothing here is reached by resolution: a document gets a
-// time.Time by being decoded into one, or by writing !!timestamp.
-var allowedTimestampFormats = []string{
-	"2006-1-2T15:4:5.999999999Z07:00", // RCF3339Nano with short date fields.
-	"2006-1-2t15:4:5.999999999Z07:00", // RFC3339Nano with short date fields and lower-case "t".
-	"2006-1-2 15:4:5.999999999Z07:00", // space separated, with a zone
-	"2006-1-2 15:4:5.999999999 Z07:00",
-	"2006-1-2 15:4:5.999999999", // space separated with no time zone
-	"2006-1-2",                  // date only
+// tagZero is what a tag standing on no value denotes: the value its type starts
+// at. "k: !!int" is 0 and "k: !!bool" is false, exactly as
+// parser.newTagDefaultScalarValueNode writes them into the tree.
+func tagZero(tag token.ReservedTagKeyword) (any, error) {
+	switch tag {
+	case token.IntegerTag:
+		return uint64(0), nil
+	case token.FloatTag:
+		return float64(0), nil
+	case token.BooleanTag:
+		return false, nil
+	case token.StringTag:
+		return "", nil
+	case token.BinaryTag:
+		return []byte{}, nil
+	case token.TimestampTag:
+		return time.Time{}, nil
+	default:
+		return nil, nil
+	}
 }
 
 func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, error) {
@@ -1464,12 +1451,7 @@ func (d *Decoder) castToTime(ctx context.Context, src ast.Node) (time.Time, erro
 	if !ok {
 		return time.Time{}, yamlerrors.NewTypeMismatch(reflect.TypeOf(time.Time{}), reflect.TypeOf(v), src.GetToken())
 	}
-	for _, format := range allowedTimestampFormats {
-		t, err := time.Parse(format, s)
-		if err != nil {
-			// invalid format
-			continue
-		}
+	if t, ok := ast.ParseTimestamp(s); ok {
 		return t, nil
 	}
 

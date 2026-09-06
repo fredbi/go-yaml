@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
@@ -443,54 +444,94 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 // taggedValue is the JSON a tagged scalar is written as, and whether the tag
 // names a scalar type at all.
 //
+// The decision is [ast.TagNode.Resolve]'s and not this function's. Before it,
+// the converter and the decoder each read the tag for themselves and answered
+// differently: "!!timestamp not-a-date" was refused by one and written as
+// "not-a-date" by the other. Here the conversion is all that is left -- the
+// converter writes the date as the document wrote it where the decoder wants a
+// time.Time, and both ask the same question first.
+//
 // A "%TAG" line gives the handle a prefix of the document's own, so "!!int"
-// under one names the document's type and not YAML's, and the value stands as
-// it is written.
+// under one names the document's type and not YAML's; Resolve reads the URI and
+// reports it unresolved, and the value stands as it is written.
 func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
-	text, isScalar := taggedText(t.Value)
-	if !isScalar {
+	res := t.Resolve()
+
+	switch res.Verdict {
+	case ast.TagUnresolved:
+		// A local tag, a foreign one, or a name YAML's repository does not
+		// define. The node is written by its kind.
 		return nil, false
-	}
-	tag, reserved := token.ReservedTagOf(t.URI)
-	if !reserved {
+	case ast.TagKindMismatch:
+		w.fail(yamlerrors.NewSyntax(
+			fmt.Sprintf("%s names a kind this node is not", res.Tag), t.GetToken()))
+
+		return nil, false
+	case ast.TagValueMismatch:
+		w.fail(yamlerrors.NewSyntax(
+			fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), t.Value.GetToken()))
+
 		return nil, false
 	}
 
+	if res.Empty {
+		// The tag stands on no value and takes its own default, which is what
+		// the decoder gives for the same document.
+		return tagZeroJSON(res.Tag), true
+	}
+
 	var written []byte
-	switch tag {
+	switch res.Tag {
 	case token.StringTag:
-		written = appendJSONString(nil, text)
+		written = appendJSONString(nil, res.Text)
 	case token.IntegerTag:
-		written = strconv.AppendInt(nil, taggedInteger(text), 10)
+		written = strconv.AppendInt(nil, taggedInteger(res.Text), 10)
 	case token.FloatTag:
-		f, err := strconv.ParseFloat(text, 64)
+		f, err := strconv.ParseFloat(res.Text, 64)
 		if err != nil {
 			f = 0
 		}
 		written = appendJSONFloat(nil, f)
 	case token.BooleanTag:
-		b, ok := token.ParseBool(text)
-		if !ok {
-			// The tag says boolean whatever the text is, so a spelling neither
-			// schema resolves is tried once more in lower case: "!!bool Yes"
-			// and "!!bool YES" are the same request.
-			b, ok = token.ParseBool(strings.ToLower(text))
-		}
-		if !ok {
-			w.fail(yamlerrors.NewSyntax(fmt.Sprintf("cannot convert %q to boolean", text), t.Value.GetToken()))
-
-			return []byte("false"), true
-		}
+		b, _ := token.ParseBool(strings.ToLower(res.Text))
 		written = strconv.AppendBool(nil, b)
 	case token.NullTag:
 		written = []byte("null")
 	case token.BinaryTag:
-		written = appendJSONBinary(nil, text)
+		written = appendJSONBinary(nil, res.Text)
+	case token.TimestampTag:
+		// JSON has no date, so the timestamp is written as the document wrote
+		// it. Resolve has already refused one no format reads.
+		written = appendJSONString(nil, res.Text)
 	default:
+		// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The node
+		// writes itself.
 		return nil, false
 	}
 
 	return written, true
+}
+
+// tagZeroJSON is the JSON for a tag standing on no value: the value its type
+// starts at, written as the decoder's own zero would be.
+func tagZeroJSON(tag token.ReservedTagKeyword) []byte {
+	switch tag {
+	case token.IntegerTag:
+		return []byte("0")
+	case token.FloatTag:
+		return []byte("0.0")
+	case token.BooleanTag:
+		return []byte("false")
+	case token.StringTag:
+		return []byte(`""`)
+	case token.BinaryTag:
+		return []byte("[]")
+	case token.TimestampTag:
+		// The zero time, as encoding/json writes a time.Time.
+		return []byte(`"` + time.Time{}.Format(time.RFC3339Nano) + `"`)
+	default:
+		return []byte("null")
+	}
 }
 
 // openAnchor records the name and where the node it names will start.
@@ -809,42 +850,6 @@ func taggedInteger(text string) int64 {
 	}
 
 	return 0
-}
-
-// taggedText is the text a tagged scalar was written with, and whether the tag
-// stands on a scalar at all.
-//
-// An anchor between the tag and the scalar is stepped over: "!!int &c 4" tags
-// the 4. A collection, an alias, or a tag on nothing is not a scalar and keeps
-// whatever it converted to.
-func taggedText(n ast.Node) (string, bool) {
-	if a, ok := n.(*ast.AnchorNode); ok {
-		return taggedText(a.Value)
-	}
-	if l, ok := n.(*ast.LiteralNode); ok {
-		if l.Value == nil {
-			return "", false
-		}
-
-		return l.Value.Value, true
-	}
-	if _, isNull := n.(*ast.NullNode); isNull {
-		if tk := n.GetToken(); tk != nil && tk.Type == token.ImplicitNullType {
-			// "!!str" with nothing after it tags the empty string. The token
-			// the parser puts there reads "null", which is what the node
-			// resolves to and not what the document wrote.
-			return "", true
-		}
-	}
-	if !isScalarNode(n) {
-		return "", false
-	}
-	tk := n.GetToken()
-	if tk == nil {
-		return "", false
-	}
-
-	return tk.Value, true
 }
 
 // isScalarNode reports whether n is one of the nodes holding a single value.

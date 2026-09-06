@@ -86,8 +86,12 @@ func TestUseStringKeysReadsEveryKeyAsText(t *testing.T) {
 // its Go zero, so a null key and a genuinely empty key both came back as "" --
 // two entries of the document read as one, and the document then refused as
 // holding a duplicate key. nodeToValue and ToJSON already said "null".
+//
+// The tagged spelling is "!!null null" and not "!!null x": a tag naming a type
+// its scalar is not is refused rather than answered with the type's zero, so
+// "!!null x" is an error and no longer a way to write a null key.
 func TestANullKeyIsTheWordNull(t *testing.T) {
-	for _, src := range []string{"null: a\n", ": a\n", "~: a\n", "NULL: a\n", "!!null x: a\n"} {
+	for _, src := range []string{"null: a\n", ": a\n", "~: a\n", "NULL: a\n", "!!null null: a\n"} {
 		t.Run(src, func(t *testing.T) {
 			var into map[string]any
 			require.NoError(t, codec.Unmarshal([]byte(src), &into))

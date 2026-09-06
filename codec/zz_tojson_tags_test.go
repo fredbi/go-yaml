@@ -26,7 +26,7 @@ func TestToJSONReadsTheTagsItKnows(t *testing.T) {
 		{"int", `a: !!int "12"` + "\n", `{"a":12}`},
 		{"float", "a: !!float 12\n", `{"a":12.0}`},
 		{"bool", "a: !!bool yes\n", `{"a":true}`},
-		{"null", "a: !!null x\n", `{"a":null}`},
+		{"null", "a: !!null ~\n", `{"a":null}`},
 		{"binary", "a: !!binary aGk=\n", `{"a":[104,105]}`},
 
 		// Transparent: the value is written as it stands.

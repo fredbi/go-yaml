@@ -106,10 +106,15 @@ func TestTimestampTagDoesNotFollowTheVersion(t *testing.T) {
 // 0001-01-01 and "!!binary" on a text base64 cannot read came back as an empty
 // []byte, each with a nil error. go.yaml.in/yaml/v3 and gopkg.in/yaml.v2 both
 // refuse them.
+//
+// The complaint now names the tag rather than the type it stands for, because
+// ast.TagNode.Resolve makes it for every tag alike and codec.ToJSON reports the
+// same one: the converter used to write "not-a-date" through as a string while
+// the decoder refused it.
 func TestATagThatCannotConvertIsRefused(t *testing.T) {
 	for src, want := range map[string]string{
-		"a: !!timestamp not-a-date\n":   `cannot read "not-a-date" as a timestamp`,
-		"a: !!binary \"not base64!\"\n": "as base64",
+		"a: !!timestamp not-a-date\n":   `cannot read "not-a-date" as !!timestamp`,
+		"a: !!binary \"not base64!\"\n": `cannot read "not base64!" as !!binary`,
 	} {
 		var v any
 		err := codec.Unmarshal([]byte(src), &v)

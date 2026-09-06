@@ -140,11 +140,14 @@ var Ledger = []Divergence{
 			"`!!map &a1` do not parse at all: `value is not allowed in this context` and " +
 			"`could not find map`. `!!null &a1 null` parses and a later `*a1` reports " +
 			"`could not find alias`.\n\n" +
-			"On an empty node it is worse than dropped: `- !!null &a1` followed by `- x` " +
-			"decodes to a one-item sequence, and the second entry is gone with no error " +
-			"at all. `- !!str &a1` followed by `- x` swallows it into the scalar as the " +
-			"text \"[x]\", and `k: !!null &a1` followed by `j: x` loses j. Anchor first " +
-			"reads all of them correctly.\n\n" +
+			"On an empty node the tag swallows what follows: `- !!null &a1` over `- x` " +
+			"takes the entry below it, and so do `- !!str &a1` over `- x` and " +
+			"`k: !!null &a1` over `j: x`. Anchor first reads all of them correctly. " +
+			"The swallowing is still here; what it does is now reported. It used to " +
+			"come back as a one-item sequence with no error at all, and the load " +
+			"refuses it since 2026-09-07, because the entry the tag swallowed turns the " +
+			"node into a collection and ast.TagNode.Resolve reports a scalar tag " +
+			"standing on one.\n\n" +
 			"So three shapes fail three ways: a collection tag stops the parse, a tag on " +
 			"an empty node eats what follows, and any other tag is dropped so quietly " +
 			"that nothing notices until an alias asks the anchor what it names. The " +
