@@ -454,13 +454,26 @@ func (r *Renderer) value(n Node, keyCommented bool) string {
 	}
 
 	shape := r.deref(n)
-	if r.fitsOnKeyLine(shape) && (!keyCommented || !isCollection(shape)) &&
-		(!isCollection(shape) || !strings.Contains(text, "\n")) {
-		// A flow collection fits on the key's line only while it stays on one
-		// line. A comment forces it onto several, and then the lines below it
-		// carry no indentation of their own: its closing bracket would land in
-		// column one, outside the mapping it belongs to, and the document it
-		// wrote would not read back.
+	spansLines := strings.Contains(text, "\n")
+	collection := isCollection(shape)
+
+	// A flow collection fits on the key's line only while it stays on one line.
+	// A comment forces it onto several, and then the lines below it carry no
+	// indentation of their own: its closing bracket would land in column one,
+	// outside the mapping it belongs to, and the document it wrote would not
+	// read back.
+	//
+	// A commented key also sends a value written over several lines below it,
+	// whatever kind of node stands at the top of them. fitsOnKeyLine says yes to
+	// an anchor and a tag, since they carry their own value and decide their own
+	// shape -- but the comment claims the rest of the key's line, so what
+	// follows cannot start there. Kept on it, the comment was pushed past the
+	// whole value and came back on the last line of it: "k: # c1" over "&a2"
+	// over "- 1" rendered as "k: &a2" over "- 1 # c1", and where the last entry
+	// was a block scalar the comment landed inside its content and changed the
+	// value.
+	if r.fitsOnKeyLine(shape) && (!collection || !spansLines) &&
+		(!keyCommented || (!collection && !spansLines)) {
 		return " " + text
 	}
 	if sequence, ok := shape.(*SequenceNode); ok && !sequence.IsFlowStyle && !r.indentSequence {
@@ -553,11 +566,20 @@ func (r *Renderer) sequence(n *SequenceNode) string {
 			blank = blankLineBefore(value)
 		}
 		comment := r.entryLineComment(n, i)
-		if comment != "" && !r.fitsOnKeyLine(value) && !carriesOwnIndent(value) {
+		if comment != "" && !carriesOwnIndent(value) &&
+			(!r.fitsOnKeyLine(value) || strings.Contains(text, "\n")) {
 			// Everything after the '#' is commented out, so a value that would
 			// share the dash's line goes below it instead. A block scalar is
 			// exempt: its header is all that shares the line, and a comment
 			// after the header is where YAML puts one.
+			//
+			// fitsOnKeyLine says yes to an anchor and a tag, which carry their
+			// own value and decide their own shape, so a property standing on a
+			// block kept the dash's line and the comment was written after the
+			// whole entry -- on the last line of it. "- # c" over "&a2" over a
+			// mapping holding a folded scalar came back with the comment inside
+			// the scalar's content. The same shape under a mapping key is
+			// Renderer.value's to place.
 			lines = append(lines, blank+"-"+comment, r.indented(r.String(value)))
 
 			continue

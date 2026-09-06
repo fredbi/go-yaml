@@ -103,26 +103,3 @@ func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
 	})
 }
 
-// TestDefectCommentAboveAPropertyLineMoves: a comment on the line that
-// introduces a node whose properties are written on the next line comes back
-// attached to that node's last entry.
-//
-// Harmless where the last entry is a plain scalar. Where it is a block scalar
-// the comment lands inside the content, and the value changes without anything
-// reporting it.
-func TestDefectCommentAboveAPropertyLineMoves(t *testing.T) {
-	const moved = "k: # c1\n  &a2\n  - 1\n"
-	wellFormed(t, moved)
-	assert.Equal(t, "k: &a2\n- 1 # c1\n", renderOnce(t, moved), "today: the comment is on the entry")
-
-	const corrupts = "k: # c1\n  &a2\n  - |-\n    trailing \n"
-	wellFormed(t, corrupts)
-
-	var before, after any
-	require.NoError(t, yaml.Unmarshal([]byte(corrupts), &before))
-	require.NoError(t, yaml.Unmarshal([]byte(renderOnce(t, corrupts)), &after))
-
-	assert.Equal(t, []any{"trailing "}, before.(map[string]any)["k"])
-	assert.Equal(t, []any{"trailing  # c1"}, after.(map[string]any)["k"],
-		"today: the comment became part of the block scalar")
-}

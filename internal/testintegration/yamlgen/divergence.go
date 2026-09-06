@@ -111,25 +111,6 @@ func (p Property) String() string {
 // is one the library is obliged to read.
 var Ledger = []Divergence{
 	{
-		Name: "render/a-comment-above-a-property-line-moves-onto-the-last-entry",
-		Reason: "A comment on the line that introduces a node, where the node's properties " +
-			"are written on the next line, comes back attached to that node's last entry. " +
-			"`k: # c1` then `  &a2` then `  - 1` renders as `k: &a2` then `- 1 # c1`. It needs " +
-			"only an anchor, so this is about where the properties sit rather than about " +
-			"tags.\n\n" +
-			"Harmless where the last entry is a plain scalar and not harmless at all where " +
-			"it is a block scalar: the comment lands inside the content, and " +
-			"`  - |-` then `    trailing ` comes back as \"trailing  # c1\" instead of " +
-			"\"trailing \". So the entry claims Render as well as CommentsKept, and " +
-			"Settle besides -- a comment that has moved onto a line whose own comment is " +
-			"still there renders differently again next time. It reports fewer " +
-			"divergences than draws on all three.",
-		Property: Render | Settle | CommentsKept,
-		Match: func(v Value, st Style) bool {
-			return st.Comments.line() && writesPropertyLine(v, st)
-		},
-	},
-	{
 		Name: "parse/a-tag-before-an-anchor-is-dropped",
 		Reason: "YAML 1.2 lets a node's tag and anchor appear in either order and means the " +
 			"same by both. Written second the tag holds; written first it is dropped from " +
@@ -220,15 +201,6 @@ func aliasNames(v Value) map[string]bool {
 	walk(v)
 
 	return out
-}
-
-// writesPropertyLine reports whether emitting v in st puts a node's properties
-// on a line of their own.
-func writesPropertyLine(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	return e.propertyLines > 0
 }
 
 // Known returns the ledger entry describing this pairing for the given

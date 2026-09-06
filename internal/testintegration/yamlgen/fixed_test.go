@@ -684,3 +684,76 @@ func TestFixedACommentAfterALineEndingTagSurvives(t *testing.T) {
 		assert.NotContains(t, f.String(), "#")
 	})
 }
+
+// TestFixedACommentAboveAPropertyLineStaysOnTheKey covers a comment on the line
+// that introduces a node whose properties are written on the next one.
+//
+// A comment claims the rest of the line it sits on, so what follows the key
+// cannot start there. Renderer.fitsOnKeyLine says yes to an anchor and a tag --
+// they carry their own value and decide their own shape -- and the comment was
+// then pushed past the whole value and written on the last line of it:
+// "k: # c1" over "&a2" over "- 1" came back as "k: &a2" over "- 1 # c1".
+//
+// Harmless where the last line was a plain scalar and not harmless at all where
+// it was a block scalar: the comment landed inside the content and the value
+// changed with nothing reporting it.
+func TestFixedACommentAboveAPropertyLineStaysOnTheKey(t *testing.T) {
+	for _, src := range []string{
+		"k: # c1\n  &a2\n  - 1\n",
+		"k: # c1\n  !!seq\n  - 1\n",
+		"k: # c1\n  &a2 |-\n    x\n",
+		"k: # c1\n  &a2\n  - |-\n    trailing \n",
+
+		// A sequence entry takes the same rule from Renderer.sequence, which
+		// asked fitsOnKeyLine the same question and got the same wrong answer.
+		// TestRenderPreservesValue found this one at 50,000 draws, after the
+		// mapping half was fixed and the entry half was not.
+		"- # c1\n  &a2\n  - |-\n    trailing \n",
+		"- # c1\n  !!seq\n  - 1\n",
+
+		// The shapes that always rendered correctly, so the fix did not move
+		// them: a collection under a commented key already went below it, and a
+		// block scalar keeps its header on the line because a comment after the
+		// header is where YAML puts one.
+		"k: # c1\n  a: 1\n",
+		"k: # c1\n  [1, 2]\n",
+		"k: |- # c1\n  x\n",
+		"k: &a2 x # c1\n",
+		"- |- # c1\n  x\n",
+		"- 1 # c1\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			wellFormed(t, src)
+			assert.Equal(t, src, renderOnce(t, src))
+		})
+	}
+
+	t.Run("the comment stays on its own line where the layout normalizes", func(t *testing.T) {
+		// A block mapping under a property is indented from the property, with
+		// or without a comment -- "!!map" over "a: 1" renders the same way. So
+		// these do not come back byte for byte, and what this holds is the one
+		// thing the defect moved: the comment is still on the line that
+		// introduced the node, and not somewhere inside the value.
+		for _, src := range []string{
+			"- # c1\n  &a2\n  a: 1\n",
+			"k: # c1\n  &a2\n  a: 1\n",
+		} {
+			wellFormed(t, src)
+
+			got := renderOnce(t, src)
+			assert.Equal(t, 1, strings.Count(got, "#"), "%q rendered %q", src, got)
+			assert.Contains(t, strings.SplitN(got, "\n", 2)[0], "# c1", "%q rendered %q", src, got)
+		}
+	})
+
+	t.Run("the block scalar keeps its value", func(t *testing.T) {
+		const src = "k: # c1\n  &a2\n  - |-\n    trailing \n"
+
+		var before, after any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &before))
+		require.NoError(t, yaml.Unmarshal([]byte(renderOnce(t, src)), &after))
+
+		assert.Equal(t, []any{"trailing "}, before.(map[string]any)["k"])
+		assert.Equal(t, before, after, "the render changed the value")
+	})
+}
