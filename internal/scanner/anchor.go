@@ -80,3 +80,12 @@ func anchorNameEnd(src string, start int) int {
 
 	return end
 }
+
+func endsAnchorName(c rune) bool {
+	switch c {
+	case ' ', '\t', '\r', '\n', ',', '[', ']', '{', '}':
+		return true
+	default:
+		return false
+	}
+}

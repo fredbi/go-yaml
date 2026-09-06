@@ -836,3 +836,51 @@ func (c *Context) followsJSONLikeKey() bool {
 
 	return tk.Type == token.SequenceEndType || tk.Type == token.MappingEndType
 }
+
+// isPropertyToken reports whether tk introduces a node property: an anchor, an alias or a tag.
+//
+// Each may stand alone, with the empty scalar as its node.
+func isPropertyToken(tk *token.Token) bool {
+	switch tk.Type {
+	case token.AnchorType, token.AliasType, token.TagType:
+		return true
+	default:
+		return false
+	}
+}
+
+// firstLineIndentColumnByOpt reads the indentation indicator out of a block scalar header's options, or 0 where it
+// carries none.
+//
+// c-indentation-indicator is one digit, 1 to 9, and validateMultiLineHeaderOption has already refused an option holding
+// anything else or holding two of them.
+// So the digit is found by looking for it.
+//
+// strconv.ParseInt read it before, over the option with its chomping indicator trimmed off either end.
+// For a header carrying no width -- a plain "|" or ">", which is most of them -- that is ParseInt("") and a
+// *strconv.NumError allocated to say so. validateIndentColumn asked once per character of content, and it came to 95%
+// of everything the scanner allocated reading block scalars.
+func firstLineIndentColumnByOpt(opt string) int {
+	for i := range len(opt) {
+		if c := opt[i]; c >= '1' && c <= '9' {
+			return int(c - '0')
+		}
+	}
+
+	return 0
+}
+
+// leadingSpace counts the whitespace bytes buf opens with.
+func leadingSpace(buf string) int {
+	var i int
+	for i < len(buf) {
+		switch buf[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+		default:
+			return i
+		}
+	}
+
+	return i
+}

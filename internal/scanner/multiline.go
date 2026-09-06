@@ -5,6 +5,7 @@ package scanner
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -521,4 +522,42 @@ func (s *MultiLineState) from(now token.Position) token.Position {
 	}
 
 	return s.start
+}
+
+// validateMultiLineHeaderOption checks the indicators a block scalar header carries.
+//
+// c-b-block-header(m,t) takes one indentation indicator and one chomping indicator, in either order, and either may be
+// left out.
+//
+// Two of either is not a header: "|--" used to pass because the check trimmed one indicator off each end and found
+// nothing left in the middle. validateMultiLineHeaderOption refuses a block scalar header that carries anything but its
+// two indicators, or two of either.
+//
+// opt is what stands between the "|" or ">" and the end of its line, with any comment already cut off: at most one
+// digit 1 to 9 and at most one of "-" or "+", in either order.
+// [MultiLineState] says what each of them does.
+//
+// "|--" used to pass, the check having trimmed one indicator off each end and found nothing left in the middle.
+func validateMultiLineHeaderOption(opt string) error {
+	var chomping, indentation bool
+
+	for _, c := range opt {
+		switch {
+		case c == '-' || c == '+':
+			if chomping {
+				return fmt.Errorf("invalid header option: %q", opt)
+			}
+			chomping = true
+		case c >= '1' && c <= '9':
+			// c-indentation-indicator is ns-dec-digit less '0': a block cannot be introduced by no indentation at all.
+			if indentation {
+				return fmt.Errorf("invalid header option: %q", opt)
+			}
+			indentation = true
+		default:
+			return fmt.Errorf("invalid header option: %q", opt)
+		}
+	}
+
+	return nil
 }

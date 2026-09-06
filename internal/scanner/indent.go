@@ -149,3 +149,24 @@ func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int) e
 
 	return ErrInvalidToken("a scalar continues on a line that is not indented past the one it started on", token.Invalid(ctx.origin(), s.pos()))
 }
+
+// lineIndent returns how many spaces begin the line, and whether the line holds nothing else.
+//
+// A blank line is part of no indentation.
+func lineIndent(src string) (int, bool) {
+	indent := 0
+	for _, c := range src {
+		switch c {
+		case ' ':
+			indent++
+		case '\t':
+			// A tab is whitespace but not indentation: it neither adds to the count nor ends the line.
+		case '\n', '\r':
+			return indent, true
+		default:
+			return indent, false
+		}
+	}
+
+	return indent, true
+}

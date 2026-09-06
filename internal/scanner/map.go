@@ -105,3 +105,11 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 
 	return true
 }
+
+// isFlowIndicator reports whether c is one of the characters that end an entry of a flow collection.
+//
+// A plain scalar cannot hold one, so a ':' in front of one closes the key rather than belonging to it: "{a:}" is the
+// pair a/null.
+func isFlowIndicator(c rune) bool {
+	return c == ',' || c == '}' || c == ']'
+}

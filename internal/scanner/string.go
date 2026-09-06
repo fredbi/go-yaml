@@ -445,3 +445,43 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 
 	return token.Token{}, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(ctx.origin(), srcpos))
 }
+
+// isCodePointEscape reports whether an escape names a code point by its digits, and so consumes more of the source than
+// the backslash and one marker.
+func isCodePointEscape(marker rune) bool {
+	return marker == 'x' || marker == 'u' || marker == 'U'
+}
+
+// hexToInt returns the value of one hexadecimal digit, and whether the rune is one at all.
+//
+// Answering that is the point: subtracting '0' from whatever turned up gave a number for every rune, so an escape whose
+// digits were not digits decoded to some other character instead of being refused.
+//
+//nolint:mnd // hex to int is fine, no need to redefine constants for these symbols
+func hexToInt(b rune) (int, bool) {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b) - '0', true
+	case b >= 'a' && b <= 'f':
+		return int(b) - 'a' + 10, true
+	case b >= 'A' && b <= 'F':
+		return int(b) - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+// hexRunesToInt returns the value a run of hexadecimal digits spells, and whether every rune in it was a digit.
+// hexDigitsToInt reads b as hexadecimal digits, and reports whether every one of them is a digit at all.
+func hexDigitsToInt(b string) (int, bool) {
+	sum := 0
+	for i := range len(b) {
+		digit, isHex := hexToInt(rune(b[i]))
+		if !isHex {
+			return 0, false
+		}
+		sum += digit << (uint(len(b)-i-1) * 4) //nolint:mnd // the shift is fine
+	}
+
+	return sum, true
+}

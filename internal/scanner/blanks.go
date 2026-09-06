@@ -184,3 +184,13 @@ func (s *Scanner) indentRun(ctx *Context) int {
 
 	return i - ctx.idx
 }
+
+func isNewLineChar(c rune) bool {
+	if c == '\n' {
+		return true
+	}
+	if c == '\r' {
+		return true
+	}
+	return false
+}

@@ -743,3 +743,33 @@ func (s *Scanner) stop(err error) {
 		s.ctx.addToken(invalidTokenErr.Token)
 	}
 }
+
+// isDocumentMarker reports whether a line opens with "---" or "...".
+func isDocumentMarker(line string) bool {
+	return strings.HasPrefix(line, "---") || strings.HasPrefix(line, "...")
+}
+
+// blankOrComment reports whether a line carries neither content nor a marker.
+func blankOrComment(line string) bool {
+	trimmed := strings.TrimLeft(line, " \t")
+
+	return trimmed == "" || strings.HasPrefix(trimmed, "#")
+}
+
+func newLineCount(src []byte) int {
+	size := len(src)
+	cnt := 0
+	for i := 0; i < size; i++ {
+		c := src[i]
+		switch c {
+		case '\r':
+			if i+1 < size && src[i+1] == '\n' {
+				i++
+			}
+			cnt++
+		case '\n':
+			cnt++
+		}
+	}
+	return cnt
+}
