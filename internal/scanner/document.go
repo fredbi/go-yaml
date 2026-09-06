@@ -11,7 +11,7 @@ import (
 )
 
 func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) error {
-	if s.foundDocumentSeparatorMarker(src) {
+	if foundDocumentSeparatorMarker(src) {
 		return ErrInvalidToken("found unexpected document separator", token.Invalid(ctx.origin(), s.pos()))
 	}
 
@@ -20,7 +20,7 @@ func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) erro
 
 // foundDocumentSeparatorMarker reports that src opens with "---" or "...", standing alone rather than beginning a
 // longer scalar.
-func (s *Scanner) foundDocumentSeparatorMarker(src string) bool {
+func foundDocumentSeparatorMarker(src string) bool {
 	if !strings.HasPrefix(src, "---") && !strings.HasPrefix(src, "...") {
 		return false
 	}

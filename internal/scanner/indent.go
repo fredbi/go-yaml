@@ -34,7 +34,7 @@ func (s *Scanner) updateIndentLevel() {
 	}
 }
 
-func (s *Scanner) updateIndentState(_ *Context) {
+func (s *Scanner) updateIndentState() {
 	if s.lastDelimColumn == 0 {
 		return
 	}
@@ -86,7 +86,7 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 		return
 	}
 	s.updateIndentLevel()
-	s.updateIndentState(ctx)
+	s.updateIndentState()
 	s.isFirstCharAtLine = false
 }
 

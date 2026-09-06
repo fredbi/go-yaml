@@ -103,9 +103,9 @@ func (s *Scanner) readMultiLineBreak(ctx *Context, state *MultiLineState, c rune
 	state.updateNewLineState()
 	s.progressLine(ctx)
 
-	if ctx.next() && s.foundDocumentSeparatorMarker(ctx.src[ctx.idx:]) {
+	if ctx.next() && foundDocumentSeparatorMarker(ctx.src[ctx.idx:]) {
 		s.emitMultiLine(ctx, state)
-		s.breakMultiLine(ctx)
+		ctx.breakMultiLine()
 	}
 }
 
@@ -148,10 +148,6 @@ func (s *Scanner) refuseMultiLine(ctx *Context, msg string) error {
 	s.progressColumn(ctx, 1)
 
 	return ErrInvalidToken(msg, tk)
-}
-
-func (s *Scanner) breakMultiLine(ctx *Context) {
-	ctx.breakMultiLine()
 }
 
 func (s *Scanner) scanMultiLineHeader(ctx *Context) (bool, error) {
@@ -309,8 +305,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 //	  second line
 //
 // "|" keeps the line structure and ">" folds it, so those two lines read back as "first line\nsecond line\n" under "|"
-// and "first line second line\n" under ">".
-// That is the whole difference between isLiteral and isFolded.
+// and "first line second line\n" under ">". isLiteral records which of the two, and a block that is not literal folds.
 //
 // The header may carry up to two indicators after the "|" or ">", in either order. opt holds them as they were written
 // -- "", "-", "+", "2", "2-", "-2".
@@ -363,7 +358,6 @@ type MultiLineState struct {
 
 	isRawFolded bool
 	isLiteral   bool
-	isFolded    bool
 }
 
 func (s *MultiLineState) lastDelimColumn() int {

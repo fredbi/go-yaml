@@ -254,7 +254,7 @@ func (s *Scanner) scan(ctx *Context) error {
 			// The mark opens a document prefix and is not content.
 			// Step over it, counting its bytes: an offset addresses the source as it was handed in, and deleting the mark
 			// instead moved every offset after it.
-			s.progressOnly(ctx, 1)
+			s.progress(ctx, 1)
 			ctx.resetBuffer()
 
 			continue
@@ -283,7 +283,7 @@ func (s *Scanner) scan(ctx *Context) error {
 						ctx.addTokenValue(token.MakeString("", "", s.pos()))
 					}
 				}
-				s.breakMultiLine(ctx)
+				ctx.breakMultiLine()
 			} else {
 				if err := s.scanMultiLine(ctx, c); err != nil {
 					return err
@@ -434,14 +434,14 @@ func (s *Scanner) scan(ctx *Context) error {
 				// tab indent for plain text (yaml-test-suite's spec-example-7-12-plain-lines).
 				s.indentNum++
 				ctx.addOriginBuf(c)
-				s.progressOnly(ctx, 1)
+				s.progress(ctx, 1)
 				continue
 			}
 
 			if s.lastDelimColumn < s.column {
 				s.indentNum++
 				ctx.addOriginBuf(c)
-				s.progressOnly(ctx, 1)
+				s.progress(ctx, 1)
 				continue
 			}
 
@@ -610,10 +610,6 @@ func (s *Scanner) progressASCII(ctx *Context, num int) {
 
 func (s *Scanner) progressColumn(ctx *Context, num int) {
 	s.column += num
-	s.progress(ctx, num)
-}
-
-func (s *Scanner) progressOnly(ctx *Context, num int) {
 	s.progress(ctx, num)
 }
 

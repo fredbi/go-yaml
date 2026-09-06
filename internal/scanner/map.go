@@ -15,7 +15,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if s.isDirective || s.isAnchor || s.isAlias {
 		return false, nil
 	}
-	if nc != ' ' && nc != '\t' && !isNewLineChar(nc) && !ctx.isNextEOS() {
+	if nc != ' ' && nc != '\t' && !isNewLineChar(nc) && !ctx.isEOS() {
 		// Nothing separates this ':' from what follows it, so it only delimits a pair where the spec allows the value to be
 		// adjacent: after a JSON-like key, or where the value is absent and the next character is what ends the entry.
 		if !s.isFlowMode() || (!isFlowIndicator(nc) && !ctx.followsJSONLikeKey()) {

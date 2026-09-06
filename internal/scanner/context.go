@@ -167,10 +167,9 @@ func (c *Context) textAt(buf []byte, start int) (string, int) {
 	if span, ok := c.window(buf, start); ok {
 		return span, start
 	}
-	if at := c.idx - len(buf); true {
-		if span, ok := c.window(buf, at); ok {
-			return span, at
-		}
+	at := c.idx - len(buf)
+	if span, ok := c.window(buf, at); ok {
+		return span, at
 	}
 
 	return string(buf), -1
@@ -218,7 +217,6 @@ func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 func (c *Context) setFolded(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	c.block = MultiLineState{
-		isFolded:        true,
 		opt:             opt,
 		indentIndicator: indent,
 	}
@@ -455,13 +453,6 @@ func (c *Context) width() int {
 
 // isEOS reports that no character follows the one at the cursor.
 func (c *Context) isEOS() bool {
-	return c.idx+c.width() >= c.size
-}
-
-// isNextEOS reports the same thing.
-//
-// Both spellings are in use.
-func (c *Context) isNextEOS() bool {
 	return c.idx+c.width() >= c.size
 }
 
