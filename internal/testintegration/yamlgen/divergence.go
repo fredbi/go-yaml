@@ -191,6 +191,29 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "render/a-kept-folded-scalar-gains-a-break-every-time-it-is-rendered",
+		Reason: "The renderer writes a blank line between a folded block scalar and the entry after " +
+			"it, and `+` keeps every break it is given -- so the value grows one break per rendering. " +
+			"`- >+` over `  x` over a blank over `  y` over `- 1` reads [\"x\\ny\\n\", 1] and " +
+			"renders to a document that reads [\"x\\ny\\n\\n\", 1]. Rendering that again adds " +
+			"another.\n\n" +
+			"Four things are needed and dropping any one of them makes it right. Folded, not literal: " +
+			"`|+` over the same content renders unchanged. `+`, not clip: `>` over the same content " +
+			"gets the same blank line and discards it. A break inside the content, which is what the " +
+			"blank line in the middle spells. And an entry after it, since the blank is written to " +
+			"separate them.\n\n" +
+			"⚠️ A regression, and a recent one. It arrived with a5e7cc5, \"fix(scanner): position a " +
+			"block scalar's content where its content begins\"; its parent renders the same document " +
+			"unchanged. Bisected on 2026-09-07, the day the scanner work landed, by rebasing this " +
+			"branch onto it -- Style.Chomping had been green over 60,000 draws the day before and " +
+			"failed within 7,473 against the new scanner.\n\n" +
+			"So the fix moved a block scalar's content position and the renderer's separating blank " +
+			"line moved with it. The value only survives where chomping throws the blank away, which " +
+			"is every indicator except the one that keeps.",
+		Property: Render | Settle,
+		Match:    writesAKeptFoldedScalar,
+	},
+	{
 		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
 		Reason: "A blank line written before a comment is kept by the first rendering and dropped by " +
 			"the second, so the rendering never settles. `a:` over ` - x` over a blank line over " +
@@ -376,6 +399,48 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 // entry the long way, with a quoted key and a value the emitter may write as a
 // block scalar.
 //
+// writesAKeptFoldedScalar reports whether st writes a folded block scalar with
+// "+" over content that holds a break of its own.
+func writesAKeptFoldedScalar(v Value, st Style) bool {
+	if !st.Folded {
+		return false
+	}
+
+	return holdsAKeptFoldedString(v, st)
+}
+
+func holdsAKeptFoldedString(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Str:
+		body := strings.TrimRight(n.V, "\n")
+		trailing := len(n.V) - len(body)
+
+		// "+" is written for two or more trailing breaks whatever the style
+		// says, and for one when Style.Chomping asks for it.
+		kept := trailing >= 2 || (trailing == 1 && st.Chomping == ChompKeep)
+
+		return kept && canFolded(n.V) && strings.Contains(body, "\n")
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAKeptFoldedString(item, st)
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsAKeptFoldedString(p.Val, st) {
+				return true
+			}
+		}
+	case Anchored:
+		return holdsAKeptFoldedString(n.V, st)
+	case Alias:
+		return holdsAKeptFoldedString(n.V, st)
+	case Tagged:
+		return holdsAKeptFoldedString(n.V, st)
+	}
+
+	return false
+}
+
 // writesABlankLineBeforeAComment reports whether st pads a block scalar with
 // blank lines in a document that also writes comments above its entries.
 func writesABlankLineBeforeAComment(v Value, st Style) bool {

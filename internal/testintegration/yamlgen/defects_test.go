@@ -527,3 +527,50 @@ func TestDefectABlankLineBeforeACommentDoesNotSettle(t *testing.T) {
 		}
 	})
 }
+
+// TestDefectAKeptFoldedScalarGainsABreakEveryRendering: the renderer writes a
+// blank line between a folded block scalar and the entry after it, and "+"
+// keeps every break it is given.
+//
+// A regression from a5e7cc5, "fix(scanner): position a block scalar's content
+// where its content begins": its parent renders this document unchanged.
+// Bisected on 2026-09-07 by rebasing onto the scanner work.
+func TestDefectAKeptFoldedScalarGainsABreakEveryRendering(t *testing.T) {
+	const src = "- >+\n  x\n\n  y\n- 1\n"
+	wellFormed(t, src)
+
+	var got any
+	require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+	assert.Equal(t, []any{"x\ny\n", uint64(1)}, got)
+
+	once := renderOnce(t, src)
+	assert.Equal(t, "- >+\n  x\n\n  y\n\n- 1\n", once, "today: a blank line is written before the next entry")
+
+	var after any
+	require.NoError(t, yaml.Unmarshal([]byte(once), &after))
+	assert.Equal(t, []any{"x\ny\n\n", uint64(1)}, after, "today: the value gained a break")
+
+	t.Run("and it compounds", func(t *testing.T) {
+		var third any
+		require.NoError(t, yaml.Unmarshal([]byte(renderOnce(t, once)), &third))
+		assert.Equal(t, []any{"x\ny\n\n\n", uint64(1)}, third)
+	})
+
+	t.Run("dropping any one of the four makes it right", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, src string
+			want      []any
+		}{
+			{name: "literal rather than folded", src: "- |+\n  x\n\n  y\n- 1\n", want: []any{"x\n\ny\n", uint64(1)}},
+			{name: "clip rather than keep", src: "- >\n  x\n\n  y\n- 1\n", want: []any{"x\ny\n", uint64(1)}},
+			{name: "no break inside the content", src: "- >+\n  x\n- 1\n", want: []any{"x\n", uint64(1)}},
+			{name: "nothing after it", src: "- >+\n  x\n\n  y\n", want: []any{"x\ny\n"}},
+		} {
+			var before, after any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &before), "%s", tc.name)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(renderOnce(t, tc.src)), &after), "%s", tc.name)
+			assert.Equalf(t, tc.want, before, "%s", tc.name)
+			assert.Equalf(t, before, after, "with %s the rendering keeps the value", tc.name)
+		}
+	})
+}
