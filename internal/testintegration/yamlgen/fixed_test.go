@@ -872,3 +872,68 @@ func TestFixedAnAnchorAfterATagNamesTheTaggedNode(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedFoldedScalarGainsNoBreakWhenRendered: a folded block scalar is
+// written back with the blank lines the document gave it, and no more.
+//
+// token.Lookback.blankLineAbove asks linesSpannedBy how many lines a scalar
+// occupies past its first, then subtracts that from the gap to the next token.
+// linesSpannedBy counted the breaks in the scalar's value, which measures the
+// source only for a literal block. Folding rewrites the line structure, so
+// "  x\n\n  y\n" comes back as "x\ny\n", and the scalar measured one line short
+// for every line its content folded away. The renderer read the leftover as a
+// blank line the author had left, and wrote one.
+//
+// Under ">+" that blank line is content on the way back in, so the value gained
+// a trailing break on every render and the document never settled. Clip and
+// strip chomping discard it, which kept the same miscount out of sight.
+//
+// linesSpannedBy now measures the source through Token.EndLine and adds the
+// blank lines chomping keeps.
+func TestFixedFoldedScalarGainsNoBreakWhenRendered(t *testing.T) {
+	for name, src := range map[string]string{
+		// The shape the generator found, and the three the same miscount
+		// reaches once the chomping indicator stops hiding it.
+		"keep, folded over a gap":  "- >+\n  x\n\n  y\n- 1\n",
+		"clip, folded over a gap":  "- >\n  x\n\n  y\n- 1\n",
+		"strip, folded over a gap": "- >-\n  x\n\n  y\n- 1\n",
+		"two lines folded to one":  "- >+\n  x\n  y\n\n- 1\n",
+
+		// A literal block never showed it: its value keeps the source's lines.
+		"literal, over a gap": "- |+\n  x\n\n  y\n- 1\n",
+
+		// The miscount grew with the number of blank lines kept, so a scalar
+		// ending on two of them gained two.
+		"keep, two trailing blanks": "- >+\n  x\n\n  y\n\n\n- 1\n",
+		"keep, one trailing blank":  "- >+\n  x\n\n  y\n\n- 1\n",
+		"folded twice":              "- >+\n  a\n\n  b\n\n  c\n- 1\n",
+
+		// Under a mapping key, and with a third entry after it.
+		"under a mapping key": "a: >+\n  x\n\n  y\nb: 1\n",
+		"two entries after":   "- >+\n  x\n\n  y\n\n- 1\n- 2\n",
+
+		// Neither of these ever diverged: with nothing after the scalar there
+		// is no gap to measure, and with no break inside it nothing folds.
+		"nothing after the scalar": "- >+\n  x\n\n  y\n",
+		"no break inside":          "- >+\n  x\n- 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var before any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &before))
+
+			file, err := parser.ParseBytes([]byte(src), parser.WithComments())
+			require.NoError(t, err)
+
+			rendered := file.String()
+			assert.Equal(t, src, rendered, "the document is written back as it was read")
+
+			var after any
+			require.NoError(t, yaml.Unmarshal([]byte(rendered), &after))
+			assert.Equal(t, before, after, "the value survives being written out")
+
+			reread, err := parser.ParseBytes([]byte(rendered), parser.WithComments())
+			require.NoError(t, err)
+			assert.Equal(t, rendered, reread.String(), "and settles in one pass")
+		})
+	}
+}

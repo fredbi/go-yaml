@@ -3,8 +3,6 @@
 
 package token
 
-import "strings"
-
 // Lookback carries what the tokens already read say about the next one: whether
 // the author left a blank line above it, and how many line breaks the comments
 // above it take up.
@@ -74,8 +72,6 @@ func (l *Lookback) read(tk *Token) {
 
 // blankLineAbove reports whether the author left an empty line above t.
 func (l *Lookback) blankLineAbove(t *Token) bool {
-	const lbc = "\n"
-
 	prev := &l.prev
 	// blockHeader for the prefix before prev, which says whether prev is block
 	// scalar content.
@@ -107,7 +103,7 @@ func (l *Lookback) blankLineAbove(t *Token) bool {
 		// whose content is several, and the blank lines a "|+" keeps. Those
 		// lines are the scalar's own, and none of them is a gap the author left
 		// above t.
-		adjustment += int32(linesSpannedBy(prev, header, lbc))
+		adjustment += int32(linesSpannedBy(prev, header))
 	case NullType, ImplicitNullType:
 		// Due to the way that comment parsing works its assumed that when a null value does not have new line in origin
 		// it was squashed therefore difference is ignored.
@@ -143,28 +139,28 @@ func (l *Lookback) commentBreaksAbove(tk *Token) int32 {
 // linesSpannedBy returns how many lines past its first the scalar tk occupies.
 // isContent says whether tk holds the content of a literal or folded block.
 //
-// A block scalar is measured by its value, because that is what chomping has
-// already settled: the blank lines a "|+" keeps are content and are lines the
-// scalar is written on, while the ones a "|" clips away are not the scalar's at
-// all. Every other scalar is measured by its source text, whose trailing blank
-// lines run on to whatever comes next rather than belonging to it.
-func linesSpannedBy(tk *Token, isContent bool, lbc string) int {
-	if isContent {
-		lines := strings.Count(tk.Value, lbc)
-		if !strings.HasSuffix(tk.Value, lbc) {
-			lines++
-		}
-		if lines < 1 {
-			return 0
-		}
-
-		return lines - 1
+// EndLine counts the lines the scalar has content on, settled where the token
+// was built: the breaks inside the token, with the whitespace around it left to
+// whatever it separates.
+//
+// A block scalar reaches past EndLine by the blank lines its chomping indicator
+// keeps, and its value records those. Every trailing break past the one ending
+// the last line of content stands for a blank line the scalar is written on, so
+// ">+" and "|+" reach that many lines further down the document.
+//
+// This counted the value's breaks instead, which measures the source only for a
+// literal block. Folding rewrites the line structure -- "  x\n\n  y\n" comes
+// back as "x\ny\n" -- so a folded scalar's value holds fewer breaks than the
+// source has lines, and the scalar came out one line short for every line its
+// content folded away. The miscount stayed out of sight until a folded scalar
+// started reporting the line its content begins on.
+func linesSpannedBy(tk *Token, isContent bool) int {
+	lines := int(tk.EndLine() - tk.Position.Line)
+	if !isContent {
+		return lines
 	}
 
-	// EndLine is that count, settled where the token was built: the breaks
-	// inside the token, with the whitespace around it left to whatever it
-	// separates.
-	return int(tk.EndLine() - tk.Position.Line)
+	return lines + max(int(TrailingBreaksIn(tk.Value))-1, 0)
 }
 
 // originBreaksBefore counts the breaks in the whole of prev's source text,

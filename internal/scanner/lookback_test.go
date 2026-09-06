@@ -169,3 +169,54 @@ func TestTokensResumesAfterBreak(t *testing.T) {
 		assert.Equalf(t, want[i], got[i], "token %d differs after the break", i)
 	}
 }
+
+// TestBlankLineAboveDoesNotCountAFoldedScalarShort checks that the token after
+// a block scalar records a gap only where the author left one.
+//
+// token.Lookback.blankLineAbove subtracts the lines a scalar occupies from the
+// gap to the next token, and linesSpannedBy measured a block scalar by the
+// breaks in its value. That measures the source only for a literal block:
+// folding drops a break for every line it joins, so a folded scalar came out
+// one line short for each fold and the leftover was read as a blank line.
+//
+// "- >+\n  x\n\n  y\n- 1\n" then rendered with a blank line before "- 1", which
+// ">+" keeps as content, so the value gained a trailing break on every render.
+//
+// Only the last two cases record a gap: "\n\n" before the entry is content
+// under ">+" and "|+", and a gap under ">" and ">-", which discard it.
+func TestBlankLineAboveDoesNotCountAFoldedScalarShort(t *testing.T) {
+	for name, test := range map[string]struct {
+		src  string
+		want bool
+	}{
+		"folded over a gap":              {"- >+\n  x\n\n  y\n- 1\n", false},
+		"folded over a gap, clipped":     {"- >\n  x\n\n  y\n- 1\n", false},
+		"folded over a gap, stripped":    {"- >-\n  x\n\n  y\n- 1\n", false},
+		"literal over a gap":             {"- |+\n  x\n\n  y\n- 1\n", false},
+		"two lines folded to one":        {"- >+\n  x\n  y\n\n- 1\n", false},
+		"no break inside":                {"- >+\n  x\n- 1\n", false},
+		"a kept blank line is content":   {"- >+\n  x\n\n  y\n\n- 1\n", false},
+		"and so is a literal's":          {"- |+\n  x\n\n  y\n\n- 1\n", false},
+		"a clipped blank line is a gap":  {"- >\n  x\n\n  y\n\n- 1\n", true},
+		"a stripped blank line is a gap": {"- >-\n  x\n\n  y\n\n- 1\n", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var s scanner.Scanner
+			s.Init([]byte(test.src))
+
+			var tokens []token.Token
+			for tk := range s.Tokens() {
+				tokens = append(tokens, tk)
+			}
+			require.NoError(t, s.Err())
+
+			// Every source here reads as '-', the header, the content, '-' and
+			// the second entry's scalar.
+			require.Len(t, tokens, 5)
+			entry := tokens[3]
+			require.Equal(t, token.SequenceEntryType, entry.Type)
+
+			assert.Equal(t, test.want, entry.BlankLineAbove())
+		})
+	}
+}
