@@ -606,15 +606,17 @@ func keyFamily(v Value) string {
 		return strings.ToLower(s.V)
 	}
 
-	// A string that spells a number belongs with the number: "1.0" and
-	// Float{1} are one key to this library, whichever of them was written
-	// first. ParseFloat is generous -- it takes "Inf" and "1e3", which YAML
-	// spells differently -- and being generous here only makes the dedupe
-	// coarser, which costs a draw and never a wrong document.
-	if f, err := strconv.ParseFloat(s.V, 64); err == nil {
-		return KeyText(Float{V: f})
-	}
-
+	// A string's own text, which is also the name this library gives it: a
+	// quoted key is a string and a string is named by what it spells. So
+	// Str{"1.0"} lands with Float{1}, whose canonical name is "1.0", and
+	// Str{"0"} lands with Int{0}, whose canonical name is "0".
+	//
+	// This used to run the text through ParseFloat and name the float it
+	// found, which was wrong in both directions. It missed Str{"0"} beside
+	// Int{0} -- two keys the library merges, drawn together and refused as a
+	// duplicate, which TestEmitParses caught -- and it needlessly collided
+	// Str{"1e3"} with Float{1000}, whose names are "1e3" and "1000.0" and are
+	// two keys to everybody.
 	return s.V
 }
 

@@ -6,6 +6,7 @@ package yamlgen
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strconv"
@@ -703,18 +704,22 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 	case Int:
 		e.feat.add(FeaturePlain)
 
-		return strconv.Itoa(n.V)
+		return e.number(intText(n.V, e.st))
 	case BigInt:
 		e.feat.add(FeaturePlain)
 		e.feat.add(FeatureValueBigInt)
 
-		return n.V.String()
+		return e.number(bigIntText(n.V, e.st))
 	case BigFloat:
 		e.feat.add(FeaturePlain)
 		e.feat.add(FeatureValueBigFloat)
 
 		// The shortest text that reads back as the same value at the precision
 		// a big.Float carries, which is what the library parses it into.
+		//
+		// Style.NumberForm is not applied. The value was built from its own
+		// text and parsed back at prec 64, and re-spelling it risks a rounding
+		// the generator would then blame the library for.
 		return n.V.Text('g', -1)
 	case Float:
 		e.feat.add(FeaturePlain)
@@ -740,18 +745,7 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 			return ".nan"
 		}
 
-		// Never exponent form. The library reads "1e3" as the float 1000, so an
-		// exponent would round-trip -- but it would also cross the spelling
-		// axis this emitter does not have yet, and a float written two ways is
-		// that axis's question rather than this one's.
-		s := strconv.FormatFloat(n.V, 'f', -1, 64)
-		if !strings.Contains(s, ".") {
-			// An integral float formats without a point, and a number without
-			// a point reads back as an integer.
-			s += ".0"
-		}
-
-		return s
+		return e.number(floatText(n.V, e.st))
 	case Str:
 		return e.scalarString(n.V, flow, false)
 	default:
@@ -828,6 +822,103 @@ func canPlain(s string, strTagged bool) bool {
 	}
 
 	return true
+}
+
+// number records the form a number was written in and returns the text.
+func (e *emitter) number(text string, form NumberForm) string {
+	switch form {
+	case NumberSigned:
+		e.feat.add(FeatureNumberSigned)
+	case NumberHex:
+		e.feat.add(FeatureNumberHex)
+	case NumberOctal:
+		e.feat.add(FeatureNumberOctal)
+	case NumberExponent:
+		e.feat.add(FeatureNumberExponent)
+	case NumberPlain:
+	}
+
+	e.reads.sawNumber(text, form)
+
+	return text
+}
+
+// intText writes an integer in the form the style asks for, and reports the
+// form it actually used.
+//
+// The core schema puts no sign on a hex or octal integer -- "-0x1f" and "+0x1f"
+// are both strings under §10.3.2 -- so a negative integer has only its decimal
+// spelling and falls back to it. An exponent would make a float of it.
+func intText(v int, st Style) (string, NumberForm) {
+	if v < 0 {
+		return strconv.Itoa(v), NumberPlain
+	}
+
+	switch st.NumberForm {
+	case NumberSigned:
+		return "+" + strconv.Itoa(v), NumberSigned
+	case NumberHex:
+		return "0x" + strconv.FormatInt(int64(v), 16), NumberHex
+	case NumberOctal:
+		return "0o" + strconv.FormatInt(int64(v), 8), NumberOctal
+	case NumberPlain, NumberExponent:
+		return strconv.Itoa(v), NumberPlain
+	default:
+		return strconv.Itoa(v), NumberPlain
+	}
+}
+
+// bigIntText is [intText] for an integer past a machine word.
+func bigIntText(v *big.Int, st Style) (string, NumberForm) {
+	if v.Sign() < 0 {
+		return v.String(), NumberPlain
+	}
+
+	switch st.NumberForm {
+	case NumberSigned:
+		return "+" + v.String(), NumberSigned
+	case NumberHex:
+		return "0x" + v.Text(16), NumberHex
+	case NumberOctal:
+		return "0o" + v.Text(8), NumberOctal
+	case NumberPlain, NumberExponent:
+		return v.String(), NumberPlain
+	default:
+		return v.String(), NumberPlain
+	}
+}
+
+// floatText writes a float in the form the style asks for.
+//
+// The exponent form is strconv's 'e' at precision -1, which is the shortest
+// text that reads back as the same double -- the property this whole package
+// turns on. There is no hex or octal float, so those fall back.
+func floatText(v float64, st Style) (string, NumberForm) {
+	switch st.NumberForm {
+	case NumberSigned:
+		// Signbit rather than v >= 0: negative zero compares non-negative and
+		// formats with its own "-", so the two signs would meet as "+-0.0".
+		if !math.Signbit(v) {
+			return "+" + plainFloat(v), NumberSigned
+		}
+	case NumberExponent:
+		return strconv.FormatFloat(v, 'e', -1, 64), NumberExponent
+	case NumberPlain, NumberHex, NumberOctal:
+	}
+
+	return plainFloat(v), NumberPlain
+}
+
+// plainFloat is the decimal spelling, which always carries a point.
+func plainFloat(v float64) string {
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	if !strings.Contains(s, ".") {
+		// An integral float formats without a point, and a number without a
+		// point reads back as an integer.
+		s += ".0"
+	}
+
+	return s
 }
 
 // bom is the byte order mark, which YAML 1.2 admits at the start of a stream

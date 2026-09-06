@@ -3,6 +3,8 @@
 
 package yamlgen
 
+import "strings"
+
 // What a document denotes under a reading other than YAML 1.2's core schema.
 //
 // # Only plain scalars raise the question
@@ -71,6 +73,63 @@ var legacyBooleans = map[string]bool{
 type readings struct {
 	plain map[string]bool
 	split map[string]bool
+	// numbers holds the numbers written in a form YAML 1.1 does not read,
+	// under the text they were written as. Where core reads a number and 1.1
+	// reads the text back as a string, that text is the 1.1 answer.
+	numbers map[string]bool
+	// st is the presentation, which decides how a number was written and so
+	// what 1.1 makes of it. The booleans above need no style; a number's
+	// spelling is the whole question here.
+	st Style
+}
+
+// numberUnder11 reports whether YAML 1.1 reads this text as the number the core
+// schema reads.
+//
+// Three of the forms part company with 1.1. It has no "0o" prefix -- its octal
+// is a bare leading zero -- so "0o37" is a string there. Its float production
+// requires a '.' and, where an exponent is written, a sign on it, so "1e-320"
+// and "1.5e0" are strings while "1.5e+00" is the float. The decimal, "+" and
+// "0x" forms it reads exactly as core does.
+//
+// Written out rather than derived, and checked against the library's own 1.1
+// reader by TestTheElevenAnswersMatchTheLibrary: being wrong here would mean
+// stating a meaning no implementation holds.
+func numberUnder11(text string) bool {
+	body := strings.TrimLeft(text, "+-")
+
+	if strings.HasPrefix(body, "0o") {
+		return false
+	}
+
+	if strings.HasPrefix(body, "0x") {
+		// 1.1 reads hex, and a hex digit may be an 'e' -- "0x3e8" is the
+		// integer 1000 and not an exponent. The test below caught this.
+		return true
+	}
+
+	exp := strings.IndexAny(body, "eE")
+	if exp < 0 {
+		return true
+	}
+
+	// A 1.1 float needs a '.' before the exponent and a sign on it.
+	if !strings.Contains(body[:exp], ".") {
+		return false
+	}
+
+	rest := body[exp+1:]
+
+	return strings.HasPrefix(rest, "+") || strings.HasPrefix(rest, "-")
+}
+
+// sawNumber records a number and the form it was written in.
+func (r *readings) sawNumber(text string, form NumberForm) {
+	if r == nil || form == NumberPlain || numberUnder11(text) {
+		return
+	}
+
+	r.numbers[text] = true
 }
 
 // sawScalar records how one scalar was written.
@@ -101,8 +160,12 @@ func (r *readings) sawScalar(text string, plain bool) {
 // under returns what v denotes under a reading, and whether that differs from
 // the core answer.
 func (r *readings) under(v Value) (any, bool) {
-	if r == nil || len(r.plain) == 0 {
+	if r == nil || (len(r.plain) == 0 && len(r.numbers) == 0) {
 		return nil, false
+	}
+
+	if len(r.numbers) > 0 {
+		return r.legacy(v), true
 	}
 
 	var swapped bool
@@ -122,6 +185,27 @@ func (r *readings) under(v Value) (any, bool) {
 	return r.legacy(v), true
 }
 
+// numberKey is [KeyText] under YAML 1.1 for a number written in a form 1.1
+// does not read: the key is named by the text rather than by the number.
+func (r *readings) numberKey(v Value) (string, bool) {
+	switch n := v.(type) {
+	case Int:
+		text, form := intText(n.V, r.st)
+
+		return text, form != NumberPlain && r.numbers[text]
+	case BigInt:
+		text, form := bigIntText(n.V, r.st)
+
+		return text, form != NumberPlain && r.numbers[text]
+	case Float:
+		text, form := floatText(n.V, r.st)
+
+		return text, form != NumberPlain && r.numbers[text]
+	default:
+		return "", false
+	}
+}
+
 // legacyKey is [KeyText] under YAML 1.1.
 //
 // A key resolves before it is stringified, so a plain "yes:" is the key "true"
@@ -137,6 +221,10 @@ func (r *readings) legacyKey(v Value) string {
 
 			return "false"
 		}
+	}
+
+	if text, diverges := r.numberKey(v); diverges {
+		return text
 	}
 
 	return KeyText(v)
@@ -155,6 +243,24 @@ func (r *readings) legacy(v Value) any {
 		}
 
 		return n.V
+	case Int:
+		if text, form := intText(n.V, r.st); form != NumberPlain && r.numbers[text] {
+			return text
+		}
+
+		return n.Decoded()
+	case BigInt:
+		if text, form := bigIntText(n.V, r.st); form != NumberPlain && r.numbers[text] {
+			return text
+		}
+
+		return n.Decoded()
+	case Float:
+		if text, form := floatText(n.V, r.st); form != NumberPlain && r.numbers[text] {
+			return text
+		}
+
+		return n.Decoded()
 	case Seq:
 		out := make([]any, 0, len(n.Items))
 		for _, item := range n.Items {

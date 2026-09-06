@@ -82,6 +82,16 @@ func marks() []mark {
 		{feature: yamlgen.FeatureQuotedSingle, in: has("'"), rune: '\''},
 		{feature: yamlgen.FeatureQuotedDouble, in: has(`"`), rune: '"'},
 
+		// Forward direction only. A double-quoted string may hold "0x" or a
+		// "+" of its own, so reading these back out of the bytes would report
+		// scalar content as presentation.
+		{feature: yamlgen.FeatureNumberHex, in: has("0x")},
+		{feature: yamlgen.FeatureNumberOctal, in: has("0o")},
+		{feature: yamlgen.FeatureNumberSigned, in: has("+")},
+		{feature: yamlgen.FeatureNumberExponent, in: func(s string) bool {
+			return strings.Contains(s, "e+") || strings.Contains(s, "e-")
+		}},
+
 		{feature: yamlgen.FeatureBreakCRLF, in: has("\r\n")},
 		{feature: yamlgen.FeatureBreakCR, in: loneCR},
 
@@ -212,6 +222,10 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureTagVerbatim:     st.TagSpelling == yamlgen.SpellVerbatim,
 			yamlgen.FeatureTagHandle:       st.TagSpelling == yamlgen.SpellHandle,
 			yamlgen.FeatureTagDirective:    st.TagSpelling == yamlgen.SpellHandle,
+			yamlgen.FeatureNumberSigned:    st.NumberForm == yamlgen.NumberSigned,
+			yamlgen.FeatureNumberHex:       st.NumberForm == yamlgen.NumberHex,
+			yamlgen.FeatureNumberOctal:     st.NumberForm == yamlgen.NumberOctal,
+			yamlgen.FeatureNumberExponent:  st.NumberForm == yamlgen.NumberExponent,
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,

@@ -8,8 +8,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
 	"pgregory.net/rapid"
 
+	yaml "github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
@@ -98,8 +101,10 @@ func TestOneTextWrittenTwoWaysDropsTheReading(t *testing.T) {
 
 // TestASecondReadingOnlyArrivesWithALegacySpelling is the property.
 //
-// A reading is stated only where the document holds one of the sixteen
-// spellings YAML 1.1 reads as a boolean and 1.2 does not, written plain.
+// A reading is stated for two reasons and no third. Either the document holds
+// one of the sixteen spellings YAML 1.1 reads as a boolean and 1.2 does not,
+// written plain; or it writes a number in a form 1.1 does not read, which
+// Style.NumberForm decides.
 func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		v := yamlgen.Values().Draw(rt, "value")
@@ -107,6 +112,12 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 
 		w := yamlgen.Write(v, st)
 		if len(w.Readings) == 0 {
+			return
+		}
+
+		// A number's form is the style's, so the value alone cannot say
+		// whether one was written -- only that there is a number to write.
+		if divergentForm(st) && holdsNumber(v) {
 			return
 		}
 
@@ -118,6 +129,38 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 			rt.Fatalf("a second reading under %s, which quotes every string\n%q", st, w.Text)
 		}
 	})
+}
+
+// divergentForm reports the number forms YAML 1.1 may not read.
+//
+// "0o37" is a string there, and so is a float whose exponent carries no sign.
+// The decimal and "+" forms it reads exactly as core does, and hex too.
+func divergentForm(st yamlgen.Style) bool {
+	return st.NumberForm == yamlgen.NumberOctal || st.NumberForm == yamlgen.NumberExponent
+}
+
+// holdsNumber reports whether v has a number in it anywhere.
+func holdsNumber(v yamlgen.Value) bool {
+	switch n := v.(type) {
+	case yamlgen.Int, yamlgen.Float, yamlgen.BigInt, yamlgen.BigFloat:
+		return true
+	case yamlgen.Seq:
+		return slices.ContainsFunc(n.Items, holdsNumber)
+	case yamlgen.Map:
+		for _, p := range n.Pairs {
+			if holdsNumber(p.Key) || holdsNumber(p.Val) {
+				return true
+			}
+		}
+	case yamlgen.Anchored:
+		return holdsNumber(n.V)
+	case yamlgen.Alias:
+		return holdsNumber(n.V)
+	case yamlgen.Tagged:
+		return holdsNumber(n.V)
+	}
+
+	return false
 }
 
 func holdsLegacySpelling(v yamlgen.Value) bool {
@@ -150,4 +193,55 @@ func holdsLegacySpelling(v yamlgen.Value) bool {
 	}
 
 	return false
+}
+
+// TestTheNumberFormsMeanUnder11WhatTheLibraryReads holds yamlgen's table of
+// YAML 1.1 answers to the library's own 1.1 reader.
+//
+// The table in reading.go is written out rather than derived, so it can be
+// wrong, and being wrong there would mean stating a meaning no implementation
+// holds -- the one failure the whole readings mechanism exists to avoid. This
+// asks the library the same question for every form the emitter can write.
+//
+// The library is not the specification, so a disagreement is a question rather
+// than a verdict. It has been the right question twice: libfyaml overturned a
+// triage done without it, and the reference parser settled the key departure.
+func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
+	values := []yamlgen.Value{
+		yamlgen.Int{V: 0}, yamlgen.Int{V: 1}, yamlgen.Int{V: 31}, yamlgen.Int{V: 511},
+		yamlgen.Int{V: 1000}, yamlgen.Int{V: -31},
+		yamlgen.Float{V: 1.5}, yamlgen.Float{V: -1.5}, yamlgen.Float{V: 0.5},
+		yamlgen.Float{V: 1000}, yamlgen.Float{V: 1e-320}, yamlgen.Float{V: 0},
+	}
+
+	forms := []yamlgen.NumberForm{
+		yamlgen.NumberPlain, yamlgen.NumberSigned,
+		yamlgen.NumberHex, yamlgen.NumberOctal, yamlgen.NumberExponent,
+	}
+
+	for _, form := range forms {
+		st := yamlgen.Style{NullSpelling: "null", NumberForm: form}
+
+		for _, v := range values {
+			w := yamlgen.Write(yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: v}}}, st)
+
+			// The core answer first, so a form that changes the value at all
+			// fails here rather than quietly in the 1.1 column.
+			var core any
+			require.NoError(t, yaml.Unmarshal([]byte(w.Text), &core), "%q", w.Text)
+			assert.Equal(t, map[string]any{"k": v.Decoded()}, core,
+				"%q does not read back as the value it was written from", w.Text)
+
+			var legacy any
+			require.NoError(t, yaml.Unmarshal([]byte("%YAML 1.1\n---\n"+w.Text), &legacy), "%q", w.Text)
+
+			want := map[string]any{"k": v.Decoded()}
+			if alt, differs := w.Readings[yamlgen.Reading11]; differs {
+				want = alt.(map[string]any)
+			}
+
+			assert.Equal(t, want, legacy,
+				"%q: yamlgen says %v under 1.1 and the library reads %v", w.Text, want, legacy)
+		}
+	}
 }

@@ -177,6 +177,59 @@ func (s TagSpelling) String() string {
 // otherwise, and what a %TAG must declare for a handle to mean the same thing.
 const secondaryPrefix = "tag:yaml.org,2002:"
 
+// NumberForm is how a number is written down.
+//
+// YAML 1.2's core schema reads an integer in three bases and a float in two
+// shapes, so one value has several texts and they all mean the same number.
+// That is presentation, and it belongs here beside [Style.BoolCase] and
+// [Style.NullSpelling] rather than in the value.
+//
+// A form that does not apply falls back to [NumberPlain] rather than failing:
+// the core schema puts no sign on a hex or octal integer, so a negative one has
+// only its decimal spelling, and an exponent turns an integer into a float and
+// is left to the floats.
+//
+// # Every form is a spelling core reads, and some are not spellings 1.1 reads
+//
+// The forms here were chosen against §10.3.2 and measured against the library:
+// "0X1F", "-0x1f" and "+0x1f" are all strings under the core schema, so none of
+// them is a way of writing a number and none is offered. What the forms do part
+// company with is YAML 1.1, which has no "0o" prefix and wants a sign on a
+// float's exponent -- so a document written this way denotes something else
+// under that reading, and readings.numberUnder11 says what.
+type NumberForm int
+
+const (
+	// NumberPlain writes an integer in decimal and a float the shortest way
+	// that reads back as the same double.
+	NumberPlain NumberForm = iota
+	// NumberSigned writes the "+" a non-negative number may carry.
+	NumberSigned
+	// NumberHex writes a non-negative integer as "0x1f".
+	NumberHex
+	// NumberOctal writes a non-negative integer as "0o37".
+	NumberOctal
+	// NumberExponent writes a float as "1.5e+00", and leaves integers alone.
+	NumberExponent
+)
+
+func (n NumberForm) String() string {
+	switch n {
+	case NumberSigned:
+		return " num=+"
+	case NumberHex:
+		return " num=0x"
+	case NumberOctal:
+		return " num=0o"
+	case NumberExponent:
+		return " num=e"
+	case NumberPlain:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // Style is one way of writing a document down.
 //
 // These are the axes along which two documents can look completely different
@@ -247,6 +300,8 @@ type Style struct {
 	// TagHandle is the handle name SpellHandle declares and uses, written
 	// without its "!" delimiters. Ignored by the other two spellings.
 	TagHandle string
+	// NumberForm is the base or shape a number is written in.
+	NumberForm NumberForm
 }
 
 // flowAt reports whether a node at this depth is written in flow style.
@@ -308,7 +363,7 @@ func (s Style) String() string {
 
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
-		s.Break.String() + props + spelling
+		s.Break.String() + props + spelling + s.NumberForm.String()
 }
 
 // Styles generates a presentation.
@@ -353,6 +408,10 @@ func Styles() *rapid.Generator[Style] {
 			// a handle of more than one character is the shape a parser that
 			// scans for "!x!" by position gets wrong.
 			TagHandle: rapid.SampledFrom([]string{"e", "x", "n-1", "TAG2"}).Draw(t, "taghandle"),
+			// Weighted towards decimal, which is how a number is usually
+			// written and the only form a negative integer has. The other four
+			// share the rest evenly.
+			NumberForm: NumberForm(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "numberform")),
 		}
 	})
 }

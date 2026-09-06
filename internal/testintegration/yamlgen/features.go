@@ -91,6 +91,14 @@ const (
 	FeatureTagNonSpecific stance.Feature = "node/tag-non-specific"
 	// FeatureTagDirective is a "%TAG" line declaring the handle those tags use.
 	FeatureTagDirective stance.Feature = "presentation/tag-directive"
+	// FeatureNumberSigned is a non-negative number written with its "+".
+	FeatureNumberSigned stance.Feature = "presentation/number-signed"
+	// FeatureNumberHex is an integer written "0x1f".
+	FeatureNumberHex stance.Feature = "presentation/number-hex"
+	// FeatureNumberOctal is an integer written "0o37".
+	FeatureNumberOctal stance.Feature = "presentation/number-octal"
+	// FeatureNumberExponent is a float written "1.5e+00".
+	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
 
 	// FeatureValueNull and the rest name what the document denotes, drawn from
 	// the Value rather than from the text. A consumer that cannot hold a float
@@ -142,9 +150,14 @@ type Written struct {
 // millions and wants none of them.
 func Write(v Value, st Style) Written {
 	e := &emitter{
-		st:    st,
-		feat:  features{},
-		reads: &readings{plain: map[string]bool{}, split: map[string]bool{}},
+		st:   st,
+		feat: features{},
+		reads: &readings{
+			plain:   map[string]bool{},
+			split:   map[string]bool{},
+			numbers: map[string]bool{},
+			st:      st,
+		},
 	}
 	text := e.emit(v)
 
