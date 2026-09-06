@@ -3,7 +3,10 @@
 
 package yamlcorpus
 
-import "github.com/go-openapi/go-yaml/internal/testintegration/stance"
+import (
+	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
+	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
+)
 
 // GoYAML is what this library does with the questions YAML leaves open, at the
 // stage its decoder works at.
@@ -21,6 +24,7 @@ var GoYAML = stance.Table{
 	Name:     "go-openapi/go-yaml decoder into any",
 	Because:  "decodes into Go values, which hold more shapes than JSON does and fewer than YAML admits",
 	At:       stance.Construct,
+	Reads:    Reading,
 	Speaks:   Vocabulary(),
 	Requires: allRules(),
 	Stands: map[stance.Tag]stance.Stand{
@@ -157,6 +161,14 @@ var Departures = []Departure{
 		Corroborated: "libfyaml 1.0.0a8 keeps both, and merges 1 with !!int 1 -- so its key identity is " +
 			"resolution and not spelling",
 	},
+	{
+		Pattern:  "a version directive above a root scalar",
+		Kind:     Value,
+		Observed: `"%YAML 1.1\n---\nN\n" reads "N" and "%YAML 1.1\n---\n0777\n" reads 777, which are 1.2's answers`,
+		Because: "6.8.1: the directive applies to the document that follows it, and 1.1 resolves N as false " +
+			"and 0777 as 511 -- which this library does everywhere else in the same document, so a " +
+			"sequence entry, a flow entry and a mapping value all read them right",
+	},
 }
 
 // GoYAMLParser is the same library asked the question it actually answers at
@@ -174,10 +186,33 @@ var Departures = []Departure{
 // the decoder it is either an accusation -- if the corpus claims construction
 // it has no right to -- or nothing at all, if the corpus is honest and the
 // consumer is the wrong one. Both were tried here before this table existed.
+// GoYAML11 is the same decoder reading a document that asks for YAML 1.1.
+//
+// A third table for one library, and it differs from GoYAML in one field. Every
+// verdict is the same -- "0777" is a valid document whichever schema resolves
+// it -- so nothing about accept-or-refuse moves. What moves is the value, and
+// Reads is what lets the corpus hand this consumer 511 where it hands GoYAML
+// 777.
+//
+// ⚠️ A document reaches this table by carrying a "%YAML 1.1" directive. The
+// parser also takes parser.WithYAMLVersion, and codec.Decoder has no option
+// that passes it through, so the directive is the only route through the
+// decoder today.
+var GoYAML11 = stance.Table{
+	Name:     "go-openapi/go-yaml decoder under YAML 1.1",
+	Because:  "reads a document that asks for 1.1, where a plain scalar resolves by 1.1's productions",
+	At:       stance.Construct,
+	Reads:    yamlgen.Reading11,
+	Speaks:   Vocabulary(),
+	Requires: allRules(),
+	Stands:   GoYAML.Stands,
+}
+
 var GoYAMLParser = stance.Table{
 	Name:     "go-openapi/go-yaml parser",
 	Because:  "answers whether a document is well formed, and nothing about what it means",
 	At:       stance.Parse,
+	Reads:    Reading,
 	Speaks:   Vocabulary(),
 	Requires: allRules(),
 	Stands:   GoYAML.Stands,

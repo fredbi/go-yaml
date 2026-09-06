@@ -119,6 +119,17 @@ func DirectiveShapes() []stance.Shape {
 			Intent: []stance.Tag{TagYAMLRepeated},
 		},
 		{
+			// The document a version directive changes the meaning of, rather
+			// than one it only precedes. "N" is a string under 1.2 and false
+			// under 1.1, and the scalar sits directly under the directive with
+			// no collection between them -- which is where this library stops
+			// applying it. See Departures and
+			// TestDefectAVersionDirectiveMissesTheRootScalar.
+			Name:   "a version directive above a root scalar",
+			Src:    []byte("%YAML 1.1\n---\nN\n"),
+			Intent: []stance.Tag{TagYAMLDirective, TagBoolLegacy},
+		},
+		{
 			Name:   "a version directive with a major other than one",
 			Src:    []byte("%YAML 2.0\n---\na: 1\n"),
 			Intent: []stance.Tag{TagYAMLMajorVersion},
