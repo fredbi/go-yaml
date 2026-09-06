@@ -2274,33 +2274,84 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 	}
 	normalizedFile := &ast.File{}
 	for _, doc := range f.Docs {
+		if !holdsAValue(doc) {
+			continue
+		}
+		normalizedFile.Docs = append(normalizedFile.Docs, doc)
+
 		// An anchor belongs to the document it was written in: a stream is a run
 		// of documents, each independent of the rest, so each gets its own books
 		// and an alias naming an anchor from an earlier one has nothing to name.
 		// Kept alongside the documents, as the comment maps are, because this
-		// walk runs over the whole stream and decode reads one document at a
-		// time afterwards.
-		d.anchorNodeMap = make(map[string]ast.Node, len(d.referenceAnchorNodeMap))
-		maps.Copy(d.anchorNodeMap, d.referenceAnchorNodeMap)
-		d.anchorValueMap = make(map[string]reflect.Value)
+		// runs over the whole stream and decode reads one document at a time
+		// afterwards.
+		//
+		// The parser fills ast.DocumentNode.Anchors as it reads, so the books
+		// are taken from it rather than collected again here.
+		anchors := make(map[string]ast.Node, len(doc.Anchors)+len(d.referenceAnchorNodeMap))
+		maps.Copy(anchors, d.referenceAnchorNodeMap)
+		maps.Copy(anchors, doc.Anchors)
+		d.anchorNodeMaps = append(d.anchorNodeMaps, anchors)
 
-		// try to decode ast.Node to value and map anchor value to anchorMap
-		v, err := d.nodeToValue(ctx, doc.Body)
-		if err != nil {
+		if d.toCommentMap == nil {
+			continue
+		}
+
+		// Only a caller that asked for the comments pays for reading them.
+		d.anchorNodeMap = anchors
+		d.anchorValueMap = make(map[string]reflect.Value)
+		if err := d.collectComments(ctx, doc.Body); err != nil {
 			return nil, err
 		}
-		if v != nil || (doc.Body != nil && doc.Body.Type() == ast.NullType) || isEmptyDocument(doc) {
-			normalizedFile.Docs = append(normalizedFile.Docs, doc)
-			cm := CommentMap{}
-			maps.Copy(cm, d.toCommentMap)
-			d.commentMaps = append(d.commentMaps, cm)
-			d.anchorNodeMaps = append(d.anchorNodeMaps, d.anchorNodeMap)
-		}
+
+		cm := CommentMap{}
+		maps.Copy(cm, d.toCommentMap)
+		d.commentMaps = append(d.commentMaps, cm)
 		for k := range d.toCommentMap {
 			delete(d.toCommentMap, k)
 		}
 	}
+
 	return normalizedFile, nil
+}
+
+// holdsAValue reports whether the document carries something to decode.
+//
+// A document of directives and nothing else opens their scope and denotes no
+// value, and a source holding only comments is not a document at all. Everything
+// else is one, including a tag or an anchor standing on nothing: "!!null" and
+// "&a" denote null exactly as "~" does.
+//
+// This replaced folding the whole document into a Go value and asking whether it
+// came out nil. That read "!!null" and "&a" as no document at all and dropped
+// them from the stream -- "a: 1" over "---" over "!!null" handed back one
+// document where go.yaml.in/yaml/v3 hands back two -- and it cost a second
+// reading of every document to answer a question about its shape.
+func holdsAValue(doc *ast.DocumentNode) bool {
+	if isEmptyDocument(doc) {
+		return true
+	}
+	if doc.Body == nil {
+		return false
+	}
+
+	switch doc.Body.(type) {
+	case *ast.DirectiveNode, *ast.CommentGroupNode:
+		return false
+	default:
+		return true
+	}
+}
+
+// collectComments fills the map a caller asked for with CommentToMap.
+//
+// It reads the document the way the decode does, since a comment is recorded
+// against the path of the node carrying it and the paths are what the map is
+// keyed by.
+func (d *Decoder) collectComments(ctx context.Context, body ast.Node) error {
+	_, err := d.nodeToValue(ctx, body)
+
+	return err
 }
 
 // readAll returns everything r holds, without copying it where r already has

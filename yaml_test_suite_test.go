@@ -107,9 +107,14 @@ var decodeLedger = map[string]string{
 	"various-trailing-comments-1-3":                    reasonStatedAsOutYAML,
 
 	// in.yaml and nothing else. The decoder refuses the first and the last of
-	// these -- ": a\n: b\n" as a duplicate null key, and the zero-indented
-	// sequence with "[5:1] value is not allowed in this context" -- and reads
-	// the other six.
+	// these -- ": a\n: b\n" holds one null key twice, which the load reports,
+	// and the zero-indented sequence gives "[5:1] value is not allowed in this
+	// context" -- and reads the other seven.
+	//
+	// syntax-character-edge-cases/02 is "!", the non-specific tag on the empty
+	// node. It denotes null and was read as no document at all until the
+	// decoder stopped folding every document into a value to decide whether it
+	// held one; go.yaml.in/yaml/v3 hands back one document holding nil.
 	"block-mapping-with-missing-keys":                  reasonNoExpectation,
 	"empty-keys-in-block-and-flow-mapping":             reasonNoExpectation,
 	"empty-lines-at-end-of-document":                   reasonNoExpectation,
@@ -117,6 +122,7 @@ var decodeLedger = map[string]string{
 	"spec-example-8-18-implicit-block-mapping-entries": reasonNoExpectation,
 	"spec-example-8-19-compact-block-mappings":         reasonNoExpectation,
 	"syntax-character-edge-cases/00":                   reasonNoExpectation,
+	"syntax-character-edge-cases/02":                   reasonNoExpectation,
 	"zero-indented-sequences-in-explicit-mapping-keys": reasonNoExpectation,
 
 	"trailing-line-of-spaces/01": reasonFixtureDiffersFromSpec,
