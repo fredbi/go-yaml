@@ -5,6 +5,7 @@ package yamlgen
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -113,7 +114,115 @@ func (p Property) String() string {
 // The emitter is gated against the YAML 1.2 grammar, so each of these documents
 // is one the library is obliged to read. Add one when a property test finds a
 // shape that diverges and the fix is not immediate; take it out with the fix.
-var Ledger = []Divergence{}
+var Ledger = []Divergence{
+	{
+		Name: "parse/a-mapping-key-written-empty-is-refused",
+		Reason: "A mapping entry whose key is written empty -- `: 2` rather than `k: 2` -- is " +
+			"refused in several positions. YAML 1.2 accepts every one of them and the grammar " +
+			"agrees.\n\n" +
+			"Three read correctly, which is what makes this a defect rather than a library that " +
+			"does not implement empty keys: `: a` on its own, `a: 1` then `: 2`, and " +
+			"`- k: 1` over `  : 2`. The last two were refused before 2026-09-10 and are fixed.\n\n" +
+			"Three do not, with two different messages, so there is more than one fault behind " +
+			"the shape. `a:` then `: 2` reports `unexpected scalar value`. `k: &a1` then `: 1` " +
+			"and `false: !!bool false` then `: &a1 !!null` both report `mapping value is not " +
+			"allowed in this context`, and both name the *earlier* line -- so what precedes the " +
+			"empty key matters, and an entry whose value carries properties or is written empty " +
+			"is what precedes it in each.\n\n" +
+			"The predicate asks only whether an empty key is written at all. Narrowing it would " +
+			"mean reproducing the parser's property handling inside a predicate, and one that " +
+			"tracked the defect that closely would drift from it; the pinned cases in " +
+			"defects_test.go carry the precision. It reports fewer divergences than draws.\n\n" +
+			"It claims every property, because a document that does not parse answers none.",
+		Property: Parses | Decode | Render | Settle | CommentsKept,
+		Match:    writesAnEmptyKey,
+	},
+	{
+		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
+		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
+			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
+			"`False: 1` reads the key \"False\"; without the tag it reads \"false\".\n\n" +
+			"Three things narrow it, and each is what makes this a defect rather than a rule " +
+			"about tagged nodes. `!!map` over the same mapping resolves the keys, so it is not " +
+			"that a tag suppresses resolution -- one spelling of the same tag behaves and the " +
+			"others do not. A flow mapping resolves them under any tag, `!foo {False: 1}` " +
+			"reading \"false\". And an anchor makes no difference either way.\n\n" +
+			"Only visible where a key's text and its canonical name differ, which since the " +
+			"naming rule landed means the booleans and the nulls: `!foo` over `1.0: a` reads " +
+			"\"1.0\" correctly, because that is the text as well as the name.",
+		Property: Decode | Render,
+		Match:    writesTaggedBlockMappingKeys,
+	},
+}
+
+// writesTaggedBlockMappingKeys reports whether emitting v writes a mapping that
+// carries a tag other than `!!map`.
+//
+// Wider than the defect twice over, and both are the usual trade. It does not
+// ask whether any key's text differs from its canonical name, so a mapping
+// keyed by ordinary words matches and reads back correctly. And it does not ask
+// whether the mapping lands in block context, because that depends on its depth
+// and on Style.FlowFrom.
+func writesTaggedBlockMappingKeys(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Tagged:
+		if _, keyed := n.V.(Map); keyed && n.Tag != TagMap {
+			return true
+		}
+
+		return writesTaggedBlockMappingKeys(n.V, Style{})
+	case Anchored:
+		return writesTaggedBlockMappingKeys(n.V, Style{})
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesTaggedBlockMappingKeys(item, Style{})
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if writesTaggedBlockMappingKeys(p.Val, Style{}) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writesAnEmptyKey reports whether emitting v in st writes a mapping key with
+// no text at all.
+//
+// Only a bare Null reaches the document as nothing, and only when the style
+// spells null as nothing. A tag or an anchor in front of one writes itself.
+func writesAnEmptyKey(v Value, st Style) bool {
+	return st.NullSpelling == "" && holdsAnEmptyKey(v)
+}
+
+func holdsAnEmptyKey(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if isNullNode(p.Key) || holdsAnEmptyKey(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsAnEmptyKey)
+	case Anchored:
+		return holdsAnEmptyKey(n.V)
+	case Tagged:
+		return holdsAnEmptyKey(n.V)
+	}
+
+	return false
+}
+
+// isNullNode reports whether v writes nothing when the style spells null as
+// nothing.
+func isNullNode(v Value) bool {
+	_, empty := v.(Null)
+
+	return empty
+}
 
 // Known returns the ledger entry describing this pairing for the given
 // property, or nil.

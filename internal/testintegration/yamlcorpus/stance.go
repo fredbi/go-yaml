@@ -193,7 +193,34 @@ type Departure struct {
 // not see on 2026-09-03, and on 2026-09-07 a version directive missing the root
 // scalar, a document carrying two directives, and two keys alike in text and
 // different once resolved.
-var Departures = []Departure{}
+var Departures = []Departure{
+	{
+		Pattern: "a key that is a boolean",
+		Kind:    Value,
+		Observed: `"true: a" beside "\"true\": b" comes back as the single entry {"true": "b"}, ` +
+			`and so do "1: a" beside "\"1\": b" and "~: a" beside "\"null\": b"`,
+		Because: "3.2.1.1: a key is equal to another when they resolve to the same node, and a boolean " +
+			"is not a string. Naming a key by the canonical spelling of its type is what makes 1 and " +
+			"1.0 two keys, and it puts every typed key in the strings' namespace at the same time -- " +
+			"so the map cannot hold both and one value is dropped with nothing reported. Refusing " +
+			"them as a duplicate would be wrong too: they are two keys, not one",
+		Corroborated: "split, and the split is worth stating. libfyaml 1.0.0b1 keeps both nodes -- its " +
+			`JSON has a repeated member name, which is the same loss one step later. ` +
+			"go.yaml.in/yaml/v3 v3.0.5 refuses the document as a duplicate, so it names keys the way " +
+			"this library does and merges the two the way this library used to. Only libfyaml holds " +
+			"both, and the reading here rests on 3.2.1.1 rather than on a majority",
+	},
+	{
+		Pattern:  "a key that is null",
+		Kind:     Value,
+		Observed: `"+.inf: a" beside ".inf: b" comes back as two entries, keyed "+.inf" and ".inf"`,
+		Because: "the sign is normalized away for an integer, so \"+1\" and \"1\" are one key, and the " +
+			"same normalization does not reach the infinities. Both spell positive infinity, so they " +
+			"are one node and one key",
+		Corroborated: "libfyaml 1.0.0b1 names both \"Infinity\"; go.yaml.in/yaml/v3 v3.0.5 reads both " +
+			"as float64(+Inf) and holds one entry",
+	},
+}
 
 // GoYAMLParser is the same library asked the question it actually answers at
 // parsing: is this a document.

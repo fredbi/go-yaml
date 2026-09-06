@@ -29,19 +29,22 @@ import (
 // scalar means, the event stream shows the node they are disagreeing about,
 // which is what JSON cannot express and where the other two are weakest.
 
-// TestConsensusOnAWholeValuedFloatKey is the departure with all four readings
-// beside each other.
+// TestConsensusOnAWholeValuedFloatKey is the departure that assembled the three
+// sources, now closed.
 //
-// The three outside sources agree that "1.0: a" over "1: b" is two entries and
-// that the key keeps its type. This library gives one entry, having stringified
-// both keys to "1" and lost the first value. That is the whole case, and no one
-// source made it: perlref says there are two nodes, goyaml says they are two
-// keys, libfyaml says the float survives naming.
+// It was: this library named both keys "1" and kept one entry, losing a value.
+// perlref said there were two nodes, goyaml said they were two keys, libfyaml
+// said the float survives being named -- and no single source made the case.
+//
+// Kept as a regression test rather than deleted, because the fix rests on a
+// reading the sources do not agree about: libfyaml merges the float with the
+// integer and only goyaml keeps them apart. A change here would be invisible
+// otherwise.
 func TestConsensusOnAWholeValuedFloatKey(t *testing.T) {
 	const src = "1.0: a\n1: b\n"
 
-	t.Run("this library keeps one entry", func(t *testing.T) {
-		assert.Len(t, decodeInto(t, src), 1, "today: the two keys collapse and a value is lost")
+	t.Run("this library keeps both, naming them by type", func(t *testing.T) {
+		assert.Equal(t, map[string]any{"1.0": "a", "1": "b"}, decodeInto(t, src))
 	})
 
 	t.Run("the reference parser sees two", func(t *testing.T) {
@@ -72,15 +75,16 @@ func TestConsensusOnAWholeValuedFloatKey(t *testing.T) {
 		assert.Len(t, docs[0], 2, "float64(1) and int(1) are two keys")
 	})
 
-	t.Run("libfyaml keeps the float when it names the key", func(t *testing.T) {
+	t.Run("libfyaml merges them, and is the outlier now", func(t *testing.T) {
 		if !libfyaml.Available() {
 			t.Skipf("not installed at %s; run hack/conformance/install-libfyaml.sh",
 				libfyaml.Home())
 		}
 
-		docs, err := libfyaml.Load([]byte("1.0: a\n"))
+		docs, err := libfyaml.Load([]byte(src))
 		require.NoError(t, err)
-		assert.Equal(t, []string{`{"1.0": "a"}`}, docs)
+		assert.Equal(t, []string{`{"1.0": "b"}`}, docs,
+			"one entry, named from the first key and valued from the last")
 	})
 }
 

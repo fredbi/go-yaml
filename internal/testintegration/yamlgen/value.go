@@ -96,7 +96,7 @@ type Pair struct {
 }
 
 // KeyText is what this library makes of a key when it decodes a mapping into an
-// `any`.
+// `any`: the canonical spelling of the key's type.
 //
 // Measured, and the measurement is the whole reason this is a function rather
 // than a field. Decoding into an `any` always produces a map[string]any, and
@@ -108,13 +108,10 @@ type Pair struct {
 // That is what makes a key presentation-invariant, and it is why the generator
 // can draw a key of any scalar kind and still state what the document means.
 //
-// ⚠️ This whole function moves when the decoder is fixed. Stringifying a key
-// belongs in codec.ToJSON, where a JSON member name has to be a string; the
-// decoder should keep the key's type the way go.yaml.in/yaml/v3 does, and
-// codec.UseStringKeys should be what turns stringification on. When that
-// lands, Map.Decoded returns a map[any]any keyed by the values themselves and
-// KeyText becomes the answer for the ToJSON and UseStringKeys paths alone. See
-// yamlcorpus.Departures, "a key that is a boolean" and "a key that is null".
+// ⚠️ Naming per type puts every typed key into the strings' namespace, and a
+// map[string]any cannot hold a key twice -- so Str{"1.0"} and Float{1.0} are
+// two keys that this library collapses into one, silently. keyFamily keeps the
+// generator out of that; yamlcorpus.Departures records it.
 // It also means two keys can collide after resolution while looking nothing
 // alike -- Int{1} and Str{"1"} are both "1" -- which the library refuses as a
 // duplicate and [yamlcorpus.Departures] records as wrong. drawMap keeps out of
@@ -132,20 +129,14 @@ func KeyText(v Value) string {
 	case Int:
 		return strconv.Itoa(n.V)
 	case Float:
-		// ⚠️ This one is a defect, recorded rather than worked around.
+		// The canonical spelling of a float: shortest round-trip, and a ".0"
+		// when that leaves no decimal point or exponent. 1.0 is named "1.0",
+		// 1e3 is "1000.0", 1e30 stays "1e+30", 0.5 is "0.5".
 		//
-		// It is Go's own formatting of a float64, which is what the decoder
-		// ends up applying: 1.0 is named "1" and 1e3 is named "1000", so a
-		// whole-valued float key loses the fact that it was a float. libfyaml
-		// names them "1.0" and "1000.0" and is right to. A fractional float is
-		// unaffected either way, 0.5 being "0.5".
-		//
-		// Kept matching the library on purpose, the way Int.Decoded keeps its
-		// uint64/int64 asymmetry: a generator that quietly wrote the correct
-		// answer would report every drawn document as broken and stop noticing
-		// when the real thing is fixed. See yamlcorpus.Departures, "a key that
-		// is a float with a whole value".
-		return strconv.FormatFloat(n.V, 'g', -1, 64)
+		// The ".0" is what keeps a float out of the integers' namespace, which
+		// is what lets 1 and 1.0 be two keys rather than a collision. Naming
+		// per type and uniqueness per type are one mechanism, not two.
+		return floatKeyText(n.V)
 	case Str:
 		return n.V
 	case Anchored:
@@ -602,4 +593,31 @@ func floats() *rapid.Generator[float64] {
 
 		return f
 	})
+}
+
+// floatKeyText is the canonical spelling of a float, shared by [KeyText] and
+// the tests that check it against the other readings.
+//
+// The infinities and NaN are spelled the way YAML spells them rather than the
+// way Go prints them -- ".inf" and not "+Inf" -- which is what this library
+// does and what round-trips. [Float] excludes them by design, so nothing
+// generated reaches this, and it is written down because a reader comparing
+// against libfyaml will find "Infinity" there and should know the difference is
+// deliberate.
+func floatKeyText(f float64) string {
+	switch {
+	case math.IsNaN(f):
+		return ".nan"
+	case math.IsInf(f, 1):
+		return ".inf"
+	case math.IsInf(f, -1):
+		return "-.inf"
+	}
+
+	out := strconv.FormatFloat(f, 'g', -1, 64)
+	if !strings.ContainsAny(out, ".eE") {
+		out += ".0"
+	}
+
+	return out
 }

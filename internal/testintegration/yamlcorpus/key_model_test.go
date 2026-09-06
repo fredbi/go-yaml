@@ -105,8 +105,10 @@ func TestYAMLv3KeepsTheKeyType(t *testing.T) {
 		docs, err := goyaml.Load([]byte("1.0: a\n1: b\n"))
 		require.NoError(t, err)
 		require.Len(t, docs, 1)
-		assert.Len(t, docs[0], 2, "yaml.v3 keeps both, where this library keeps one")
+		assert.Len(t, docs[0], 2, "yaml.v3 keeps both")
 
-		assert.Len(t, decodeInto(t, "1.0: a\n1: b\n"), 1, "today: this library collapses them")
+		// ✅ And so does this library since 2026-09-10, by naming the float
+		// "1.0" and the integer "1" rather than both "1".
+		assert.Len(t, decodeInto(t, "1.0: a\n1: b\n"), 2)
 	})
 }
