@@ -473,6 +473,12 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			return nil, yamlerrors.NewSyntax(
 				fmt.Sprintf("%s names a kind this node is not", res.Tag), n.GetToken())
 		case ast.TagValueMismatch:
+			if res.Lax {
+				// parser.WithLaxTags: the characters the scalar was written
+				// with stand in for the value the tag could not make of them.
+				return res.Text, nil
+			}
+
 			return nil, yamlerrors.NewSyntax(
 				fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), n.Value.GetToken())
 		}

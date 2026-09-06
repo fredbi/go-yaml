@@ -67,6 +67,12 @@ type Resolution struct {
 	// read anything into it: "!!str 0x10" carries "0x10" and not "16". It is ""
 	// where the node is not a scalar.
 	Text string
+	// Lax says the document was read with
+	// [github.com/go-openapi/go-yaml/parser.WithLaxTags]. A consumer that finds
+	// TagValueMismatch and can fall back reads Text as a string instead of
+	// refusing; a kind mismatch is reported whatever this says, since no text
+	// stands in for a sequence.
+	Lax bool
 	// Empty says there is no text under the tag: the document left the node out
 	// as in "k: !!int", or wrote an empty scalar. Such a node takes the tag's
 	// own default rather than failing to be read.
@@ -95,10 +101,10 @@ func (n *TagNode) Resolve() Resolution {
 	_, isNull := unwrapAnchor(n.Value).(*NullNode)
 
 	if !reserved {
-		return Resolution{Verdict: TagUnresolved, Text: text, Empty: empty}
+		return Resolution{Verdict: TagUnresolved, Text: text, Empty: empty, Lax: n.LaxTags}
 	}
 
-	res := Resolution{Tag: tag, Text: text, Empty: empty}
+	res := Resolution{Tag: tag, Text: text, Empty: empty, Lax: n.LaxTags}
 
 	if collectionTag(tag) {
 		// A collection tag on a scalar, and the other way about. n.Value is nil

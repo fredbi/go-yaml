@@ -126,3 +126,37 @@ func WithAnchors(anchors map[string]ast.Node) Option {
 		p.declaredAnchors = anchors
 	}
 }
+
+// WithLaxTags reads a tag naming a type its scalar is not as the text the
+// scalar was written with, rather than refusing the document.
+//
+// A tag is an assertion about the node under it, and by default an assertion
+// that does not hold is reported: "!!int abc" is an error naming the text and
+// the tag. YAML says nothing about what a processor owes here -- 3.1.2 builds a
+// representation from the serialization, and a node whose tag will not apply
+// has none to build -- so refusing, zeroing and echoing the text are all
+// conformant, and this option picks the second-strictest of the three.
+//
+// Under it "!!int abc" reads "abc", "!!bool 7" reads "7" and
+// "!!timestamp not-a-date" reads "not-a-date". The characters are kept, where
+// the zero this library used to answer with could be told neither from a
+// written zero nor from the text that produced it.
+//
+// Two things it does not relax. A tag naming a kind its node is not --
+// "!!seq 5" -- is reported whatever the policy, because no text stands in for a
+// sequence and writing "!!seq" was a deliberate claim about shape. And a tag
+// the grammar has no production for, such as "!<>", is refused by the scanner
+// before any of this is reached.
+//
+// The tag itself is untouched either way: it stays on the node and a render
+// writes it back, so a document read laxly still round-trips.
+//
+// It is a parser option because the policy travels on the tree. Every consumer
+// of that tree reads one answer -- [github.com/go-openapi/go-yaml/ast.TagNode.Resolve]
+// -- so the decoder, the JSON converter and a caller of DecodeFromNode agree
+// about a document without being told twice.
+func WithLaxTags() Option {
+	return func(p *Parser) {
+		p.laxTags = true
+	}
+}

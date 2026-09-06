@@ -1734,6 +1734,16 @@ type TagNode struct {
 	// handle expands to "!". A "%TAG" directive changes what a handle expands
 	// to, so read this rather than Start to find which tag the node carries.
 	URI string
+	// LaxTags says the document was read with
+	// [github.com/go-openapi/go-yaml/parser.WithLaxTags], so a consumer that
+	// can fall back to the text should, where it would otherwise refuse a tag
+	// naming a type its scalar is not. [TagNode.Resolve] reports it as
+	// [Resolution.Lax].
+	//
+	// It is stamped on the node rather than kept beside the document, so that a
+	// node handed over on its own -- what DecodeFromNode and
+	// expressions.Path.Read are given -- carries the policy it was read under.
+	LaxTags bool
 }
 
 func (n *TagNode) GetValue() any {

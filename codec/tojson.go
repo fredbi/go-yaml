@@ -31,7 +31,17 @@ import (
 // A stream of several documents converts its first, which is the one
 // [Unmarshal] reads. The rest are still read, so a stream whose later documents
 // cannot be converted is refused rather than half-answered.
-func ToJSON(src []byte) ([]byte, error) {
+//
+// opts are passed to the parse. The one that changes what is written is
+// [github.com/go-openapi/go-yaml/parser.WithLaxTags], which reads a tag naming
+// a type its scalar is not as the text rather than refusing it, so
+// "k: !!int abc" converts to {"k":"abc"} instead of failing. Pass it here and
+// to whatever else reads the same document, or the two disagree about it.
+//
+// [github.com/go-openapi/go-yaml/parser.WithJSONCompatible] is always on and
+// cannot be turned off: a document JSON has no spelling for is refused rather
+// than given one this converter invented.
+func ToJSON(src []byte, opts ...parser.Option) ([]byte, error) {
 	// The JSON runs from half the source to a little under it on the workload
 	// corpus -- 0.51x on golang_source, 0.93x on twitter_status -- so the
 	// source's length is one allocation that holds all of it. Growing from
@@ -39,7 +49,11 @@ func ToJSON(src []byte) ([]byte, error) {
 	// what the conversion allocated, almost all of it doubling.
 	w := &jsonWriter{out: make([]byte, 0, len(src))}
 
-	if _, err := parser.New(parser.WithOmitNodePaths(), parser.WithJSONCompatible()).Walk(src, w); err != nil {
+	// The caller's options come first, so neither of the two below can be
+	// turned off by one of them.
+	opts = append(opts, parser.WithOmitNodePaths(), parser.WithJSONCompatible())
+
+	if _, err := parser.New(opts...).Walk(src, w); err != nil {
 		return nil, err
 	}
 	if w.err != nil {
@@ -468,6 +482,12 @@ func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 
 		return nil, false
 	case ast.TagValueMismatch:
+		if res.Lax {
+			// parser.WithLaxTags: the characters the scalar was written with
+			// stand in for the value the tag could not make of them.
+			return appendJSONString(nil, res.Text), true
+		}
+
 		w.fail(yamlerrors.NewSyntax(
 			fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), t.Value.GetToken()))
 

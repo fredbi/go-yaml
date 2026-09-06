@@ -57,7 +57,35 @@
 // value under them stands as it was written. So does every tag outside these
 // fifteen -- a local "!thing", a handle a "%TAG" line declared, another
 // namespace -- with one rule: a tag nothing resolves leaves its scalar as text,
-// digits and all, so "!thing 12" is the string "12".
+// digits and all, so "!thing 12" is the string "12". §6.9.1 hands a local tag
+// to the application, so none of these is an error.
+//
+// # A tag naming a type its scalar is not
+//
+// "!!int abc" is an assertion that does not hold, and by default it is an error
+// naming both: cannot read "abc" as !!int. The same goes for !!bool, !!float,
+// !!null, !!binary and !!timestamp.
+//
+// YAML leaves this open. §3.1.2 builds a representation from the serialization,
+// and a node whose tag will not apply has none to build; what a processor then
+// owes the caller is not stated, so refusing, zeroing and echoing the text are
+// all conformant. This library refused three of the six and answered the other
+// three with a zero until 2026-09-07, which meant a caller could not tell
+// "!!int abc" from a written 0.
+//
+// [github.com/go-openapi/go-yaml/parser.WithLaxTags] reads the text instead, so
+// "!!int abc" is the string "abc". The tag stays on the node either way and a
+// render writes it back, so a document read laxly still round-trips.
+//
+// Two things stay strict. A tag naming a kind its node is not -- "!!seq 5" --
+// is reported whatever the policy, since no text stands in for a sequence. And
+// a tag the YAML 1.2 grammar has no production for, such as "!<>" or "!!<x>",
+// is refused as the document is scanned.
+//
+// The verdict is the node's own, at
+// [github.com/go-openapi/go-yaml/ast.TagNode.Resolve], so every consumer of one
+// tree gives one answer: [Unmarshal], [codec.ToJSON] and a caller holding a
+// single node all read it there.
 package yaml
 
 import "github.com/go-openapi/go-yaml/codec"

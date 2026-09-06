@@ -113,6 +113,7 @@ type Parser struct {
 	allowDuplicateMapKey bool
 	omitNodePaths        bool
 	jsonCompatible       bool
+	laxTags              bool
 	// tagHandles maps a handle a TAG directive declared to the prefix it
 	// expands to.
 	tagHandles map[string]string
@@ -1689,6 +1690,7 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 		return nil, err
 	}
 	node.URI = p.resolveTag(tagRawTk.Value)
+	node.LaxTags = p.laxTags
 
 	// The tag stands around the node it types, so it goes over before that node
 	// and closes after it -- the same shape parseAnchorValue gives an anchor,
