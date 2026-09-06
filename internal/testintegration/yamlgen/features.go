@@ -101,6 +101,11 @@ const (
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
 	// FeatureExplicitKey is a mapping entry written "? key" over ": value".
 	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
+	// FeatureChompKeep is a block scalar written "|+" where clip would do.
+	FeatureChompKeep stance.Feature = "presentation/chomp-keep"
+	// FeatureChompPadded is a block scalar followed by blank lines its
+	// chomping indicator discards.
+	FeatureChompPadded stance.Feature = "presentation/chomp-padded"
 
 	// FeatureValueNull and the rest name what the document denotes, drawn from
 	// the Value rather than from the text. A consumer that cannot hold a float

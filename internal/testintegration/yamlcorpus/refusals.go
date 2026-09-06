@@ -248,5 +248,23 @@ func Refusals() []Refusal {
 			Name: "an anchor standing alone where an entry should be",
 			Src:  "a:\n&x\n", Says: "anchor is not allowed in this context",
 		},
+		{
+			// Both halves of validateAnchorName's second case, which the
+			// corpus reached only by luck and stopped reaching when the
+			// chomping axis shifted the draws: an "&" or a "*" needs
+			// s-separate between its name and whatever follows.
+			Name: "an alias running straight into a flow collection",
+			Src:  "a: *x{}\n", Says: "an alias must be separated from the node that follows it",
+		},
+		{
+			Name: "an anchor running straight into a flow collection",
+			Src:  "a: &x[]\n", Says: "an anchor must be separated from the node that follows it",
+		},
+		{
+			// 6.9.2 gives a node one anchor, and the generator writes one per
+			// node by construction, so nothing it draws reaches this.
+			Name: "two anchors on one node",
+			Src:  "a: &x\n  &y 1\n", Says: "anchors cannot be used consecutively",
+		},
 	}
 }

@@ -191,6 +191,24 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
+		Reason: "A blank line written before a comment is kept by the first rendering and dropped by " +
+			"the second, so the rendering never settles. `a:` over ` - x` over a blank line over " +
+			"`# c` over `b: 1` renders to `a:` over `- x` over a blank over `# c` over `b: 1`, and " +
+			"that renders again without the blank.\n\n" +
+			"Three things are needed. The nested sequence has to be written at an indentation the " +
+			"renderer does not use -- already at column 1 it settles on the first pass, dropping the " +
+			"blank straight away. A nested mapping in the same place settles, re-indented and blank " +
+			"kept. And an entry has to follow the comment: without `b: 1` it settles.\n\n" +
+			"Only the rendering wobbles: the value is the same every time, and no comment is lost -- " +
+			"just the blank line before one. So this claims Settle alone.\n\n" +
+			"The predicate is narrower than the defect: it matches the shape Style.Chomping's padding " +
+			"reaches, which is how it was found, and a document that writes a blank line some other " +
+			"way would fail the property rather than be excused. Widen it then.",
+		Property: Settle,
+		Match:    writesABlankLineBeforeAComment,
+	},
+	{
 		Name: "render/a-comment-on-an-explicit-keys-colon-line-is-dropped",
 		Reason: "A comment written on the `:` line of an entry written the long way, with the value " +
 			"below it, is lost. `? a` over `: # c3` over `  v` renders back as `? a` over `: v`.\n\n" +
@@ -237,13 +255,19 @@ var Ledger = []Divergence{
 			"it, and it happens at the document root, inside a mapping and inside a sequence entry. " +
 			"An anchor or a tag on the value makes no difference. A flow collection, a quoted scalar " +
 			"and a plain scalar after the same quoted key all read.\n\n" +
+			"Where the block scalar's content begins with a `:` it is worse than refused. `? \"\"` " +
+			"over `: >-` over ` : a` reads {\"\": {\"\": \"a\"}} -- a nested mapping, where libfyaml " +
+			"1.0.0b1 gives {\"\": \": a\"} -- because the parser takes the `>-` for a plain scalar " +
+			"key rather than a block scalar header. A plain scalar cannot begin with `>`, so the tree " +
+			"holds a node no document can spell, and the renderer writes `>-: a` back out: text the " +
+			"recognizer refuses. That is why this claims RenderValid as well.\n\n" +
 			"libfyaml 1.0.0b1 reads every one of them, the reference parser passes them, and " +
 			"grammar.NewRecognizer accepts them. Found on 2026-09-11 by Style.ExplicitKeys, on its " +
 			"first deep run.\n\n" +
 			"The predicate asks the emitter's own blockScalarIn whether the value becomes one, so the " +
 			"only place it is wider than the defect is the key: Style.Quoting quotes every string, " +
 			"and not every quoted key is one the parser then cannot place.",
-		Property: Parses | Decode | Render | Settle | CommentsKept,
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid,
 		Match:    writesAQuotedExplicitKeyOverABlockScalar,
 	},
 	{
@@ -352,6 +376,47 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 // entry the long way, with a quoted key and a value the emitter may write as a
 // block scalar.
 //
+// writesABlankLineBeforeAComment reports whether st pads a block scalar with
+// blank lines in a document that also writes comments above its entries.
+func writesABlankLineBeforeAComment(v Value, st Style) bool {
+	if st.Chomping != ChompPadded {
+		return false
+	}
+
+	if st.Comments != HeadComments && st.Comments != AllComments {
+		return false
+	}
+
+	return holdsAPaddedBlockScalar(v, st)
+}
+
+func holdsAPaddedBlockScalar(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Str:
+		// Only "-" and clip are padded, and "+" is what a value with two or
+		// more trailing breaks needs.
+		return blockScalarIn(n.V, st) && len(n.V)-len(strings.TrimRight(n.V, "\n")) < 2
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAPaddedBlockScalar(item, st)
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsAPaddedBlockScalar(p.Val, st) {
+				return true
+			}
+		}
+	case Anchored:
+		return holdsAPaddedBlockScalar(n.V, st)
+	case Alias:
+		return holdsAPaddedBlockScalar(n.V, st)
+	case Tagged:
+		return holdsAPaddedBlockScalar(n.V, st)
+	}
+
+	return false
+}
+
 // writesACommentOnAnExplicitColonLine reports whether st writes an entry the
 // long way, with a line comment, over a value that may go on its own line.
 func writesACommentOnAnExplicitColonLine(v Value, st Style) bool {

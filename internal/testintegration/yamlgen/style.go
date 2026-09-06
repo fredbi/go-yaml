@@ -230,6 +230,47 @@ func (n NumberForm) String() string {
 	}
 }
 
+// Chomping is how a block scalar's trailing line breaks are written.
+//
+// The indicator itself is not a choice: a value with no trailing break needs
+// "-", one with two or more needs "+", and one with exactly one needs clip --
+// which is the indicator written by leaving the position empty. So the emitter
+// picks it from the value, and what is left over is the two places the same
+// value has more than one spelling.
+//
+// Blank lines after the content are the interesting one. "-" strips every
+// trailing break and clip keeps exactly one, so both can be followed by blank
+// lines that the reader then discards -- and a parser that miscounts them
+// hands the value back with a break too many, or takes the next node's first
+// line for its own. Only "+" cannot: it keeps what it is given.
+type Chomping int
+
+const (
+	// ChompExact writes the indicator the value needs and the breaks it has,
+	// and nothing more.
+	ChompExact Chomping = iota
+	// ChompPadded writes two blank lines after the content, which "-" strips
+	// and clip discards down to the one break the value has. A value needing
+	// "+" is written exactly, since keeping is what "+" does.
+	ChompPadded
+	// ChompKeep writes "+" where the value has exactly one trailing break and
+	// clip would have written it. The two spell the same value.
+	ChompKeep
+)
+
+func (c Chomping) String() string {
+	switch c {
+	case ChompPadded:
+		return " chomp=pad"
+	case ChompKeep:
+		return " chomp=+"
+	case ChompExact:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // Style is one way of writing a document down.
 //
 // These are the axes along which two documents can look completely different
@@ -302,6 +343,9 @@ type Style struct {
 	TagHandle string
 	// NumberForm is the base or shape a number is written in.
 	NumberForm NumberForm
+	// Chomping is how a block scalar's trailing breaks are written, where the
+	// value admits more than one spelling.
+	Chomping Chomping
 	// ExplicitKeys writes a mapping entry as "? key" over ": value" rather
 	// than as "key: value".
 	//
@@ -373,6 +417,8 @@ func (s Style) String() string {
 		spelling += " ?key"
 	}
 
+	spelling += s.Chomping.String()
+
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String()
@@ -429,6 +475,10 @@ func Styles() *rapid.Generator[Style] {
 			// split would spend half the corpus's mappings on a form few
 			// readers ever meet.
 			ExplicitKeys: rapid.IntRange(0, 3).Draw(t, "explicitkeys") == 0,
+			// An even three-way split: all three are ordinary ways to write a
+			// block scalar, and the two that are not exact are the ones no
+			// generator had written.
+			Chomping: Chomping(rapid.IntRange(0, 2).Draw(t, "chomping")),
 		}
 	})
 }

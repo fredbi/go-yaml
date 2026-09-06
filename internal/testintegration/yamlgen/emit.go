@@ -582,13 +582,7 @@ func (e *emitter) literal(s string, indent, stated int) {
 		e.buf.WriteString(itoa(stated))
 	}
 
-	switch trailing {
-	case 0:
-		e.buf.WriteString("-")
-	case 1:
-	default:
-		e.buf.WriteString("+")
-	}
+	pad := e.chomp(trailing)
 
 	e.buf.WriteString("\n")
 
@@ -604,6 +598,8 @@ func (e *emitter) literal(s string, indent, stated int) {
 	for range max(trailing-1, 0) {
 		e.buf.WriteString("\n")
 	}
+
+	e.blanks(pad)
 }
 
 func (e *emitter) flowSeq(n Seq) string {
@@ -1110,13 +1106,7 @@ func (e *emitter) foldedScalar(s string, indent, stated int) {
 		e.buf.WriteString(itoa(stated))
 	}
 
-	switch trailing {
-	case 0:
-		e.buf.WriteString("-")
-	case 1:
-	default:
-		e.buf.WriteString("+")
-	}
+	pad := e.chomp(trailing)
 
 	e.buf.WriteString("\n")
 
@@ -1132,6 +1122,48 @@ func (e *emitter) foldedScalar(s string, indent, stated int) {
 
 	// Clip already wrote the one trailing newline; keep needs the rest.
 	for range max(trailing-1, 0) {
+		e.buf.WriteString("\n")
+	}
+
+	e.blanks(pad)
+}
+
+// chomp writes the chomping indicator for a value with this many trailing
+// breaks and returns how many blank lines to write after the content.
+//
+// The indicator comes from the value: none for 0, clip for 1, "+" for more.
+// Style.Chomping moves it only where the value admits a second spelling --
+// "+" instead of clip when there is exactly one break, and blank lines the
+// reader discards when the indicator is "-" or clip.
+func (e *emitter) chomp(trailing int) int {
+	switch {
+	case trailing == 0:
+		e.buf.WriteString("-")
+	case trailing == 1 && e.st.Chomping == ChompKeep:
+		e.feat.add(FeatureChompKeep)
+		e.buf.WriteString("+")
+
+		return 0
+	case trailing == 1:
+	default:
+		// "+" keeps every break it is given, so there is nothing to pad with.
+		e.buf.WriteString("+")
+
+		return 0
+	}
+
+	if e.st.Chomping != ChompPadded {
+		return 0
+	}
+
+	e.feat.add(FeatureChompPadded)
+
+	return 2
+}
+
+// blanks writes n empty lines.
+func (e *emitter) blanks(n int) {
+	for range n {
 		e.buf.WriteString("\n")
 	}
 }

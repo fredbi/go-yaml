@@ -86,6 +86,10 @@ func marks() []mark {
 		// "+" of its own, so reading these back out of the bytes would report
 		// scalar content as presentation.
 		{feature: yamlgen.FeatureExplicitKey, in: has("?")},
+		{feature: yamlgen.FeatureChompKeep, in: has("+")},
+		{feature: yamlgen.FeatureChompPadded, in: func(s string) bool {
+			return strings.ContainsAny(s, "|>")
+		}},
 		{feature: yamlgen.FeatureNumberHex, in: has("0x")},
 		{feature: yamlgen.FeatureNumberOctal, in: has("0o")},
 		{feature: yamlgen.FeatureNumberSigned, in: has("+")},
@@ -228,6 +232,8 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureNumberOctal:     st.NumberForm == yamlgen.NumberOctal,
 			yamlgen.FeatureNumberExponent:  st.NumberForm == yamlgen.NumberExponent,
 			yamlgen.FeatureExplicitKey:     st.ExplicitKeys,
+			yamlgen.FeatureChompKeep:       st.Chomping == yamlgen.ChompKeep,
+			yamlgen.FeatureChompPadded:     st.Chomping == yamlgen.ChompPadded,
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,
