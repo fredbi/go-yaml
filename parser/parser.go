@@ -1732,6 +1732,56 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	return node, nil
 }
 
+// retypeAhead reads the plain scalars the scan has already cut past seq again,
+// against schema.
+//
+// A schema reaches only what the scanner cuts after it is set, and the grouping
+// reads one token past the directive to know the directive's own document has
+// ended. For a document whose body is a bare scalar that one token is the body:
+// "%YAML 1.1" over "---" over "N" had N typed by 1.2 before the directive was
+// parsed, and read "N" where the same document read false at every other
+// position -- inside a collection a "-", a key or a "[" stands between the two,
+// so the schema was in place by the time the scalar was cut.
+//
+// token.ScalarType is a pure function of the text and the schema, so what is
+// already cut is read again rather than scanned again. There is one token at
+// stake in practice; the grouping holds what it cannot settle yet and no more.
+//
+// Only a plain scalar is read this way. A quoted or folded one is a string
+// whatever it spells, and the scanner gives it a type of its own, so it is not
+// among the types below and keeps what it was cut as.
+func (p *Parser) retypeAhead(schema token.Schema, from int32) {
+	if p.tokens == nil {
+		return
+	}
+
+	for seq := int(from) + 1; seq < p.tokens.Len(); seq++ {
+		tk := p.tokens.At(seq)
+		if tk == nil {
+			continue
+		}
+		raw := tk.RawToken()
+		if raw == nil || !resolvedByAnySchema(raw.Type) {
+			continue
+		}
+		raw.Type = token.ScalarType(raw.Value, schema)
+	}
+}
+
+// resolvedByAnySchema reports whether the scanner gave the token its type by
+// reading a plain scalar against a schema, which is what makes reading it again
+// against another one meaningful.
+func resolvedByAnySchema(t token.Type) bool {
+	switch t {
+	case token.StringType, token.BoolType, token.IntegerType, token.BinaryIntegerType,
+		token.OctetIntegerType, token.HexIntegerType, token.FloatType,
+		token.InfinityType, token.NanType, token.NullType:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) clearTagDirectives() {
 	p.tagHandles = nil
 }
@@ -2406,6 +2456,7 @@ func (p *Parser) parseDirective(ctx context, g *tokenGroup) (*ast.DirectiveNode,
 		// asked later: a schema set part way through takes effect from the next
 		// scalar it cuts, and the directive stands before the document's body.
 		p.scan.SetSchema(schemaFor(ver))
+		p.retypeAhead(schemaFor(ver), valueTk.Seq())
 
 		versionNode, err := newStringNode(ctx, valueTk)
 		if err != nil {

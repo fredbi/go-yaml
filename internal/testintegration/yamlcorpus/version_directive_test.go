@@ -28,30 +28,60 @@ func reading(t *testing.T, src string) any {
 	return v
 }
 
-// TestDefectAVersionDirectiveMissesTheRootScalar pins today's behavior, so the
-// fix fails the test that says it was broken.
+// TestFixedAVersionDirectiveReachesTheRootScalar covers the one position a
+// "%YAML" directive did not reach.
 //
-// The directive reaches every scalar in the document except the one directly
-// under it. Scanner.SetSchema takes effect from the next scalar the scanner
-// reads, and a root scalar is the first token after the "---" -- already
-// scanned and typed by 1.2 before the parser handles the directive and sets the
-// schema. Inside any collection there is at least one more token, a "-", a key,
-// a ":" or a "[", so the schema is in place by the time the scalar is read.
-func TestDefectAVersionDirectiveMissesTheRootScalar(t *testing.T) {
+// 6.8.1: the directive applies to the document that follows it. It reached
+// every scalar of that document except the one written directly under the
+// "---", so "%YAML 1.1" over "N" read the string "N" where the same document
+// read false at every other position.
+//
+// The scanner resolves a plain scalar as it cuts it, and the grouping reads one
+// token past the directive to know the directive's own document has ended. For
+// a document whose body is a bare scalar that one token is the body, already
+// cut and typed by 1.2 before the parser read the directive at all; inside any
+// collection a "-", a key or a "[" stands between the two, so the schema was in
+// place by the time the scalar was cut. Parser.retypeAhead reads what was cut
+// too early again, which token.ScalarType makes cheap: it is a pure function of
+// the text and the schema.
+func TestFixedAVersionDirectiveReachesTheRootScalar(t *testing.T) {
 	for _, tc := range []struct {
 		src  string
-		got  any
 		want any
 	}{
-		{src: "%YAML 1.1\n---\nN\n", got: "N", want: false},
-		{src: "%YAML 1.1\n---\ny\n", got: "y", want: true},
-		{src: "%YAML 1.1\n---\nyes\n", got: "yes", want: true},
-		{src: "%YAML 1.1\n---\n0777\n", got: uint64(777), want: uint64(511)},
-		{src: "%YAML 1.1\n---\n1_000\n", got: "1_000", want: uint64(1000)},
+		{src: "%YAML 1.1\n---\nN\n", want: false},
+		{src: "%YAML 1.1\n---\ny\n", want: true},
+		{src: "%YAML 1.1\n---\nyes\n", want: true},
+		{src: "%YAML 1.1\n---\n0777\n", want: uint64(511)},
+		{src: "%YAML 1.1\n---\n1_000\n", want: uint64(1000)},
 	} {
-		if v := reading(t, tc.src); v != tc.got {
-			t.Errorf("%q reads %#v, and this test says it still reads %#v -- if that is the fix, "+
-				"the expected value is %#v", tc.src, v, tc.got, tc.want)
+		if v := reading(t, tc.src); v != tc.want {
+			t.Errorf("%q reads %#v, want %#v", tc.src, v, tc.want)
+		}
+	}
+}
+
+// TestAQuotedRootScalarIsUntouched holds the line the fix must not cross.
+//
+// A quoted or folded scalar is a string whatever it spells, so reading it again
+// against another schema would be wrong. The scanner gives it a type of its own
+// and retypeAhead leaves those alone.
+func TestAQuotedRootScalarIsUntouched(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{src: "%YAML 1.1\n---\n\"N\"\n", want: "N"},
+		{src: "%YAML 1.1\n---\n'y'\n", want: "y"},
+		{src: "%YAML 1.1\n---\n\"0777\"\n", want: "0777"},
+		{src: "%YAML 1.1\n---\n!!str N\n", want: "N"},
+
+		// And a document naming no version still reads 1.2.
+		{src: "---\nN\n", want: "N"},
+		{src: "%YAML 1.2\n---\nN\n", want: "N"},
+	} {
+		if v := reading(t, tc.src); v != tc.want {
+			t.Errorf("%q reads %#v, want %#v", tc.src, v, tc.want)
 		}
 	}
 }

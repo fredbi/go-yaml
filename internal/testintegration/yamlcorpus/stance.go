@@ -188,14 +188,6 @@ var Departures = []Departure{
 		Corroborated: "libfyaml 1.0.0a8 keeps both, and merges 1 with !!int 1 -- so its key identity is " +
 			"resolution and not spelling",
 	},
-	{
-		Pattern:  "a version directive above a root scalar",
-		Kind:     Value,
-		Observed: `"%YAML 1.1\n---\nN\n" reads "N" and "%YAML 1.1\n---\n0777\n" reads 777, which are 1.2's answers`,
-		Because: "6.8.1: the directive applies to the document that follows it, and 1.1 resolves N as false " +
-			"and 0777 as 511 -- which this library does everywhere else in the same document, so a " +
-			"sequence entry, a flow entry and a mapping value all read them right",
-	},
 }
 
 // GoYAMLParser is the same library asked the question it actually answers at
