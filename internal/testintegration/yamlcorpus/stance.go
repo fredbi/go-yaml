@@ -160,27 +160,40 @@ type Departure struct {
 	Corroborated string
 }
 
+// Key identity is a declared position, and the one place this library overrules
+// the yardstick.
+//
+// §3.2.1.1 makes two keys equal when they resolve to the same node, so identity
+// is the type and the value and not the characters: "7" and "007" are one
+// integer written twice, "~" and "null" one null, and "1" and "1.0" an integer
+// and a float and so two keys.
+//
+// Naming follows libfyaml, which writes an integer in decimal whatever base it
+// was read from and gives a float a '.' or an exponent so that it never spells
+// an integer. Identity follows gopkg.in/yaml.v3, which keeps the type. libfyaml
+// makes "1" and "1.0" one key; the specification is unambiguous that they are
+// different tags, different nodes and so different keys, so libfyaml is lax
+// here rather than the rule wrong.
+//
+// A repeat is recorded by the parse and refused by the load, and
+// parser.WithAllowDuplicateMapKey records none at all -- then the last entry
+// written wins. Refusing "7" beside "007" and "~" beside "null" turns away
+// documents every implementation reads today. That is deliberate: there is no
+// legitimate document that writes both, and a caller who has one reaches for
+// the option.
+
 // Departures is what the anchor patterns found, on first contact.
 //
 // None of them appears anywhere in the four hundred documents of the YAML Test
 // Suite. That is the argument for the patterns in one sentence.
 //
-// Two entries left on 2026-08-27, both fixed rather than argued away: a cycle
-// decoding to nil, and an alias resolving to an earlier document's anchor. The
-// third arrived on 2026-09-03 from the generator rather than from a pattern:
-// Style.FlowEmpty started writing "{a}" and the duplicate-key check turned out
-// not to see it.
-var Departures = []Departure{
-	{
-		Pattern:  "two keys alike in text and different once resolved",
-		Kind:     Verdict,
-		Observed: `"1: x" and "\"1\": y" in one mapping are refused as a duplicate key`,
-		Because: "3.2.1.1: keys are equal when they resolve to the same node, and these resolve to an integer " +
-			"and a string, so they are two keys and the document is valid",
-		Corroborated: "libfyaml 1.0.0a8 keeps both, and merges 1 with !!int 1 -- so its key identity is " +
-			"resolution and not spelling",
-	},
-}
+// It is empty. Every entry it has held was fixed rather than argued away: a
+// cycle decoding to nil and an alias naming an earlier document's anchor on
+// 2026-08-27, a flow entry written as a key alone that the duplicate check did
+// not see on 2026-09-03, and on 2026-09-07 a version directive missing the root
+// scalar, a document carrying two directives, and two keys alike in text and
+// different once resolved.
+var Departures = []Departure{}
 
 // GoYAMLParser is the same library asked the question it actually answers at
 // parsing: is this a document.

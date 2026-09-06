@@ -1370,42 +1370,10 @@ a:
 			"key: [`val]",
 			"\n[1:7] '`' is a reserved character\n>  1 | key: [`val]\n             ^\n",
 		},
-		{
-			`
-foo:
-  bar:
-    foo: 2
-  baz:
-    foo: 3
-foo: 2
-`,
-			`
-[7:1] mapping key "foo" already defined at [2:1]
-   4 |     foo: 2
-   5 |   baz:
-   6 |     foo: 3
->  7 | foo: 2
-       ^
-`,
-		},
-		{
-			`
-foo:
-  bar:
-    foo: 2
-  baz:
-    foo: 3
-    foo: 4
-`,
-			`
-[7:5] mapping key "foo" already defined at [6:5]
-   4 |     foo: 2
-   5 |   baz:
-   6 |     foo: 3
->  7 |     foo: 4
-           ^
-`,
-		},
+		// A repeated key was here, and the parse no longer refuses one: it
+		// records the repeat and the load reports it. See
+		// codec.TestADuplicateKeyIsReportedAtTheLoad for the same two documents
+		// and the same message, drawn under the line that repeats.
 		{
 			`{"000":0000A,`,
 			`

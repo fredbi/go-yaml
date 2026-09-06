@@ -103,7 +103,11 @@ func divergesOnPurpose(err error) (string, bool) {
 // acceptsOnPurpose reports whether a refusal the frozen parser makes is one the
 // shipped parser no longer makes.
 //
-// Two rules. A document may carry more than one directive: 6.8 puts no limit on
+// Three rules. A repeated key is recorded by the parse and refused by the load,
+// so a document holding one is read here and refused there; refparser refuses
+// it at the parse.
+//
+// A document may carry more than one directive: 6.8 puts no limit on
 // them, and a "%YAML" beside a "%TAG" is the commonest header YAML has.
 // refparser refuses the second one whatever it says.
 //
@@ -126,6 +130,23 @@ func divergesOnPurpose(err error) (string, bool) {
 func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 	if err == nil || got == nil {
 		return "", false
+	}
+
+	if strings.Contains(err.Error(), "already defined at") {
+		// Two changes at once, and refparser makes the same complaint about
+		// both. 3.2.1.1 makes a repeated key an error, and the parse now
+		// records it rather than refusing -- a document that cannot be parsed
+		// cannot be linted or rendered either -- so codec refuses it at the
+		// load. And two keys are equal when they resolve to the same node, so
+		// "1" and "\"1\"" are a number and a string and not a repeat at all,
+		// where refparser compares the characters and calls them one.
+		//
+		// Matched on the reason alone, as the entries above are: "already
+		// defined at" is refparser's duplicate check and nothing else, so it
+		// cannot hide a regression of another kind. A repeat this parser fails
+		// to record would still be caught -- yamlcorpus holds the key rules and
+		// parser/duplicate_key_test.go holds the shapes.
+		return "a repeated key is recorded and refused at the load (3.2.1.1)", true
 	}
 
 	if strings.Contains(err.Error(), "unexpected directive value") && countDirectives(got) > 1 {

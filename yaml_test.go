@@ -12,7 +12,6 @@ import (
 	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/codec"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
-	"github.com/go-openapi/go-yaml/parser"
 )
 
 func TestRoundTripWithComment(t *testing.T) {
@@ -246,7 +245,11 @@ foo:
     foo: 3
 foo: 2
 `
-	if _, err := parser.ParseBytes([]byte(data)); err == nil {
+	// The document repeats a key. The parse reads it and records the repeat;
+	// the load is what reports one, so the error with a position on it comes
+	// from there.
+	var into any
+	if err := yaml.Unmarshal([]byte(data), &into); err == nil {
 		t.Fatalf("expected error")
 	} else {
 		var yamlErr *yamlerrors.Error

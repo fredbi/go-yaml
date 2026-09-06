@@ -216,7 +216,7 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 // wrote and what keeps it apart from the empty key: "null: a" and "\"\": b" are
 // two entries.
 func mapKeyString(node ast.Node, key any) string {
-	if name, kind := keyName(unwrapKeyNode(node)); kind != keyOther {
+	if name, kind := keyName(unwrapKeyNode(node)); kind != token.KeyOther {
 		return name
 	}
 	if key == nil {
@@ -606,6 +606,9 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		}
 		return map[string]interface{}{key: v}, nil
 	case *ast.MappingNode:
+		if err := refuseDuplicateKeys(n); err != nil {
+			return nil, err
+		}
 		if d.useOrderedMap {
 			m := make(MapSlice, 0, len(n.Values))
 			for _, value := range n.Values {
@@ -641,6 +644,10 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
 		return nil, ErrExceededMaxDepth
+	}
+
+	if err := refuseDuplicateKeys(node); err != nil {
+		return nil, err
 	}
 
 	switch n := node.(type) {

@@ -199,7 +199,6 @@ var parserComplaints = []string{
 	"found unknown escape character _",
 	"invalid header option",
 	"invalid number of indent is specified in the multi-line header",
-	"mapping key _ already defined at",
 	"mapping value is not allowed in this context",
 	"non-map value is specified",
 	"not enough length for escaped UTF-N character",

@@ -148,6 +148,12 @@ type Parser struct {
 	// begins, innermost last. Anchors nest, so it is a stack.
 	anchorFrom []int32
 
+	// openMaps holds the mapping node at each level of the descent, innermost
+	// last, so a repeated key is recorded on the mapping that holds it as it is
+	// read. One pointer per mapping open at once, which is the document's
+	// nesting and not its width.
+	openMaps []*ast.MappingNode
+
 	// entryCol is the column of the '-' or of the key of the entry being read,
 	// and 0 at the document's root where no entry encloses anything. entryInMap
 	// says which of the two it is.
@@ -260,8 +266,21 @@ func (p *Parser) newPathNode() *ast.PathNode {
 
 // mapKeyRef addresses one key of one mapping: base is where that mapping's
 // keys start in keyStack, and text is the key as mapKeyText reads it.
+// mapKeyRef is what tells one key of a mapping from another: which mapping it
+// belongs to, the type it resolved to, and that type's own spelling of it.
+//
+// §3.2.1.1 makes two keys equal when they resolve to the same node, so the type
+// is half the identity: "7" and "007" are one integer written twice and "1" and
+// "1.0" are an integer and a float. Comparing the characters alone read the
+// first pair as two keys and the second as one, and read "1" and "\"1\"" as one
+// where they are a number and a string.
+//
+// base is an index into keyStack and never approaches 2^31, so narrowing it
+// makes room for the kind in the padding the struct already had: it was 24
+// bytes with an int and a string, and it is 24 bytes with these three.
 type mapKeyRef struct {
-	base int
+	base int32
+	kind token.KeyKind
 	text string
 }
 
@@ -270,8 +289,8 @@ type mapKeyRef struct {
 //
 // It returns where text was first written, and whether the mapping had already
 // used it.
-func (p *Parser) recordMapKey(base int, text string, pos token.Position) (token.Position, bool) {
-	ref := mapKeyRef{base: base, text: text}
+func (p *Parser) recordMapKey(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool) {
+	ref := mapKeyRef{base: int32(base), kind: kind, text: text}
 	if prev, defined := p.keyIndex[ref]; defined {
 		return prev, true
 	}
@@ -718,6 +737,7 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer p.openMapping(node)()
 	p.enter(ctx, node, KindMapping)
 	defer p.leave(ctx, node)
 	ctx.goNext() // skip MappingStart token
@@ -832,9 +852,8 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			}
 			p.handKey(ctx, key)
 
-			if err := p.recordKeyOnce(ctx, key.GetToken(), p.mapKeyText(key)); err != nil {
-				return nil, err
-			}
+			name, kind := p.mapKeyIdentity(key)
+			p.recordKeyOnce(ctx, key.GetToken(), name, kind)
 
 			// "{p}" leaves the value out, and a writer needs the null that
 			// stands for it as much as it needs the key.
@@ -967,6 +986,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	// over instead.
 	mapNode := ctx.arena.Mapping(keyTk.RawToken(), false, nil)
 	mapNode.SetPathNode(ctx.path)
+	defer p.openMapping(mapNode)()
 	p.enter(ctx, mapNode, KindMapping)
 
 	// Where the arena stands before an entry is read. A walk has seen the entry
@@ -1165,7 +1185,7 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 		}
 		keyText := p.mapKeyText(scalar)
 		key.SetPathNode(ctx.withChild(p, keyText).path)
-		if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
+		if err := p.validateMapKey(ctx, key, g.Last()); err != nil {
 			return nil, err
 		}
 
@@ -1185,7 +1205,7 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 	}
 	keyText := p.mapKeyText(key)
 	key.SetPathNode(ctx.withChild(p, keyText).path)
-	if err := p.validateMapKey(ctx, key, keyText, g.Last()); err != nil {
+	if err := p.validateMapKey(ctx, key, g.Last()); err != nil {
 		return nil, err
 	}
 
@@ -1195,14 +1215,13 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 // validateMapKey checks key against the rules a mapping key is held to, and
 // records it among the keys of the mapping being parsed.
 //
-// keyText is the key as mapKeyText reads it. Two entries of one mapping repeat
-// a key when their texts are equal, so the check needs the text and not the
-// path built from it.
-func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string, colonTk *tapeToken) error {
+// Two entries of one mapping repeat a key when they resolve to the same node,
+// which mapKeyIdentity reads as a type and that type's own spelling, so the
+// check needs the key and not the path built from it.
+func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, colonTk *tapeToken) error {
 	tk := key.GetToken()
-	if err := p.recordKeyOnce(ctx, tk, keyText); err != nil {
-		return err
-	}
+	name, kind := p.mapKeyIdentity(key)
+	p.recordKeyOnce(ctx, tk, name, kind)
 	if ctx.isFlow {
 		// A pair written inside a flow sequence is an implicit key: it has to
 		// fit on one line, and its ':' has to be on that line with it.
@@ -1227,26 +1246,43 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, keyText string,
 }
 
 // recordKeyOnce records tk among the keys of the mapping being parsed, and
-// refuses a key the mapping already holds.
+// notes a repeat on the mapping rather than refusing the document.
+//
+// The parse reads a document that repeats a key and says where: 3.2.1.1 makes
+// the repeat an error, but which error and whether to stop is the caller's, and
+// a document that cannot be parsed cannot be linted, rendered or colorized
+// either. codec refuses it at the load.
 //
 // Every entry's key passes through here, including a flow entry written as a
 // key with no value: "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does,
 // and was read without complaint while the check only saw keys that came with
 // a ':'.
-func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, keyText string) error {
+//
+// Told to allow duplicates, nothing is recorded at all: the mapping carries no
+// Duplicates, the load has nothing to refuse, and the last entry written wins
+// because that is what filling a map does.
+func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind token.KeyKind) {
 	if p.allowDuplicateMapKey {
-		return nil
+		return
 	}
 
-	pos, defined := p.recordMapKey(ctx.keyBase, keyText, tk.Position)
+	pos, defined := p.recordMapKey(ctx.keyBase, name, kind, tk.Position)
 	if !defined {
-		return nil
+		return
 	}
 
-	return yamlerrors.NewSyntax(
-		fmt.Sprintf("mapping key %q already defined at [%d:%d]", tk.Value, pos.Line, pos.Column),
-		tk,
-	)
+	if n := len(p.openMaps); n > 0 {
+		open := p.openMaps[n-1]
+		open.Duplicates = append(open.Duplicates,
+			ast.DuplicateKey{Name: name, At: tk.Position, FirstAt: pos})
+	}
+}
+
+// openMapping records the mapping being read, and returns what takes it off.
+func (p *Parser) openMapping(node *ast.MappingNode) func() {
+	p.openMaps = append(p.openMaps, node)
+
+	return func() { p.openMaps = p.openMaps[:len(p.openMaps)-1] }
 }
 
 // isScalarKeyToken reports whether tk is a scalar written where a key goes,
@@ -1286,10 +1322,15 @@ func (p *Parser) valueContext(ctx context, key ast.MapKeyNode) context {
 	return ctx.withChild(p, p.mapKeyText(key))
 }
 
+// mapKeyText is the key as the document wrote it, which is what a path
+// addresses the entry by: "$.0x10" reaches the entry written "0x10:" whatever
+// the number resolves to. Telling one key from another is a different question
+// and mapKeyIdentity's.
 func (p *Parser) mapKeyText(n ast.Node) string {
 	if n == nil {
 		return ""
 	}
+
 	switch nn := n.(type) {
 	case *ast.MappingKeyNode:
 		return p.mapKeyText(nn.Value)
@@ -1300,7 +1341,70 @@ func (p *Parser) mapKeyText(n ast.Node) string {
 	case *ast.AliasNode:
 		return ""
 	}
+
 	return n.GetToken().Value
+}
+
+func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
+	if n == nil {
+		return "", token.KeyOther
+	}
+
+	switch nn := n.(type) {
+	case *ast.MappingKeyNode:
+		return p.mapKeyIdentity(nn.Value)
+	case *ast.AnchorNode:
+		return p.mapKeyIdentity(nn.Value)
+	case *ast.TagNode:
+		// A tag names the type, so it names the key's identity: "!!str 1" is
+		// the string "1" and not the integer, and the two are two keys.
+		// Unwrapping to the node under it read the tag off and made them one.
+		if name, kind, tagged := taggedKeyIdentity(nn); tagged {
+			return name, kind
+		}
+
+		return p.mapKeyIdentity(nn.Value)
+	case *ast.AliasNode:
+		// What the alias names is not read here; the load resolves it.
+		return "", token.KeyOther
+	}
+
+	tk := n.GetToken()
+	if tk == nil {
+		return "", token.KeyOther
+	}
+
+	return token.KeyName(tk.Value, tk.Type)
+}
+
+// taggedKeyIdentity reads a key's identity off the tag standing on it, for the
+// tags that name one of the types a key is told apart by.
+func taggedKeyIdentity(n *ast.TagNode) (string, token.KeyKind, bool) {
+	res := n.Resolve()
+	if res.Verdict != ast.TagResolved {
+		return "", token.KeyOther, false
+	}
+
+	switch res.Tag {
+	case token.StringTag:
+		return res.Text, token.KeyString, true
+	case token.NullTag:
+		return "null", token.KeyNull, true
+	case token.BooleanTag:
+		name, kind := token.KeyName(res.Text, token.BoolType)
+
+		return name, kind, true
+	case token.IntegerTag:
+		name, kind := token.KeyName(res.Text, token.IntegerType)
+
+		return name, kind, true
+	case token.FloatTag:
+		name, kind := token.KeyName(res.Text, token.FloatType)
+
+		return name, kind, true
+	default:
+		return "", token.KeyOther, false
+	}
 }
 
 func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *tapeToken) (ast.Node, error) {

@@ -227,6 +227,13 @@ func (w *jsonWriter) Leave(node ast.Node, at parser.Step) {
 	case *ast.TagNode:
 		w.closeTag(n)
 	case *ast.MappingNode:
+		// §3.2.1.1 makes a repeated key an error, and JSON holds a member once
+		// whatever the document wrote. The parse records the repeats and
+		// refuses none, and it hangs them on the mapping as the mapping closes,
+		// so the complaint is made here rather than as it opened.
+		if err := refuseDuplicateKeys(n); err != nil {
+			w.fail(err)
+		}
 		w.closeMapping()
 		w.closeKey(at)
 	case *ast.SequenceNode:
@@ -407,7 +414,7 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 // keyText is a scalar key as the string a mapping holds it under. JSON keys are
 // strings, so 4.0 and 4 address the same entry and are both "4".
 func keyText(node ast.Node) string {
-	if name, kind := keyName(node); kind != keyOther {
+	if name, kind := keyName(node); kind != token.KeyOther {
 		return name
 	}
 

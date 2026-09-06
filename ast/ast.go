@@ -1127,11 +1127,37 @@ func (m *MapNodeIter) KeyValue() *MappingValueNode {
 }
 
 // MappingNode type of mapping node
+// DuplicateKey is one entry of a mapping whose key the mapping already held.
+//
+// YAML 1.2.2 §3.2.1.1: two keys are equal when they resolve to the same node,
+// so "7" and "007" are one key written twice while "1" and "1.0" are two. The
+// parser records the repeats it finds and refuses nothing; whoever loads the
+// document decides what to do about them, which is what lets a linter read a
+// document that a decoder will not.
+type DuplicateKey struct {
+	// Name is the key as its type spells it, which is what makes it the same
+	// key: token.KeyName writes an integer in decimal whatever base the
+	// document used.
+	Name string
+	// At is where the repeat stands and FirstAt where the key was first
+	// written, so a complaint can name both.
+	At, FirstAt token.Position
+}
+
 type MappingNode struct {
 	BaseNode
 	Start       *token.Token
 	End         *token.Token
 	IsFlowStyle bool
+	// Duplicates holds the entries whose key the mapping already held, in the
+	// order they were written. It is nil for a mapping that repeats none, which
+	// is nearly every mapping of nearly every document, so a document without
+	// duplicates carries nothing for them.
+	//
+	// It is nil as well where the parse was told to allow them with
+	// [github.com/go-openapi/go-yaml/parser.WithAllowDuplicateMapKey]: nothing
+	// is recorded, so tolerating a repeat costs no memory at all.
+	Duplicates  []DuplicateKey
 	Values      []*MappingValueNode
 	FootComment *CommentGroupNode
 }

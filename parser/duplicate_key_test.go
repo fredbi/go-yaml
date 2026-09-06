@@ -11,6 +11,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -96,16 +97,42 @@ func TestDuplicateMapKeyIsReportedPerMapping(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(test.src))
+			// The parse reads the document and records the repeat rather than
+			// refusing: a document that cannot be parsed cannot be linted or
+			// rendered either, and 3.2.1.1 leaves what to do about a repeat to
+			// whoever loads it. codec refuses it there.
+			f, err := parser.ParseBytes([]byte(test.src))
+			require.NoError(t, err)
+
+			found := duplicatesOf(f)
 			if !test.duplicate {
-				require.NoError(t, err)
+				assert.Empty(t, found, "the parse recorded a repeat where the mapping holds none")
 
 				return
 			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "already defined at")
+			assert.NotEmpty(t, found, "the parse recorded no repeat")
 		})
 	}
+}
+
+// duplicatesOf returns every repeated key the parse recorded in f.
+func duplicatesOf(f *ast.File) []ast.DuplicateKey {
+	var found []ast.DuplicateKey
+	for _, doc := range f.Docs {
+		ast.Walk(duplicateWalker{&found}, doc)
+	}
+
+	return found
+}
+
+type duplicateWalker struct{ out *[]ast.DuplicateKey }
+
+func (w duplicateWalker) Visit(n ast.Node) ast.Visitor {
+	if m, ok := n.(*ast.MappingNode); ok {
+		*w.out = append(*w.out, m.Duplicates...)
+	}
+
+	return w
 }
 
 // TestDuplicateMapKeyIsFoundPastTheScanLimit checks the index a large mapping
@@ -130,21 +157,70 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 		return b.String()
 	}
 
-	_, err := parser.ParseBytes([]byte(build(-1)))
+	f, err := parser.ParseBytes([]byte(build(-1)))
 	require.NoError(t, err)
+	assert.Empty(t, duplicatesOf(f))
 
 	for _, repeat := range []int{0, 3, 17, 100, keys - 1} {
 		t.Run(fmt.Sprintf("repeats key%02d", repeat), func(t *testing.T) {
-			_, err := parser.ParseBytes([]byte(build(repeat)))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(),
-				fmt.Sprintf("mapping key %q already defined at [%d:1]", fmt.Sprintf("key%02d", repeat), repeat+1))
+			f, err := parser.ParseBytes([]byte(build(repeat)))
+			require.NoError(t, err)
+
+			found := duplicatesOf(f)
+			require.Len(t, found, 1)
+			assert.Equal(t, fmt.Sprintf("key%02d", repeat), found[0].Name)
+			assert.Equal(t, repeat+1, int(found[0].FirstAt.Line), "where it was first written")
+			assert.Equal(t, keys+1, int(found[0].At.Line), "where the repeat stands")
 		})
 	}
 }
 
-// TestDuplicateMapKeyAllowed checks that the option turns the whole check off.
+// TestDuplicateMapKeyAllowed checks that the option records nothing at all, so
+// that tolerating a repeat costs no memory and the load has nothing to refuse.
 func TestDuplicateMapKeyAllowed(t *testing.T) {
-	_, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.WithAllowDuplicateMapKey())
+	f, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.WithAllowDuplicateMapKey())
 	require.NoError(t, err)
+	assert.Empty(t, duplicatesOf(f))
+}
+
+// TestDuplicateMapKeyIsPerType covers the half of 3.2.1.1 that says which keys
+// are the same key.
+//
+// Two keys are equal when they resolve to the same node, so the type is half a
+// key's identity and its canonical text the other half. Comparing the
+// characters alone read "7" and "007" as two keys where they are one integer
+// written twice, and "1" and "\"1\"" as one where they are a number and a
+// string.
+func TestDuplicateMapKeyIsPerType(t *testing.T) {
+	for name, test := range map[string]struct {
+		src       string
+		duplicate bool
+	}{
+		// One node written two ways is one key.
+		"an integer in two bases":     {src: "0x10: a\n16: b\n", duplicate: true},
+		"an integer with a leading 0": {src: "7: a\n007: b\n", duplicate: true},
+		"a null in two spellings":     {src: "~: a\nnull: b\n", duplicate: true},
+		"a null written empty":        {src: ": a\nnull: b\n", duplicate: true},
+		"a boolean in two cases":      {src: "true: a\nTrue: b\n", duplicate: true},
+		"a float in two spellings":    {src: "1e3: a\n1000.0: b\n", duplicate: true},
+
+		// Two nodes are two keys, however alike they read.
+		"an integer and a float":       {src: "1: a\n1.0: b\n"},
+		"a number and a string":        {src: "1: a\n\"1\": b\n"},
+		"a number and a tagged string": {src: "1: a\n!!str 1: b\n"},
+		"a boolean and a string":       {src: "true: a\n\"true\": b\n"},
+		"a null and an empty string":   {src: "null: a\n\"\": b\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(test.src))
+			require.NoError(t, err)
+
+			if test.duplicate {
+				assert.NotEmpty(t, duplicatesOf(f))
+
+				return
+			}
+			assert.Empty(t, duplicatesOf(f))
+		})
+	}
 }
