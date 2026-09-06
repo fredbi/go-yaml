@@ -182,7 +182,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			isNewLine = false
 		}
 		ctx.addOriginBuf(c)
-		if isNewLineChar(c) { // TODO(fred): switch
+		switch {
+		case isNewLineChar(c):
 			keep(idx)
 			notSpaceIdx := -1
 			for i, v := range slices.Backward(value) {
@@ -212,14 +213,14 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				}
 			}
 			continue
-		} else if isFirstLineChar && c == ' ' {
+		case isFirstLineChar && c == ' ':
 			continue
-		} else if isFirstLineChar && c == '\t' {
+		case isFirstLineChar && c == '\t':
 			if s.lastDelimColumn >= s.column {
 				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(ctx.origin(), s.pos()))
 			}
 			continue
-		} else if c == '\\' {
+		case c == '\\':
 			keep(idx)
 			isFirstLineChar = false
 			if idx+1 >= size {
@@ -394,7 +395,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			idx += progress
 			s.progressColumn(ctx, progress)
 			continue
-		} else if c == '\t' {
+		case c == '\t':
 			var (
 				foundNotSpaceChar bool
 				progress          int
@@ -424,22 +425,23 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				s.progressColumn(ctx, progress)
 			}
 			continue
-		} else if c != '"' {
+		case c != '"':
 			if copied {
 				value = utf8.AppendRune(value, c)
 			}
 			isFirstLineChar = false
 			continue
-		}
+		default:
+			// The '"' that closes the scalar.
+			s.progressColumn(ctx, 1)
+			text := src[startIndex:idx]
+			if copied {
+				text = string(value)
+				s.quoted = value[:0]
+			}
 
-		s.progressColumn(ctx, 1)
-		text := src[startIndex:idx]
-		if copied {
-			text = string(value)
-			s.quoted = value[:0]
+			return token.MakeDoubleQuote(text, ctx.origin(), srcpos), nil
 		}
-
-		return token.MakeDoubleQuote(text, ctx.origin(), srcpos), nil
 	}
 	s.progressColumn(ctx, 1)
 
