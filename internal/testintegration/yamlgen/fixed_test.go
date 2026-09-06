@@ -816,3 +816,59 @@ func TestFixedATagOnAnEmptyNodeKeepsWhatFollows(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedAnAnchorAfterATagNamesTheTaggedNode covers the last shape of the
+// tag-before-anchor defect.
+//
+// §6.9 lets a node's tag and anchor stand in either order and means the same by
+// both. Written anchor first the tree is Anchor over Tag over the value, and the
+// anchor names the tagged node; written tag first it is Tag over Anchor over the
+// value, and the anchor named the value with the tag stripped off it. So
+// "a: !!int &a1 \"5\"" read 5 at a and "5" at "b: *a1" -- one node, read as a
+// number where it stands and as a string through an alias to it.
+//
+// The tree still keeps the order the document wrote, so it renders as it was
+// written. Only what the name stands for changed.
+func TestFixedAnAnchorAfterATagNamesTheTaggedNode(t *testing.T) {
+	for _, tc := range []struct {
+		tagFirst, anchorFirst string
+		want                  any
+	}{
+		{
+			tagFirst:    "a: !!int &a1 \"5\"\nb: *a1\n",
+			anchorFirst: "a: &a1 !!int \"5\"\nb: *a1\n",
+			want:        map[string]any{"a": 5, "b": 5},
+		},
+		{
+			tagFirst:    "a: !!str &a1 5\nb: *a1\n",
+			anchorFirst: "a: &a1 !!str 5\nb: *a1\n",
+			want:        map[string]any{"a": "5", "b": "5"},
+		},
+		{
+			tagFirst:    "a: !!float &a1 1\nb: *a1\n",
+			anchorFirst: "a: &a1 !!float 1\nb: *a1\n",
+			want:        map[string]any{"a": float64(1), "b": float64(1)},
+		},
+		{
+			tagFirst:    "a: !!binary &a1 aGk=\nb: *a1\n",
+			anchorFirst: "a: &a1 !!binary aGk=\nb: *a1\n",
+			want:        map[string]any{"a": []byte("hi"), "b": []byte("hi")},
+		},
+	} {
+		t.Run(tc.tagFirst, func(t *testing.T) {
+			wellFormed(t, tc.tagFirst)
+			wellFormed(t, tc.anchorFirst)
+
+			var written, other any
+			require.NoError(t, yaml.Unmarshal([]byte(tc.tagFirst), &written))
+			require.NoError(t, yaml.Unmarshal([]byte(tc.anchorFirst), &other))
+
+			assert.Equal(t, tc.want, written, "tag first")
+			assert.Equal(t, tc.want, other, "anchor first")
+
+			// And each order still renders as it was written.
+			assert.Equal(t, tc.tagFirst, renderOnce(t, tc.tagFirst))
+			assert.Equal(t, tc.anchorFirst, renderOnce(t, tc.anchorFirst))
+		})
+	}
+}

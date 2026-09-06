@@ -1727,6 +1727,8 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 		return nil, err
 	}
 	node.Value = tagValue
+	p.retagAnchor(node)
+
 	return node, nil
 }
 

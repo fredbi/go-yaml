@@ -6,27 +6,22 @@ package yamlgen_test
 import (
 	"testing"
 
-	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// Shapes the generator found that still diverge.
+// Shapes the generator found that still diverge. There are none.
 //
-// Each one pins today's behavior rather than the correct behavior, so that a
-// fix breaks the test that says it was broken. The corresponding entry in
+// A case here pins today's behavior rather than the correct behavior, so that a
+// fix breaks the test that says it was broken, and the matching entry in
 // [yamlgen.Ledger] is what keeps the property tests from failing on it
-// meanwhile; when both go, the case moves to fixed_test.go.
+// meanwhile. When both go the case moves to fixed_test.go with its assertions
+// inverted, which is where all of them are now.
 //
-// The first two below came from [yamlgen.Style.Break] on 2026-09-03, the axis that
-// writes one document with LF, CRLF and a lone CR. Neither shape is exotic and
-// neither was reachable before it. The third came from [yamlgen.DeepDocument]
-// the same day, and is the one no verdict could have found: the documents parse
-// correctly and cost quadratic time doing it. The rest came from [Tagged]
-// and [yamlgen.Style.PropertyOrder] on the same day again.
+// Write the next one here. The two helpers below are what a case needs, and
+// they are kept for it rather than moved.
 
 // wellFormed asserts src is a YAML 1.2 document before anything is asked of the
 // library, so that a case here is a claim about the library and not about a
@@ -46,35 +41,4 @@ func renderOnce(t *testing.T, src string) string {
 	require.NoError(t, err)
 
 	return file.String()
-}
-
-// TestDefectTagBeforeAnchorIsDropped: YAML 1.2 lets a node's tag and anchor
-// appear in either order. Written second the tag holds; written first it is
-// dropped from the node the anchor names.
-//
-// One shape left: the tag is dropped from the node the anchor names, so a
-// scalar reads one way where it stands and another through an alias to it.
-//
-// Two are fixed and moved to fixed_test.go: a collection tag stopped the parse
-// outright, and a tag on an empty node swallowed the entry below it.
-func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
-	t.Run("otherwise the anchor names the untagged value", func(t *testing.T) {
-		wellFormed(t, "a: !!int &a1 \"5\"\nb: *a1\n")
-
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("a: !!int &a1 \"5\"\nb: *a1\n"), &got))
-		assert.Equal(t, map[string]any{"a": int(5), "b": "5"}, got,
-			"today: one node, read as a number where it stands and as a string through the alias")
-
-		got = nil
-		require.NoError(t, yaml.Unmarshal([]byte("a: &a1 !!int \"5\"\nb: *a1\n"), &got))
-		assert.Equal(t, map[string]any{"a": int(5), "b": int(5)}, got)
-
-		// "!!str" is the one tag that survives the alias: the decoder replaces
-		// what the anchor recorded with the string, since that is the value
-		// the tag names. See TestFixedStrTagKeepsTheSpelling.
-		got = nil
-		require.NoError(t, yaml.Unmarshal([]byte("a: !!str &a1 5\nb: *a1\n"), &got))
-		assert.Equal(t, map[string]any{"a": "5", "b": "5"}, got)
-	})
 }

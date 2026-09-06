@@ -483,58 +483,22 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 				fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), n.Value.GetToken())
 		}
 
-		if res.Empty {
-			// A tag with nothing after it takes the tag's own default, which
-			// parser's newTagDefaultScalarValueNode builds and nothing read:
-			// "k: !!int" was 0 while "k: !!bool" and "k: !!binary" were errors.
-			return tagZero(res.Tag)
+		v, err := d.taggedValue(ctx, n, res)
+		if err != nil {
+			return nil, err
 		}
 
-		switch res.Tag {
-		case token.TimestampTag:
-			return d.castToTime(ctx, n.Value)
-		case token.IntegerTag:
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-
-			return castToInteger(v), nil
-		case token.FloatTag:
-			v, err := d.nodeToValue(ctx, n.Value)
-			if err != nil {
-				return nil, err
-			}
-			return d.castToFloat(v), nil
-		case token.NullTag:
-			return nil, nil
-		case token.BinaryTag:
-			// Resolve has read the text as base64 already, so this cannot fail.
-			return base64.StdEncoding.DecodeString(res.Text)
-		case token.BooleanTag:
-			// The tag says boolean whatever the text is, so a spelling neither
-			// schema resolves is read in lower case: "!!bool Yes" and
-			// "!!bool YES" are the same request. Resolve has agreed there is
-			// one to read.
-			b, _ := token.ParseBool(strings.ToLower(res.Text))
-
-			return b, nil
-		case token.StringTag:
-			// The tag names the type, so the scalar keeps the text it was
-			// written with rather than what the core schema resolved it to:
-			// "!!str 0x10" is "0x10" and not "16", and "!!str False" keeps its
-			// capital F. An anchor over that scalar names the same string, so
-			// its recorded value is replaced too.
-			if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
-				d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(res.Text)
-			}
-
-			return res.Text, nil
-		default:
-			// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The
-			// node is read as it stands.
-			return d.nodeToValue(ctx, n.Value)
+		// The tag and the anchor under it belong to one node, whichever order
+		// the document wrote them in (6.9), so the name stands for the tagged
+		// value. Recorded here rather than by the AnchorNode case below, which
+		// runs first and only ever sees what the tag was put in front of:
+		// "a: !!int &a1 \"5\"" read 5 at a and "5" at "b: *a1", one node read
+		// as a number where it stands and as a string through an alias to it.
+		if anchor, anchored := n.Value.(*ast.AnchorNode); anchored && v != nil {
+			d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(v)
 		}
+
+		return v, nil
 	case *ast.AnchorNode:
 		anchorName := n.Name.GetToken().Value
 
@@ -1411,6 +1375,63 @@ func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFi
 		}
 	}
 	return nil
+}
+
+// taggedValue is what a tagged node denotes, once ast.TagNode.Resolve has said
+// the tag applies.
+func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resolution) (any, error) {
+	if res.Empty {
+		// A tag with nothing after it takes the tag's own default, which
+		// parser's newTagDefaultScalarValueNode builds and nothing read:
+		// "k: !!int" was 0 while "k: !!bool" and "k: !!binary" were errors.
+		return tagZero(res.Tag)
+	}
+
+	switch res.Tag {
+	case token.TimestampTag:
+		return d.castToTime(ctx, n.Value)
+	case token.IntegerTag:
+		v, err := d.nodeToValue(ctx, n.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		return castToInteger(v), nil
+	case token.FloatTag:
+		v, err := d.nodeToValue(ctx, n.Value)
+		if err != nil {
+			return nil, err
+		}
+		return d.castToFloat(v), nil
+	case token.NullTag:
+		return nil, nil
+	case token.BinaryTag:
+		// Resolve has read the text as base64 already, so this cannot fail.
+		return base64.StdEncoding.DecodeString(res.Text)
+	case token.BooleanTag:
+		// The tag says boolean whatever the text is, so a spelling neither
+		// schema resolves is read in lower case: "!!bool Yes" and
+		// "!!bool YES" are the same request. Resolve has agreed there is
+		// one to read.
+		b, _ := token.ParseBool(strings.ToLower(res.Text))
+
+		return b, nil
+	case token.StringTag:
+		// The tag names the type, so the scalar keeps the text it was
+		// written with rather than what the core schema resolved it to:
+		// "!!str 0x10" is "0x10" and not "16", and "!!str False" keeps its
+		// capital F. An anchor over that scalar names the same string, so
+		// its recorded value is replaced too.
+		if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
+			d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(res.Text)
+		}
+
+		return res.Text, nil
+	default:
+		// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The
+		// node is read as it stands.
+		return d.nodeToValue(ctx, n.Value)
+	}
 }
 
 // tagZero is what a tag standing on no value denotes: the value its type starts

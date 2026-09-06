@@ -48,6 +48,10 @@ type openAnchor struct {
 type cyclicAlias struct {
 	alias  *ast.AliasNode
 	anchor *ast.AnchorNode
+	// tagged is the tag written before the anchor, where there is one. The node
+	// the alias names carries both properties, so it is the tag node and not
+	// what the anchor holds. See retagAnchor.
+	tagged *ast.TagNode
 }
 
 // openAnchorName records that the node name stands for is being read.
@@ -131,10 +135,51 @@ func (p *Parser) resolveAlias(alias *ast.AliasNode, name string, tk *token.Token
 	return yamlerrors.NewUnknownAnchor(name, tk)
 }
 
+// retagAnchor points an anchor written after a tag at the tagged node.
+//
+// §6.9 lets a node's tag and anchor stand in either order and means the same by
+// both. Written anchor first the tree is Anchor over Tag over the value, and the
+// anchor names the tagged node. Written tag first it is Tag over Anchor over the
+// value, and the anchor named the value with the tag stripped off it, so
+// "a: !!int &a1 \"5\"" read 5 at a and "5" at "b: *a1" -- one node, read as a
+// number where it stands and as a string through an alias to it.
+//
+// The tree keeps the order the document wrote, so it still renders as it was
+// written. Only what the name stands for changes.
+func (p *Parser) retagAnchor(tagged *ast.TagNode) {
+	anchor, anchored := tagged.Value.(*ast.AnchorNode)
+	if !anchored {
+		return
+	}
+
+	name := anchorNameOf(anchor.Name)
+	if name == "" {
+		return
+	}
+	if p.anchors[name] == anchor.Value {
+		// Still the entry this anchor made. A later "&a1" on another node has
+		// replaced it, and that one is what the name means from there on.
+		p.anchors[name] = tagged
+	}
+
+	// An alias inside the anchored node resolved before this tag was built, so
+	// it holds the anchor rather than the node standing around it.
+	for i := range p.cyclicAliases {
+		if p.cyclicAliases[i].anchor == anchor {
+			p.cyclicAliases[i].tagged = tagged
+		}
+	}
+}
+
 // takeAnchors returns what the document just read declared, and empties the
 // table for the next one.
 func (p *Parser) takeAnchors() map[string]ast.Node {
 	for _, cyclic := range p.cyclicAliases {
+		if cyclic.tagged != nil {
+			cyclic.alias.Target = cyclic.tagged
+
+			continue
+		}
 		cyclic.alias.Target = cyclic.anchor.Value
 	}
 	p.cyclicAliases = p.cyclicAliases[:0]

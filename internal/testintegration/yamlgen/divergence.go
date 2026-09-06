@@ -94,110 +94,26 @@ func (p Property) String() string {
 	return strings.Join(names, "|")
 }
 
-// Ledger records every shape known to diverge.
+// Ledger records every shape known to diverge, and is empty.
 //
 // An entry is not an excuse. It is a measurement with a name attached, and the
 // property test reports which entries were exercised and which of those
 // actually diverged -- so an entry that has been fixed shows up as one that no
-// longer diverges, rather than sitting here forever.
+// longer diverges, rather than sitting here forever. Every entry it has held
+// left that way, each named in a TestFixed* in fixed_test.go with the
+// assertions inverted.
 //
-// Two of these were opened by [Style.Break], the axis that writes the same
-// document with LF, CRLF and a lone CR, and the rest by [Tagged],
-// [Style.PropertyOrder] and [Style.PropertyLine]. The ledger was empty before
-// either; every entry in it came from an axis nobody had crossed.
+// Two were opened by [Style.Break], the axis that writes the same document with
+// LF, CRLF and a lone CR, and the rest by [Tagged], [Style.PropertyOrder] and
+// [Style.PropertyLine]. The ledger was empty before either; every entry in it
+// came from an axis nobody had crossed, which is the argument for the axes in
+// one sentence.
 //
 // An entry here is a parser or renderer defect rather than an open question.
 // The emitter is gated against the YAML 1.2 grammar, so each of these documents
-// is one the library is obliged to read.
-var Ledger = []Divergence{
-	{
-		Name: "parse/a-tag-before-an-anchor-is-dropped",
-		Reason: "YAML 1.2 lets a node's tag and anchor appear in either order and means the " +
-			"same by both. Written second the tag holds; written first it is dropped from " +
-			"the node the anchor names. A scalar parses and the anchor resolves to the " +
-			"untagged value, so `a: !!str &a1 5` reads \"5\" at a and 5 at `b: *a1` -- one " +
-			"node, two types. `!!null &a1 null` parses and a later `*a1` reports " +
-			"`could not find alias`.\n\n" +
-			"A collection tag was a third kind and is fixed: `!!seq &a1 [1]` and " +
-			"`!!map &a1 {b: 1}` did not parse at all, and read correctly since " +
-			"2026-09-07. See TestFixedACollectionTagBeforeAnAnchorParses.\n\n" +
-			"A tag on an empty node swallowing what follows was a second kind and is " +
-			"fixed: `- !!null &a1` over `- x` took the entry below it and came back a " +
-			"one-item sequence with no error at all. See " +
-			"TestFixedATagOnAnEmptyNodeKeepsWhatFollows.\n\n" +
-			"So one shape is left: the tag is dropped so quietly that nothing notices " +
-			"until an alias asks the anchor what it names.\n\n" +
-			"It claimed all five properties while it ate the rest of the document, which " +
-			"took the comments with it and moved what it swallowed. That shape is gone, " +
-			"so the entry no longer claims Parses or CommentsKept: the document is read " +
-			"and its comments survive. Render and Settle stay with Decode, measured " +
-			"rather than assumed -- narrowing the entry to Decode alone made " +
-			"TestRenderPreservesValue report `!!map &a2` over two entries, one of them " +
-			"aliasing a tagged anchor.",
-		Property: Decode | Render | Settle,
-		Match:    writesBrokenTaggedAnchor,
-	},
-}
-
-// writesBrokenTaggedAnchor reports whether emitting v in st writes a tag before
-// an anchor in a way this library gets wrong.
-//
-// Three cases, measured. `!!seq` and `!!map` written ahead of an anchor stop
-// the parse whatever else the document does. Any tag written that way on an
-// empty node swallows the rest of the document. Otherwise the tag is silently
-// dropped from the node the anchor names, which changes nothing until an alias
-// resolves to it -- so the third case asks whether one does.
-func writesBrokenTaggedAnchor(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	// Neither collectionTagAnchors nor emptyTagAnchors is asked for any more.
-	// A collection tag written before an anchor stopped the parse, and a tag on
-	// an empty node swallowed what followed it; both were fixed on 2026-09-07.
-	// See TestFixedACollectionTagBeforeAnAnchorParses and
-	// TestFixedATagOnAnEmptyNodeKeepsWhatFollows.
-	if len(e.taggedAnchorNames) == 0 {
-		return false
-	}
-
-	named := aliasNames(v)
-	for _, name := range e.taggedAnchorNames {
-		if named[name] {
-			return true
-		}
-	}
-
-	return false
-}
-
-// aliasNames returns the anchors that something in v refers to.
-func aliasNames(v Value) map[string]bool {
-	out := map[string]bool{}
-	var walk func(Value)
-
-	walk = func(v Value) {
-		switch n := v.(type) {
-		case Alias:
-			out[n.Name] = true
-		case Anchored:
-			walk(n.V)
-		case Tagged:
-			walk(n.V)
-		case Seq:
-			for _, item := range n.Items {
-				walk(item)
-			}
-		case Map:
-			for _, p := range n.Pairs {
-				walk(p.Val)
-			}
-		}
-	}
-
-	walk(v)
-
-	return out
-}
+// is one the library is obliged to read. Add one when a property test finds a
+// shape that diverges and the fix is not immediate; take it out with the fix.
+var Ledger = []Divergence{}
 
 // Known returns the ledger entry describing this pairing for the given
 // property, or nil.
