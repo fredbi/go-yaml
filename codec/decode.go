@@ -568,13 +568,15 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			return nil, yamlerrors.NewRecursiveAlias(text, n.Value.GetToken())
 		}
 		if v, exists := d.anchorValueMap[text]; exists {
+			// The anchored node has been decoded already, so the alias is that
+			// value rather than a second decode of the same subtree.
 			if !v.IsValid() {
 				return nil, nil
 			}
 			return v.Interface(), nil
 		}
-		if node, exists := d.anchorNodeMap[text]; exists {
-			return d.nodeToValue(ctx, node)
+		if target, _ := d.aliasTarget(n); target != nil {
+			return d.nodeToValue(ctx, target)
 		}
 		return nil, yamlerrors.NewUnknownAnchor(text, n.Value.GetToken())
 	case *ast.LiteralNode:
@@ -667,12 +669,11 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 		d.anchorNodeMap[anchorName] = n.Value
 		return d.getMapNode(n.Value, isMerge)
 	case *ast.AliasNode:
-		aliasName := n.Value.GetToken().Value
-		node := d.anchorNodeMap[aliasName]
-		if node == nil {
-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
+		target, name := d.aliasTarget(n)
+		if target == nil {
+			return nil, yamlerrors.NewUnknownAnchor(name, n.GetToken())
 		}
-		return d.getMapNode(node, isMerge)
+		return d.getMapNode(target, isMerge)
 	case *ast.TagNode:
 		return d.getMapNode(n.Value, isMerge)
 	case *ast.SequenceNode:
@@ -692,6 +693,26 @@ func (d *Decoder) getMapNode(node ast.Node, isMerge bool) (ast.MapNode, error) {
 	return nil, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken())
 }
 
+// aliasTarget returns the node an alias names, and the name it was written
+// with.
+//
+// The parser fills [ast.AliasNode.Target] as it reads, so a node handed over on
+// its own -- what DecodeFromNode and expressions.Path.Read are given -- already
+// carries what its aliases name. Before this the decoder looked the name up in
+// anchorNodeMap, which is built from a whole file, and an alias whose anchor
+// stood outside the node found nothing.
+//
+// The map is still the answer for a tree built by hand or written by the
+// encoder, neither of which went through a parse.
+func (d *Decoder) aliasTarget(n *ast.AliasNode) (ast.Node, string) {
+	name := n.Value.GetToken().Value
+	if n.Target != nil {
+		return n.Target, name
+	}
+
+	return d.anchorNodeMap[name], name
+}
+
 func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 	d.stepIn()
 	defer d.stepOut()
@@ -706,12 +727,11 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 		return d.getArrayNode(anchor.Value)
 	}
 	if alias, ok := node.(*ast.AliasNode); ok {
-		aliasName := alias.Value.GetToken().Value
-		node := d.anchorNodeMap[aliasName]
-		if node == nil {
-			return nil, fmt.Errorf("cannot find anchor by alias name %s", aliasName)
+		target, name := d.aliasTarget(alias)
+		if target == nil {
+			return nil, yamlerrors.NewUnknownAnchor(name, alias.GetToken())
 		}
-		return d.getArrayNode(node)
+		return d.getArrayNode(target)
 	}
 	if tag, ok := node.(*ast.TagNode); ok {
 		return d.getArrayNode(tag.Value)
@@ -1274,18 +1294,17 @@ func (d *Decoder) castToAssignableValue(value reflect.Value, target reflect.Type
 func (d *Decoder) createDecodedNewValue(
 	ctx context.Context, typ reflect.Type, defaultVal reflect.Value, node ast.Node,
 ) (reflect.Value, error) {
-	if node.Type() == ast.AliasType {
-		aliasName := node.(*ast.AliasNode).Value.GetToken().Value
-		value := d.anchorValueMap[aliasName]
+	if alias, aliased := node.(*ast.AliasNode); aliased {
+		target, name := d.aliasTarget(alias)
+		value := d.anchorValueMap[name]
 		if value.IsValid() {
 			v, err := d.castToAssignableValue(value, typ, node)
 			if err == nil {
 				return v, nil
 			}
 		}
-		anchor, exists := d.anchorNodeMap[aliasName]
-		if exists {
-			node = anchor
+		if target != nil {
+			node = target
 		}
 	}
 	var newValue reflect.Value

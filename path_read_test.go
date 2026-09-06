@@ -10,7 +10,10 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/expressions"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestPathReadAgreesWithUnmarshal checks that reading a value through a path
@@ -65,4 +68,38 @@ func TestPathFilterKeepsTheTrailingBreak(t *testing.T) {
 	var got string
 	require.NoError(t, p.Filter(map[string]string{"a": "x\ny\n"}, &got))
 	require.Equal(t, "x\ny\n", got)
+}
+
+// TestPathReadResolvesAnAliasFromOutsideTheNode covers an alias whose anchor
+// stands outside what the path returns.
+//
+// Path.Read parses the document, keeps the one node the path addresses and
+// decodes that. The anchor is elsewhere in the file, so the decoder used to
+// look the name up in a table built from a node that does not hold it and
+// report `could not find alias "x"`. The parser now points the alias at what it
+// names as it reads, so the node carries its own answer.
+func TestPathReadResolvesAnAliasFromOutsideTheNode(t *testing.T) {
+	const src = "anchored: &x\n  a: 1\n  b: 2\nelsewhere:\n  here: *x\n"
+
+	p, err := expressions.PathString("$.elsewhere.here")
+	require.NoError(t, err)
+
+	var got map[string]int
+	require.NoError(t, p.Read(bytes.NewReader([]byte(src)), &got))
+	require.Equal(t, map[string]int{"a": 1, "b": 2}, got)
+}
+
+// TestDecodeFromNodeResolvesAnAliasFromOutsideTheNode is the same fix reached
+// through the API a caller holding a node uses directly.
+func TestDecodeFromNodeResolvesAnAliasFromOutsideTheNode(t *testing.T) {
+	f, err := parser.ParseBytes([]byte("anchored: &x [1, 2]\nelsewhere: *x\n"))
+	require.NoError(t, err)
+
+	body, ok := f.Docs[0].Body.(*ast.MappingNode)
+	require.True(t, ok)
+	require.Len(t, body.Values, 2)
+
+	var got []int
+	require.NoError(t, codec.NewDecoder(bytes.NewReader(nil)).DecodeFromNode(body.Values[1].Value, &got))
+	require.Equal(t, []int{1, 2}, got)
 }
