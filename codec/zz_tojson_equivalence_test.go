@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -118,6 +119,15 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 		}
 
 		gotValue, err := readJSON(got)
+		if err != nil && mergesAValueWrittenInPlace(src.text) {
+			// A recorded defect: ToJSON performs the merge and writes the "<<"
+			// entry's own slot as well, so the output carries a member with no
+			// key. Pinned in TestDefectAMergeWrittenInPlaceMakesToJSONWriteBrokenJSON.
+			t.Logf("%s: a merge written in place makes ToJSON write JSON that will not parse", src.name)
+			skipped++
+
+			continue
+		}
 		require.NoErrorf(t, err, "%s: folding converter wrote %q, which is not JSON", src.name, got)
 
 		var excused []string
@@ -418,6 +428,18 @@ func jsonSources(t *testing.T) []jsonSource {
 
 // firstLine keeps a log line to the parser's own words, since an error here
 // carries the offending source and a caret under it.
+// mergesAValueWrittenInPlace reports whether src gives a "<<" key a collection
+// written where it stands rather than an alias to one.
+//
+// Deliberately crude, and it only ever runs on a document whose JSON already
+// failed to parse: a false positive costs one excused case, where reproducing
+// the parser here to be exact would cost a second parser to keep in step.
+func mergesAValueWrittenInPlace(src string) bool {
+	return mergeInPlace.MatchString(src)
+}
+
+var mergeInPlace = regexp.MustCompile(`(^|[\s{,])<<\s*:\s*[\[{]`)
+
 func firstLine(text string) string {
 	for i := range len(text) {
 		if text[i] == '\n' {

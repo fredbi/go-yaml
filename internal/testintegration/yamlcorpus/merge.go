@@ -36,6 +36,16 @@ const (
 	// TagMergeSequence is "<<" given a sequence of mappings, which 1.1 merges
 	// in order with the earlier winning.
 	TagMergeSequence stance.Tag = "merge/sequence"
+	// TagMergeInline is "<<" given a mapping written where it stands, rather
+	// than an alias to one written elsewhere.
+	//
+	// The 1.1 merge type says the value is a mapping or a sequence of mappings
+	// and says nothing about how it got there, so "<<: {a: 1}" asks for the
+	// same merge that "<<: *b" does. An implementation that resolves the alias
+	// and merges what it finds may still not have a path for a mapping that was
+	// never anchored, which is why this is a tag of its own and not part of
+	// TagMergeKey.
+	TagMergeInline stance.Tag = "merge/written-in-place"
 	// TagMergeNonMapping is "<<" given something that is not a mapping.
 	//
 	// The shape that turns the stance into a verdict: an error to a merging
@@ -59,6 +69,7 @@ func MergeVocabulary() stance.Vocabulary {
 	return stance.Vocabulary{
 		TagMergeKey:        stance.Construct,
 		TagMergeSequence:   stance.Construct,
+		TagMergeInline:     stance.Construct,
 		TagMergeNonMapping: stance.Construct,
 		TagMergeQuoted:     stance.Construct,
 	}
@@ -99,6 +110,24 @@ func MergeShapes() []stance.Shape {
 			Name:   "two merge keys in one mapping",
 			Src:    []byte("x: &x {a: 1}\ny: &y {b: 2}\nd:\n  <<: *x\n  <<: *y\n"),
 			Intent: []stance.Tag{TagMergeKey, TagDuplicateKey},
+		},
+		{
+			Name:   "a merge from a mapping written in place",
+			Src:    []byte("d:\n  <<: {a: 1}\n  c: 2\n"),
+			Intent: []stance.Tag{TagMergeInline},
+		},
+		{
+			Name:   "a merge from a sequence holding mappings written in place",
+			Src:    []byte("d:\n  <<: [{a: 1}, {b: 2}]\n"),
+			Intent: []stance.Tag{TagMergeInline, TagMergeSequence},
+		},
+		{
+			// An alias and a mapping written in place in one sequence, which
+			// is where codec.ToJSON writes JSON that will not parse. See
+			// codec/zz_merge_test.go.
+			Name:   "a merge from an alias beside a mapping written in place",
+			Src:    []byte("b: &b {q: 1}\nd:\n  <<: [*b, {a: 1}]\n"),
+			Intent: []stance.Tag{TagMergeInline, TagMergeSequence},
 		},
 		{
 			Name:   "a quoted merge key, which is an ordinary key",

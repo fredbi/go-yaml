@@ -74,6 +74,7 @@ var GoYAML = stance.Table{
 		// Both are conformant and the corpus scores both.
 		TagMergeKey:        stance.Accepts,
 		TagMergeSequence:   stance.Accepts,
+		TagMergeInline:     stance.Accepts,
 		TagMergeNonMapping: stance.Refuses,
 		TagMergeQuoted:     stance.Accepts,
 
