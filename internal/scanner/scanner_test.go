@@ -20,8 +20,6 @@ import (
 //
 // Currently, nothing enforces that, so the bound turns a hypothetical non-progressing loop into a test failure rather
 // than a fuzzing timeout.
-//
-// TODO(fred): enforce a scanner bound??
 const maxScanCalls = 1 << 16
 
 // Doc is a convenience type to share utilities that accept either a string or []byte.
@@ -65,7 +63,7 @@ func scanTokens[V Doc](src V) ([]token.Token, error) {
 	s.Init([]byte(src))
 
 	tokens := make([]token.Token, 0, estimateTokens(src))
-	for tk := range s.Tokens() { // NOTE(fred): at this moment, the Tokens() iterator is not being used - candidate for removal
+	for tk := range s.Tokens() {
 		held := tk
 		tokens = append(tokens, held)
 	}

@@ -28,6 +28,14 @@ import (
 // So a streaming parser cannot bridge with iter.Pull. The passes have to pull
 // rather than push: each one a func() (*Token, bool) reading from the one below
 // it, composed by ordinary calls.
+//
+// What this does not price, and has been read as pricing: Scanner.NextToken
+// against Scanner.Tokens. NextToken is a method call over a two-element buffer,
+// with no coroutine, and it is what "pull natively" above means. Measured
+// 2026-09-06, it costs 15 to 20ns a token more than Tokens -- a quarter of the
+// 62ns this bridge costs, and 4% of the 382ns a full parse of golang_source
+// spends per token (112ms over 293,142 tokens). Quote that number, not this
+// one, when weighing a move of the parser to the push iterator.
 func BenchmarkPullOverhead(b *testing.B) {
 	w, err := workloads.ByName("golang_source")
 	if err != nil {

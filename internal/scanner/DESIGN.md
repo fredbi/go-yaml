@@ -79,6 +79,17 @@ source stays where it is, so the next call continues from there. Two entry point
 
 `TestPushAndPullAgree` holds the two to the same token stream.
 
+`Tokens` is the faster of the two by **15 to 20 ns a token**, measured 2026-09-06 interleaved over the twenty-six
+benchmark shapes, n=10: -9.98% geomean, every shape faster, and 144 fewer bytes allocated because `pending` never
+grows. The saving is flat per token, so the percentage tracks how cheap the token is - 20.8% on `flow` at 87 ns a
+token, 4.4% on `blockscalars` at 471 ns. The pull path spends what this saves on one `NextToken` call, one re-entry
+into `scan`, one append into `pending` and one copy back out.
+
+Weigh that against the whole parse before moving the parser to the push side: `golang_source` costs 382 ns a token to
+parse, 112 ms over 293,142 tokens, so 16 ns is about 4% of it. `internal/analysis/pull_bench_test.go` carries an older
++18.4% figure that is sometimes read as this comparison. It prices `iter.Pull`'s coroutine bridge at ~62 ns a token,
+which is a different thing, and its conclusion - pull natively, do not bridge - is what `NextToken` already does.
+
 The dispatch is a switch on the character. Most arms call a `scanXxx` that either claims the character and
 returns true, or declines and lets the switch fall through to the plain-scalar path at the bottom. An arm that
 refuses returns an error carrying the token it refused.

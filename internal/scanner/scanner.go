@@ -156,8 +156,13 @@ func (s *Scanner) Err() error {
 // The loop ends on the end of the source and on a refusal alike. Call [Scanner.Err] afterwards to tell the two apart.
 // Breaking out leaves the scanner where it stands, and a further Tokens or NextToken continues from there.
 //
-// NOTE(fred): this duplicates most of NextToken. Inlining may account for the difference between them, but the two
-// should not measure far apart.
+// It is the faster of the two, by 15 to 20 nanoseconds a token, measured 2026-09-06 over the twenty-six shapes of
+// BenchmarkScannerNextToken against BenchmarkScannerTokens, interleaved, n=10: -9.98% geomean, every shape faster,
+// and 144 fewer bytes allocated because pending never grows.
+//
+// The saving is flat per token, so the percentage tracks how cheap the token is: -20.8% on flow, whose tokens cost
+// 87ns, and -4.4% on blockscalars, whose tokens cost 471ns. What the pull path spends and this does not is one
+// NextToken call, one re-entry into scan, one append into pending and one copy back out.
 func (s *Scanner) Tokens() iter.Seq[token.Token] {
 	return func(yield func(token.Token) bool) {
 		// Whatever NextToken left buffered comes first.
