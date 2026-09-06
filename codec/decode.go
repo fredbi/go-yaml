@@ -75,7 +75,11 @@ type Decoder struct {
 	typedWalk bool
 	// strs holds the text of every string a decode hands back, copied out of
 	// the document so that the values outlive it.
-	strs        arena
+	strs arena
+	// built counts what this decode has made, and budget bounds it. See
+	// aliasBudget.
+	built       int
+	budget      int
 	src         []byte
 	parsedFile  *ast.File
 	streamIndex int
@@ -105,8 +109,30 @@ func NewDecoder(r io.Reader, opts ...DecodeOption) *Decoder {
 
 const maxDecodeDepth = 10000
 
+// aliasBudget bounds what a decode may build from a document of n bytes.
+//
+// An alias names a node and the value it stands for is built again wherever the
+// alias appears, so a chain of them multiplies rather than adds: 259 bytes of
+// YAML name 100,000 values and 423 bytes name 387 million. maxDecodeDepth does
+// not see it -- nine levels of aliases is nine deep and as wide as it likes.
+//
+// Reading a document that holds no alias costs well under one step a byte, and
+// the widest of the measured workloads reaches 0.19, so 32 a byte leaves a
+// document written by a person alone and closes early on one written to exhaust
+// memory.
+//
+// It counts what a decode builds and not what an alias builds, because an alias
+// is the only thing that can build more than the document holds. Reading into an
+// interface hands the same value to every alias of one anchor and so builds
+// nothing extra, which is why that path does not reach this and why it reads a
+// 423-byte document naming 387 million values in no time at all.
+func aliasBudget(n int) int {
+	return 1024 + 32*n
+}
+
 func (d *Decoder) stepIn() {
 	d.decodeDepth++
+	d.built++
 }
 
 func (d *Decoder) stepOut() {
@@ -115,6 +141,22 @@ func (d *Decoder) stepOut() {
 
 func (d *Decoder) isExceededMaxDepth() bool {
 	return d.decodeDepth > maxDecodeDepth
+}
+
+// isOverBudget reports a decode building more than the document can account
+// for, which only an alias can do.
+func (d *Decoder) isOverBudget() bool {
+	return d.budget > 0 && d.built > d.budget
+}
+
+// refuseOverBudget returns the error to stop a decode that has run away.
+func (d *Decoder) refuseOverBudget(at ast.Node) error {
+	var tk *token.Token
+	if at != nil {
+		tk = at.GetToken()
+	}
+
+	return yamlerrors.NewExcessiveAliasing(d.built, d.budget, tk)
 }
 
 // castToInteger reads what "!!int" was written over.
@@ -481,6 +523,9 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
 		return nil, ErrExceededMaxDepth
+	}
+	if d.isOverBudget() {
+		return nil, d.refuseOverBudget(node)
 	}
 
 	d.setPathToCommentMap(node)
@@ -1101,6 +1146,9 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
 		return ErrExceededMaxDepth
+	}
+	if d.isOverBudget() {
+		return d.refuseOverBudget(src)
 	}
 	if !dst.IsValid() {
 		return nil
@@ -2746,6 +2794,7 @@ func (d *Decoder) decodeInit(ctx context.Context, v reflect.Value) error {
 	// the tree was built from rather than copying them again.
 	d.source = yamlerrors.Source{Text: nocopy.String(src), FirstLine: 1}
 	d.src = src
+	d.built, d.budget = 0, aliasBudget(len(src))
 
 	if d.canWalk(v) {
 		walked, err := WalkValues(src, d.parserOptions()...)

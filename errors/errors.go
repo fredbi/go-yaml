@@ -79,6 +79,12 @@ var (
 	// anchor names, directly or through another anchor. The node is not
 	// resolved yet, so there is nothing for the alias to stand for.
 	ErrRecursiveAlias = stderrors.New("recursive alias")
+	// ErrExcessiveAliasing reports a document whose aliases build far more than
+	// the document could hold written out. An alias names a node and the value
+	// it stands for is built again wherever the alias appears, so a chain of
+	// them multiplies: 259 bytes of YAML can name 100,000 values and 423 bytes
+	// 387 million.
+	ErrExcessiveAliasing = stderrors.New("excessive aliasing")
 )
 
 const (
@@ -141,6 +147,19 @@ func NewUnknownAnchor(name string, tk *token.Token) *Error {
 	return &Error{
 		kind:  ErrUnknownAnchor,
 		msg:   fmt.Sprintf("could not find alias %q", name),
+		token: tk,
+	}
+}
+
+// NewExcessiveAliasing reports a decode building more than the document can
+// account for, at tk.
+func NewExcessiveAliasing(built, budget int, tk *token.Token) *Error {
+	return &Error{
+		kind: ErrExcessiveAliasing,
+		msg: fmt.Sprintf(
+			"the document's aliases build more than it can account for: %d values against a budget of %d",
+			built, budget,
+		),
 		token: tk,
 	}
 }
