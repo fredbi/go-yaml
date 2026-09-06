@@ -177,6 +177,25 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved",
+		Reason: "An entry whose value is a tag written in full with nothing after it stops the key on " +
+			"the next line from resolving. `a: !<tag:yaml.org,2002:null>` over `False: 1` reads the " +
+			"key \"False\"; `a: !!null` over the same line reads \"false\".\n\n" +
+			"Four things narrow it. Only the key immediately after -- `NULL: 2` and `0x10: 4` further " +
+			"down the same mapping resolve correctly. Only in block context: " +
+			"`{a: !<tag:yaml.org,2002:null>, False: 1}` resolves it. Only with nothing after the tag: " +
+			"`a: !<tag:yaml.org,2002:null> null` resolves it. And only the long spellings, the handle " +
+			"form `!e!null` included -- which is what makes this the same root cause as " +
+			"parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar.\n\n" +
+			"libfyaml 1.0.0b1, go.yaml.in/yaml/v3 v3.0.5 and the reference parser all read the key as " +
+			"the boolean's name.\n\n" +
+			"The predicate asks only whether a long-spelled tag stands on a node written with nothing " +
+			"after it, so it reports more draws than divergences: the same tag on the last entry of a " +
+			"mapping has no next key to lose.",
+		Property: Decode | Render,
+		Match:    writesALongTagOnAnEmptyNode,
+	},
+	{
 		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
 		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
 			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
@@ -218,6 +237,41 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 	case Map:
 		for _, p := range n.Pairs {
 			if writesFloatTaggedWideNumber(p.Val, Style{}) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writesALongTagOnAnEmptyNode reports whether v writes a tag in one of the long
+// spellings over a node that reaches the document as nothing.
+//
+// Only a bare Null does, and only when the style spells null as nothing.
+func writesALongTagOnAnEmptyNode(v Value, st Style) bool {
+	if st.TagSpelling == SpellShorthand || st.NullSpelling != "" {
+		return false
+	}
+
+	return holdsATaggedNull(v)
+}
+
+func holdsATaggedNull(v Value) bool {
+	switch n := v.(type) {
+	case Tagged:
+		if _, empty := n.V.(Null); empty {
+			return true
+		}
+
+		return holdsATaggedNull(n.V)
+	case Anchored:
+		return holdsATaggedNull(n.V)
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsATaggedNull)
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsATaggedNull(p.Key) || holdsATaggedNull(p.Val) {
 				return true
 			}
 		}

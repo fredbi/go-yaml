@@ -43,12 +43,38 @@ type Strictness struct {
 
 // Strict records valid documents the library refuses.
 //
-// It is empty. The six entries it held were all read by the time the empty node
-// was carried through the scanner, the token grouping and the flow parsers, and
-// each left a test in parser/ and scanner/ behind it.
+// The six entries it held before 2026-09-11 were all read by the time the empty
+// node was carried through the scanner, the token grouping and the flow
+// parsers, and each left a test in parser/ and scanner/ behind it.
 //
 // Deliberately no expected value on an entry. An empty key in a Go map is a
 // question about this library's mapping model rather than about YAML, and a
 // guessed expectation pinned here would be believed. Whoever adds an entry
 // should settle the value against another parser and record it then.
-var Strict = []Strictness{}
+var Strict = []Strictness{
+	{
+		Name: "a tag before an anchor on a flow sequence used as a key",
+		Src:  "!!str &a [1]: v\n",
+		Rule: "6.9.2 and 7.4: a node's properties may be written in either order, and a flow " +
+			"sequence may stand as a mapping key. Written the other way round, `&a !!str [1]: v`, " +
+			"the same document parses here -- so the refusal is about the order of the two " +
+			"properties and nothing else. The reference parser reads both and emits the same " +
+			"events for them: +MAP +SEQ &a <tag:yaml.org,2002:str> =VAL :1 -SEQ =VAL :v -MAP.",
+		Error: "[1:6] value is not allowed in this context",
+	},
+	{
+		Name: "a comment between a tag on its own line and a plain scalar",
+		Src:  "a:\n !\n # c\n 1\n",
+		Rule: "6.9.1 and 8.2.1: a node's properties may be written on a line of their own, and " +
+			"s-l-comments after them may hold comment lines. Without the comment, `a:` over ` !` " +
+			"over ` 1` reads here; with it the parse stops. `!!str` in the same place reads with " +
+			"the comment, and so does a flow collection under it -- so it is a local or " +
+			"non-specific tag over a plain scalar and nothing else.\n\n" +
+			"The same shape refuses at a sequence entry and at the document root. libfyaml 1.0.0b1 " +
+			"reads {\"a\": \"1\"} and the reference parser emits =VAL <!> :1.\n\n" +
+			"Likely the same assumption as the departure \"a local tag on an empty value, with the " +
+			"mapping carrying on\": a tag that names no known type makes the parser expect a block " +
+			"collection under it.",
+		Error: "[4:2] value is not allowed in this context",
+	},
+}

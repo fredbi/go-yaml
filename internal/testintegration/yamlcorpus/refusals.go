@@ -232,5 +232,14 @@ func Refusals() []Refusal {
 			Name: "a plain scalar opening with a flow indicator",
 			Src:  "a: }\n", Says: "plain scalar cannot begin with",
 		},
+		{
+			// The three outside sources split on this one, and the split is
+			// about layers rather than about the rule. The reference parser
+			// refuses it and go.yaml.in/yaml/v3 v3.0.5 wants the ':';
+			// libfyaml 1.0.0b1 reads {"a": null} and drops the anchor. The
+			// recognizer refuses it, which is what this corpus goes by.
+			Name: "an anchor standing alone where an entry should be",
+			Src:  "a:\n&x\n", Says: "anchor is not allowed in this context",
+		},
 	}
 }

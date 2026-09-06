@@ -214,6 +214,27 @@ func TagShapes() []stance.Shape {
 			Src:    []byte("k: ! v\n"),
 			Intent: []stance.Tag{TagNonSpecific},
 		},
+
+		// A tag standing on a node with nothing after it, with the document
+		// carrying on underneath. The generator cannot write these: TagFor
+		// offers a local tag and the non-specific tag on a Str, a Seq and a Map
+		// and never on a Null, so the one tag it puts on an empty node is
+		// "!!null" -- which is the spelling that behaves.
+		{
+			Name:   "a local tag on an empty value, with the mapping carrying on",
+			Src:    []byte("a: !foo\nb: 1\nc: 2\n"),
+			Intent: []stance.Tag{TagLocal},
+		},
+		{
+			Name:   "a non-specific tag on an empty value, with the mapping carrying on",
+			Src:    []byte("a: !\nb: 1\n"),
+			Intent: []stance.Tag{TagNonSpecific},
+		},
+		{
+			Name:   "a local tag on an empty sequence entry",
+			Src:    []byte("- !foo\n- b\n"),
+			Intent: []stance.Tag{TagLocal},
+		},
 		{
 			Name:   "a version directive",
 			Src:    []byte("%YAML 1.2\n---\nk: v\n"),

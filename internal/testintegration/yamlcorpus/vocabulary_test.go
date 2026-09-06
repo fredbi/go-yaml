@@ -179,8 +179,18 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// in eight put all of it back. Style.TagSpelling then took it to 25:
 	// mutating a "%TAG" line reaches `unexpected format TAG directive`, and the
 	// longer tags reach `found unexpected document separator` and
-	// `unexpected scalar value`.
-	const ceiling = 25
+	// `unexpected scalar value`. Weighting the drawn mappings towards one pair
+	// lost `unexpected scalar value` again, and a Refusals entry for an anchor
+	// standing alone put `anchor is not allowed in this context` back.
+	//
+	// Two of the 26 look unreachable rather than untested, and both were hunted
+	// on 2026-09-11 without success. `unexpected scalar value` has one document
+	// behind it -- "a:" over ": 2" -- and that is the empty-key defect, so a
+	// Refusals entry for it would pin a bug. Nothing at all provokes
+	// `specified not scalar tag`: parseScalarTag reports it when a scalar tag
+	// stands on a node that is not a scalar, and every such document is caught
+	// earlier. Recorded in stream 8.
+	const ceiling = 26
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+

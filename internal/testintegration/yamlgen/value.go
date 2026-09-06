@@ -498,11 +498,48 @@ func values(depth int) *rapid.Generator[Value] {
 func drawSeq(t *rapid.T, depth int) Value {
 	items := rapid.SliceOfN(values(depth+1), 0, 4).Draw(t, "items")
 
+	// A flow pair -- the "b: c" in "[a, b: c]" -- can be written from one shape
+	// and no other: a mapping of exactly one pair standing directly in a
+	// sequence. A uniform draw reached it in 20 documents out of 40,000, so
+	// Style.FlowPairs was an axis on paper.
+	//
+	// So two thirds of the mappings drawn into a sequence are cut to their first
+	// pair, and one non-empty sequence in three gains a single-pair mapping it
+	// did not draw. Nothing is lost by either: a mapping of three pairs inside
+	// a sequence is written the same way as one anywhere else, and every other
+	// axis already reaches it. Together they take the flow pair from 1 document
+	// in 2,000 to 1 in 240.
+	//
+	// An empty sequence is left alone -- value/empty-collection is an axis too.
+	for i, item := range items {
+		m, keyed := item.(Map)
+		if !keyed || len(m.Pairs) < 2 {
+			continue
+		}
+
+		if rapid.IntRange(0, 2).Draw(t, "onepair") > 0 {
+			items[i] = Map{Pairs: m.Pairs[:1]}
+		}
+	}
+
+	if len(items) > 0 && rapid.IntRange(0, 2).Draw(t, "addpair") == 0 {
+		at := rapid.IntRange(0, len(items)-1).Draw(t, "at")
+		items[at] = Map{Pairs: []Pair{{
+			Key: Keys().Draw(t, "pairkey"),
+			Val: values(depth+1).Draw(t, "pairvalue"),
+		}}}
+	}
+
 	return Seq{Items: items}
 }
 
 func drawMap(t *rapid.T, depth int) Value {
-	n := rapid.IntRange(0, 4).Draw(t, "pairs")
+	// Weighted towards the small ones. A mapping of one pair is the only shape
+	// a flow pair can be written from and the only one a flow mapping can hold
+	// while still fitting on a line with something else; a fourth and fifth
+	// pair repeat what the third already showed. Uniform over 0..4 spent most
+	// of its mappings on the sizes that say least.
+	n := rapid.SampledFrom([]int{0, 1, 1, 1, 2, 2, 3, 4}).Draw(t, "pairs")
 
 	// Distinct once resolved, not distinct as written. Int{1} and Str{"1"} are
 	// two different nodes and one key: this library refuses such a document as
@@ -520,12 +557,26 @@ func drawMap(t *rapid.T, depth int) Value {
 		}
 
 		seen[text] = struct{}{}
-		pairs = append(pairs, Pair{Key: key, Val: values(depth+1).Draw(t, "value")})
+		pairs = append(pairs, Pair{Key: key, Val: drawMapValue(t, depth)})
 	}
 
 	sort.Slice(pairs, func(i, j int) bool { return keyFamily(pairs[i].Key) < keyFamily(pairs[j].Key) })
 
 	return Map{Pairs: pairs}
+}
+
+// drawMapValue draws what stands after a "k:", one value in five being null.
+//
+// Null is the value the language spells four ways -- "k:", "k: null", "k: ~"
+// and "k: Null" -- and inside a flow mapping it is the only value
+// Style.FlowEmpty can leave out or write as a key alone. Drawn from values() it
+// arrives one time in eight, which put both of those axes past 1 in 300.
+func drawMapValue(t *rapid.T, depth int) Value {
+	if rapid.IntRange(0, 4).Draw(t, "nullvalue") == 0 {
+		return Null{}
+	}
+
+	return values(depth+1).Draw(t, "value")
 }
 
 // keyFamily is [KeyText] widened to the spellings this library treats as one

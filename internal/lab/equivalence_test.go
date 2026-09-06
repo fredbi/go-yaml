@@ -115,9 +115,87 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "an alias node carries no tag (7.1)", true
 	case strings.Contains(msg, "value is not allowed in this context") && holdsCollectionOnItsTagsLine(want):
 		return "a block collection begins on the line below its properties (8.2.1)", true
+	case strings.Contains(msg, "flow mapping end token") && holdsTwoTagsOnOneNode(want):
+		return "a node carries at most one tag (6.9)", true
 	default:
 		return "", false
 	}
+}
+
+// divergesByDefect reports whether a refusal the frozen parser did not make is
+// one this repository has recorded as a defect of the shipped parser.
+//
+// Separate from divergesOnPurpose, and the separation is the point: that one
+// says the shipped parser is right and refparser is not, this one says the
+// shipped parser is wrong and names where the finding is written down. Neither
+// list should ever quietly become the other.
+//
+// One entry. A comment written between a node's properties on their own line
+// and a plain scalar underneath refuses the document, where the same document
+// without the comment reads: "a:" over " !" over " # c" over " 1". Only a local
+// or non-specific tag does it -- "!!str" in the same place reads -- and only a
+// plain scalar, since a flow collection after the comment reads too. The
+// recognizer accepts every one of them, libfyaml 1.0.0b1 gives {"a": "1"} and
+// the reference parser emits =VAL <!> :1. Recorded as yamlgen.Strict, "a
+// comment between a tag on its own line and a plain scalar".
+func divergesByDefect(err error, text string) (string, bool) {
+	if err == nil || !strings.Contains(err.Error(), "value is not allowed in this context") {
+		return "", false
+	}
+
+	if !commentsBetweenATagLineAndItsValue(text) {
+		return "", false
+	}
+
+	return "a comment between a tag on its own line and a plain scalar (yamlgen.Strict)", true
+}
+
+// commentsBetweenATagLineAndItsValue reports whether text writes a line holding
+// nothing but a tag and then a comment line.
+func commentsBetweenATagLineAndItsValue(text string) bool {
+	lines := strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == '\r' })
+
+	for i := range len(lines) - 1 {
+		tag := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(tag, "!") || strings.ContainsAny(tag, " \t") {
+			continue
+		}
+
+		if strings.HasPrefix(strings.TrimSpace(lines[i+1]), "#") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// holdsTwoTagsOnOneNode reports whether f carries a tag whose node, past any
+// anchor, carries a tag of its own.
+func holdsTwoTagsOnOneNode(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			tag, ok := n.(*ast.TagNode)
+			if !ok {
+				return
+			}
+
+			under := tag.Value
+			if anchor, anchored := under.(*ast.AnchorNode); anchored {
+				under = anchor.Value
+			}
+
+			if _, twice := under.(*ast.TagNode); twice {
+				found = true
+			}
+		}), doc)
+	}
+
+	return found
 }
 
 // holdsCollectionOnItsTagsLine reports whether f carries a tag whose block
@@ -311,6 +389,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 			t.Skipf("refused on purpose: %s\nlab: %v", why, gotErr)
 		}
 
+		if why, ok := divergesByDefect(gotErr, text); ok {
+			t.Skipf("refused by a recorded defect: %s\nlab: %v", why, gotErr)
+		}
+
 		t.Fatalf("the lab refuses a document production accepts\nlab: %v\nsource:\n%s", gotErr, text)
 	}
 
@@ -319,7 +401,120 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 		t.Skipf("resolved on purpose: %s", why)
 	}
 
+	if why, ok := nestsDifferentlyOnPurpose(want, got); ok {
+		t.Skipf("nested on purpose: %s", why)
+	}
+
 	require.Equal(t, wantTree, gotTree, "the two parsers build different trees")
+}
+
+// nestsDifferentlyOnPurpose reports whether refparser swallowed the entries
+// after a tag that was written with nothing following it.
+//
+// "- !<tag:yaml.org,2002:null>" over "- 3.5" is a sequence of two entries:
+// 8.2.1 needs a nested block collection indented further than the collection it
+// sits in, and the second "-" is at the first one's own column. refparser nests
+// it anyway, so the 3.5 disappears into the tagged node. The shipped parser
+// reads the two entries, and libfyaml 1.0.0b1, go.yaml.in/yaml/v3 v3.0.5 and
+// the reference parser all read [null, 3.5].
+//
+// One direction only: the allowance needs refparser to nest and the shipped
+// parser not to. The shipped parser has the same fault for a local tag --
+// "a: !foo" over "b: 1" reads {"a": {"b": 1}} here and {"a": "", "b": 1}
+// everywhere else -- and that is a departure yamlcorpus records rather than
+// something to excuse.
+func nestsDifferentlyOnPurpose(want, got *ast.File) (string, bool) {
+	if !swallowsTheEntriesAfterATag(want) || swallowsTheEntriesAfterATag(got) {
+		return "", false
+	}
+
+	return "a block collection cannot begin at the indentation of the one it sits in (8.2.1)", true
+}
+
+// swallowsTheEntriesAfterATag reports whether f nests, under a tag, a block
+// collection standing at the indentation of the collection the tag itself is
+// in.
+func swallowsTheEntriesAfterATag(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	for _, doc := range f.Docs {
+		if swallowsUnder(doc.Body, 0) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// swallowsUnder walks n carrying enclosing, the column of the nearest block
+// collection around it. A collection nested under a node begins further in than
+// that one, so a column at or before it is the swallow.
+func swallowsUnder(n ast.Node, enclosing int) bool {
+	switch node := n.(type) {
+	case *ast.TagNode:
+		if col, block := blockCollectionColumn(node.Value); block && col <= enclosing {
+			return true
+		}
+
+		return swallowsUnder(node.Value, enclosing)
+	case *ast.AnchorNode:
+		return swallowsUnder(node.Value, enclosing)
+	case *ast.SequenceNode:
+		if col, block := blockCollectionColumn(node); block {
+			enclosing = col
+		}
+		for _, v := range node.Values {
+			if swallowsUnder(v, enclosing) {
+				return true
+			}
+		}
+	case *ast.MappingNode:
+		if col, block := blockCollectionColumn(node); block {
+			enclosing = col
+		}
+		for _, v := range node.Values {
+			if swallowsUnder(v, enclosing) {
+				return true
+			}
+		}
+	case *ast.MappingValueNode:
+		if col, block := blockCollectionColumn(node); block {
+			enclosing = col
+		}
+
+		return swallowsUnder(node.Value, enclosing)
+	}
+
+	return false
+}
+
+// blockCollectionColumn returns the column a block collection begins at.
+func blockCollectionColumn(n ast.Node) (int, bool) {
+	var flow bool
+
+	switch node := n.(type) {
+	case *ast.SequenceNode:
+		flow = node.IsFlowStyle
+	case *ast.MappingNode:
+		flow = node.IsFlowStyle
+	case *ast.MappingValueNode:
+		flow = node.IsFlowStyle
+	default:
+		return 0, false
+	}
+
+	if flow {
+		return 0, false
+	}
+
+	tk := n.GetToken()
+	if tk == nil {
+		return 0, false
+	}
+
+	return int(tk.Position.Column), true
 }
 
 // resolvesDifferentlyOnPurpose reports whether two trees differ only in what a
