@@ -207,6 +207,7 @@ var parserComplaints = []string{
 	"not enough length for escaped UTF-N character",
 	"sequence end token _ not found",
 	"sequence entries are not allowed after anchor on the same line",
+	"specified not scalar tag",
 	"tab character cannot stand for the indentation a mapping entry needs",
 	"tab character cannot use as a map key directly",
 	"tab character cannot use as a sequence delimiter",

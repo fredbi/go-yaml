@@ -6,6 +6,7 @@ package yamlgen
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +45,15 @@ type (
 	// A NaN costs the property tests one helper: it is not equal to itself, so
 	// they compare with sameValue rather than with reflect's equality.
 	Float struct{ V float64 }
+	// BigInt is an integer past what a machine word holds, which this library
+	// reads as a *big.Int rather than losing.
+	BigInt struct{ V *big.Int }
+	// BigFloat is a float past what a float64 holds, read as a *big.Float.
+	//
+	// The value carries prec 64, because that is what the library's own
+	// big.Float carries and the properties compare the two with reflect's
+	// equality -- a wider one would be the same number and a different struct.
+	BigFloat struct{ V *big.Float }
 	// Str is a string, and the interesting one: most of the ways to write a
 	// YAML document differently are ways to write a string differently.
 	Str struct{ V string }
@@ -147,6 +157,10 @@ func KeyText(v Value) string {
 		return floatKeyText(n.V)
 	case Str:
 		return n.V
+	case BigInt:
+		return n.V.String()
+	case BigFloat:
+		return n.V.Text('g', -1)
 	case Anchored:
 		return KeyText(n.V)
 	case Alias:
@@ -177,8 +191,10 @@ func (i Int) Decoded() any {
 	return int64(i.V)
 }
 
-func (f Float) Decoded() any { return f.V }
-func (s Str) Decoded() any   { return s.V }
+func (f Float) Decoded() any    { return f.V }
+func (b BigInt) Decoded() any   { return b.V }
+func (b BigFloat) Decoded() any { return b.V }
+func (s Str) Decoded() any      { return s.V }
 
 func (s Seq) Decoded() any {
 	if len(s.Items) == 0 {
@@ -278,8 +294,10 @@ func TagFor(v Value) []string {
 		return []string{TagBool}
 	case Int:
 		return []string{TagInt}
-	case Float:
+	case Float, BigFloat:
 		return []string{TagFloat}
+	case BigInt:
+		return []string{TagInt}
 	case Str:
 		return []string{TagStr, TagLocal, TagNone, TagVerbatim}
 	case Seq:
@@ -452,8 +470,8 @@ func values(depth int) *rapid.Generator[Value] {
 		scalars := []*rapid.Generator[Value]{
 			rapid.Just(Value(Null{})),
 			rapid.Custom(func(t *rapid.T) Value { return Bool{V: rapid.Bool().Draw(t, "bool")} }),
-			rapid.Custom(func(t *rapid.T) Value { return Int{V: rapid.IntRange(-1000, 1000).Draw(t, "int")} }),
-			rapid.Custom(func(t *rapid.T) Value { return Float{V: floats().Draw(t, "float")} }),
+			rapid.Custom(drawInt),
+			rapid.Custom(drawFloat),
 			rapid.Custom(func(t *rapid.T) Value { return Str{V: Strings().Draw(t, "string")} }),
 			// Strings twice over: they carry most of the presentation choices,
 			// so they should carry most of the generated weight.
@@ -589,9 +607,126 @@ func Strings() *rapid.Generator[string] {
 	)
 }
 
-// floats avoids the infinities and NaN. They are worth testing and they are a
-// separate question: their spelling is schema-dependent, so a disagreement
-// there says nothing about presentation invariance.
+// drawInt draws an integer, one in eight of them past a machine word.
+//
+// Wide numbers share the integer's slot rather than taking one of their own,
+// because given a slot each they were a quarter of every scalar drawn and the
+// corpus stopped reaching four of the parser's error messages.
+//
+// One in eight is not a tuned figure and the ratio barely matters. Sweeping it
+// from one in six to one in sixteen moved the unmatched buckets in
+// TestTheCorpusReachesMostOfTheGrammar between 63 and 65 with no trend, and the
+// unreached templates in TestTheParserVocabularyGapIsMeasured between 27 and
+// 28. Keeping the "wide" draw and never acting on it -- so the byte stream
+// shifts and no wide number is produced -- costs 3 buckets and 2 templates on
+// its own. Most of what a new kind costs is the reshuffle, not the dilution:
+// the last few buckets are reached by a handful of documents each, and any
+// change to the draw sequence hands them to different ones.
+func drawInt(t *rapid.T) Value {
+	if rapid.IntRange(0, 7).Draw(t, "wide") == 0 {
+		return BigInt{V: bigInts().Draw(t, "bigint")}
+	}
+
+	return Int{V: rapid.IntRange(-1000, 1000).Draw(t, "int")}
+}
+
+// drawFloat draws a float, one in eight of them past what a float64 holds.
+func drawFloat(t *rapid.T) Value {
+	if rapid.IntRange(0, 7).Draw(t, "wide") == 0 {
+		return BigFloat{V: bigFloats().Draw(t, "bigfloat")}
+	}
+
+	return Float{V: floats().Draw(t, "float")}
+}
+
+// Numbers wider than a machine word, and the bounds they are drawn inside.
+//
+// # The guard, and why it is not caution
+//
+// A big.Float keeps its exponent in an int32, and this library falls back to a
+// float64 past that and hands back **zero** with nothing reported -- a recorded
+// defect. Drawing a number past the bound would mean generating documents whose
+// meaning the corpus states and the library cannot reach, which is a corpus
+// accusing a library of a defect it has already recorded. So the exponent stays
+// far inside: past float64's 308, nowhere near int32's two billion.
+//
+// The integer side has no such cliff, since a big.Int is bounded only by
+// memory. The digit count is bounded anyway, to keep a document readable.
+const (
+	// bigFloatMinExp is past float64's range, so the value needs a big.Float.
+	//
+	// 330 and not 310, because float64 reaches 1e-320 through its subnormals:
+	// this library reads 1e-320 as a float64 and 1e-324 as a big.Float, and a
+	// generator that drew 1e-310 would state a big.Float meaning for a document
+	// the library reads as a double. Measured rather than reasoned from the
+	// exponent range.
+	bigFloatMinExp = 330
+	// bigFloatMaxExp is far inside big.Float's int32 exponent, and far inside
+	// the bound where this library stops building one.
+	bigFloatMaxExp = 4900
+	// bigIntMinDigits keeps every drawn integer past a machine word.
+	//
+	// 21 and not 20, because uint64's maximum is itself twenty digits --
+	// 18446744073709551615 -- so a twenty-digit draw may still fit one, and
+	// this library reads what fits as a uint64. Twenty-one digits is at least
+	// 1e20 and never does.
+	bigIntMinDigits = 21
+	bigIntMaxDigits = 45
+)
+
+// bigInts draws an integer past what a machine word holds.
+func bigInts() *rapid.Generator[*big.Int] {
+	return rapid.Custom(func(t *rapid.T) *big.Int {
+		digits := rapid.IntRange(bigIntMinDigits, bigIntMaxDigits).Draw(t, "digits")
+
+		text := make([]byte, 0, digits+1)
+		if rapid.Bool().Draw(t, "negative") {
+			text = append(text, '-')
+		}
+
+		text = append(text, byte('1'+rapid.IntRange(0, 8).Draw(t, "lead")))
+		for range digits - 1 {
+			text = append(text, byte('0'+rapid.IntRange(0, 9).Draw(t, "digit")))
+		}
+
+		out, ok := new(big.Int).SetString(string(text), 10)
+		if !ok {
+			panic("yamlgen: a decimal integer that big.Int will not read: " + string(text))
+		}
+
+		return out
+	})
+}
+
+// bigFloats draws a float past what a float64 holds.
+//
+// Built from its text and parsed back, so the value carries exactly what the
+// library's own parse of the same text carries: prec 64, and the same rounding.
+func bigFloats() *rapid.Generator[*big.Float] {
+	return rapid.Custom(func(t *rapid.T) *big.Float {
+		mantissa := rapid.IntRange(1, 9999).Draw(t, "mantissa")
+		exponent := rapid.IntRange(bigFloatMinExp, bigFloatMaxExp).Draw(t, "exponent")
+
+		sign := ""
+		if rapid.Bool().Draw(t, "negative") {
+			sign = "-"
+		}
+
+		if rapid.Bool().Draw(t, "tiny") {
+			exponent = -exponent
+		}
+
+		text := fmt.Sprintf("%s%de%d", sign, mantissa, exponent)
+
+		out, ok := new(big.Float).SetString(text)
+		if !ok {
+			panic("yamlgen: a decimal float that big.Float will not read: " + text)
+		}
+
+		return out
+	})
+}
+
 func floats() *rapid.Generator[float64] {
 	return rapid.Custom(func(t *rapid.T) float64 {
 		// One float in nine is a special. Weighted low on purpose: they are
@@ -620,10 +755,8 @@ func floats() *rapid.Generator[float64] {
 //
 // The infinities and NaN are spelled the way YAML spells them rather than the
 // way Go prints them -- ".inf" and not "+Inf" -- which is what this library
-// does and what round-trips. [Float] excludes them by design, so nothing
-// generated reaches this, and it is written down because a reader comparing
-// against libfyaml will find "Infinity" there and should know the difference is
-// deliberate.
+// does and what round-trips. A reader comparing against libfyaml will find
+// "Infinity" there instead; the difference is deliberate.
 func floatKeyText(f float64) string {
 	switch {
 	case math.IsNaN(f):

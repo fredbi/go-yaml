@@ -138,6 +138,21 @@ var Ledger = []Divergence{
 		Match:    writesAnEmptyKey,
 	},
 	{
+		Name: "parse/a-float-tag-on-a-number-past-float64-is-not-read",
+		Reason: "`!!float` written on a number a float64 cannot hold fails two ways, where the same " +
+			"number untagged reads correctly as a big.Float.\n\n" +
+			"Large, the parse stops: `!!float 1e+310` reports `cannot read \"1e+310\" as !!float`. " +
+			"Small, it is worse than refused: `!!float 1e-400` comes back as the float64 **zero**, with " +
+			"nothing reported.\n\n" +
+			"Untagged, `1e+310` and `1e-400` are both read as a big.Float, and `!!int` on an integer " +
+			"past a machine word reads as a big.Int -- so the wide types are built, and it is the float " +
+			"tag alone that does not know about them.\n\n" +
+			"It claims every property: the large form does not parse, and a document that does not parse " +
+			"answers none of them.",
+		Property: Parses | Decode | Render | Settle | CommentsKept,
+		Match:    writesFloatTaggedWideNumber,
+	},
+	{
 		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
 		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
 			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
@@ -153,6 +168,33 @@ var Ledger = []Divergence{
 		Property: Decode | Render,
 		Match:    writesTaggedBlockMappingKeys,
 	},
+}
+
+// writesFloatTaggedWideNumber reports whether v carries `!!float` on a number
+// no float64 holds.
+func writesFloatTaggedWideNumber(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Tagged:
+		if _, wide := n.V.(BigFloat); wide && n.Tag == TagFloat {
+			return true
+		}
+
+		return writesFloatTaggedWideNumber(n.V, Style{})
+	case Anchored:
+		return writesFloatTaggedWideNumber(n.V, Style{})
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesFloatTaggedWideNumber(item, Style{})
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if writesFloatTaggedWideNumber(p.Val, Style{}) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // writesTaggedBlockMappingKeys reports whether emitting v writes a mapping that

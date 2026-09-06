@@ -638,6 +638,18 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 		e.feat.add(FeaturePlain)
 
 		return strconv.Itoa(n.V)
+	case BigInt:
+		e.feat.add(FeaturePlain)
+		e.feat.add(FeatureValueBigInt)
+
+		return n.V.String()
+	case BigFloat:
+		e.feat.add(FeaturePlain)
+		e.feat.add(FeatureValueBigFloat)
+
+		// The shortest text that reads back as the same value at the precision
+		// a big.Float carries, which is what the library parses it into.
+		return n.V.Text('g', -1)
 	case Float:
 		e.feat.add(FeaturePlain)
 

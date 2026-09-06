@@ -106,6 +106,12 @@ const (
 	// none of them, so a consumer bound for JSON selects on this and a stated
 	// meaning skips it.
 	FeatureValueFloatSpecial stance.Feature = "value/float-special"
+	// FeatureValueBigInt is an integer past what a machine word holds, which
+	// this library reads as a *big.Int.
+	FeatureValueBigInt stance.Feature = "value/big-int"
+	// FeatureValueBigFloat is a float past what a float64 holds, read as a
+	// *big.Float. A consumer that reads numbers into a double selects on both.
+	FeatureValueBigFloat stance.Feature = "value/big-float"
 )
 
 // Written is a document and what the emitter put in it.
@@ -207,6 +213,10 @@ func valueFeatures(v Value, into features) {
 		into.add(FeatureValueBool)
 	case Int:
 		into.add(FeatureValueInt)
+	case BigInt:
+		into.add(FeatureValueBigInt)
+	case BigFloat:
+		into.add(FeatureValueBigFloat)
 	case Float:
 		into.add(FeatureValueFloat)
 	case Str:
