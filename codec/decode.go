@@ -65,9 +65,17 @@ type Decoder struct {
 	useOrderedMap          bool
 	useStringKeys          bool
 	useJSONUnmarshaler     bool
-	parsedFile             *ast.File
-	streamIndex            int
-	decodeDepth            int
+
+	// walked holds the value of each document, read by walking the source
+	// rather than by building a tree and walking that. src is kept beside it so
+	// that a later Decode wanting something the walk cannot serve can still
+	// build the tree. See canWalk.
+	walked      []any
+	walkedOK    bool
+	src         []byte
+	parsedFile  *ast.File
+	streamIndex int
+	decodeDepth int
 }
 
 // NewDecoder returns a new decoder that reads from r.
@@ -2259,7 +2267,8 @@ func (d *Decoder) resolveReference(ctx context.Context) error {
 	return nil
 }
 
-func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
+// parserOptions are the options this decoder's own options ask the parse for.
+func (d *Decoder) parserOptions() []parser.Option {
 	var opts []parser.Option
 	if d.toCommentMap != nil {
 		opts = append(opts, parser.WithComments())
@@ -2273,7 +2282,12 @@ func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
 		// anchors. Publishing them is what lets that alias through.
 		opts = append(opts, parser.WithAnchors(d.referenceAnchorNodeMap))
 	}
-	f, err := parser.ParseBytes(bytes, opts...)
+
+	return opts
+}
+
+func (d *Decoder) parse(ctx context.Context, bytes []byte) (*ast.File, error) {
+	f, err := parser.ParseBytes(bytes, d.parserOptions()...)
 	if err != nil {
 		return nil, err
 	}
@@ -2394,10 +2408,38 @@ func readAll(r io.Reader) ([]byte, error) {
 }
 
 func (d *Decoder) isInitialized() bool {
-	return d.parsedFile != nil
+	return d.parsedFile != nil || d.walkedOK
 }
 
-func (d *Decoder) decodeInit(ctx context.Context) error {
+// canWalk reports whether this decode can read the source by walking it rather
+// than by building a tree and walking that.
+//
+// Reading into an interface asks for the value the document denotes and nothing
+// else, which is what valueBuilder folds as the parse goes. Everything else
+// needs the tree: reflection into a concrete type reads nodes, a CommentMap is
+// keyed by the paths of the nodes carrying the comments, MapSlice keeps the
+// order the tree holds, and ReferenceFiles publishes anchors from documents
+// this one never sees.
+func (d *Decoder) canWalk(v reflect.Value) bool {
+	if d.toCommentMap != nil || d.useOrderedMap {
+		return false
+	}
+	if len(d.referenceFiles) > 0 || len(d.referenceDirs) > 0 || len(d.referenceReaders) > 0 {
+		return false
+	}
+	if len(d.customUnmarshalerMap) > 0 {
+		return false
+	}
+	if !v.IsValid() || v.Kind() != reflect.Pointer {
+		return false
+	}
+
+	dst := v.Elem()
+
+	return dst.Kind() == reflect.Interface && dst.NumMethod() == 0
+}
+
+func (d *Decoder) decodeInit(ctx context.Context, v reflect.Value) error {
 	if !d.isResolvedReference {
 		if err := d.resolveReference(ctx); err != nil {
 			return err
@@ -2411,11 +2453,69 @@ func (d *Decoder) decodeInit(ctx context.Context) error {
 	// itself, and only the text can say what those are. It shares the bytes
 	// the tree was built from rather than copying them again.
 	d.source = yamlerrors.Source{Text: nocopy.String(src), FirstLine: 1}
+	d.src = src
+
+	if d.canWalk(v) {
+		walked, err := WalkValues(src, d.parserOptions()...)
+		if err != nil {
+			return err
+		}
+		d.walked, d.walkedOK = walked, true
+
+		return nil
+	}
+
 	file, err := d.parse(ctx, src)
 	if err != nil {
 		return err
 	}
 	d.parsedFile = file
+
+	return nil
+}
+
+// buildTree reads the source into a tree, for a decode the walk cannot serve.
+//
+// One Decoder may be handed different destinations for the documents of one
+// stream, and only the first of them decided how the source was read.
+func (d *Decoder) buildTree(ctx context.Context) error {
+	file, err := d.parse(ctx, d.src)
+	if err != nil {
+		return err
+	}
+	d.parsedFile = file
+	d.walked, d.walkedOK = nil, false
+
+	return nil
+}
+
+// handWalked gives the caller the value the walk read for the document in hand.
+func (d *Decoder) handWalked(v reflect.Value) error {
+	if len(d.walked) == 0 {
+		// An empty source holds one empty document: the destination takes its
+		// zero and the stream then ends, which is what the tree path does.
+		if dst := v.Elem(); dst.IsValid() {
+			dst.Set(reflect.Zero(dst.Type()))
+		}
+	}
+	if d.streamIndex >= len(d.walked) {
+		return io.EOF
+	}
+
+	value := d.walked[d.streamIndex]
+	d.streamIndex++
+
+	dst := v.Elem()
+	if !dst.IsValid() {
+		return nil
+	}
+	if value == nil {
+		dst.Set(reflect.Zero(dst.Type()))
+
+		return nil
+	}
+	dst.Set(reflect.ValueOf(value))
+
 	return nil
 }
 
@@ -2441,6 +2541,18 @@ func isEmptyDocument(doc *ast.DocumentNode) bool {
 }
 
 func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
+	if d.walkedOK {
+		if d.canWalk(v) {
+			return d.handWalked(v)
+		}
+		// This Decoder read the source by walking it for an earlier document,
+		// and now holds a destination the walk cannot serve. Read it again into
+		// a tree, which is what the rest of this reads.
+		if err := d.buildTree(ctx); err != nil {
+			return err
+		}
+	}
+
 	d.decodeDepth = 0
 	d.anchorValueMap = make(map[string]reflect.Value)
 	if len(d.parsedFile.Docs) == 0 {
@@ -2504,7 +2616,7 @@ func (d *Decoder) DecodeContext(ctx context.Context, v interface{}) error {
 
 		return nil
 	}
-	if err := d.decodeInit(ctx); err != nil {
+	if err := d.decodeInit(ctx, rv); err != nil {
 		return yamlerrors.WithSource(err, d.source)
 	}
 	if err := d.decode(ctx, rv); err != nil {
@@ -2525,7 +2637,8 @@ func (d *Decoder) DecodeFromNodeContext(ctx context.Context, node ast.Node, v in
 		return ErrDecodeRequiredPointerType
 	}
 	if !d.isInitialized() {
-		if err := d.decodeInit(ctx); err != nil {
+		// A node in hand is a tree, so this never takes the walking path.
+		if err := d.decodeInit(ctx, reflect.Value{}); err != nil {
 			return err
 		}
 	}

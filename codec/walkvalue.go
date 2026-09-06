@@ -6,6 +6,7 @@ package codec
 import (
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -32,7 +33,10 @@ type valueBuilder struct {
 	// named holds what each anchor of the document named, for an alias to name
 	// again. It is emptied at each document, since an anchor belongs to one.
 	named map[string]any
-	err   error
+	// open holds the anchors whose node is being read, innermost last. An alias
+	// naming one of them stands inside what it names.
+	open []string
+	err  error
 }
 
 type frameKind uint8
@@ -97,7 +101,10 @@ func (b *valueBuilder) Enter(node ast.Node, at parser.Step) bool {
 		// the tree-walking decoder gives and what a caller comparing against
 		// "[]any{}" expects.
 		b.stack = append(b.stack, buildFrame{kind: frameSequence, at: at, seq: []any{}})
-	case *ast.AnchorNode, *ast.TagNode, *ast.MappingKeyNode:
+	case *ast.AnchorNode:
+		b.open = append(b.open, anchorName(n.Name))
+		b.stack = append(b.stack, buildFrame{kind: frameProperty, at: at, node: node})
+	case *ast.TagNode, *ast.MappingKeyNode:
 		b.stack = append(b.stack, buildFrame{kind: frameProperty, at: at, node: node})
 	case *ast.AliasNode:
 		b.deliver(b.aliasValue(n), node, at)
@@ -173,6 +180,9 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 
 	switch n := frame.node.(type) {
 	case *ast.AnchorNode:
+		if n := len(b.open); n > 0 {
+			b.open = b.open[:n-1]
+		}
 		if name := anchorName(n.Name); name != "" {
 			if b.named == nil {
 				b.named = map[string]any{}
@@ -182,7 +192,21 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 
 		return value, nil
 	case *ast.TagNode:
-		return taggedWalkValue(n, value)
+		tagged, err := taggedWalkValue(n, value)
+		if err != nil {
+			return nil, err
+		}
+		if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
+			// The anchor closed before the tag was applied and recorded what it
+			// held untagged. 6.9 gives the node both properties, so the name
+			// stands for the tagged value: "a: !!int &a1 \"5\"" reads 5 at a,
+			// and an alias to a1 reads 5 rather than "5".
+			if name := anchorName(anchor.Name); name != "" && b.named != nil {
+				b.named[name] = tagged
+			}
+		}
+
+		return tagged, nil
 	default:
 		// A "?" key stands around the node it addresses the entry by.
 		return value, nil
@@ -216,6 +240,16 @@ func (b *valueBuilder) aliasValue(n *ast.AliasNode) any {
 	name := anchorName(n.Value)
 	if v, named := b.named[name]; named {
 		return v
+	}
+	if slices.Contains(b.open, name) {
+		// The anchor is being read right now, so the alias stands inside what
+		// its own anchor names. A Go value is built by walking and has nowhere
+		// to put a cycle. AliasNode.Target does not answer this during a walk:
+		// the parser fills it at the document's end, which is after the alias
+		// has been handed over.
+		b.fail(yamlerrors.NewRecursiveAlias(name, n.GetToken()))
+
+		return nil
 	}
 
 	b.fail(yamlerrors.NewUnknownAnchor(name, n.GetToken()))
@@ -370,18 +404,70 @@ func taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 	}
 }
 
-// WalkValue reads src by walking it, without building a tree. EXPERIMENT.
+// WalkValue reads the first document of src by walking it. EXPERIMENT.
 func WalkValue(src []byte) (any, error) {
+	docs, err := WalkValues(src)
+	if err != nil {
+		return nil, err
+	}
+	if len(docs) == 0 {
+		return nil, nil
+	}
+
+	return docs[0], nil
+}
+
+// WalkValues reads every document of src by walking it, without building a
+// tree.
+func WalkValues(src []byte, opts ...parser.Option) ([]any, error) {
 	b := &valueBuilder{}
-	if _, err := parser.New(parser.WithOmitNodePaths()).Walk(src, b); err != nil {
+	opts = append(opts, parser.WithOmitNodePaths())
+
+	file, err := parser.New(opts...).Walk(src, b)
+	if err != nil {
 		return nil, err
 	}
 	if b.err != nil {
 		return nil, b.err
 	}
-	if len(b.docs) == 0 {
-		return nil, nil
+
+	return b.documentValues(file), nil
+}
+
+// documentValues lines the values up with the documents of the stream.
+//
+// A document holding no node hands nothing over -- there is nothing for the
+// walk to visit -- so a value has to be put back for it. "%YAML 1.1" over "---"
+// and "# comment" over "..." are both documents denoting null: a marker opens
+// or closes a document whatever stands between the markers, and a directive or
+// a run of comments is not a node. isEmptyDocument names exactly those, and
+// holdsAValue drops what is no document at all.
+//
+// The file the walk returns holds the documents, which is all this reads: the
+// markers around each body and the type of the body, and no token.
+func (b *valueBuilder) documentValues(file *ast.File) []any {
+	if file == nil || len(file.Docs) == 0 {
+		return b.docs
 	}
 
-	return b.docs[0], nil
+	var (
+		values []any
+		walked int
+	)
+	for _, doc := range file.Docs {
+		if !holdsAValue(doc) {
+			continue
+		}
+		if isEmptyDocument(doc) {
+			values = append(values, nil)
+
+			continue
+		}
+		if walked < len(b.docs) {
+			values = append(values, b.docs[walked])
+			walked++
+		}
+	}
+
+	return values
 }

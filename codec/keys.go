@@ -62,7 +62,7 @@ func refuseDuplicateKeys(n ast.Node) error {
 
 	return yamlerrors.NewDuplicateKey(
 		fmt.Sprintf("mapping key %q already defined at [%d:%d]", d.Name, d.FirstAt.Line, d.FirstAt.Column),
-		keyTokenAt(m, d.At),
+		keyTokenAt(m, d),
 	)
 }
 
@@ -72,7 +72,9 @@ func refuseDuplicateKeys(n ast.Node) error {
 // The parse keeps the position and not the token: a token held against a
 // mapping outlives the entry that carried it, and a mapping of 5,000 keys would
 // hold 5,000 tokens spread over the whole document.
-func keyTokenAt(m *ast.MappingNode, pos token.Position) *token.Token {
+func keyTokenAt(m *ast.MappingNode, d ast.DuplicateKey) *token.Token {
+	pos := d.At
+
 	for _, v := range m.Values {
 		if v == nil || v.Key == nil {
 			continue
@@ -82,5 +84,10 @@ func keyTokenAt(m *ast.MappingNode, pos token.Position) *token.Token {
 		}
 	}
 
-	return m.GetToken()
+	// A walk hands the mapping over without gathering its entries, so the token
+	// is not to hand. The position was recorded when the repeat was read, and
+	// token.New fills in the rest: a token built as a struct literal carries no
+	// spans, its EndLine reads 0, and printer.PrintErrorSource then draws a
+	// window that closes before it opens and shows nothing.
+	return token.New(d.Name, d.Name, pos)
 }
