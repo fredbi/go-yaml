@@ -757,3 +757,62 @@ func TestFixedACommentAboveAPropertyLineStaysOnTheKey(t *testing.T) {
 		assert.Equal(t, before, after, "the render changed the value")
 	})
 }
+
+// TestFixedATagOnAnEmptyNodeKeepsWhatFollows covers a tag and an anchor written
+// at the end of a line with nothing after them.
+//
+// The anchor went looking for a value and took the next entry of the collection
+// around it. "- !!null &a1" over "- x" decoded to a one-item sequence -- the
+// second entry gone, and no error at all -- and "k: !!null &a1" over "j: x"
+// lost j the same way.
+//
+// Whatever a property at the end of a line names has to be written inside the
+// entry holding it, which means further in than that entry's own column.
+// parseMapValue and parseSequenceValue said exactly this for a bare anchor,
+// which is why "- &a1" over "- x" never lost anything; a tag before the anchor
+// sends the descent down parseTagValue, too far from either to repeat the test,
+// so the parser now carries the column there.
+func TestFixedATagOnAnEmptyNodeKeepsWhatFollows(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{src: "- !!null &a1\n- x\n", want: []any{nil, "x"}},
+		{src: "- !!str &a1\n- x\n", want: []any{"", "x"}},
+		{src: "- !!seq &a1\n- x\n", want: []any{nil, "x"}},
+		{src: "k: !!null &a1\nj: x\n", want: map[string]any{"k": nil, "j": "x"}},
+		{src: "k: !!seq &a1\nj: x\n", want: map[string]any{"k": nil, "j": "x"}},
+
+		// The anchor written first, which never lost anything.
+		{src: "- &a1 !!null\n- x\n", want: []any{nil, "x"}},
+		{src: "- &a1\n- x\n", want: []any{nil, "x"}},
+	} {
+		t.Run(tc.src, func(t *testing.T) {
+			wellFormed(t, tc.src)
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(tc.src), &got))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("and a property still names what is written inside its entry", func(t *testing.T) {
+		// The other side of the column rule: indented past the entry, what
+		// follows belongs to the property and not to the collection around it.
+		for _, tc := range []struct {
+			src  string
+			want any
+		}{
+			{src: "a: &a\n  foo: 1\nb: 2\n", want: map[string]any{"a": map[string]any{"foo": uint64(1)}, "b": uint64(2)}},
+			{src: "a: !!map &m\n  foo: 1\nb: 2\n", want: map[string]any{"a": map[string]any{"foo": uint64(1)}, "b": uint64(2)}},
+
+			// And at the document's root nothing encloses the property, so it
+			// names what follows however far away it is written.
+			{src: "!!str\n&a2\nscalar2\n", want: "scalar2"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}

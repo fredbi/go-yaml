@@ -52,36 +52,12 @@ func renderOnce(t *testing.T, src string) string {
 // appear in either order. Written second the tag holds; written first it is
 // dropped from the node the anchor names.
 //
-// Two shapes left, and the first is the reason this is worth more than a
-// curiosity: a document loses entries and nobody is told. The third -- a
-// collection tag stopping the parse outright -- was fixed on 2026-09-07 and
-// moved to TestFixedACollectionTagBeforeAnAnchorParses.
+// One shape left: the tag is dropped from the node the anchor names, so a
+// scalar reads one way where it stands and another through an alias to it.
+//
+// Two are fixed and moved to fixed_test.go: a collection tag stopped the parse
+// outright, and a tag on an empty node swallowed the entry below it.
 func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
-	t.Run("on an empty node it swallows what follows, and says so", func(t *testing.T) {
-		// The swallowing is the parse's and has not been fixed: the tag still
-		// takes the entry below it. What has changed is that the document no
-		// longer comes back short with a nil error. ast.TagNode.Resolve reports
-		// a scalar tag standing on a collection, which is what the swallowed
-		// entry turns the node into, so the load refuses.
-		for _, src := range []string{
-			"- !!null &a1\n- x\n",
-			"- !!str &a1\n- x\n",
-			"k: !!null &a1\nj: x\n",
-		} {
-			wellFormed(t, src)
-
-			var got any
-			err := yaml.Unmarshal([]byte(src), &got)
-			require.Errorf(t, err, "%q", src)
-			assert.Containsf(t, err.Error(), "names a kind this node is not", "%q", src)
-		}
-
-		// Anchor first, and all three read correctly.
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("- &a1 !!null\n- x\n"), &got))
-		assert.Equal(t, []any{nil, "x"}, got)
-	})
-
 	t.Run("otherwise the anchor names the untagged value", func(t *testing.T) {
 		wellFormed(t, "a: !!int &a1 \"5\"\nb: *a1\n")
 
@@ -102,4 +78,3 @@ func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "5", "b": "5"}, got)
 	})
 }
-

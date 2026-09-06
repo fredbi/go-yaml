@@ -121,23 +121,20 @@ var Ledger = []Divergence{
 			"A collection tag was a third kind and is fixed: `!!seq &a1 [1]` and " +
 			"`!!map &a1 {b: 1}` did not parse at all, and read correctly since " +
 			"2026-09-07. See TestFixedACollectionTagBeforeAnAnchorParses.\n\n" +
-			"On an empty node the tag swallows what follows: `- !!null &a1` over `- x` " +
-			"takes the entry below it, and so do `- !!str &a1` over `- x` and " +
-			"`k: !!null &a1` over `j: x`. Anchor first reads all of them correctly. " +
-			"The swallowing is still here; what it does is now reported. It used to " +
-			"come back as a one-item sequence with no error at all, and the load " +
-			"refuses it since 2026-09-07, because the entry the tag swallowed turns the " +
-			"node into a collection and ast.TagNode.Resolve reports a scalar tag " +
-			"standing on one.\n\n" +
-			"So two shapes fail two ways: a tag on an empty node eats what follows, and " +
-			"any other tag is dropped so quietly that nothing notices until an alias asks " +
-			"the anchor what it names. The predicate asks for one of the two.\n\n" +
-			"It claims all five properties, which no other entry does and this one has " +
-			"earned: a node that eats the rest of the document takes the comments with " +
-			"it, moves what it swallowed -- `a: !!null &a1` over `b: 1` comes back with b " +
-			"indented under a -- and a document whose entries have shifted does not render " +
-			"the same way twice.",
-		Property: Parses | Decode | Render | Settle | CommentsKept,
+			"A tag on an empty node swallowing what follows was a second kind and is " +
+			"fixed: `- !!null &a1` over `- x` took the entry below it and came back a " +
+			"one-item sequence with no error at all. See " +
+			"TestFixedATagOnAnEmptyNodeKeepsWhatFollows.\n\n" +
+			"So one shape is left: the tag is dropped so quietly that nothing notices " +
+			"until an alias asks the anchor what it names.\n\n" +
+			"It claimed all five properties while it ate the rest of the document, which " +
+			"took the comments with it and moved what it swallowed. That shape is gone, " +
+			"so the entry no longer claims Parses or CommentsKept: the document is read " +
+			"and its comments survive. Render and Settle stay with Decode, measured " +
+			"rather than assumed -- narrowing the entry to Decode alone made " +
+			"TestRenderPreservesValue report `!!map &a2` over two entries, one of them " +
+			"aliasing a tagged anchor.",
+		Property: Decode | Render | Settle,
 		Match:    writesBrokenTaggedAnchor,
 	},
 }
@@ -154,12 +151,11 @@ func writesBrokenTaggedAnchor(v Value, st Style) bool {
 	e := &emitter{st: st}
 	e.root(v)
 
-	// collectionTagAnchors is deliberately not asked for: a collection tag
-	// written before an anchor was the third shape of this defect and it was
-	// fixed on 2026-09-07. See TestFixedACollectionTagBeforeAnAnchorParses.
-	if e.emptyTagAnchors > 0 {
-		return true
-	}
+	// Neither collectionTagAnchors nor emptyTagAnchors is asked for any more.
+	// A collection tag written before an anchor stopped the parse, and a tag on
+	// an empty node swallowed what followed it; both were fixed on 2026-09-07.
+	// See TestFixedACollectionTagBeforeAnAnchorParses and
+	// TestFixedATagOnAnEmptyNodeKeepsWhatFollows.
 	if len(e.taggedAnchorNames) == 0 {
 		return false
 	}

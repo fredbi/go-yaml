@@ -148,6 +148,17 @@ type Parser struct {
 	// begins, innermost last. Anchors nest, so it is a stack.
 	anchorFrom []int32
 
+	// entryCol is the column of the '-' or of the key of the entry being read,
+	// and 0 at the document's root where no entry encloses anything. entryInMap
+	// says which of the two it is.
+	//
+	// Together they say what a property standing at the end of its line may
+	// name. parseMapValue and parseSequenceValue know this and act on it for a
+	// bare anchor; a tag before the anchor takes the descent down parseTagValue,
+	// which is too far from either to see it. See anchorEndsTheLine.
+	entryCol   int
+	entryInMap bool
+
 	// anchors holds the node each anchor of the document in hand names, under
 	// the anchor's name. It goes to the document as that one closes, and the
 	// next starts with none. See anchors.go.
@@ -1304,6 +1315,8 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *tapeTok
 	keyCol := int(key.GetToken().Position.Column)
 	keyLine := int(key.GetToken().Position.Line)
 
+	defer p.enterEntry(keyCol, true)()
+
 	if tk.Column() != keyCol && tk.Line() == keyLine && (tk.GroupType() == TokenGroupMapKey || tk.GroupType() == TokenGroupMapKeyValue) {
 		// a: b:
 		//    ^
@@ -1870,6 +1883,15 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 			// mapping has begun. The tag is on the empty node.
 			return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 		}
+		if group, ends := p.anchorEndsTheLine(ctx, tk); ends {
+			anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
+			if err != nil {
+				return nil, err
+			}
+			ctx.goNext()
+
+			return anchor, nil
+		}
 		if opensCollection(tk) || p.isMapToken(tk) {
 			return p.parseTaggedOtherKind(ctx, uri, tagRawTk, tk)
 		}
@@ -1908,6 +1930,77 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 	return p.parseToken(ctx, tk)
 }
 
+// enterEntry records the entry being read and returns what puts the enclosing
+// one back.
+func (p *Parser) enterEntry(col int, inMap bool) func() {
+	wasCol, wasMap := p.entryCol, p.entryInMap
+	p.entryCol, p.entryInMap = col, inMap
+
+	return func() { p.entryCol, p.entryInMap = wasCol, wasMap }
+}
+
+// anchorEndsTheLine reports whether tk is an anchor that names nothing, and
+// returns the group standing it on the empty node.
+//
+// Whatever a property at the end of a line names has to be written inside the
+// entry holding it, which means further in than that entry's own column. A
+// token back at that column or before it belongs to something the entry is part
+// of. parseMapValue and parseSequenceValue say exactly this for a bare anchor;
+// a tag written before the anchor sends the descent down parseTagValue, which
+// stands too far from either to repeat the test, so the column is carried here
+// on the parser.
+//
+// Without it the anchor went looking for a value and took the next entry of the
+// collection around it: "- !!null &a1" over "- x" came back a one-item sequence
+// with the second entry swallowed and no error at all.
+//
+// Which token can be taken depends on what the entry is. Inside a sequence,
+// anything back at the '-' column opens the next entry. Inside a mapping only
+// another key does: a '-' at the key's column is a block sequence written as the
+// value, which is how "k: &a" over "- 1" reads, so parseMapValue asks isMapToken
+// and this asks the same.
+//
+// At the document's root no entry encloses anything, so nothing can be taken
+// from one and the anchor names whatever follows -- which is what "!!str" over
+// "&a2" over "scalar2" is, three lines and one node.
+//
+// A comment may stand between the anchor and the next token. It belongs to what
+// comes after and says nothing about where this node ends.
+func (p *Parser) anchorEndsTheLine(ctx context, tk *tapeToken) (*tokenGroup, bool) {
+	if tk.GroupType() != TokenGroupAnchorName {
+		return nil, false
+	}
+
+	if next := ctx.nextNotCommentToken(); next != nil && !p.opensNextEntry(next, tk) {
+		return nil, false
+	}
+
+	return newTokenGroup(TokenGroupAnchor, []*tapeToken{tk, ctx.createImplicitNullToken(tk)}), true
+}
+
+// opensNextEntry reports whether next belongs to the collection around the entry
+// the anchor was written in, rather than to the anchor.
+func (p *Parser) opensNextEntry(next, anchor *tapeToken) bool {
+	if next.Line() == anchor.Line() {
+		// Written beside the anchor, so it is what the anchor names.
+		return false
+	}
+	if p.entryCol <= 0 || int(next.Column()) > p.entryCol {
+		// The document's root, or written further in than the entry: either way
+		// nothing else can claim it.
+		return false
+	}
+
+	if p.entryInMap && !p.isMapToken(next) {
+		// A block sequence may be written at the key's own column, so a '-'
+		// there is the value and "k: &a" over "- 1" reads as {k: [1]}. Further
+		// left it belongs to something the mapping is itself inside.
+		return int(next.Column()) < p.entryCol
+	}
+
+	return true
+}
+
 // parseTaggedOtherKind reads the node a tag names the wrong kind for.
 //
 // "!!seq 5" and "!!str [1, 2]" are YAML 1.2: the grammar puts no constraint on
@@ -1927,6 +2020,15 @@ func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.T
 		// The tag stands on the empty node, which is not a mismatch: the
 		// document left the value out rather than writing one of another kind.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
+	}
+	if group, ends := p.anchorEndsTheLine(ctx, tk); ends {
+		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
+		if err != nil {
+			return nil, err
+		}
+		ctx.goNext()
+
+		return anchor, nil
 	}
 
 	return p.parseToken(ctx, tk)
@@ -2195,6 +2297,8 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *tapeToken) (ast.Node, er
 	}
 	seqCol := seqTk.Column()
 	seqLine := seqTk.Line()
+
+	defer p.enterEntry(int(seqCol), false)()
 
 	if tk.Column() == seqCol && tk.Type() == token.SequenceEntryType {
 		// in this case,
