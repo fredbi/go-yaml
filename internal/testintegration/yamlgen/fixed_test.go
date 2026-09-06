@@ -585,3 +585,60 @@ func TestFixedACollectionTagBeforeAnAnchorParses(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedANullKeepsTheSpellingItWasWrittenWith covers a null rendering as the
+// document spelled it.
+//
+// ast.NullNode.String wrote the four letters "null" whatever the token held, so
+// "Null", "NULL" and "~" all came back as "null". Every other scalar node
+// already rendered from its token -- "!!str True" keeps its capital T and
+// "!!str .INF" its capitals -- and the null was the one that did not.
+//
+// Untagged it cost the spelling and not the value, since YAML resolves all four
+// to the same node. Under "!!str" it cost the value too: the tag names the
+// characters, and "Null" is not "null". Reading it was fixed first; writing it
+// back is the half that was not.
+func TestFixedANullKeepsTheSpellingItWasWrittenWith(t *testing.T) {
+	for _, src := range []string{
+		"k: !!str Null\n",
+		"k: !!str NULL\n",
+		"k: !!str null\n",
+		"k: !!str ~\n",
+		"!!str Null\n",
+		"&a1 !!str Null\n",
+
+		// Untagged, where only the spelling was at stake.
+		"k: Null\n",
+		"k: NULL\n",
+		"k: ~\n",
+		"k: null\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			wellFormed(t, src)
+			assert.Equal(t, src, renderOnce(t, src))
+		})
+	}
+
+	t.Run("the value survives the write as well as the read", func(t *testing.T) {
+		for _, src := range []string{"k: !!str Null\n", "k: !!str NULL\n", "k: !!str ~\n"} {
+			want := strings.TrimSuffix(strings.TrimPrefix(src, "k: !!str "), "\n")
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, map[string]any{"k": want}, got, "the decode")
+
+			var again any
+			require.NoError(t, yaml.Unmarshal([]byte(renderOnce(t, src)), &again), "%q", src)
+			assert.Equal(t, got, again, "the render, read back")
+		}
+	})
+
+	t.Run("a null the document never wrote still has no text", func(t *testing.T) {
+		// An implicit null is the absence of a value, so it renders as nothing.
+		// Writing "null" for it would put a value where the document had none.
+		for _, src := range []string{"k:\n", "k: !!str\n", "- \n"} {
+			wellFormed(t, src)
+			assert.NotContains(t, renderOnce(t, src), "null", "%q", src)
+		}
+	})
+}

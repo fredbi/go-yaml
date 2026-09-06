@@ -541,7 +541,7 @@ func (n *NullNode) GetValue() interface{} {
 	return nil
 }
 
-// String returns `null` text
+// String returns the null as the document spelled it.
 func (n *NullNode) String() string {
 	if n.Token.Type == token.ImplicitNullType {
 		if n.Comment != nil {
@@ -550,8 +550,9 @@ func (n *NullNode) String() string {
 		return ""
 	}
 	if n.Comment != nil {
-		return addCommentString("null", n.Comment)
+		return addCommentString(n.stringWithoutComment(), n.Comment)
 	}
+
 	return n.stringWithoutComment()
 }
 
@@ -562,7 +563,15 @@ func (n *NullNode) stringWithoutComment() string {
 		return ""
 	}
 
-	return "null"
+	// The spelling the document used, not the canonical one. YAML resolves
+	// "Null", "NULL", "null" and "~" to the same node, so writing "null" for
+	// all four kept the value and lost the document -- and under a "!!str" the
+	// value went too, since the tag names the characters and "Null" is not
+	// "null".
+	//
+	// Every other scalar node already renders from its token: "!!str True"
+	// keeps its capital T and "!!str .INF" its capitals.
+	return n.Token.Value
 }
 
 // MarshalYAML encodes to a YAML text

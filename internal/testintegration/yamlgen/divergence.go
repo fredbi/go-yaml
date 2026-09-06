@@ -5,7 +5,6 @@ package yamlgen
 
 import (
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -173,70 +172,6 @@ var Ledger = []Divergence{
 			return st.Comments.line() && writesTagAtLineEnd(v, st)
 		},
 	},
-	{
-		Name: "render/a-str-tagged-null-spelling-is-lowercased",
-		Reason: "The renderer writes a `!!str`-tagged null spelling back in lower case. " +
-			"`k: !!str Null` and `k: !!str NULL` both come back as `k: !!str null`, and " +
-			"under that tag `null` is the four letters, so \"Null\" has become \"null\" " +
-			"and the value is gone.\n\n" +
-			"The decode is right and only the render is wrong, which is what pins this on " +
-			"the renderer: `!!str Null` reads \"Null\" today, and reading it was the half " +
-			"of this fixed on the parser branch. `!!str True` renders unchanged, so it is " +
-			"the null spellings and not the resolving spellings in general.\n\n" +
-			"It claims Render and Settle: the second cycle reads \"null\" and writes it " +
-			"again, so the document has stopped moving only after the value went.",
-		Property: Render | Settle,
-		Match:    writesStrTaggedNullSpelling,
-	},
-}
-
-// strTaggedNullSpellings are the plain spellings the renderer lower-cases when
-// `!!str` stands in front of them.
-//
-// The null words alone. `True` and `TRUE` carry the same tag through a render
-// unchanged, which is what makes this the renderer resolving the scalar it was
-// told not to resolve rather than a general case-folding.
-var strTaggedNullSpellings = map[string]struct{}{
-	"Null": {}, "NULL": {},
-}
-
-// writesStrTaggedNullSpelling reports whether emitting v in st writes a `!!str`
-// tag over a null spelling.
-//
-// Quoting is the only style axis consulted, and the predicate is wider than the
-// defect on purpose. The spelling has to reach the document unquoted, which
-// canPlain allows only under this tag; whether a given node is written plain or
-// as a block scalar depends on its depth and on Style.FlowFrom, and a predicate
-// that recomputed the emitter's decision would drift from it. So a folded style
-// draws some documents that render correctly, and the tally reports fewer
-// divergences than draws -- the same trade the comment-above entry makes.
-func writesStrTaggedNullSpelling(v Value, st Style) bool {
-	return st.Quoting == QuotePlain && holdsStrTaggedNull(v)
-}
-
-func holdsStrTaggedNull(v Value) bool {
-	switch n := v.(type) {
-	case Tagged:
-		if inner, ok := n.V.(Str); ok && n.Tag == TagStr {
-			if _, spelt := strTaggedNullSpellings[inner.V]; spelt {
-				return true
-			}
-		}
-
-		return holdsStrTaggedNull(n.V)
-	case Anchored:
-		return holdsStrTaggedNull(n.V)
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsStrTaggedNull)
-	case Map:
-		for _, pair := range n.Pairs {
-			if holdsStrTaggedNull(pair.Val) {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 // writesBrokenTaggedAnchor reports whether emitting v in st writes a tag before
