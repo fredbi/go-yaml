@@ -91,31 +91,27 @@ func TestTheEnumeratedShapesReadIntoAGoType(t *testing.T) {
 // registers did not hold, which is the answer it was built to give. An entry
 // leaves by being fixed -- the test says so rather than passing quietly.
 //
-// Eight are the struct zeroing: a key a struct tag cannot name leaves every
-// field at its zero value and reports nothing, so a mapping keyed by a boolean,
-// a null or a number reads into an `any` and into nothing else. Recorded as
-// yamlgen.Ledger's decode/one-non-string-key-zeroes-a-whole-struct, parked
-// until decodeStruct is inverted.
+// Eleven left that way on 2026-09-07, when the decoder branch landed. Eight
+// were the struct zeroing, closed in two steps: 7dc4075 inverted decodeStruct,
+// so a key no field can be named after is a key no field claims rather than one
+// that abandons the whole mapping, and entryName then named a key by the
+// type's own canonical spelling, so "true: x" reaches a field tagged "true" and
+// "1.0: x" one tagged "1.0" -- which is how the same document reads into a
+// map[string]any. Three were the merge path, closed by 6c10f40: a mapping's own
+// key was refused as a duplicate of the one it overrides, and a merge given a
+// sequence was refused with "sequence was used where mapping is expected".
 //
-// Four are the merge path, and all four are fixed on the decoder branch by
-// 6c10f40 rather than open: a mapping's own key was refused as a duplicate of
-// the one it overrides, and a merge given a sequence was refused with "sequence
-// was used where mapping is expected". They fail here because this branch
-// predates that commit, and they will report themselves stale when it lands.
+// This test also found one the registers did not hold, which is what it was
+// built for: the walking decoder read a merge written in place -- "<<: {a: 1}"
+// rather than "<<: *b" -- as a key no field claims and dropped it. A merge
+// written as an alias gave up on the alias and fell back to the tree; one
+// written in place had nothing else to give up on. Fixed in the same branch.
 var typedPathDefects = map[string]string{
-	"a key that is a boolean":                                       "the struct zeroing, parked",
-	"a key that is null":                                            "the struct zeroing, parked",
-	"a key tagged !!float":                                          "the struct zeroing, parked",
-	"a key that is a float with a whole value":                      "the struct zeroing, parked",
-	"a key written as a float in exponent form":                     "the struct zeroing, parked",
-	"a whole-valued float key beside the integer of the same value": "the struct zeroing, parked",
-	"a key colliding with one an alias resolves to":                 "the struct zeroing, parked",
-	"two keys alike in text and different once resolved":            "the struct zeroing, parked",
-
-	"a local key overriding the merged one":                     "the merge override, fixed by 6c10f40",
-	"a sequence of merges, the earlier winning":                 "a merge given a sequence, fixed by 6c10f40",
-	"a merge from a sequence holding mappings written in place": "a merge given a sequence, fixed by 6c10f40",
-	"a merge from an alias beside a mapping written in place":   "a merge given a sequence, fixed by 6c10f40",
+	// A tag on a key is not unwrapped before the key is named, so the key
+	// resolves to nothing a field can be named after. The same root as
+	// yamlgen.Ledger's parser entries for a tag over a key, and parked with
+	// them: see stream 2, defects 2, 13 and 14.
+	"a key tagged !!float": "a tag on a key, parked",
 }
 
 // sameNumerically compares two decodes of one document, with numbers compared

@@ -1835,16 +1835,16 @@ func (d *Decoder) rangeMergedEntries(ctx context.Context, src ast.Node, ignoreMe
 }
 
 // entryName reads the text a mapping key addresses its entry by. named is false
-// for a key that is not a string, such as "1:" or "[a]:", which no struct field
-// can be named after.
-func (d *Decoder) entryName(ctx context.Context, keyNode ast.Node) (string, bool, error) {
-	keyVal, err := d.nodeToValue(ctx, keyNode)
-	if err != nil {
-		return "", false, err
-	}
-	name, isText := keyVal.(string)
+// for a key no field can be named after, such as "[a]:".
+//
+// keyName writes the type's own canonical spelling, so "true: x" addresses a
+// field tagged "true" and "1.0: x" one tagged "1.0", which is how the same
+// document reads into a map[string]any. Requiring the key to be an ast string
+// dropped every one of those instead.
+func (d *Decoder) entryName(_ context.Context, keyNode ast.Node) (string, bool, error) {
+	name, kind := keyName(unwrapKeyNode(keyNode))
 
-	return name, isText, nil
+	return name, kind != token.KeyOther, nil
 }
 
 // writtenFields records which fields a mapping has set, so that what a "<<"

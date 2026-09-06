@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // errNeedsTheTree says a document or a destination this walk cannot serve.
@@ -330,6 +331,16 @@ func (b *typedBuilder) openEntry(top *typedFrame, keyNode ast.Node) bool {
 		return false
 	}
 
+	if key, isKey := keyNode.(ast.MapKeyNode); isKey && key.IsMergeKey() {
+		// "<<" folds another mapping's entries into this one, which the walk
+		// does not do yet. A merge written as an alias gives up on the alias;
+		// one written in place -- "<<: {a: 1}" -- has nothing else to give up
+		// on, and was read as a key no field claims and dropped.
+		b.fail(errNeedsTheTree)
+
+		return false
+	}
+
 	name, named := entryText(keyNode)
 	if !named {
 		if top.kind == typedMap {
@@ -417,20 +428,15 @@ func fieldAt(v reflect.Value, at []int) (reflect.Value, error) {
 	return v, nil
 }
 
-// entryText reads the name a mapping key addresses its entry by.
+// entryText reads the name a mapping key addresses its entry by, in the type's
+// own canonical spelling: "true: x" addresses a field tagged "true" and
+// "1.0: x" one tagged "1.0", which is how the same document reads into a
+// map[string]any. keyName holds the rule, so the walk, the tree decoder and
+// ToJSON name an entry the same way.
 func entryText(n ast.Node) (string, bool) {
-	switch t := n.(type) {
-	case *ast.StringNode:
-		return t.Value, true
-	case *ast.LiteralNode:
-		if t.Value == nil {
-			return "", true
-		}
+	name, kind := keyName(unwrapKeyNode(n))
 
-		return t.Value.Value, true
-	default:
-		return "", false
-	}
+	return name, kind != token.KeyOther
 }
 
 func (b *typedBuilder) setScalar(dst reflect.Value, node ast.Node) error {
