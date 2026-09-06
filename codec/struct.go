@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 const (
@@ -109,7 +110,45 @@ func (m StructFieldMap) hasMergeProperty() bool {
 	return false
 }
 
+// structFieldMaps holds the fields of each struct type read so far, keyed by
+// reflect.Type.
+var structFieldMaps sync.Map
+
+// readFields holds one type's fields, or the error its tags raised. Both are
+// kept, so a type with a duplicated field name is refused as fast as one that
+// reads.
+type readFields struct {
+	fields StructFieldMap
+	err    error
+}
+
+// structFieldMap returns the fields of structType, keyed by Go field name.
+//
+// A type's fields never change, so each is read once and handed out again
+// afterwards. Reading them for every value decoded was the largest single cost
+// of decoding into Go types: citm_catalog read into the structs it describes
+// allocated 73,708 times in here per document -- a StructFieldMap, a
+// renderNameMap and a StructField per value, and 21,627 calls to strings.Split
+// on tags already split thousands of times -- against 243,679 allocations for
+// the whole decode.
+//
+// The map and the StructFields in it are shared between every decode and
+// encode of the type, so no caller may write to them.
 func structFieldMap(structType reflect.Type) (StructFieldMap, error) {
+	if cached, read := structFieldMaps.Load(structType); read {
+		r := cached.(*readFields)
+
+		return r.fields, r.err
+	}
+
+	fields, err := readStructFields(structType)
+	cached, _ := structFieldMaps.LoadOrStore(structType, &readFields{fields: fields, err: err})
+	r := cached.(*readFields)
+
+	return r.fields, r.err
+}
+
+func readStructFields(structType reflect.Type) (StructFieldMap, error) {
 	fieldMap := StructFieldMap{}
 	renderNameMap := map[string]struct{}{}
 	for i := 0; i < structType.NumField(); i++ {
