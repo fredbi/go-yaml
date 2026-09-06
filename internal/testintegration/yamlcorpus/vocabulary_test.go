@@ -183,14 +183,20 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// lost `unexpected scalar value` again, and a Refusals entry for an anchor
 	// standing alone put `anchor is not allowed in this context` back.
 	//
-	// Two of the 26 look unreachable rather than untested, and both were hunted
-	// on 2026-09-11 without success. `unexpected scalar value` has one document
-	// behind it -- "a:" over ": 2" -- and that is the empty-key defect, so a
-	// Refusals entry for it would pin a bug. Nothing at all provokes
-	// `specified not scalar tag`: parseScalarTag reports it when a scalar tag
-	// stands on a node that is not a scalar, and every such document is caught
-	// earlier. Recorded in stream 8.
-	const ceiling = 26
+	// Three of the 27 look unreachable rather than untested. `unexpected scalar
+	// value` has one document behind it -- "a:" over ": 2" -- and that is the
+	// empty-key defect, so a Refusals entry for it would pin a bug. Nothing at
+	// all provokes `specified not scalar tag`: parseScalarTag reports it when a
+	// scalar tag stands on a node that is not a scalar, and every such document
+	// is caught earlier. Both were hunted on 2026-09-11 without success and are
+	// recorded in stream 8.
+	//
+	// The third took the ceiling from 26 to 27 on 2026-09-07, when Scanner.Init
+	// grew a refusal for a source at or above maxSourceLen. No document reaches
+	// it: the bound is math.MaxInt32 - 1, so provoking it costs two gigabytes.
+	// The bound is checked instead by sourceTooLong, which is a predicate of its
+	// own so that a test can read its edge at any size.
+	const ceiling = 27
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+
