@@ -57,6 +57,13 @@ type Entry struct {
 	Value yamlgen.Value
 	// Mutation names how it was broken, empty for a document emitted whole.
 	Mutation string
+	// Features are the constructs the emitter wrote into it.
+	//
+	// Empty for a byte mutant, and that is the honest answer rather than a
+	// missing one: the mutation may have deleted the bracket the document was
+	// labeled for, and nothing here can tell which mutations did. It is the
+	// same reasoning that caps a mutant's VerdictAt at parsing.
+	Features []stance.Feature
 	// Tags are the rules this document breaks, where it was broken on purpose
 	// and the break is therefore known.
 	//
@@ -86,22 +93,28 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 		at := int(seed)*1_000_003 + i
 
 		value := values.Example(at)
-		src := []byte(yamlgen.Emit(value, styles.Example(at)))
+		style := styles.Example(at)
+		written := yamlgen.Write(value, style)
+		src := []byte(written.Text)
 
 		out = append(out, Entry{
-			Name:  "generated/" + digits(i),
-			Src:   src,
-			Value: value,
+			Name:     "generated/" + digits(i),
+			Src:      src,
+			Value:    value,
+			Features: written.Features,
 		})
 
 		// Broken on purpose, on the value, so the break is labeled rather
 		// than guessed at. These are the only generated documents that violate
 		// a rule the grammar cannot see.
 		for _, b := range breakRules(value) {
+			broken := yamlgen.Write(b.Value, style)
+
 			out = append(out, Entry{
 				Name:     "generated/" + digits(i) + "/" + b.How,
-				Src:      []byte(yamlgen.Emit(b.Value, styles.Example(at))),
+				Src:      []byte(broken.Text),
 				Mutation: b.How,
+				Features: broken.Features,
 				Tags:     b.Tags,
 			})
 		}

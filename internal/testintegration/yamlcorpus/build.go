@@ -19,7 +19,7 @@ import (
 
 // Generator names what produced a corpus, so a change here is as visible in an
 // artifact's header as a change to the grammar.
-const Generator = "yamlcorpus/5"
+const Generator = "yamlcorpus/6"
 
 // Build is the recipe for a corpus: how much to draw, and how much to keep.
 type Build struct {
@@ -90,6 +90,7 @@ func (b Build) Write(w io.Writer) error {
 		Cases:     len(cases),
 		Vocabulary: suite.SpecsFor(
 			vocabularyOf(cases), Vocabulary(), allRules()),
+		Features: featuresOf(cases),
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -162,6 +163,7 @@ func (b Build) cases() []suite.Case {
 			VerdictAt:  verdictAt(e),
 			Opaque:     !utf8.Valid(e.Src),
 			Tags:       append(encodingTags(e.Src), names(e.Tags)...),
+			Features:   featureNames(e.Features),
 			Meaning:    meaning,
 			Origin: suite.Origin{
 				Document:  -1,
@@ -211,6 +213,36 @@ func encodingTags(src []byte) []string {
 	return out
 }
 
+// featuresOf collects every feature name the corpus uses, sorted.
+func featuresOf(cases []suite.Case) []string {
+	var out []string
+
+	for _, c := range cases {
+		for _, f := range c.Features {
+			if !slices.Contains(out, f) {
+				out = append(out, f)
+			}
+		}
+	}
+
+	slices.Sort(out)
+
+	return out
+}
+
+func featureNames(features []stance.Feature) []string {
+	if len(features) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(features))
+	for _, f := range features {
+		out = append(out, string(f))
+	}
+
+	return out
+}
+
 // vocabularyOf collects every tag name the corpus uses.
 func vocabularyOf(cases []suite.Case) []string {
 	var out []string
@@ -247,6 +279,13 @@ const Reading = "yaml-1.2-core"
 //
 // The verdict is still recorded, and it is still the grammar's. What the
 // construction adds is the label the grammar could not produce.
+//
+// None of these carries a Feature, and the omission is deliberate. A feature is
+// derived by the emitter from a Value and a Style, and these documents have
+// neither -- somebody wrote the bytes. Reading them back out with a scanner is
+// exactly the unsound step TestEveryMarkInTheBytesIsLabeled has to guard
+// against, so a filter on features selects among the generated documents and
+// leaves these to the tags, which say more about them anyway.
 func Cases() []suite.Case {
 	out := make([]suite.Case, 0,
 		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(MergeShapes())+len(DirectiveShapes())+len(ReachShapes()))
