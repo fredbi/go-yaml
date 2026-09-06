@@ -71,9 +71,19 @@ func KnownlyAccepted(src string) *Laxity {
 // The list is not a survey. It is what a few hundred thousand mutations turned
 // up and a person then confirmed, so absence from it means nothing.
 //
-// It is empty. The three entries it held were refused once the byte order mark
-// was held to the document prefixes it may open, the '?' was read as the
+// The three entries it held before 2026-09-11 were refused once the byte order
+// mark was held to the document prefixes it may open, the '?' was read as the
 // explicit key indicator wherever separation follows it, and an entry's value
 // was measured against the ':' of a key that was never written. Each left a
 // test in parser/ or scanner/ behind it.
-var Lax = []Laxity{}
+var Lax = []Laxity{
+	{
+		Name: "a block sequence on the same line as its tag",
+		Src:  "!foo - 1\n",
+		Rule: "8.2.1: s-l+block-collection puts s-l-comments between a node's properties and the " +
+			"collection under them, and s-l-comments requires a line break. So a block sequence " +
+			"cannot begin on the line its tag was written on. `!foo` over `- 1` on the next line " +
+			"is the same document written correctly, and reads the same.",
+		Reads: []any{uint64(1)},
+	},
+}

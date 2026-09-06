@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -153,6 +154,29 @@ var Ledger = []Divergence{
 		Match:    writesFloatTaggedWideNumber,
 	},
 	{
+		Name: "parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar",
+		Reason: "The scanner types the scalar under a `!!` tag and leaves the one under the same tag " +
+			"written any other way as a string. `!!float 7` parses to an ast.IntegerNode under its " +
+			"ast.TagNode and `!!float 1e3` to an ast.FloatNode; `!<tag:yaml.org,2002:float> 7` and " +
+			"`!e!float 1e3` both parse to an ast.StringNode. The tag's URI is the same in every case, " +
+			"so the tree a consumer walks depends on how the tag was spelled.\n\n" +
+			"For most values nothing further goes wrong -- the string is read against the tag " +
+			"afterwards and `7`, `0x1f`, `1e3`, `true` and `null` all come back right. The exception is " +
+			"the three specials: `!<tag:yaml.org,2002:float> .inf` decodes to the float64 **zero** with " +
+			"nothing reported, where `!!float .inf` decodes to +Inf. `-.inf` and `.nan` go the same way.\n\n" +
+			"codec.ToJSON loses the same value and loses a refusal with it. `!!float .inf` is refused " +
+			"with `JSON has no number for .inf`, which is right -- JSON has no infinity -- while the " +
+			"verbatim spelling writes `0.0` and reports nothing.\n\n" +
+			"A collection tag is unaffected: `!<tag:yaml.org,2002:seq> [1, .inf]` reads +Inf, because " +
+			"the scalar inside it carries no tag of its own.\n\n" +
+			"The predicate matches only the shape that loses a value, so a document merely carrying a " +
+			"tag written out in full is still held to every property.\n\n" +
+			"Decode and Render, and Render because the value is already wrong when it is first read: " +
+			"the rendering is byte-identical to the document that went in.",
+		Property: Decode | Render,
+		Match:    writesASpecialFloatUnderALongTag,
+	},
+	{
 		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
 		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
 			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
@@ -162,6 +186,11 @@ var Ledger = []Divergence{
 			"that a tag suppresses resolution -- one spelling of the same tag behaves and the " +
 			"others do not. A flow mapping resolves them under any tag, `!foo {False: 1}` " +
 			"reading \"false\". And an anchor makes no difference either way.\n\n" +
+			"That first sentence holds for the `!!map` shorthand alone. Written in full as " +
+			"`!<tag:yaml.org,2002:map>`, or through a declared handle as `!e!map`, the same tag " +
+			"leaves the keys as text like any other -- which is the same root cause as " +
+			"parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar, seen on a mapping " +
+			"instead of on a scalar. The predicate takes Style.TagSpelling for that reason.\n\n" +
 			"Only visible where a key's text and its canonical name differ, which since the " +
 			"naming rule landed means the booleans and the nulls: `!foo` over `1.0: a` reads " +
 			"\"1.0\" correctly, because that is the text as well as the name.",
@@ -197,6 +226,42 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 	return false
 }
 
+// writesASpecialFloatUnderALongTag reports whether v writes an infinity or a
+// NaN under a float tag that st does not spell as a `!!` shorthand.
+func writesASpecialFloatUnderALongTag(v Value, st Style) bool {
+	if st.TagSpelling == SpellShorthand {
+		return false
+	}
+
+	return holdsASpecialFloatUnderAFloatTag(v)
+}
+
+func holdsASpecialFloatUnderAFloatTag(v Value) bool {
+	switch n := v.(type) {
+	case Tagged:
+		if f, number := n.V.(Float); number && n.Tag == TagFloat && isSpecial(f.V) {
+			return true
+		}
+
+		return holdsASpecialFloatUnderAFloatTag(n.V)
+	case Anchored:
+		return holdsASpecialFloatUnderAFloatTag(n.V)
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsASpecialFloatUnderAFloatTag)
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsASpecialFloatUnderAFloatTag(p.Key) || holdsASpecialFloatUnderAFloatTag(p.Val) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isSpecial reports the three floats YAML spells with a leading '.'.
+func isSpecial(f float64) bool { return math.IsInf(f, 0) || math.IsNaN(f) }
+
 // writesTaggedBlockMappingKeys reports whether emitting v writes a mapping that
 // carries a tag other than `!!map`.
 //
@@ -205,23 +270,26 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 // keyed by ordinary words matches and reads back correctly. And it does not ask
 // whether the mapping lands in block context, because that depends on its depth
 // and on Style.FlowFrom.
-func writesTaggedBlockMappingKeys(v Value, _ Style) bool {
+//
+// The one tag that behaves is `!!map`, and only while it is written as that
+// shorthand: st decides, so the same tag written out in full matches here.
+func writesTaggedBlockMappingKeys(v Value, st Style) bool {
 	switch n := v.(type) {
 	case Tagged:
-		if _, keyed := n.V.(Map); keyed && n.Tag != TagMap {
+		if _, keyed := n.V.(Map); keyed && (n.Tag != TagMap || st.TagSpelling != SpellShorthand) {
 			return true
 		}
 
-		return writesTaggedBlockMappingKeys(n.V, Style{})
+		return writesTaggedBlockMappingKeys(n.V, st)
 	case Anchored:
-		return writesTaggedBlockMappingKeys(n.V, Style{})
+		return writesTaggedBlockMappingKeys(n.V, st)
 	case Seq:
 		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesTaggedBlockMappingKeys(item, Style{})
+			return writesTaggedBlockMappingKeys(item, st)
 		})
 	case Map:
 		for _, p := range n.Pairs {
-			if writesTaggedBlockMappingKeys(p.Val, Style{}) {
+			if writesTaggedBlockMappingKeys(p.Val, st) {
 				return true
 			}
 		}

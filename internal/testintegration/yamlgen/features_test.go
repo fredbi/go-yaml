@@ -54,7 +54,10 @@ func marks() []mark {
 	}
 
 	return []mark{
-		{feature: yamlgen.FeatureDocumentMarker, in: func(s string) bool { return strings.HasPrefix(s, "---") }},
+		{feature: yamlgen.FeatureDocumentMarker, in: opensTheDocument},
+		{feature: yamlgen.FeatureTagDirective, in: func(s string) bool {
+			return strings.HasPrefix(s, "%TAG ")
+		}},
 		{feature: yamlgen.FeatureCommentAbove, in: has("#"), rune: '#'},
 		{feature: yamlgen.FeatureCommentInline, in: has("#"), rune: '#'},
 		{feature: yamlgen.FeatureFlowCollection, in: func(s string) bool {
@@ -87,6 +90,44 @@ func marks() []mark {
 	}
 }
 
+// opensTheDocument reports the "---" that FeatureDocumentMarker names. A %TAG
+// directive is written above it, so the marker is not always at byte zero.
+func opensTheDocument(s string) bool {
+	// Split on either break character, since Style.Break may be a lone "\r".
+	for line := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if strings.HasPrefix(line, "%") {
+			continue
+		}
+
+		return strings.HasPrefix(line, "---")
+	}
+
+	return false
+}
+
+// plainBytes blanks out every verbatim tag, whose URI holds characters the
+// marks read as structure: "!<tag:yaml.org,2002:map>" ends in the ">" that
+// spells a folded block scalar.
+//
+// A crude scan for a crude scan. The emitter writes a verbatim tag as one token
+// with no space in it, so finding the "!<" and running to the ">" cannot cross
+// into anything else.
+func plainBytes(s string) string {
+	for {
+		open := strings.Index(s, "!<")
+		if open < 0 {
+			return s
+		}
+
+		close := strings.Index(s[open:], ">")
+		if close < 0 {
+			return s
+		}
+
+		s = s[:open] + s[open+close+1:]
+	}
+}
+
 // loneCR reports a carriage return that no line feed follows, which is the one
 // spelling of BreakCR.
 func loneCR(s string) bool {
@@ -99,14 +140,17 @@ func loneCR(s string) bool {
 	return false
 }
 
-// tagMarks are the four tag features, which share one mark: a tag is the only
-// thing in a document that writes a "!".
+// tagMarks are the tag features, which share one mark: a tag is the only thing
+// in a document that writes a "!". The %TAG directive is in here because it is
+// written only for a tag that goes through it.
 func tagMarks() []stance.Feature {
 	return []stance.Feature{
 		yamlgen.FeatureTagShorthand,
 		yamlgen.FeatureTagLocal,
 		yamlgen.FeatureTagVerbatim,
+		yamlgen.FeatureTagHandle,
 		yamlgen.FeatureTagNonSpecific,
+		yamlgen.FeatureTagDirective,
 	}
 }
 
@@ -148,7 +192,9 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 		w := yamlgen.Write(v, st)
 
 		permits := map[stance.Feature]bool{
-			yamlgen.FeatureDocumentMarker:  st.Markers,
+			// A %TAG directive forces the marker whatever the style asked
+			// for: the directive applies to the document the "---" opens.
+			yamlgen.FeatureDocumentMarker:  st.Markers || st.TagSpelling == yamlgen.SpellHandle,
 			yamlgen.FeatureCommentAbove:    st.Comments == yamlgen.HeadComments || st.Comments == yamlgen.AllComments,
 			yamlgen.FeatureCommentInline:   st.Comments == yamlgen.LineComments || st.Comments == yamlgen.AllComments,
 			yamlgen.FeatureFlowPair:        st.FlowPairs,
@@ -162,6 +208,13 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureQuotedSingle:    st.Quoting == yamlgen.QuoteSingle,
 			yamlgen.FeatureBreakCRLF:       st.Break == yamlgen.BreakCRLF,
 			yamlgen.FeatureBreakCR:         st.Break == yamlgen.BreakCR,
+			yamlgen.FeatureTagShorthand:    st.TagSpelling == yamlgen.SpellShorthand,
+			yamlgen.FeatureTagVerbatim:     st.TagSpelling == yamlgen.SpellVerbatim,
+			yamlgen.FeatureTagHandle:       st.TagSpelling == yamlgen.SpellHandle,
+			yamlgen.FeatureTagDirective:    st.TagSpelling == yamlgen.SpellHandle,
+			// A local tag is written out in full under SpellVerbatim, as
+			// "!<!foo>", and keeps its shorthand under the other two.
+			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,
 		}
 
 		for _, f := range w.Features {
@@ -196,15 +249,23 @@ func TestEveryMarkInTheBytesIsLabeled(t *testing.T) {
 			rt.Fatalf("a lone carriage return and its label disagree\n%q\n%v", w.Text, w.Features)
 		}
 
-		if strings.HasPrefix(w.Text, "---") != slices.Contains(w.Features, yamlgen.FeatureDocumentMarker) {
+		if opensTheDocument(w.Text) != slices.Contains(w.Features, yamlgen.FeatureDocumentMarker) {
 			rt.Fatalf("a document marker and its label disagree\n%q\n%v", w.Text, w.Features)
 		}
+
+		if strings.HasPrefix(w.Text, "%TAG ") != slices.Contains(w.Features, yamlgen.FeatureTagDirective) {
+			rt.Fatalf("a %%TAG directive and its label disagree\n%q\n%v", w.Text, w.Features)
+		}
+
+		// A verbatim tag's URI holds characters the marks below read as
+		// structure, and it is not scalar content, so it goes before they run.
+		text := plainBytes(w.Text)
 
 		// A flow collection writes both brackets, and one label covers them, so
 		// the guard has to clear both characters before the read-back is sound.
 		flow := yamlgen.FeatureFlowCollection
 
-		if structural(v, "[{") && strings.ContainsAny(w.Text, "[{") && !slices.Contains(w.Features, flow) {
+		if structural(v, "[{") && strings.ContainsAny(text, "[{") && !slices.Contains(w.Features, flow) {
 			rt.Fatalf("a flow collection is written and not labeled\n%q\n%v", w.Text, w.Features)
 		}
 
@@ -213,7 +274,7 @@ func TestEveryMarkInTheBytesIsLabeled(t *testing.T) {
 				continue
 			}
 
-			if !structural(v, string(m.rune)) || !strings.ContainsRune(w.Text, m.rune) {
+			if !structural(v, string(m.rune)) || !strings.ContainsRune(text, m.rune) {
 				continue
 			}
 

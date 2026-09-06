@@ -82,6 +82,13 @@ func TestLabParserMatchesProduction(t *testing.T) {
 // too. refparser builds a TagNode over an AliasNode and renders it back;
 // the shipped parser stops with "unexpected scalar value type".
 //
+// 8.2.1's s-l+block-collection puts s-l-comments -- a line break -- between a
+// node's properties and the block collection under them, so "!<tag:x> -" is not
+// a YAML 1.2 document either and the recognizer refuses it. refparser reads the
+// "-" as a block sequence beginning on the tag's own line; the shipped parser
+// stops with "value is not allowed in this context". It refuses "!!int -"
+// identically, and so does refparser, so only the long spellings reach this.
+//
 // Matching the reason rather than the document, because the fuzz seeds hold
 // many shapes of each and they are one finding apiece. A duplicate the shipped
 // parser reports wrongly would still be caught: yamlcorpus holds the key rules,
@@ -106,9 +113,42 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "a flow mapping entry takes a single ':' (7.4.2)", true
 	case strings.Contains(msg, "unexpected scalar value type") && holdsTaggedAlias(want):
 		return "an alias node carries no tag (7.1)", true
+	case strings.Contains(msg, "value is not allowed in this context") && holdsCollectionOnItsTagsLine(want):
+		return "a block collection begins on the line below its properties (8.2.1)", true
 	default:
 		return "", false
 	}
+}
+
+// holdsCollectionOnItsTagsLine reports whether f carries a tag whose block
+// collection begins on the tag's own line.
+func holdsCollectionOnItsTagsLine(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			tag, ok := n.(*ast.TagNode)
+			if !ok || tag.Start == nil {
+				return
+			}
+
+			switch body := tag.Value.(type) {
+			case *ast.SequenceNode:
+				found = found || (!body.IsFlowStyle && sameLine(tag.Start, body.Start))
+			case *ast.MappingNode:
+				found = found || (!body.IsFlowStyle && sameLine(tag.Start, body.Start))
+			}
+		}), doc)
+	}
+
+	return found
+}
+
+func sameLine(a, b *token.Token) bool {
+	return a != nil && b != nil && a.Position.Line == b.Position.Line
 }
 
 // holdsTaggedAlias reports whether f carries a tag standing on an alias.

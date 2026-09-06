@@ -267,21 +267,27 @@ var awkwardStrings = []string{
 
 // The tags a node can carry without changing what it means.
 //
-// Every one of them is measured rather than assumed. The three that resolve a
-// plain scalar by its own kind -- the non-specific `!`, a local tag, and the
-// verbatim spelling of the string tag -- turn any scalar into its text, so they
-// are only put on a [Str], a [Seq] or a [Map], where they are the identity.
+// Every one of them is measured rather than assumed. The two that resolve a
+// plain scalar by its own kind -- the non-specific `!` and a local tag -- turn
+// any scalar into its text, so they are only put on a [Str], a [Seq] or a
+// [Map], where they are the identity.
+//
+// These are the tags, not the ways of writing them. The same tag is spelled
+// three ways and [Style.TagSpelling] chooses: "!!int",
+// "!<tag:yaml.org,2002:int>" and "!e!int" are one tag on the node and three
+// documents. Splitting the two was what let the long form reach every kind --
+// it used to exist only as a tenth tag, offered on [Str] alone, and so was
+// written on the one kind where it made no difference.
 const (
-	TagNull     = "!!null"
-	TagBool     = "!!bool"
-	TagInt      = "!!int"
-	TagFloat    = "!!float"
-	TagStr      = "!!str"
-	TagSeq      = "!!seq"
-	TagMap      = "!!map"
-	TagLocal    = "!foo"
-	TagNone     = "!"
-	TagVerbatim = "!<tag:yaml.org,2002:str>"
+	TagNull  = "!!null"
+	TagBool  = "!!bool"
+	TagInt   = "!!int"
+	TagFloat = "!!float"
+	TagStr   = "!!str"
+	TagSeq   = "!!seq"
+	TagMap   = "!!map"
+	TagLocal = "!foo"
+	TagNone  = "!"
 )
 
 // TagFor returns the tags that can be written on v without changing what it
@@ -299,7 +305,7 @@ func TagFor(v Value) []string {
 	case BigInt:
 		return []string{TagInt}
 	case Str:
-		return []string{TagStr, TagLocal, TagNone, TagVerbatim}
+		return []string{TagStr, TagLocal, TagNone}
 	case Seq:
 		return []string{TagSeq, TagLocal, TagNone}
 	case Map:

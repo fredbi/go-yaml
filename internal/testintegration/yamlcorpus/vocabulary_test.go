@@ -176,8 +176,11 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// templates by itself. It went 27 -> 28 when yamlgen drew the infinities,
 	// and 28 -> 32 when BigInt and BigFloat took a draw slot each -- that one
 	// was a real loss, and folding them into the integer and float slots at one
-	// in eight put all of it back.
-	const ceiling = 27
+	// in eight put all of it back. Style.TagSpelling then took it to 25:
+	// mutating a "%TAG" line reaches `unexpected format TAG directive`, and the
+	// longer tags reach `found unexpected document separator` and
+	// `unexpected scalar value`.
+	const ceiling = 25
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+

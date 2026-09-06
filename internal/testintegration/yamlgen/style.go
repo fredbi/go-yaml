@@ -138,6 +138,45 @@ func (o PropertyOrder) String() string {
 	return ""
 }
 
+// TagSpelling is how a tag is written down.
+//
+// The three spellings name the same tag and the document means the same thing,
+// which is what makes this presentation and not meaning. Only the
+// tag:yaml.org,2002: family takes all three: a bare "!" has no URI to write out
+// and a local "!foo" has no handle, so a local tag takes the verbatim form and
+// nothing else.
+type TagSpelling int
+
+const (
+	// SpellShorthand writes the secondary handle: "!!int".
+	SpellShorthand TagSpelling = iota
+	// SpellVerbatim writes the tag in full between angle brackets:
+	// "!<tag:yaml.org,2002:int>", which resolves through no handle at all. A
+	// local tag takes this form too, as "!<!foo>".
+	SpellVerbatim
+	// SpellHandle declares a handle with a %TAG directive at the head of the
+	// document and writes the tag through it: "!e!int" under
+	// "%TAG !e! tag:yaml.org,2002:".
+	SpellHandle
+)
+
+func (s TagSpelling) String() string {
+	switch s {
+	case SpellVerbatim:
+		return " tag=!<>"
+	case SpellHandle:
+		return " tag=!e!"
+	case SpellShorthand:
+		return ""
+	default:
+		return ""
+	}
+}
+
+// secondaryPrefix is what the "!!" handle expands to unless a %TAG says
+// otherwise, and what a %TAG must declare for a handle to mean the same thing.
+const secondaryPrefix = "tag:yaml.org,2002:"
+
 // Style is one way of writing a document down.
 //
 // These are the axes along which two documents can look completely different
@@ -202,6 +241,12 @@ type Style struct {
 	// PropertyLine puts a node's properties on a line of their own, above the
 	// node they belong to, wherever block context allows it.
 	PropertyLine bool
+	// TagSpelling is how a tag is written: "!!int", "!<tag:yaml.org,2002:int>"
+	// or "!e!int".
+	TagSpelling TagSpelling
+	// TagHandle is the handle name SpellHandle declares and uses, written
+	// without its "!" delimiters. Ignored by the other two spellings.
+	TagHandle string
 }
 
 // flowAt reports whether a node at this depth is written in flow style.
@@ -256,9 +301,14 @@ func (s Style) String() string {
 		props += " props-above"
 	}
 
+	spelling := s.TagSpelling.String()
+	if s.TagSpelling == SpellHandle {
+		spelling = " tag=!" + s.TagHandle + "!"
+	}
+
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
-		s.Break.String() + props
+		s.Break.String() + props + spelling
 }
 
 // Styles generates a presentation.
@@ -294,6 +344,15 @@ func Styles() *rapid.Generator[Style] {
 			Break:         rapid.SampledFrom([]Break{BreakLF, BreakCRLF, BreakCR}).Draw(t, "break"),
 			PropertyOrder: PropertyOrder(rapid.IntRange(0, 1).Draw(t, "proporder")),
 			PropertyLine:  rapid.Bool().Draw(t, "propline"),
+			// An even three-way split, as for Break and for the same reason:
+			// the two long spellings are the ones the corpus never wrote, and
+			// weighting them down would leave them as rare as the axis they
+			// replaced.
+			TagSpelling: TagSpelling(rapid.IntRange(0, 2).Draw(t, "tagspelling")),
+			// Handle names, not tags. ns-word-char admits digits and '-', and
+			// a handle of more than one character is the shape a parser that
+			// scans for "!x!" by position gets wrong.
+			TagHandle: rapid.SampledFrom([]string{"e", "x", "n-1", "TAG2"}).Draw(t, "taghandle"),
 		}
 	})
 }

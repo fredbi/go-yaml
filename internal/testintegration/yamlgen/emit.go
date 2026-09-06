@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -34,7 +35,16 @@ func Emit(v Value, st Style) string {
 func (e *emitter) emit(v Value) string {
 	st := e.st
 
-	if st.Markers {
+	// A %TAG directive applies to the document the directives end marker opens,
+	// so writing one forces the "---" whatever the style asked for. It is
+	// written only when the document has a tag to route through the handle:
+	// declaring a handle nothing uses is legal and says nothing.
+	if st.TagSpelling == SpellHandle && holdsSecondaryTag(v) {
+		e.feat.add(FeatureTagDirective)
+		e.buf.WriteString("%TAG !" + st.TagHandle + "! " + secondaryPrefix + "\n")
+	}
+
+	if st.Markers || e.buf.Len() > 0 {
 		e.feat.add(FeatureDocumentMarker)
 		e.buf.WriteString("---\n")
 	}
@@ -179,6 +189,62 @@ func strip(v Value) (props, Value) {
 
 func (p props) none() bool { return p.anchor == "" && p.tag == "" }
 
+// spellTag writes a tag the way the style asks for.
+//
+// Three spellings of the same tag, and the node carries only the tag. A bare
+// "!" is left alone: it names no type, so there is nothing to write out in full
+// and no handle to route it through. A local "!foo" takes the verbatim form,
+// where the URI is the tag itself, and keeps its shorthand under SpellHandle --
+// declaring a handle for it would mean a second %TAG line saying something
+// different from the first.
+func spellTag(tag string, st Style) string {
+	suffix, secondary := strings.CutPrefix(tag, "!!")
+	if !secondary {
+		if tag == TagNone || tag == "" || st.TagSpelling != SpellVerbatim {
+			return tag
+		}
+
+		return "!<" + tag + ">"
+	}
+
+	switch st.TagSpelling {
+	case SpellVerbatim:
+		return "!<" + secondaryPrefix + suffix + ">"
+	case SpellHandle:
+		return "!" + st.TagHandle + "!" + suffix
+	case SpellShorthand:
+		return tag
+	default:
+		return tag
+	}
+}
+
+// holdsSecondaryTag reports whether v carries a tag that SpellHandle would
+// route through a declared handle, which is what makes the %TAG directive
+// necessary rather than decorative.
+func holdsSecondaryTag(v Value) bool {
+	switch n := v.(type) {
+	case Tagged:
+		if strings.HasPrefix(n.Tag, "!!") {
+			return true
+		}
+
+		return holdsSecondaryTag(n.V)
+	case Anchored:
+		return holdsSecondaryTag(n.V)
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsSecondaryTag)
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsSecondaryTag(p.Key) || holdsSecondaryTag(p.Val) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // propText writes the properties, and records the ones written tag first.
 //
 // A tag written before an anchor is dropped, so what a [Ledger] entry needs is
@@ -190,7 +256,7 @@ func (e *emitter) propText(p props) string {
 	}
 
 	if p.tag != "" {
-		e.feat.add(tagFeature(p.tag))
+		e.feat.add(tagFeature(spellTag(p.tag, e.st)))
 	}
 
 	if p.anchor != "" && p.tag != "" && e.st.PropertyOrder == TagFirst {
@@ -234,7 +300,7 @@ func (p props) text(st Style) string {
 		anchor = "&" + p.anchor
 	}
 
-	parts := []string{anchor, p.tag}
+	parts := []string{anchor, spellTag(p.tag, st)}
 	if st.PropertyOrder == TagFirst {
 		parts[0], parts[1] = parts[1], parts[0]
 	}

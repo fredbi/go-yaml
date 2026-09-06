@@ -84,8 +84,13 @@ const (
 	FeatureTagLocal stance.Feature = "node/tag-local"
 	// FeatureTagVerbatim is a "!<...>" tag, resolving through nothing.
 	FeatureTagVerbatim stance.Feature = "node/tag-verbatim"
+	// FeatureTagHandle is a "!e!int" tag, resolving through a handle the
+	// document declared.
+	FeatureTagHandle stance.Feature = "node/tag-handle"
 	// FeatureTagNonSpecific is a bare "!", suppressing resolution.
 	FeatureTagNonSpecific stance.Feature = "node/tag-non-specific"
+	// FeatureTagDirective is a "%TAG" line declaring the handle those tags use.
+	FeatureTagDirective stance.Feature = "presentation/tag-directive"
 
 	// FeatureValueNull and the rest name what the document denotes, drawn from
 	// the Value rather than from the text. A consumer that cannot hold a float
@@ -184,17 +189,24 @@ func (f features) sorted() []stance.Feature {
 
 // tagFeature names the kind of tag a spelling is.
 //
-// The four kinds resolve by four different routes -- through the secondary
-// handle, through nothing, through the application, and not at all -- which is
-// why one "a tag is present" label would not have been worth carrying.
-func tagFeature(tag string) stance.Feature {
+// Read from the written form rather than from the tag on the node, since
+// [Style.TagSpelling] is what decides between them. The five kinds resolve by
+// five different routes -- through the secondary handle, through a declared
+// one, through nothing, through the application, and not at all -- which is why
+// one "a tag is present" label would not have been worth carrying.
+//
+// The verbatim test comes first because "!<!foo>" is a local tag written out in
+// full and holds a "!" of its own.
+func tagFeature(written string) stance.Feature {
 	switch {
-	case strings.HasPrefix(tag, "!<"):
+	case strings.HasPrefix(written, "!<"):
 		return FeatureTagVerbatim
-	case strings.HasPrefix(tag, "!!"):
+	case strings.HasPrefix(written, "!!"):
 		return FeatureTagShorthand
-	case tag == TagNone:
+	case written == TagNone:
 		return FeatureTagNonSpecific
+	case strings.Count(written, "!") == 2:
+		return FeatureTagHandle
 	default:
 		return FeatureTagLocal
 	}
