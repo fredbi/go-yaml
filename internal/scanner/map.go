@@ -58,7 +58,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	// mapping value
 	tk, ok := s.bufferedToken(ctx)
 	if ok {
-		s.lastDelimColumn = int(tk.Position.Column)
+		s.lastDelimColumn = tk.Position.Column
 		ctx.addTokenValue(tk)
 	} else if col := ctx.keyStartColumn(); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty scalar
@@ -66,7 +66,7 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		// What the following lines are measured against is where the key begins, so for "&a :" that is the '&' and not the
 		// name after it.
 		s.lastDelimColumn = col
-	} else if last := ctx.lastContentToken(); last == nil || int(last.Position.Line) != s.line {
+	} else if last := ctx.lastContentToken(); last == nil || last.Position.Line != s.line {
 		// Nothing precedes this ':' on its line, so the key was written above it after a '?'.
 		// The ':' is then where the entry sits, and the level its value is measured against.
 		// Left at the level of whatever the key held -- a sequence entry, most often -- the value's own lines read as no
@@ -98,7 +98,7 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 	}
 
 	tk := token.MakeMappingKey(s.pos())
-	s.lastDelimColumn = int(tk.Position.Column)
+	s.lastDelimColumn = tk.Position.Column
 	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()

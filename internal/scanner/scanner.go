@@ -29,28 +29,28 @@ type Scanner struct {
 	// offset. line number.
 	//
 	// This number starts from 1.
-	line int
+	line int32
 	// column number.
 	//
 	// This number starts from 1.
-	column int
+	column int32
 	// offset represents the offset from the beginning of the source. lastDelimColumn is the last column needed to compare
 	// indent is retained.
-	lastDelimColumn int
+	lastDelimColumn int32
 	// indentNum indicates the number of spaces used for indentation.
-	indentNum int
+	indentNum int32
 	// prevLineIndentNum indicates the number of spaces used for indentation at previous line.
-	prevLineIndentNum int
+	prevLineIndentNum int32
 	// indentLevel indicates the level of indent depth.
 	//
 	// This value does not match the column value.
-	indentLevel            int
-	startedFlowSequenceNum int
-	startedFlowMapNum      int
+	indentLevel            int32
+	startedFlowSequenceNum int32
+	startedFlowMapNum      int32
 	// flowIndent is the indentation the line that opened the outermost flow collection carried.
 	//
 	// Every further line of that collection has to be indented past it.
-	flowIndent  int
+	flowIndent  int32
 	indentState IndentState
 	// savedPos holds the position a token was started at, where the scanner noticed the start only after passing it.
 	// hasSavedPos says whether there is one.
@@ -58,7 +58,7 @@ type Scanner struct {
 	// lastIndentLevel is the indent level the last token was given.
 	//
 	// A block scalar's content sits one level below whatever opened it, and that is the only thing that asks.
-	lastIndentLevel int
+	lastIndentLevel int32
 	// initErr holds what is wrong with the source itself, found before any token was read and reported by the first Scan.
 	initErr error
 	// lookback fills in each token's BlankLineAbove and CommentBreaksAbove as it is emitted, from the tokens emitted
@@ -481,7 +481,7 @@ func (s *Scanner) pos() token.Position {
 
 	s.lastIndentLevel = s.indentLevel
 
-	return token.At(posInt(s.line), posInt(s.column), posInt(s.ctx.idx), posInt(s.indentNum))
+	return token.At(s.line, s.column, s.ctx.idx, s.indentNum)
 }
 
 func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
@@ -500,7 +500,7 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 		return tk, ok
 	}
 	line := s.line
-	column := s.column - utf8.RuneCount(ctx.buf)
+	column := s.column - int32(utf8.RuneCount(ctx.buf))
 	level := s.indentLevel
 	if ctx.isMultiLine() {
 		line -= newLineCount(ctx.buf)
@@ -509,7 +509,7 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 		// reads as "no content".
 		column = 0
 		if at := strings.Index(ctx.origin(), nocopy.String(ctx.buf)); at >= 0 {
-			column = utf8.RuneCountInString(ctx.origin()[:at]) + 1
+			column = int32(utf8.RuneCountInString(ctx.origin()[:at])) + 1
 		}
 		// Since we are in a literal, folded or raw folded we can use the indent level from the last token.
 		if ctx.lastToken() != nil { // The last token should never be nil here.
@@ -520,13 +520,13 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 
 	// The token is cut where the scanner stands, so its text ends on the line it starts on -- except in a block scalar,
 	// whose value carries its own line breaks and whose end the origin has to give.
-	endLine := posInt(line)
+	endLine := line
 	if ctx.isMultiLine() {
 		endLine = 0
 	}
 
 	return ctx.bufferedToken(token.At(
-		posInt(line), posInt(column), posInt(ctx.idx-len(ctx.buf)), posInt(s.indentNum),
+		line, column, ctx.idx-int32(len(ctx.buf)), s.indentNum,
 	), endLine)
 }
 
@@ -609,12 +609,12 @@ func (s *Scanner) documentOpensAtMark(ctx *Context) bool {
 //
 // It is progressColumn without the loop: where every byte is a character, the column, the offset and the cursor advance
 // by the same count and none of them has to be worked out a character at a time.
-func (s *Scanner) progressASCII(ctx *Context, num int) {
+func (s *Scanner) progressASCII(ctx *Context, num int32) {
 	s.column += num
 	ctx.idx += num
 }
 
-func (s *Scanner) progressColumn(ctx *Context, num int) {
+func (s *Scanner) progressColumn(ctx *Context, num int32) {
 	s.column += num
 	s.progress(ctx, num)
 }
@@ -641,7 +641,7 @@ func (s *Scanner) progressLine(ctx *Context) {
 // Both were Context.idx by another name: over the fuzz corpus, 395,323 checks of each and not one disagreed.
 // So did Scanner.sourceSize and Context.size, Scanner.source and Context.src, and the ctx every method takes and the
 // one the Scanner holds.
-func (s *Scanner) progress(ctx *Context, num int) {
+func (s *Scanner) progress(ctx *Context, num int32) {
 	ctx.progress(num)
 
 	if probe.Enabled {
@@ -699,7 +699,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	s.addBufferedTokenIfExists(ctx)
 	ctx.addOriginBuf('-')
 	tk := token.MakeSequenceEntry(ctx.origin(), s.pos())
-	s.lastDelimColumn = int(tk.Position.Column)
+	s.lastDelimColumn = tk.Position.Column
 	ctx.addTokenValue(tk)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -758,9 +758,9 @@ func blankOrComment(line string) bool {
 	return trimmed == "" || strings.HasPrefix(trimmed, "#")
 }
 
-func newLineCount(src []byte) int {
+func newLineCount(src []byte) int32 {
 	size := len(src)
-	cnt := 0
+	var cnt int32
 	for i := 0; i < size; i++ {
 		c := src[i]
 		switch c {

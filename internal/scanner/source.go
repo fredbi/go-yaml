@@ -40,11 +40,8 @@ func sourceTooLong(n int) bool { return n > maxSourceLen }
 
 // posInt narrows a count the scan keeps in int to the int32 a [token.Position] holds it in.
 //
-// Every narrowing in this package goes through here, so gosec's G115 stays on for the rest of it: an int32 conversion
-// written directly is one nobody has argued is bounded, and the linter still says so.
-//
-// See maxSourceLen for why this one cannot wrap. It inlines, and the instructions the compiler emits for a call are
-// the ones it emits for the conversion written out.
+// The scanner's own counters are int32, so this is only for the counts the standard library hands back as int --
+// utf8.RuneCount and len -- on their way into a Position field. See maxSourceLen for why it cannot wrap.
 func posInt(n int) int32 {
-	return int32(n) //nolint:gosec // maxSourceLen bounds every position by the source length, checked once in Init
+	return int32(n)
 }

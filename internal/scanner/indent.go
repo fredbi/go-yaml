@@ -61,7 +61,7 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 			}
 			probe.Check(name, s.indentNum == s.column-1, func() string {
 				from := max(ctx.idx-24, 0)
-				to := min(ctx.idx+16, len(ctx.src))
+				to := min(ctx.idx+16, int32(len(ctx.src)))
 
 				return fmt.Sprintf(
 					"indentNum=%d column=%d line=%d idx=%d flow=%d/%d anchor=%v alias=%v directive=%v tab=%v around=%q",
@@ -122,7 +122,7 @@ func (s *Scanner) checkFlowIndent(ctx *Context) error {
 }
 
 // contentIndent is the indentation a further line of the construct now being scanned has to clear.
-func (s *Scanner) contentIndent() int {
+func (s *Scanner) contentIndent() int32 {
 	if s.isFlowMode() {
 		return s.flowIndent
 	}
@@ -141,7 +141,7 @@ func (s *Scanner) contentIndent() int {
 // A scalar spanning lines is one value, and what marks its later lines as part of it is that they are indented under
 // it.
 // Without that, "quoted: \"a\nb\"" reads as a scalar and then a second, unrelated line.
-func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int) error {
+func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int32) error {
 	indent, blank := lineIndent(rest)
 	if blank || indent > base {
 		return nil
@@ -153,8 +153,8 @@ func (s *Scanner) checkContinuationIndent(ctx *Context, rest string, base int) e
 // lineIndent returns how many spaces begin the line, and whether the line holds nothing else.
 //
 // A blank line is part of no indentation.
-func lineIndent(src string) (int, bool) {
-	indent := 0
+func lineIndent(src string) (int32, bool) {
+	var indent int32
 	for _, c := range src {
 		switch c {
 		case ' ':

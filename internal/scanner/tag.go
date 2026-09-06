@@ -43,7 +43,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 
 	// idx counts bytes into the source; progress counts the characters the column has to advance by, which is not the same
 	// thing.
-	var progress int
+	var progress int32
 	for idx, c := range ctx.src[ctx.idx:] {
 		progress++
 		if verbatim {
@@ -57,20 +57,20 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		switch c {
 		case ' ':
 			ctx.addOriginBuf(c)
-			value := ctx.source(ctx.idx-1, ctx.idx+idx)
+			value := ctx.source(ctx.idx-1, ctx.idx+int32(idx))
 			if err := s.addTag(ctx, value, tagPos); err != nil {
 				return false, err
 			}
-			s.progressColumn(ctx, utf8.RuneCountInString(value))
+			s.progressColumn(ctx, int32(utf8.RuneCountInString(value)))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
-				value := ctx.source(ctx.idx-1, ctx.idx+idx)
+				value := ctx.source(ctx.idx-1, ctx.idx+int32(idx))
 				if err := s.addTag(ctx, value, tagPos); err != nil {
 					return false, err
 				}
-				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
+				s.progressColumn(ctx, int32(utf8.RuneCountInString(value))-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
 			}
@@ -82,22 +82,22 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(ctx.origin(), s.pos()))
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
-			value := ctx.source(ctx.idx-1, ctx.idx+idx)
+			value := ctx.source(ctx.idx-1, ctx.idx+int32(idx))
 			if err := s.addTag(ctx, value, tagPos); err != nil {
 				return false, err
 			}
-			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
+			s.progressColumn(ctx, int32(utf8.RuneCountInString(value))-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
 		case '}', ']':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				// The closer ends the collection the tag stands in, so it ends the tag: "[!]" is the non-specific tag on the empty
 				// node and not a tag whose name is "]".
-				value := ctx.source(ctx.idx-1, ctx.idx+idx)
+				value := ctx.source(ctx.idx-1, ctx.idx+int32(idx))
 				if err := s.addTag(ctx, value, tagPos); err != nil {
 					return false, err
 				}
-				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
+				s.progressColumn(ctx, int32(utf8.RuneCountInString(value))-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
 
@@ -125,7 +125,7 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	// "k: !!str" with no closing break is a document, and the loop above only
 	// ever emits on the character that ends the tag, so falling out of it here
 	// dropped the token and the tag with it.
-	value := ctx.source(ctx.idx-1, len(ctx.src))
+	value := ctx.source(ctx.idx-1, int32(len(ctx.src)))
 	if err := s.addTag(ctx, value, tagPos); err != nil {
 		return false, err
 	}

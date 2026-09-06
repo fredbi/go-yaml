@@ -188,20 +188,20 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 	//
 	// The two part company as soon as the header carries a comment holding anything but ASCII.
 	var (
-		bytesRead int
-		progress  int
-		chars     int
+		bytesRead int32
+		progress  int32
+		chars     int32
 		crlf      bool
 		endOfLine bool
 	)
 
 	for idx, c := range ctx.src[ctx.idx:] {
-		bytesRead, progress = idx, chars
+		bytesRead, progress = int32(idx), chars
 		chars++
 		ctx.addOriginBuf(c)
 		if isNewLineChar(c) {
-			nextIdx := ctx.idx + idx + 1
-			if c == '\r' && nextIdx < len(ctx.src) && ctx.src[nextIdx] == '\n' {
+			nextIdx := ctx.idx + int32(idx) + 1
+			if c == '\r' && nextIdx < int32(len(ctx.src)) && ctx.src[nextIdx] == '\n' {
 				crlf = true
 				continue // process \n in the next iteration
 			}
@@ -215,7 +215,7 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// The header ends the source rather than the line, so every character read belongs to it.
 		// Stopping at the last one instead dropped it: a header ending "1#" was read as "1", which lost the '#' that makes it
 		// malformed and made the comment out of what came before it.
-		bytesRead, progress = len(ctx.src)-ctx.idx, chars
+		bytesRead, progress = int32(len(ctx.src))-ctx.idx, chars
 	}
 	endPos := ctx.idx + bytesRead
 	if crlf {
@@ -338,12 +338,12 @@ type MultiLineState struct {
 	opt string
 	// indentIndicator is the width the header stated, 0 where it stated none. firstLineIndentColumn cannot answer for it:
 	// a header without a width leaves it 0 and the first content line then sets it.
-	indentIndicator                  int
-	firstLineIndentColumn            int
-	prevLineIndentColumn             int
-	lineIndentColumn                 int
-	lastNotSpaceOnlyLineIndentColumn int
-	spaceOnlyIndentColumn            int
+	indentIndicator                  int32
+	firstLineIndentColumn            int32
+	prevLineIndentColumn             int32
+	lineIndentColumn                 int32
+	lastNotSpaceOnlyLineIndentColumn int32
+	spaceOnlyIndentColumn            int32
 	// start is where the block scalar's content begins in the source, recorded when the first byte of it is read.
 	//
 	// The token is cut at the end of the block, where the cursor says nothing about where the content started.
@@ -364,14 +364,14 @@ type MultiLineState struct {
 	isLiteral    bool
 }
 
-func (s *MultiLineState) lastDelimColumn() int {
+func (s *MultiLineState) lastDelimColumn() int32 {
 	if s.firstLineIndentColumn == 0 {
 		return 0
 	}
 	return s.firstLineIndentColumn - 1
 }
 
-func (s *MultiLineState) updateIndentColumn(column int) {
+func (s *MultiLineState) updateIndentColumn(column int32) {
 	if s.firstLineIndentColumn == 0 {
 		s.firstLineIndentColumn = column
 	}
@@ -380,14 +380,14 @@ func (s *MultiLineState) updateIndentColumn(column int) {
 	}
 }
 
-func (s *MultiLineState) updateSpaceOnlyIndentColumn(column int) {
+func (s *MultiLineState) updateSpaceOnlyIndentColumn(column int32) {
 	if s.firstLineIndentColumn != 0 {
 		return
 	}
 	s.spaceOnlyIndentColumn = column
 }
 
-func (s *MultiLineState) validateIndentAfterSpaceOnly(column int) error {
+func (s *MultiLineState) validateIndentAfterSpaceOnly(column int32) error {
 	if s.firstLineIndentColumn != 0 {
 		return nil
 	}
@@ -416,14 +416,14 @@ func (s *MultiLineState) updateNewLineState() {
 	s.lineIndentColumn = 0
 }
 
-func (s *MultiLineState) isIndentColumn(column int) bool {
+func (s *MultiLineState) isIndentColumn(column int32) bool {
 	if s.firstLineIndentColumn == 0 {
 		return column == 1
 	}
 	return s.firstLineIndentColumn > column
 }
 
-func (s *MultiLineState) addIndent(ctx *Context, column int) {
+func (s *MultiLineState) addIndent(ctx *Context, column int32) {
 	if s.firstLineIndentColumn == 0 {
 		return
 	}
@@ -440,12 +440,12 @@ func (s *MultiLineState) addIndent(ctx *Context, column int) {
 	}
 	// Since addBuf ignore space character, add to the buffer directly.
 	ctx.buf = append(ctx.buf, ' ')
-	ctx.notSpaceCharPos = len(ctx.buf)
+	ctx.notSpaceCharPos = int32(len(ctx.buf))
 }
 
 // updateNewLineInFolded if Folded or RawFolded context and the content on the current line starts at the same column as
 // the previous line, treat the new-line-char as a space.
-func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int) {
+func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int32) {
 	if s.isLiteral {
 		return
 	}
@@ -483,7 +483,7 @@ func (s *MultiLineState) updateNewLineInFolded(ctx *Context, column int) {
 		//  b
 		if lastChar == '\n' && prevLastChar == '\n' {
 			ctx.buf = ctx.buf[:len(ctx.buf)-1]
-			ctx.notSpaceCharPos = len(ctx.buf)
+			ctx.notSpaceCharPos = int32(len(ctx.buf))
 		}
 	}
 	s.foldedNewLine = false

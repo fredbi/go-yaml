@@ -17,9 +17,9 @@ import (
 
 // Context context at scanning.
 type Context struct {
-	idx             int
-	size            int
-	notSpaceCharPos int
+	idx             int32
+	size            int32
+	notSpaceCharPos int32
 	src             string
 	// raw is src's own bytes, for the word-at-a-time scans in [github.com/go-openapi/go-yaml/internal/swar].
 	//
@@ -29,8 +29,8 @@ type Context struct {
 	// originStart and originEnd bracket the current token's text in src.
 	//
 	// See [Context.origin].
-	originStart int
-	originEnd   int
+	originStart int32
+	originEnd   int32
 	// originCopy holds the text once a cut has taken bytes out of the middle of it, and originCut says it is in use.
 	originCopy []byte
 	// pending holds the tokens read but not yet handed over, as values.
@@ -108,7 +108,7 @@ func (c *Context) lastContentToken() *token.Token {
 // A quoted scalar is one token and starts where it stands.
 // An anchor, an alias or a tag may carry an empty scalar, and then the key is the run of them: the key of "&a : v"
 // begins at the '&', two tokens before the ':'.
-func (c *Context) keyStartColumn() int {
+func (c *Context) keyStartColumn() int32 {
 	if !c.hasLastTk {
 		return 0
 	}
@@ -127,13 +127,13 @@ func (c *Context) keyStartColumn() int {
 		return 0
 	}
 
-	return int(column)
+	return column
 }
 
 func (c *Context) reset(src string) {
 	c.idx = 0
 	c.originStart, c.originEnd = 0, 0
-	c.size = len(src)
+	c.size = int32(len(src))
 	c.src = src
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
 	// pending keeps the room it holds: it never grows past a token or two, so a Scanner reading a second document carries
@@ -167,11 +167,11 @@ func (c *Context) resetBuffer() {
 //
 // Where the guess misses, the cursor gives the other end, and the offset that matched is the one the token should
 // carry.
-func (c *Context) textAt(buf []byte, start int) (string, int) {
+func (c *Context) textAt(buf []byte, start int32) (string, int32) {
 	if span, ok := c.window(buf, start); ok {
 		return span, start
 	}
-	at := c.idx - len(buf)
+	at := c.idx - int32(len(buf))
 	if span, ok := c.window(buf, at); ok {
 		return span, at
 	}
@@ -180,9 +180,9 @@ func (c *Context) textAt(buf []byte, start int) (string, int) {
 }
 
 // window returns the len(buf) bytes of the source at start, and reports whether they are buf's own.
-func (c *Context) window(buf []byte, start int) (string, bool) {
-	end := start + len(buf)
-	if start < 0 || end > len(c.src) {
+func (c *Context) window(buf []byte, start int32) (string, bool) {
+	end := start + int32(len(buf))
+	if start < 0 || end > int32(len(c.src)) {
 		return "", false
 	}
 
@@ -203,7 +203,7 @@ func (c *Context) getMultiLineState() *MultiLineState {
 //
 // lastDelimColumn is the column of whatever encloses the block, which is what the header's indentation indicator counts
 // from: "|2" under a key at column 3 puts content at column 5.
-func (c *Context) setLiteral(lastDelimColumn int, opt string) {
+func (c *Context) setLiteral(lastDelimColumn int32, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	c.block = MultiLineState{
 		isLiteral:       true,
@@ -218,7 +218,7 @@ func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 
 // setFolded opens a block scalar that folds its line breaks into spaces, the ">" of [MultiLineState]. lastDelimColumn
 // is read as in setLiteral.
-func (c *Context) setFolded(lastDelimColumn int, opt string) {
+func (c *Context) setFolded(lastDelimColumn int32, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	c.block = MultiLineState{
 		opt:             opt,
@@ -230,7 +230,7 @@ func (c *Context) setFolded(lastDelimColumn int, opt string) {
 	c.mstate = &c.block
 }
 
-func (c *Context) setRawFolded(column int) {
+func (c *Context) setRawFolded(column int32) {
 	c.block = MultiLineState{isRawFolded: true}
 	c.block.updateIndentColumn(column)
 	c.mstate = &c.block
@@ -241,7 +241,7 @@ func (c *Context) isMergeKey() bool {
 		return false
 	}
 	src := c.src
-	size := len(src)
+	size := int32(len(src))
 	for idx := c.idx + 2; idx < size; idx++ {
 		char := src[idx]
 		if char == ' ' {
@@ -314,7 +314,7 @@ func (c *Context) recordToken(tk *token.Token) {
 type propertyRun struct {
 	startColumn int32
 	line        int32
-	length      int
+	length      int32
 }
 
 func (c *Context) addBuf(r rune) {
@@ -323,7 +323,7 @@ func (c *Context) addBuf(r rune) {
 	}
 	c.buf = utf8.AppendRune(c.buf, r)
 	if r != ' ' && r != '\t' {
-		c.notSpaceCharPos = len(c.buf)
+		c.notSpaceCharPos = int32(len(c.buf))
 	}
 }
 
@@ -333,7 +333,7 @@ func (c *Context) addBufWithTab(r rune) {
 	}
 	c.buf = utf8.AppendRune(c.buf, r)
 	if r != ' ' {
-		c.notSpaceCharPos = len(c.buf)
+		c.notSpaceCharPos = int32(len(c.buf))
 	}
 }
 
@@ -354,7 +354,7 @@ func (c *Context) origin() string {
 		return string(c.originCopy)
 	}
 
-	return c.src[c.originStart:min(c.originEnd, len(c.src))]
+	return c.src[c.originStart:min(c.originEnd, int32(len(c.src)))]
 }
 
 // addOriginBuf records that r was read as part of the current token.
@@ -375,7 +375,7 @@ func (c *Context) addOriginBuf(r rune) {
 // skipOrigin records that the n bytes at the cursor were read, as n calls to [Context.addOriginBuf] would.
 //
 // The caller has established they are ASCII, so each is one character and one byte.
-func (c *Context) skipOrigin(n int) {
+func (c *Context) skipOrigin(n int32) {
 	if c.originCut {
 		c.originCopy = append(c.originCopy, c.src[c.idx:c.idx+n]...)
 
@@ -400,7 +400,7 @@ func (c *Context) addOriginWide(r rune) {
 		return
 	}
 
-	c.originEnd += utf8.RuneLen(r)
+	c.originEnd += int32(utf8.RuneLen(r))
 }
 
 // removeRightSpaceFromBuf cuts the spaces and tabs a line ends with from the token's text and from its value.
@@ -423,7 +423,7 @@ func (c *Context) removeRightSpaceFromBuf() {
 		return
 	}
 
-	end := min(c.originEnd, len(c.src))
+	end := min(c.originEnd, int32(len(c.src)))
 	for end > c.originStart && isOriginSpace(c.src[end-1]) {
 		end--
 	}
@@ -443,7 +443,7 @@ func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 // method below that speaks of a character decodes one rather than indexing for it.
 
 // width is how many bytes the character at the cursor takes, or 0 at the end.
-func (c *Context) width() int {
+func (c *Context) width() int32 {
 	if c.idx >= c.size {
 		return 0
 	}
@@ -452,7 +452,7 @@ func (c *Context) width() int {
 	}
 	_, w := utf8.DecodeRuneInString(c.src[c.idx:])
 
-	return w
+	return int32(w)
 }
 
 // isEOS reports that no character follows the one at the cursor.
@@ -465,7 +465,7 @@ func (c *Context) next() bool {
 }
 
 // source returns the bytes between two byte offsets of c.src.
-func (c *Context) source(s, e int) string {
+func (c *Context) source(s, e int32) string {
 	return c.src[s:e]
 }
 
@@ -478,7 +478,7 @@ func (c *Context) previousChar() rune {
 		if r != byteOrderMark {
 			return r
 		}
-		end -= w
+		end -= int32(w)
 	}
 
 	return rune(0)
@@ -509,15 +509,15 @@ func (c *Context) nextChar() rune {
 }
 
 // repeatNum counts how many times r stands at the cursor, in a row.
-func (c *Context) repeatNum(r rune) int {
-	cnt := 0
+func (c *Context) repeatNum(r rune) int32 {
+	var cnt int32
 	for i := c.idx; i < c.size; {
 		cur, w := utf8.DecodeRuneInString(c.src[i:])
 		if cur != r {
 			break
 		}
 		cnt++
-		i += w
+		i += int32(w)
 	}
 
 	return cnt
@@ -526,7 +526,7 @@ func (c *Context) repeatNum(r rune) int {
 // progress advances the cursor by num characters and returns the bytes it crossed.
 //
 // Callers count columns in characters and offsets in bytes, which is why it reports both.
-func (c *Context) progress(num int) int {
+func (c *Context) progress(num int32) int32 {
 	start := c.idx
 	for range num {
 		if c.idx >= c.size {
@@ -540,7 +540,7 @@ func (c *Context) progress(num int) int {
 			continue
 		}
 		_, w := utf8.DecodeRuneInString(c.src[c.idx:])
-		c.idx += w
+		c.idx += int32(w)
 	}
 
 	return c.idx - start
@@ -577,19 +577,19 @@ func (c *Context) bufferedSrc() []byte {
 			}
 		}
 		// The sharp one: a mark past the end of the buffer makes buf[:mark] a slice of what the last token left behind.
-		probe.Check("buf.notSpaceCharPos<=len(buf)", c.notSpaceCharPos <= len(c.buf), func() string {
+		probe.Check("buf.notSpaceCharPos<=len(buf)", c.notSpaceCharPos <= int32(len(c.buf)), func() string {
 			return fmt.Sprintf("mark=%d len(buf)=%d cap=%d multiline=%v origin=%q",
 				c.notSpaceCharPos, len(c.buf), cap(c.buf), c.isMultiLine(),
-				c.src[c.originStart:min(c.originEnd, len(c.src))])
+				c.src[c.originStart:min(c.originEnd, int32(len(c.src)))])
 		})
 
 		name := "buf.notSpaceCharPos==trimmed/plain"
 		if c.isMultiLine() {
 			name = "buf.notSpaceCharPos==trimmed/block"
 		}
-		probe.Check(name, c.notSpaceCharPos == end, func() string {
+		probe.Check(name, c.notSpaceCharPos == int32(end), func() string {
 			from := max(c.originStart-16, 0)
-			to := min(c.idx+16, len(c.src))
+			to := min(c.idx+16, int32(len(c.src)))
 			last := "none"
 			if c.hasLastTk {
 				last = c.lastTk.Type.String() + "=" + strconv.Quote(c.lastTk.Value)
@@ -598,7 +598,7 @@ func (c *Context) bufferedSrc() []byte {
 			return fmt.Sprintf(
 				"mark=%d trimmed=%d buf=%q multiline=%v lastTk=%s origin=%q around=%q",
 				c.notSpaceCharPos, end, string(c.buf), c.isMultiLine(), last,
-				c.src[c.originStart:min(c.originEnd, len(c.src))], c.src[from:to])
+				c.src[c.originStart:min(c.originEnd, int32(len(c.src)))], c.src[from:to])
 		})
 	}
 
@@ -675,16 +675,16 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 	//
 	// Where the value is the source's own bytes, the offset it was found at is the one the token should carry: what the
 	// caller worked out by counting back from the cursor misses for anything folding shortened.
-	value, at := c.textAt(source, int(pos.Offset()))
+	value, at := c.textAt(source, pos.Offset())
 	switch {
 	case at >= 0:
-		pos.SetOffset(posInt(at))
+		pos.SetOffset(at)
 	default:
 		// Folding rewrote the value, so it is nowhere in the source to be found.
 		// The origin is still the source's own bytes and the buffer knows where it began, so the value starts that far in,
 		// past the whitespace the line was indented by.
 		if originAt == c.originStart {
-			pos.SetOffset(posInt(c.originStart + leadingSpace(origin)))
+			pos.SetOffset(c.originStart + leadingSpace(origin))
 		}
 	}
 
@@ -712,7 +712,7 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 		// whatever the offset points at inside it.
 		// Counting forward from the offset instead comes up short wherever a block scalar's indentation indicator leaves some
 		// of the leading spaces in the content.
-		ext.End = posInt(originAt + len(origin))
+		ext.End = originAt + int32(len(origin))
 	}
 
 	// A quoted or folded scalar is a string whatever it spells.
@@ -729,7 +729,7 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 		// used.
 		want := token.MeasureOrigin(origin, pos)
 		if originAt >= 0 {
-			want.End = posInt(originAt + len(origin))
+			want.End = originAt + int32(len(origin))
 		}
 		probe.Check("token.extentMatchesTheOrigin", ext == want, func() string {
 			return fmt.Sprintf("%s %q: scanner says %+v, the origin says %+v", typ, value, ext, want)
@@ -855,10 +855,10 @@ func isPropertyToken(tk *token.Token) bool {
 // For a header carrying no width -- a plain "|" or ">", which is most of them -- that is ParseInt("") and a
 // *strconv.NumError allocated to say so. validateIndentColumn asked once per character of content, and it came to 95%
 // of everything the scanner allocated reading block scalars.
-func firstLineIndentColumnByOpt(opt string) int {
+func firstLineIndentColumnByOpt(opt string) int32 {
 	for i := range len(opt) {
 		if c := opt[i]; c >= '1' && c <= '9' {
-			return int(c - '0')
+			return int32(c - '0')
 		}
 	}
 
@@ -866,9 +866,9 @@ func firstLineIndentColumnByOpt(opt string) int {
 }
 
 // leadingSpace counts the whitespace bytes buf opens with.
-func leadingSpace(buf string) int {
-	var i int
-	for i < len(buf) {
+func leadingSpace(buf string) int32 {
+	var i int32
+	for i < int32(len(buf)) {
 		switch buf[i] {
 		case ' ', '\t', '\r', '\n':
 			i++

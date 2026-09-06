@@ -41,7 +41,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	srcpos := s.pos()
 	startIndex := ctx.idx + 1
 	src := ctx.src
-	size := len(src)
+	size := int32(len(src))
 	// A single-quoted scalar reads back as the source between its quotes unless a line break is folded or a "''" stands
 	// for one quote.
 	// Until one of those happens the value is a window on src and nothing is built: value stays nil and copied stays
@@ -50,7 +50,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	// The first rewrite copies what has been passed over so far, and the rest of the scalar is appended as before.
 	value := s.quoted[:0]
 	copied := false
-	keep := func(upto int) {
+	keep := func(upto int32) {
 		if !copied {
 			value = append(value, src[startIndex:upto]...)
 			copied = true
@@ -61,7 +61,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	isNewLine := false
 
 	var width int
-	for idx := startIndex; idx < size; idx += width {
+	for idx := startIndex; idx < size; idx += int32(width) {
 		var c rune
 		c, width = utf8.DecodeRuneInString(src[idx:])
 		if !isNewLine {
@@ -96,11 +96,11 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			isFirstLineChar = true
 			isNewLine = true
 			s.progressLine(ctx)
-			if idx+width < size {
-				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+width:]); err != nil {
+			if idx+int32(width) < size {
+				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+int32(width):]); err != nil {
 					return token.Token{}, err
 				}
-				if err := s.checkContinuationIndent(ctx, src[idx+width:], baseIndent); err != nil {
+				if err := s.checkContinuationIndent(ctx, src[idx+int32(width):], baseIndent); err != nil {
 					return token.Token{}, err
 				}
 			}
@@ -121,7 +121,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			isFirstLineChar = false
 
 			continue
-		case idx+width < len(ctx.src) && ctx.src[idx+width] == '\'':
+		case idx+int32(width) < int32(len(ctx.src)) && ctx.src[idx+int32(width)] == '\'':
 			// '' handle as ' character
 			keep(idx)
 			value = utf8.AppendRune(value, c)
@@ -156,14 +156,14 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	srcpos := s.pos()
 	startIndex := ctx.idx + 1
 	src := ctx.src
-	size := len(src)
+	size := int32(len(src))
 	// As in scanSingleQuote: the value is a window on src until something rewrites it -- a folded line break, an escape,
 	// or a tab dropped before one. keep copies what has been passed over the first time that happens, and the rest is
 	// appended as before.
 	// A scalar holding none of them, which is most of them, is never built.
 	value := s.quoted[:0]
 	copied := false
-	keep := func(upto int) {
+	keep := func(upto int32) {
 		if !copied {
 			value = append(value, src[startIndex:upto]...)
 			copied = true
@@ -173,7 +173,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	isNewLine := false
 
 	var width int
-	for idx := startIndex; idx < size; idx += width {
+	for idx := startIndex; idx < size; idx += int32(width) {
 		var c rune
 		c, width = utf8.DecodeRuneInString(src[idx:])
 		if !isNewLine {
@@ -204,11 +204,11 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			isFirstLineChar = true
 			isNewLine = true
 			s.progressLine(ctx)
-			if idx+width < size {
-				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+width:]); err != nil {
+			if idx+int32(width) < size {
+				if err := s.validateDocumentSeparatorMarker(ctx, src[idx+int32(width):]); err != nil {
 					return token.Token{}, err
 				}
-				if err := s.checkContinuationIndent(ctx, src[idx+width:], baseIndent); err != nil {
+				if err := s.checkContinuationIndent(ctx, src[idx+int32(width):], baseIndent); err != nil {
 					return token.Token{}, err
 				}
 			}
@@ -229,7 +229,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				continue
 			}
 			nextChar, _ := utf8.DecodeRuneInString(src[idx+1:])
-			var progress int
+			var progress int32
 			// Each escape standing for one character repeats the same three statements. That reads badly, and it is the
 			// fastest shape measured: this switch compiles to a jump table whose constants sit in the instruction stream.
 			//
@@ -318,7 +318,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				// Two hex digits, so codeNum is at most 0xFF and the narrowing cannot wrap.
-				value = utf8.AppendRune(value, rune(codeNum)) //nolint:gosec // ns-esc-8-bit takes two digits, so codeNum <= 0xFF
+				value = utf8.AppendRune(value, rune(codeNum))
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
@@ -415,7 +415,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 		case c == '\t':
 			var (
 				foundNotSpaceChar bool
-				progress          int
+				progress          int32
 			)
 			for i := idx + 1; i < size; i++ {
 				if src[i] == ' ' || src[i] == '\t' {
