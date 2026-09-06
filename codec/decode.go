@@ -202,15 +202,23 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 		return "", err
 	}
 
-	return mapKeyString(key), nil
+	return mapKeyString(node, key), nil
 }
 
 // mapKeyString is the text a decoded mapping key is addressed by.
 //
+// Taken from the node where the node is a plain scalar, so that the decoder,
+// UseStringKeys and [ToJSON] name an entry the same way: keyName writes the
+// type's own canonical spelling, where fmt.Sprint on the resolved value wrote a
+// float and an integer alike and put "1: a" beside "1.0: b" under one name.
+//
 // A null gives "null" rather than the empty string, which is what the document
 // wrote and what keeps it apart from the empty key: "null: a" and "\"\": b" are
 // two entries.
-func mapKeyString(key any) string {
+func mapKeyString(node ast.Node, key any) string {
+	if name, kind := keyName(unwrapKeyNode(node)); kind != keyOther {
+		return name
+	}
 	if key == nil {
 		return "null"
 	}
@@ -219,6 +227,24 @@ func mapKeyString(key any) string {
 	}
 
 	return fmt.Sprint(key)
+}
+
+// unwrapKeyNode steps over what stands around a key rather than being it, to
+// reach the scalar the entry is addressed by.
+func unwrapKeyNode(n ast.Node) ast.Node {
+	for {
+		switch t := n.(type) {
+		case *ast.MappingKeyNode:
+			n = t.Value
+		case *ast.AnchorNode:
+			n = t.Value
+		default:
+			return n
+		}
+		if n == nil {
+			return nil
+		}
+	}
 }
 
 func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]interface{}) error {
@@ -2056,7 +2082,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 				// takes apart again.
 				return yamlerrors.NewUnhashableKey(reflect.TypeOf(keyValue), key.GetToken())
 			}
-			k = reflect.ValueOf(mapKeyString(keyValue)).Convert(decodeKeyAs)
+			k = reflect.ValueOf(mapKeyString(key, keyValue)).Convert(decodeKeyAs)
 		default:
 			keyVal, err := d.createDecodedNewValue(ctx, decodeKeyAs, reflect.Value{}, key)
 			if err != nil {
