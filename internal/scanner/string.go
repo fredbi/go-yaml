@@ -230,6 +230,14 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			}
 			nextChar, _ := utf8.DecodeRuneInString(src[idx+1:])
 			var progress int
+			// Each escape standing for one character repeats the same three statements. That reads badly, and it is the
+			// fastest shape measured: this switch compiles to a jump table whose constants sit in the instruction stream.
+			//
+			// Two rewrites were tried against BenchmarkScannerNextToken, interleaved in one window, and both cost. A
+			// [utf8.RuneSelf]-wide lookup table behind a five-case switch is +3.1% per token on escaped-dense-1000
+			// (p=0.047, n=12) -- an indexed load where there was none. One switch whose arms set only the character, with
+			// the three statements after it, is +1.2% geomean and +4.6% on escaped-100 (p=0.003, n=10) -- a branch on
+			// every escape where there was none.
 			switch nextChar {
 			case '0':
 				progress = 1
