@@ -23,8 +23,8 @@ import (
 func TestFirstUnprintableMatchesTheByteLoop(t *testing.T) {
 	t.Run("both versions of firstUnprintable", func(t *testing.T) {
 		t.Run("should agree on the analysis workload", func(t *testing.T) {
-			for _, doc := range testscanner.WorkloadDocsInternal(t) {
-				same(t, doc)
+			for _, doc := range testscanner.WorkloadDocs(t) {
+				same(t, doc.Text)
 			}
 		})
 
