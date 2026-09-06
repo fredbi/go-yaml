@@ -1345,6 +1345,7 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 	}
 	keyMap := map[string]struct{}{}
 	keyToNodeMap := map[string]ast.Node{}
+	var merged []map[string]ast.Node
 	mapIter := mapNode.MapRange()
 	for mapIter.Next() {
 		keyNode := mapIter.Key()
@@ -1352,31 +1353,102 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 			if ignoreMergeKey {
 				continue
 			}
-			mergeMap, err := d.keyToNodeMap(ctx, mapIter.Value(), ignoreMergeKey, getKeyOrValueNode)
+			mergeMap, err := d.mergedKeyToNodeMap(ctx, mapIter.Value(), ignoreMergeKey, getKeyOrValueNode)
 			if err != nil {
 				return nil, err
 			}
-			for k, v := range mergeMap {
-				if err := d.validateDuplicateKey(keyMap, k, v); err != nil {
-					return nil, err
+			merged = append(merged, mergeMap)
+
+			continue
+		}
+
+		keyVal, err := d.nodeToValue(ctx, keyNode)
+		if err != nil {
+			return nil, err
+		}
+		key, ok := keyVal.(string)
+		if !ok {
+			return nil, err
+		}
+		if err := d.validateDuplicateKey(keyMap, key, keyNode); err != nil {
+			return nil, err
+		}
+		keyToNodeMap[key] = getKeyOrValueNode(mapIter)
+	}
+
+	// A mapping's own keys win over the ones it merges in, whichever side of the
+	// "<<" they were written, and an earlier "<<" wins over a later one. Merged
+	// keys were validated against the mapping's own until now, so "<<: *base"
+	// beside a key the base also writes -- the whole point of a merge -- was
+	// refused as a duplicate. The key is not written twice: it is written once
+	// here and once in another mapping.
+	for _, m := range merged {
+		for k, v := range m {
+			if _, own := keyToNodeMap[k]; own {
+				continue
+			}
+			keyToNodeMap[k] = v
+		}
+	}
+
+	return keyToNodeMap, nil
+}
+
+// mergedKeyToNodeMap reads what a "<<" names, which is a mapping or a sequence
+// of them: getMapNode folds a sequence into one MapNode.
+//
+// The keys are not validated against one another and the first written stands.
+// Two mappings of a sequence may write the same key -- "<<: [*one, *two]" where
+// both write "b" -- and YAML 1.1's merge says the mapping named first wins
+// rather than that the document is wrong.
+func (d *Decoder) mergedKeyToNodeMap(
+	ctx context.Context, node ast.Node, ignoreMergeKey bool, getKeyOrValueNode func(*ast.MapNodeIter) ast.Node,
+) (map[string]ast.Node, error) {
+	d.stepIn()
+	defer d.stepOut()
+	if d.isExceededMaxDepth() {
+		return nil, ErrExceededMaxDepth
+	}
+
+	mapNode, err := d.getMapNode(node, true)
+	if err != nil {
+		return nil, err
+	}
+
+	keyToNodeMap := map[string]ast.Node{}
+	mapIter := mapNode.MapRange()
+	for mapIter.Next() {
+		keyNode := mapIter.Key()
+		if keyNode.IsMergeKey() {
+			if ignoreMergeKey {
+				continue
+			}
+			nested, err := d.mergedKeyToNodeMap(ctx, mapIter.Value(), ignoreMergeKey, getKeyOrValueNode)
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range nested {
+				if _, held := keyToNodeMap[k]; !held {
+					keyToNodeMap[k] = v
 				}
-				keyToNodeMap[k] = v
 			}
-		} else {
-			keyVal, err := d.nodeToValue(ctx, keyNode)
-			if err != nil {
-				return nil, err
-			}
-			key, ok := keyVal.(string)
-			if !ok {
-				return nil, err
-			}
-			if err := d.validateDuplicateKey(keyMap, key, keyNode); err != nil {
-				return nil, err
-			}
+
+			continue
+		}
+
+		keyVal, err := d.nodeToValue(ctx, keyNode)
+		if err != nil {
+			return nil, err
+		}
+		key, isText := keyVal.(string)
+		if !isText {
+			continue
+		}
+		if _, held := keyToNodeMap[key]; !held {
 			keyToNodeMap[key] = getKeyOrValueNode(mapIter)
 		}
 	}
+
 	return keyToNodeMap, nil
 }
 
