@@ -155,6 +155,11 @@ func castToInteger(v interface{}) interface{} {
 }
 
 func (d *Decoder) castToFloat(v interface{}) interface{} {
+	return castToFloatValue(v)
+}
+
+// castToFloatValue is castToFloat without a decoder, for the walking builder.
+func castToFloatValue(v any) any {
 	switch vv := v.(type) {
 	case int:
 		return float64(vv)
