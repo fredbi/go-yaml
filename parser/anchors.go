@@ -99,6 +99,15 @@ func (p *Parser) openAnchorNode(name string) (*ast.AnchorNode, bool) {
 // resolveAlias points the alias at the node its name stands for.
 func (p *Parser) resolveAlias(alias *ast.AliasNode, name string, tk *token.Token) error {
 	if anchor, open := p.openAnchorNode(name); open {
+		if p.jsonCompatible {
+			// JSON is a tree written out in full, so it has no spelling for a
+			// node that reaches back into itself, wherever the cycle closes.
+			// Caught here rather than at the conversion, which read the alias
+			// as naming an anchor it had not finished writing and reported it
+			// as missing.
+			return yamlerrors.NewNotJSON("a cycle cannot be written as JSON", tk)
+		}
+
 		// The alias stands inside what its own anchor names. The anchored node
 		// is not built yet -- a sequence is built once its entries are read --
 		// so the target is filled at the document's end, where it exists.

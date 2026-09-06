@@ -65,11 +65,18 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 
 		if errors.Is(gotErr, yamlerrors.ErrNotJSON) {
 			// ToJSON parses with parser.WithJSONCompatible, so it refuses a
-			// document JSON has no spelling for -- a collection used as a
-			// mapping key, or an infinity or NaN. The value converter answered
-			// each of those by inventing a spelling, "[a b]" for the key and
-			// null for the number, so there is nothing here to agree about.
-			assert.NoErrorf(t, wantErr, "%s: %v", src.name, wantErr)
+			// document JSON has no spelling for: a collection used as a mapping
+			// key or an alias naming one, an infinity or NaN, and a cycle.
+			//
+			// The value converter answered the first three by inventing a
+			// spelling, "[a b]" for the key and null for the number, so there
+			// is nothing there to agree about. A cycle it refuses too, and that
+			// is the one refusal allowed here -- a Go value built by walking
+			// has nowhere to put one either.
+			if wantErr != nil {
+				assert.ErrorIsf(t, wantErr, yamlerrors.ErrRecursiveAlias,
+					"%s: the value converter refuses this, and not because of a cycle: %v", src.name, wantErr)
+			}
 			refused++
 
 			continue
@@ -119,29 +126,23 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 // knownJSONDivergence names a difference the folding converter makes on
 // purpose, given the two values that came back.
 //
-// Two so far, both places where the value converter lost something on its way
-// through Go values:
-//
-//   - A collection reached through an alias key -- "? *x", where the anchor
-//     names one -- went out as Go printed it, "[a b]". The folding converter
-//     writes the key's own JSON, ["a","b"]. Neither reads back as the key; a
-//     collection written as a key outright is refused by
-//     parser.WithJSONCompatible, and the parser keeps no anchor table to see
-//     through the alias.
-//   - A number too wide for int64 or float64 went out as a quoted string. It is
-//     a number and is written as one.
+// One so far, a place where the value converter lost something on its way
+// through Go values: a number too wide for int64 or float64 went out as a
+// quoted string. It is a number and is written as one.
 //
 // Two more are not visible here because the value converter's output is not
 // JSON at all and the comparison never reaches this: a control character went
 // out with YAML's "\a" escape, which JSON has no spelling for, and a merge key
 // wrote every merged entry and then the mapping's own, so an overridden key was
-// written twice. Infinity and NaN used to be a third, written bare as ".inf"
-// and ".nan"; the folding converter now refuses them.
+// written twice.
+//
+// Two have stopped being divergences. Infinity and NaN were written bare as
+// ".inf" and ".nan"; the folding converter refuses them. A collection reached
+// through an alias key -- "? *x", where the anchor names one -- went out as Go
+// printed it, "[a b]", against the key's own JSON ["a","b"]; the parser follows
+// the alias to what it names and refuses the key, so neither converter writes
+// it.
 func knownJSONDivergence(want, got any) (string, bool) {
-	if sameExceptCollectionKeys(want, got) {
-		return "a collection reached through an alias key is written as JSON, not as Go printed it", true
-	}
-
 	wantText, isText := want.(string)
 	if gotNumber, isNumber := got.(float64); isText && isNumber {
 		if parsed, err := json.Number(wantText).Float64(); err == nil && (parsed == gotNumber || math.IsInf(parsed, 0)) {
@@ -192,96 +193,4 @@ func jsonSources(t *testing.T) []jsonSource {
 	}
 
 	return srcs
-}
-
-// sameExceptCollectionKeys reports whether two values hold the same document
-// once the mapping keys that YAML wrote as collections are allowed to differ.
-//
-// Only one shape reaches this now: "? *x" where the anchor names a collection.
-// parser.WithJSONCompatible refuses a collection written as a key, and the
-// parser keeps no anchor table to see through the alias.
-//
-// Keys the two agree on are compared as they stand. A key only one of them has
-// must read as a collection -- it starts with "[" or "{" -- and the values
-// under those keys have to pair up.
-func sameExceptCollectionKeys(want, got any) bool {
-	switch w := want.(type) {
-	case map[string]any:
-		g, ok := got.(map[string]any)
-		if !ok || len(w) != len(g) {
-			return false
-		}
-
-		var wantOdd, gotOdd []any
-		for key, value := range w {
-			other, shared := g[key]
-			if !shared {
-				if !isCollectionKey(key) {
-					return false
-				}
-				wantOdd = append(wantOdd, value)
-
-				continue
-			}
-			if !sameExceptCollectionKeys(value, other) {
-				return false
-			}
-		}
-		for key, value := range g {
-			if _, shared := w[key]; shared {
-				continue
-			}
-			if !isCollectionKey(key) {
-				return false
-			}
-			gotOdd = append(gotOdd, value)
-		}
-
-		return pairUp(wantOdd, gotOdd)
-	case []any:
-		g, ok := got.([]any)
-		if !ok || len(w) != len(g) {
-			return false
-		}
-		for i := range w {
-			if !sameExceptCollectionKeys(w[i], g[i]) {
-				return false
-			}
-		}
-
-		return true
-	default:
-		return assert.ObjectsAreEqual(want, got)
-	}
-}
-
-// pairUp reports whether every value on the left matches one on the right.
-func pairUp(left, right []any) bool {
-	if len(left) != len(right) {
-		return false
-	}
-
-	taken := make([]bool, len(right))
-	for _, l := range left {
-		matched := false
-		for i, r := range right {
-			if taken[i] || !sameExceptCollectionKeys(l, r) {
-				continue
-			}
-			taken[i], matched = true, true
-
-			break
-		}
-		if !matched {
-			return false
-		}
-	}
-
-	return true
-}
-
-// isCollectionKey reports whether a mapping key was written from a sequence or
-// a mapping rather than from a scalar.
-func isCollectionKey(key string) bool {
-	return strings.HasPrefix(key, "[") || strings.HasPrefix(key, "{")
 }

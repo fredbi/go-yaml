@@ -71,6 +71,15 @@ func TestToJSONSpelling(t *testing.T) {
 // used to be written as the key's own JSON text -- {"[\"a\",\"b\"]":1} -- which
 // no reader takes apart again, and the infinities and NaN used to be written as
 // null, which loses them without saying so.
+//
+// An alias naming a collection goes with them: "a: &x [1, 2]" then "? *x" wrote
+// {"a":[1,2],"[1,2]":3}, and the decoder wrote "[1 2]" for the same key. The
+// parser follows the alias to what its anchor names, however deep in the
+// document the anchor sits.
+//
+// So does a cycle, which JSON cannot hold anywhere: the conversion read the
+// alias as naming an anchor it had not finished writing and reported it as
+// missing, which said nothing about the cycle.
 func TestToJSONRefusesWhatJSONCannotSpell(t *testing.T) {
 	for src, want := range map[string]string{
 		"? [a, b]\n: 1\n":  "a sequence cannot be a JSON key",
@@ -82,6 +91,15 @@ func TestToJSONRefusesWhatJSONCannotSpell(t *testing.T) {
 		"a: -.inf\n":       "JSON has no number for -.inf",
 		"a: .nan\n":        "JSON has no number for .nan",
 		".inf: a\n":        "JSON has no number for .inf",
+
+		"a: &x [1, 2]\n? *x\n: 3\n":               "a sequence cannot be a JSON key",
+		"a: &x {p: 1}\n? *x\n: 3\n":               "a mapping cannot be a JSON key",
+		"a: &x !!seq [1]\n? *x\n: 3\n":            "a sequence cannot be a JSON key",
+		"outer:\n  inner: &x [1, 2]\n? *x\n: 3\n": "a sequence cannot be a JSON key",
+		"a: &x [ *x ]\n":                          "a cycle cannot be written as JSON",
+		"a: &x {b: *x}\n":                         "a cycle cannot be written as JSON",
+		"a: &x\n  - *x\n":                         "a cycle cannot be written as JSON",
+		"a: &x [ &y [ *x ], *y ]\n":               "a cycle cannot be written as JSON",
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, err := codec.ToJSON([]byte(src))

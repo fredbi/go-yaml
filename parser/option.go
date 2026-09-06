@@ -84,15 +84,20 @@ func WithYAMLVersion(v YAMLVersion) Option {
 // two spellings, neither of which reads back as the key. And the infinities and
 // NaN, which JSON has no number for and which both wrote as null.
 //
-// Everything else YAML holds converts and is left alone: a non-string scalar
-// key is quoted, so "1.5: a" is {"1.5":"a"}; an alias writes what its anchor
-// wrote; a "<<" folds the mapping it names into the one holding it; and a tag
-// resolves.
+// An alias standing as a key goes with them. "a: &x [1, 2]" then "? *x" wrote
+// the key as "[1,2]" through the converter and as "[1 2]" through the decoder;
+// the parser follows the alias to what it names and refuses the key, whichever
+// side of the document the anchor is on.
 //
-// One case it does not catch: an alias standing as a key, "? *x", where the
-// anchor names a collection. The parser does not substitute aliases, so it
-// cannot see what the key will be, and the conversion invents a spelling as
-// before.
+// A cycle goes too. "&x [ *x ]" is a document -- YAML's representation is a
+// graph -- and JSON is a tree written out in full, so there is nothing to write.
+// The conversion used to report the alias as naming a missing anchor, which
+// said nothing about the cycle.
+//
+// Everything else YAML holds converts and is left alone: a non-string scalar
+// key is quoted, so "1.5: a" is {"1.5":"a"}; an alias to a scalar writes what
+// its anchor wrote, so "a: &x 7" then "? *x" is {"a":7,"7":3}; a "<<" folds the
+// mapping it names into the one holding it; and a tag resolves.
 //
 // [github.com/go-openapi/go-yaml/codec.ToJSON] parses with this on. Use it on a
 // parse of your own to find out whether a document converts before converting

@@ -1766,9 +1766,24 @@ func (p *Parser) resolveTag(text string) string {
 // for, or nil where the key is a scalar.
 //
 // A "?" key, an anchor and a tag are stood around the key rather than being the
-// key, so they are unwrapped to reach what a converter would have to write.
+// key, so they are unwrapped to reach what a converter would have to write. An
+// alias is followed to the node it names: "a: &x [1, 2]" then "? *x" wrote the
+// key as "[1,2]" through the converter and as "[1 2]" through the decoder, two
+// spellings and neither of them the key.
+//
+// The walk ends. An anchor's value is never another anchor and never an alias
+// -- the parser refuses "&x &y 1" and "&x *y", the second because §7.1 gives an
+// alias no properties -- so following a target costs one step and reaches a tag
+// or a node.
 func refuseCollectionKey(key ast.MapKeyNode) error {
-	var node ast.Node = key
+	var (
+		node ast.Node = key
+		// at is where the complaint is drawn. Following an alias lands on the
+		// anchored node, which is somewhere else in the document, so the alias
+		// keeps the caret on the key that cannot be one.
+		at *token.Token
+	)
+
 	for {
 		switch n := node.(type) {
 		case *ast.MappingKeyNode:
@@ -1777,10 +1792,12 @@ func refuseCollectionKey(key ast.MapKeyNode) error {
 			node = n.Value
 		case *ast.TagNode:
 			node = n.Value
+		case *ast.AliasNode:
+			at, node = n.GetToken(), n.Target
 		case *ast.MappingNode, *ast.MappingValueNode:
-			return yamlerrors.NewNotJSON("a mapping cannot be a JSON key", node.GetToken())
+			return yamlerrors.NewNotJSON("a mapping cannot be a JSON key", drawnAt(at, node))
 		case *ast.SequenceNode:
-			return yamlerrors.NewNotJSON("a sequence cannot be a JSON key", node.GetToken())
+			return yamlerrors.NewNotJSON("a sequence cannot be a JSON key", drawnAt(at, node))
 		default:
 			return nil
 		}
@@ -1788,6 +1805,16 @@ func refuseCollectionKey(key ast.MapKeyNode) error {
 			return nil
 		}
 	}
+}
+
+// drawnAt returns at where an alias set one, and the node's own token
+// otherwise.
+func drawnAt(at *token.Token, node ast.Node) *token.Token {
+	if at != nil {
+		return at
+	}
+
+	return node.GetToken()
 }
 
 // resolvedBySchema reports whether the scanner typed a plain scalar by the core
