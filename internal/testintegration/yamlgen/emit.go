@@ -430,7 +430,13 @@ func (e *emitter) block(v Value, indent, depth int) {
 		for _, p := range n.Pairs {
 			e.headComment(indent)
 			e.pad(indent)
-			e.buf.WriteString(e.keyIn(p.Key, false))
+
+			if e.st.ExplicitKeys {
+				e.explicitKey(p.Key, indent)
+			} else {
+				e.buf.WriteString(e.keyIn(p.Key, false))
+			}
+
 			e.buf.WriteString(":")
 			e.child(p.Val, indent, depth)
 		}
@@ -445,6 +451,29 @@ func (e *emitter) block(v Value, indent, depth int) {
 		e.buf.WriteString(e.simpleScalar(v, false))
 		e.buf.WriteString("\n")
 	}
+}
+
+// explicitKey writes "? key" and the line break, leaving the caller on the
+// ":" line at the same indentation.
+//
+// The "?" and the ":" line up: 8.2.2 makes them the two halves of one entry,
+// both written at the mapping's own indentation, and the key between them may
+// be anything a node can be.
+//
+// A key that writes nothing -- a Null under the empty spelling -- takes the "?"
+// alone. Writing "? " with nothing after it would leave a trailing space, which
+// is not what the document means and not what a renderer writes back.
+func (e *emitter) explicitKey(k Value, indent int) {
+	e.feat.add(FeatureExplicitKey)
+	e.buf.WriteString("?")
+
+	if key := e.keyIn(k, false); key != "" {
+		e.buf.WriteString(" ")
+		e.buf.WriteString(key)
+	}
+
+	e.buf.WriteString("\n")
+	e.pad(indent)
 }
 
 // child writes the value of a mapping pair or a sequence entry, having already
@@ -626,6 +655,18 @@ func (e *emitter) flowMap(n Map) string {
 	pairs := make([]string, 0, len(n.Pairs))
 	for _, p := range n.Pairs {
 		key := e.keyIn(p.Key, true)
+
+		if e.st.ExplicitKeys {
+			// "{? a: 1}" is the flow spelling of the same entry. The "?" needs
+			// separation from what follows it, and an empty key takes it alone.
+			e.feat.add(FeatureExplicitKey)
+
+			if key == "" {
+				key = "?"
+			} else {
+				key = "? " + key
+			}
+		}
 
 		if _, empty := p.Val.(Null); empty {
 			switch e.st.FlowEmpty {
@@ -1036,10 +1077,17 @@ func (e *emitter) folds(s string) bool {
 	return e.st.Folded && canFolded(s)
 }
 
+// blockScalarIn is [emitter.blockScalar] as a function of the style alone, so a
+// [Divergence] predicate can ask the same question the emitter answers rather
+// than approximating it.
+func blockScalarIn(s string, st Style) bool {
+	return (st.Folded && canFolded(s)) || (st.Literal && canLiteral(s, st.BlockIndicator))
+}
+
 // blockScalar reports whether s can be written as a block scalar at all, in
 // whichever of the two styles this presentation allows.
 func (e *emitter) blockScalar(s string) bool {
-	return e.folds(s) || (e.st.Literal && canLiteral(s, e.st.BlockIndicator))
+	return blockScalarIn(s, e.st)
 }
 
 // foldedScalar writes a string as a folded block scalar.

@@ -202,6 +202,7 @@ var parserComplaints = []string{
 	"found unexpected document separator",
 	"found unknown escape character _",
 	"invalid header option",
+	"map key definition includes an implicit line break",
 	"mapping value is not allowed in this context",
 	"non-map value is specified",
 	"not enough length for escaped UTF-N character",

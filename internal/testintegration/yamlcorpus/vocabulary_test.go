@@ -183,7 +183,7 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// lost `unexpected scalar value` again, and a Refusals entry for an anchor
 	// standing alone put `anchor is not allowed in this context` back.
 	//
-	// Three of the 27 look unreachable rather than untested. `unexpected scalar
+	// Three of them look unreachable rather than untested. `unexpected scalar
 	// value` has one document behind it -- "a:" over ": 2" -- and that is the
 	// empty-key defect, so a Refusals entry for it would pin a bug. Nothing at
 	// all provokes `specified not scalar tag`: parseScalarTag reports it when a
@@ -191,12 +191,16 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// is caught earlier. Both were hunted on 2026-09-11 without success and are
 	// recorded in stream 8.
 	//
-	// The third took the ceiling from 26 to 27 on 2026-09-07, when Scanner.Init
-	// grew a refusal for a source at or above maxSourceLen. No document reaches
-	// it: the bound is math.MaxInt32 - 1, so provoking it costs two gigabytes.
-	// The bound is checked instead by sourceTooLong, which is a predicate of its
-	// own so that a test can read its edge at any size.
-	const ceiling = 27
+	// The third arrived on 2026-09-07, when Scanner.Init grew a refusal for a
+	// source at or above maxSourceLen. No document reaches it: the bound is
+	// math.MaxInt32 - 1, so provoking it costs two gigabytes. The bound is
+	// checked instead by sourceTooLong, which is a predicate of its own so that
+	// a test can read its edge at any size.
+	//
+	// Against those three, Style.ExplicitKeys reached `map key definition
+	// includes an implicit line break`, which nothing had provoked before: a
+	// mapping key written the long way is the only key that may hold one.
+	const ceiling = 26
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+

@@ -302,6 +302,14 @@ type Style struct {
 	TagHandle string
 	// NumberForm is the base or shape a number is written in.
 	NumberForm NumberForm
+	// ExplicitKeys writes a mapping entry as "? key" over ": value" rather
+	// than as "key: value".
+	//
+	// The same mapping, and YAML's other way of writing one. It is the form
+	// that lets a key stand on a line of its own, which is why a parser needs
+	// separate machinery for it -- and why the generator having never written
+	// one left that machinery reached by fixtures alone.
+	ExplicitKeys bool
 }
 
 // flowAt reports whether a node at this depth is written in flow style.
@@ -361,6 +369,10 @@ func (s Style) String() string {
 		spelling = " tag=!" + s.TagHandle + "!"
 	}
 
+	if s.ExplicitKeys {
+		spelling += " ?key"
+	}
+
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String()
@@ -412,6 +424,11 @@ func Styles() *rapid.Generator[Style] {
 			// written and the only form a negative integer has. The other four
 			// share the rest evenly.
 			NumberForm: NumberForm(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "numberform")),
+			// One mapping in four is written the long way. Weighted down
+			// because "key: value" is what documents look like, and an even
+			// split would spend half the corpus's mappings on a form few
+			// readers ever meet.
+			ExplicitKeys: rapid.IntRange(0, 3).Draw(t, "explicitkeys") == 0,
 		}
 	})
 }

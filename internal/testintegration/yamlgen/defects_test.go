@@ -368,3 +368,121 @@ func TestOneNonStringKeyNoLongerZeroesAWholeStruct(t *testing.T) {
 		assert.Equal(t, named{Name: "x"}, got)
 	})
 }
+
+// The three defects Style.ExplicitKeys found on its first deep run.
+//
+// A mapping entry has two spellings -- "key: value" and "? key" over
+// ": value" -- and the generator had only ever written the short one. All three
+// of these are the long form and nothing else: the same document written short
+// reads, libfyaml 1.0.0b1 reads every one, the reference parser passes them,
+// and grammar.NewRecognizer accepts them.
+
+// TestDefectAQuotedExplicitKeyRefusesABlockScalarValue: `? "a"` over `: >-` is
+// refused where `? a` over the same two lines reads.
+func TestDefectAQuotedExplicitKeyRefusesABlockScalarValue(t *testing.T) {
+	for _, src := range []string{
+		"? \"a\"\n: >-\n  x\n",
+		"? 'a'\n: >-\n  x\n",
+		"? \"a\"\n: |\n  x\n",
+		"a:\n  ? \"b\"\n  : >-\n    x\n",
+		"- ? \"a\"\n  : >-\n    x\n",
+		"? \"a\"\n: &an >-\n  x\n",
+		"? \"a\"\n: !!str >-\n  x\n",
+	} {
+		wellFormed(t, src)
+
+		var got any
+		err := yaml.Unmarshal([]byte(src), &got)
+		require.Errorf(t, err, "today: %q is refused", src)
+		assert.Contains(t, err.Error(), "value is not allowed in this context", "%q", src)
+	}
+
+	t.Run("a plain key over the same value reads", func(t *testing.T) {
+		for _, src := range []string{"? a\n: >-\n  x\n", "? a\n: |\n  x\n", "? a\n: |3-\n   x\n"} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		}
+	})
+
+	t.Run("and so does the short form of the quoted one", func(t *testing.T) {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("\"a\": >-\n  x\n"), &got))
+		assert.Equal(t, map[string]any{"a": "x"}, got)
+	})
+
+	t.Run("a value that is not a block scalar reads under the quoted key", func(t *testing.T) {
+		for _, src := range []string{"? \"a\"\n: \"y\"\n", "? \"a\"\n: [1]\n", "? \"\"\n: x\n"} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		}
+	})
+}
+
+// TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows: `: &a1` with
+// nothing after it takes the entries below into the node it anchors.
+//
+// The same shape as a tag on an empty value, one property over -- see
+// yamlcorpus.Departures, "a local tag on an empty value, with the mapping
+// carrying on".
+func TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows(t *testing.T) {
+	const src = "? a\n: &a1\n? b\n: &a2\n"
+	wellFormed(t, src)
+
+	var got any
+	require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+	assert.Equal(t, map[string]any{"a": map[string]any{"b": nil}}, got,
+		"today: b is swallowed into the node a's anchor names")
+
+	t.Run("the renderer writes the nesting back out", func(t *testing.T) {
+		assert.Equal(t, "? a\n: &a1\n  ? b\n  : &a2\n", renderOnce(t, src))
+	})
+
+	t.Run("an alias to the anchor stops the parse instead", func(t *testing.T) {
+		const aliased = "? a\n: &a1\n? b\n: *a1\n"
+		wellFormed(t, aliased)
+
+		var v any
+		err := yaml.Unmarshal([]byte(aliased), &v)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `alias "a1" names an anchor that is not resolved yet`)
+	})
+
+	t.Run("the short form, the long form without anchors, and a value all read", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{src: "a: &a1\nb: &a2\n", want: map[string]any{"a": nil, "b": nil}},
+			{src: "? a\n:\n? b\n:\n", want: map[string]any{"a": nil, "b": nil}},
+			{src: "? a\n: &a1 x\n? b\n: *a1\n", want: map[string]any{"a": "x", "b": "x"}},
+		} {
+			var v any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &v), "%q", tc.src)
+			assert.Equal(t, tc.want, v, "%q", tc.src)
+		}
+	})
+}
+
+// TestDefectACommentOnAnExplicitKeysColonLineIsDropped: a comment on the ":"
+// line of the long form, with the value below it, is lost by the renderer.
+func TestDefectACommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
+	for _, tc := range []struct{ src, renders string }{
+		{src: "? a\n: # c3\n  v\n", renders: "? a\n: v\n"},
+		{src: "? a\n: # c3\n  - 1\n", renders: "? a\n:\n- 1\n"},
+		{src: "?\n: #c1\n", renders: "?\n:\n"},
+	} {
+		wellFormed(t, tc.src)
+		assert.Equal(t, tc.renders, renderOnce(t, tc.src), "today: %q loses its comment", tc.src)
+	}
+
+	t.Run("every other position keeps it", func(t *testing.T) {
+		for _, tc := range []struct{ src, renders string }{
+			{src: "a: # c3\n  v\n", renders: "a: v # c3\n"},
+			{src: "a: # c3\n  - 1\n", renders: "a: # c3\n- 1\n"},
+			{src: "? a\n: v # c3\n", renders: "? a\n: v # c3\n"},
+			{src: "? a # c3\n: v\n", renders: "? a # c3\n: v\n"},
+		} {
+			assert.Equal(t, tc.renders, renderOnce(t, tc.src), "%q", tc.src)
+		}
+	})
+}

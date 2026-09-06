@@ -99,6 +99,8 @@ const (
 	FeatureNumberOctal stance.Feature = "presentation/number-octal"
 	// FeatureNumberExponent is a float written "1.5e+00".
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
+	// FeatureExplicitKey is a mapping entry written "? key" over ": value".
+	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
 
 	// FeatureValueNull and the rest name what the document denotes, drawn from
 	// the Value rather than from the text. A consumer that cannot hold a float

@@ -85,6 +85,7 @@ func marks() []mark {
 		// Forward direction only. A double-quoted string may hold "0x" or a
 		// "+" of its own, so reading these back out of the bytes would report
 		// scalar content as presentation.
+		{feature: yamlgen.FeatureExplicitKey, in: has("?")},
 		{feature: yamlgen.FeatureNumberHex, in: has("0x")},
 		{feature: yamlgen.FeatureNumberOctal, in: has("0o")},
 		{feature: yamlgen.FeatureNumberSigned, in: has("+")},
@@ -226,6 +227,7 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureNumberHex:       st.NumberForm == yamlgen.NumberHex,
 			yamlgen.FeatureNumberOctal:     st.NumberForm == yamlgen.NumberOctal,
 			yamlgen.FeatureNumberExponent:  st.NumberForm == yamlgen.NumberExponent,
+			yamlgen.FeatureExplicitKey:     st.ExplicitKeys,
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,

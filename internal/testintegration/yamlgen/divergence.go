@@ -191,6 +191,62 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "render/a-comment-on-an-explicit-keys-colon-line-is-dropped",
+		Reason: "A comment written on the `:` line of an entry written the long way, with the value " +
+			"below it, is lost. `? a` over `: # c3` over `  v` renders back as `? a` over `: v`.\n\n" +
+			"The short form keeps it: `a: # c3` over `  v` renders `a: v # c3`, moved but not lost. " +
+			"So does a comment after the value, `: v # c3`, and one on the `?` line, `? a # c3`. It " +
+			"is the `:` line of the long form and nowhere else.\n\n" +
+			"Only the comments are lost -- the value reads correctly -- which is why this claims " +
+			"CommentsKept alone. Found on 2026-09-11 by Style.ExplicitKeys.\n\n" +
+			"The shape is a `:` with nothing after it on its line, so an empty value counts as much " +
+			"as a collection: `?` over `: #c1` loses the comment too. The predicate does not work " +
+			"out whether a collection really lands below rather than in flow, since that depends on " +
+			"the value's depth and on Style.FlowFrom, so it reports more draws than divergences.",
+		Property: CommentsKept,
+		Match:    writesACommentOnAnExplicitColonLine,
+	},
+	{
+		Name: "parse/an-anchor-alone-after-an-explicit-key-swallows-what-follows",
+		Reason: "An entry written the long way whose value is an anchor and nothing else takes the " +
+			"entries after it into itself. `? a` over `: &a1` over `? b` over `: &a2` reads " +
+			"{\"a\": {\"b\": null}}, and the renderer writes the nesting back out indented.\n\n" +
+			"Where the swallowed entry aliases the anchor the parse stops instead: `? a` over `: &a1` " +
+			"over `? b` over `: *a1` reports `alias \"a1\" names an anchor that is not resolved yet`, " +
+			"because the anchor is inside the node that is still being built.\n\n" +
+			"Three things make it the anchor and the long form together. The short form reads: " +
+			"`a: &a1` over `b: &a2` gives two entries. The long form without anchors reads: `? a` " +
+			"over `:` over `? b` over `:` gives two entries. And giving the value content reads, " +
+			"`: &a1 x`.\n\n" +
+			"This is the same shape as decode/a-tag-on-an-empty-value, one property over: a node " +
+			"property standing alone after a `:` makes the parser expect a block collection under " +
+			"it. libfyaml 1.0.0b1 gives the flat mapping, the reference parser passes it, and " +
+			"grammar.NewRecognizer accepts it. Found on 2026-09-11 by Style.ExplicitKeys.\n\n" +
+			"The predicate does not ask whether anything follows the anchored entry, so it reports " +
+			"more draws than divergences.",
+		Property: Parses | Decode | DecodeTyped | Render | Settle | CommentsKept,
+		Match:    writesAnAnchorAloneAfterAnExplicitKey,
+	},
+	{
+		Name: "parse/a-quoted-explicit-key-refuses-a-block-scalar-value",
+		Reason: "A mapping entry written the long way -- `? key` over `: value` -- is refused when the " +
+			"key is quoted and the value is a block scalar. `? \"a\"` over `: >-` over `  x` reports " +
+			"`value is not allowed in this context`; `? a` over the same two lines reads, and so does " +
+			"the short form `\"a\": >-`.\n\n" +
+			"Nothing else narrows it. Single quotes and double quotes both do it, `|` and `>` both do " +
+			"it, and it happens at the document root, inside a mapping and inside a sequence entry. " +
+			"An anchor or a tag on the value makes no difference. A flow collection, a quoted scalar " +
+			"and a plain scalar after the same quoted key all read.\n\n" +
+			"libfyaml 1.0.0b1 reads every one of them, the reference parser passes them, and " +
+			"grammar.NewRecognizer accepts them. Found on 2026-09-11 by Style.ExplicitKeys, on its " +
+			"first deep run.\n\n" +
+			"The predicate asks the emitter's own blockScalarIn whether the value becomes one, so the " +
+			"only place it is wider than the defect is the key: Style.Quoting quotes every string, " +
+			"and not every quoted key is one the parser then cannot place.",
+		Property: Parses | Decode | Render | Settle | CommentsKept,
+		Match:    writesAQuotedExplicitKeyOverABlockScalar,
+	},
+	{
 		Name: "decode/an-int-tag-cannot-be-read-into-a-go-integer",
 		Reason: "`!!int` on a value cannot be read into any Go integer -- a struct field, a slice " +
 			"element or a map value. `n: !!int 5` into a struct with an int64 field is refused with " +
@@ -290,6 +346,176 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 	}
 
 	return false
+}
+
+// writesAQuotedExplicitKeyOverABlockScalar reports whether st writes a mapping
+// entry the long way, with a quoted key and a value the emitter may write as a
+// block scalar.
+//
+// writesACommentOnAnExplicitColonLine reports whether st writes an entry the
+// long way, with a line comment, over a value that may go on its own line.
+func writesACommentOnAnExplicitColonLine(v Value, st Style) bool {
+	if !st.ExplicitKeys || (st.Comments != LineComments && st.Comments != AllComments) {
+		return false
+	}
+
+	return holdsAValueBelowItsColon(v, st)
+}
+
+func holdsAValueBelowItsColon(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if goesOnItsOwnLine(p.Val, st) || holdsAValueBelowItsColon(p.Val, st) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAValueBelowItsColon(item, st)
+		})
+	case Anchored:
+		return holdsAValueBelowItsColon(n.V, st)
+	case Alias:
+		return holdsAValueBelowItsColon(n.V, st)
+	case Tagged:
+		return holdsAValueBelowItsColon(n.V, st)
+	}
+
+	return false
+}
+
+// goesOnItsOwnLine reports the values that leave the ":" line empty behind
+// them: a collection with something in it, a block scalar, and a null the style
+// spells as nothing at all.
+func goesOnItsOwnLine(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Null:
+		return st.NullSpelling == ""
+	case Seq:
+		return len(n.Items) > 0
+	case Map:
+		return len(n.Pairs) > 0
+	case Str:
+		return blockScalarIn(n.V, st)
+	case Anchored:
+		return goesOnItsOwnLine(n.V, st)
+	case Alias:
+		return goesOnItsOwnLine(n.V, st)
+	case Tagged:
+		return goesOnItsOwnLine(n.V, st)
+	default:
+		return false
+	}
+}
+
+// writesAnAnchorAloneAfterAnExplicitKey reports whether st writes an entry the
+// long way whose value reaches the document as an anchor and nothing else.
+//
+// Only a bare Null does, and only when the style spells null as nothing.
+func writesAnAnchorAloneAfterAnExplicitKey(v Value, st Style) bool {
+	if !st.ExplicitKeys || st.NullSpelling != "" {
+		return false
+	}
+
+	return holdsAnAnchoredNullValue(v)
+}
+
+func holdsAnAnchoredNullValue(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if anchoredNull(p.Val) || holdsAnAnchoredNullValue(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsAnAnchoredNullValue)
+	case Anchored:
+		return holdsAnAnchoredNullValue(n.V)
+	case Alias:
+		return holdsAnAnchoredNullValue(n.V)
+	case Tagged:
+		return holdsAnAnchoredNullValue(n.V)
+	}
+
+	return false
+}
+
+// anchoredNull reports an anchor standing directly on a node that writes
+// nothing. A tag between the two writes itself, so the anchor is no longer
+// alone.
+func anchoredNull(v Value) bool {
+	n, anchored := v.(Anchored)
+	if !anchored {
+		return false
+	}
+
+	_, empty := n.V.(Null)
+
+	return empty
+}
+
+// It asks blockScalarIn rather than approximating it, so the only place it is
+// wider than the defect is the key: a key the style quotes is not always a key
+// the defect needs, since Style.Quoting quotes every string and the defect
+// wants one the parser then cannot place.
+func writesAQuotedExplicitKeyOverABlockScalar(v Value, st Style) bool {
+	if !st.ExplicitKeys {
+		return false
+	}
+
+	return holdsAQuotedKeyOverAString(v, st)
+}
+
+func holdsAQuotedKeyOverAString(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			key, text := p.Key.(Str)
+			if text && quotedIn(key.V, st) && writesABlockScalar(p.Val, st) {
+				return true
+			}
+
+			if holdsAQuotedKeyOverAString(p.Val, st) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAQuotedKeyOverAString(item, st)
+		})
+	case Anchored:
+		return holdsAQuotedKeyOverAString(n.V, st)
+	case Alias:
+		return holdsAQuotedKeyOverAString(n.V, st)
+	case Tagged:
+		return holdsAQuotedKeyOverAString(n.V, st)
+	}
+
+	return false
+}
+
+// quotedIn reports whether a key reaches the document in quotes.
+func quotedIn(key string, st Style) bool {
+	return st.Quoting != QuotePlain || !canPlain(key, false)
+}
+
+// writesABlockScalar reports whether the emitter would write v as a block
+// scalar under this style, properties and all.
+func writesABlockScalar(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Str:
+		return blockScalarIn(n.V, st)
+	case Anchored:
+		return writesABlockScalar(n.V, st)
+	case Alias:
+		return writesABlockScalar(n.V, st)
+	case Tagged:
+		return writesABlockScalar(n.V, st)
+	default:
+		return false
+	}
 }
 
 // writesAnIntTag reports whether v carries `!!int` anywhere.
