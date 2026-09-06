@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"unicode/utf8"
 	"unsafe"
 
 	"github.com/go-openapi/go-yaml/internal/probe"
@@ -134,51 +133,6 @@ func (c *Context) reset(src string) {
 	c.mstate = nil
 }
 
-func (c *Context) resetBuffer() {
-	c.buf = c.buf[:0]
-	c.notSpaceCharPos = 0
-	c.originStart, c.originEnd = c.idx, c.idx
-	c.originCopy = c.originCopy[:0]
-	c.originCut = false
-}
-
-// textAt returns buf as a string and where in the source it was found, or -1 where buf is not the source's own bytes.
-//
-// A Go substring shares the bytes it is taken from, so a token whose text is the source's own costs nothing: it points
-// into the document rather than carrying a copy of it.
-// Scanning rewrites the text often enough -- escapes, folding, chomping -- that the source window is compared with buf
-// rather than assumed equal to it.
-//
-// start is where the caller believes buf begins.
-// It is a guess for a value the scanner folded: the offset it works out is the cursor less the folded length, and
-// folding makes the value shorter than the source it was read from.
-//
-// Where the guess misses, the cursor gives the other end, and the offset that matched is the one the token should
-// carry.
-func (c *Context) textAt(buf []byte, start int32) (string, int32) {
-	if span, ok := c.window(buf, start); ok {
-		return span, start
-	}
-	at := c.idx - int32(len(buf))
-	if span, ok := c.window(buf, at); ok {
-		return span, at
-	}
-
-	return string(buf), -1
-}
-
-// window returns the len(buf) bytes of the source at start, and reports whether they are buf's own.
-func (c *Context) window(buf []byte, start int32) (string, bool) {
-	end := start + int32(len(buf))
-	if start < 0 || end > int32(len(c.src)) {
-		return "", false
-	}
-
-	span := c.src[start:end]
-
-	return span, span == string(buf)
-}
-
 func (c *Context) breakMultiLine() {
 	c.mstate = nil
 }
@@ -222,31 +176,6 @@ func (c *Context) setRawFolded(column int32) {
 	c.block = MultiLineState{isRawFolded: true}
 	c.block.updateIndentColumn(column)
 	c.mstate = &c.block
-}
-
-func (c *Context) isMergeKey() bool {
-	if c.repeatNum('<') != 2 {
-		return false
-	}
-	src := c.src
-	size := int32(len(src))
-	for idx := c.idx + 2; idx < size; idx++ {
-		char := src[idx]
-		if char == ' ' {
-			continue
-		}
-		if char != ':' {
-			return false
-		}
-		if idx+1 < size {
-			nc := rune(src[idx+1])
-			if nc == ' ' || isNewLineChar(nc) {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func (c *Context) addToken(tk *token.Token) {
@@ -305,92 +234,6 @@ type propertyRun struct {
 	length      int32
 }
 
-func (c *Context) addBuf(r rune) {
-	if len(c.buf) == 0 && (r == ' ' || r == '\t') {
-		return
-	}
-	c.buf = utf8.AppendRune(c.buf, r)
-	if r != ' ' && r != '\t' {
-		c.notSpaceCharPos = int32(len(c.buf))
-	}
-}
-
-func (c *Context) addBufWithTab(r rune) {
-	if len(c.buf) == 0 && r == ' ' {
-		return
-	}
-	c.buf = utf8.AppendRune(c.buf, r)
-	if r != ' ' {
-		c.notSpaceCharPos = int32(len(c.buf))
-	}
-}
-
-// origin is the text the current token was written as: everything read since the last token was cut, indentation and
-// line breaks included.
-//
-// It is a window on the source.
-// Nothing keeps it -- Origin left the token, and what reads it now measures it -- so the scanner records what it reads
-// by moving originEnd rather than by copying the bytes into a buffer.
-// Over the fuzz corpus that holds for 107,805 of 107,811 reads.
-//
-// The exception is a line whose trailing spaces are cut.
-// Each cut takes a suffix, but the scan goes on and reads more, so what is left has a gap in the middle of it and no
-// window can say so.
-// The first cut copies what the window held and everything after it appends to the copy.
-func (c *Context) origin() string {
-	if c.originCut {
-		return string(c.originCopy)
-	}
-
-	return c.src[c.originStart:min(c.originEnd, int32(len(c.src)))]
-}
-
-// addOriginBuf records that r was read as part of the current token.
-//
-// One add, where appending r to a buffer was 8% of the scanner: a call that could not inline -- cost 106 against a
-// budget of 80, utf8.AppendRune's body being worth 70 on its own -- around an append that copied a byte already in the
-// source.
-func (c *Context) addOriginBuf(r rune) {
-	if r < utf8.RuneSelf && !c.originCut {
-		c.originEnd++
-
-		return
-	}
-
-	c.addOriginWide(r)
-}
-
-// skipOrigin records that the n bytes at the cursor were read, as n calls to [Context.addOriginBuf] would.
-//
-// The caller has established they are ASCII, so each is one character and one byte.
-func (c *Context) skipOrigin(n int32) {
-	if c.originCut {
-		c.originCopy = append(c.originCopy, c.src[c.idx:c.idx+n]...)
-
-		return
-	}
-
-	c.originEnd += n
-}
-
-// addOriginWide records a character that the window cannot count in one byte,
-// or any character once a cut has put the text in a buffer.
-//
-// It is kept out of [Context.addOriginBuf] so that one stays inside the
-// inliner's budget: appending a rune is worth more than the whole budget on its
-// own, and this is called for a byte in a thousand.
-//
-//go:noinline
-func (c *Context) addOriginWide(r rune) {
-	if c.originCut {
-		c.originCopy = utf8.AppendRune(c.originCopy, r)
-
-		return
-	}
-
-	c.originEnd += int32(utf8.RuneLen(r))
-}
-
 // removeRightSpaceFromBuf cuts the spaces and tabs a line ends with from the token's text and from its value.
 //
 // Where the text is still a window, the run is found by reading back over the source rather than by having marked it
@@ -429,110 +272,6 @@ func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 
 // The cursor addresses c.src by byte, and decodes UTF-8 to read a character. c.idx and c.size are byte counts; every
 // method below that speaks of a character decodes one rather than indexing for it.
-
-// width is how many bytes the character at the cursor takes, or 0 at the end.
-func (c *Context) width() int32 {
-	if c.idx >= c.size {
-		return 0
-	}
-	if c.src[c.idx] < utf8.RuneSelf {
-		return 1
-	}
-	_, w := utf8.DecodeRuneInString(c.src[c.idx:])
-
-	return int32(w)
-}
-
-// isEOS reports that no character follows the one at the cursor.
-func (c *Context) isEOS() bool {
-	return c.idx+c.width() >= c.size
-}
-
-func (c *Context) next() bool {
-	return c.idx < c.size
-}
-
-// source returns the bytes between two byte offsets of c.src.
-func (c *Context) source(s, e int32) string {
-	return c.src[s:e]
-}
-
-// previousChar returns the character before the cursor, stepping back over a byte order mark: the scanner steps over
-// one rather than reading it, so nothing that asks what came before should see it.
-func (c *Context) previousChar() rune {
-	end := c.idx
-	for end > 0 {
-		r, w := utf8.DecodeLastRuneInString(c.src[:end])
-		if r != byteOrderMark {
-			return r
-		}
-		end -= int32(w)
-	}
-
-	return rune(0)
-}
-
-func (c *Context) currentChar() rune {
-	if c.idx < c.size {
-		if b := c.src[c.idx]; b < utf8.RuneSelf {
-			return rune(b)
-		}
-
-		r, _ := utf8.DecodeRuneInString(c.src[c.idx:])
-
-		return r
-	}
-
-	return rune(0)
-}
-
-func (c *Context) nextChar() rune {
-	if w := c.width(); c.idx+w < c.size {
-		r, _ := utf8.DecodeRuneInString(c.src[c.idx+w:])
-
-		return r
-	}
-
-	return rune(0)
-}
-
-// repeatNum counts how many times r stands at the cursor, in a row.
-func (c *Context) repeatNum(r rune) int32 {
-	var cnt int32
-	for i := c.idx; i < c.size; {
-		cur, w := utf8.DecodeRuneInString(c.src[i:])
-		if cur != r {
-			break
-		}
-		cnt++
-		i += int32(w)
-	}
-
-	return cnt
-}
-
-// progress advances the cursor by num characters and returns the bytes it crossed.
-//
-// Callers count columns in characters and offsets in bytes, which is why it reports both.
-func (c *Context) progress(num int32) int32 {
-	start := c.idx
-	for range num {
-		if c.idx >= c.size {
-			break
-		}
-		// A byte below utf8.RuneSelf stands for a character of its own, so its width is known without decoding it.
-		// Decoding every character to ask how wide it is was 12% of the scanner's time.
-		if c.src[c.idx] < utf8.RuneSelf {
-			c.idx++
-
-			continue
-		}
-		_, w := utf8.DecodeRuneInString(c.src[c.idx:])
-		c.idx += int32(w)
-	}
-
-	return c.idx - start
-}
 
 func (c *Context) existsBuffer() bool {
 	return len(c.bufferedSrc()) != 0
