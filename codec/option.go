@@ -87,6 +87,36 @@ func AllowDuplicateMapKey() DecodeOption {
 	}
 }
 
+// ShareAliases makes every alias of one anchor stand for the same Go value,
+// rather than each building its own.
+//
+// By default they are independent: "first: *b" and "second: *b" give two maps,
+// so writing through one leaves the other alone. Sharing gives one map under
+// both names, and a caller who writes through either writes through both.
+//
+// Two reasons to ask for it:
+//
+//   - The anchors survive a round trip through a Go value. [MarshalAnchor] and
+//     the ",anchor" and ",alias" struct tags find an anchor by the address the
+//     value stands at, so an encoder can only write "*name" where the decode
+//     left one value under two names. Without this option, decoding a document
+//     and encoding it again writes the anchored node out in full at each alias.
+//     Reading a document into an [github.com/go-openapi/go-yaml/ast] tree and
+//     rendering it keeps the anchors either way; this is about the Go value.
+//   - An alias costs nothing. Building each alias its own value is what a
+//     document written to exhaust memory abuses -- see [errors.ErrExcessiveAliasing]
+//     -- and a shared value is built once however many aliases name it.
+//
+// Do not use it on a value the program then writes to, unless the aliasing is
+// the point.
+func ShareAliases() DecodeOption {
+	return func(d *Decoder) error {
+		d.shareAliases = true
+
+		return nil
+	}
+}
+
 // UseOrderedMap can be interpreted as a map,
 // and uses MapSlice ( ordered map ) aggressively if there is no type specification
 func UseOrderedMap() DecodeOption {
@@ -192,6 +222,11 @@ func Flow(isFlowStyle bool) EncodeOption {
 // The map key name is used as the anchor name by default.
 // If key names conflict, a suffix is automatically added to avoid collisions.
 // This is an experimental feature and cannot be used simultaneously with anchor tags.
+//
+// Encoding a value that came from Unmarshal writes an anchor only where the
+// decode left two names at one address, so pass [ShareAliases] to the decode.
+// Without it every alias builds its own value, nothing shares a pointer, and
+// this option has nothing to find.
 func WithSmartAnchor() EncodeOption {
 	return func(e *Encoder) error {
 		e.enableSmartAnchor = true
@@ -217,7 +252,13 @@ func JSON() EncodeOption {
 	}
 }
 
-// MarshalAnchor call back if encoder find an anchor during encoding
+// MarshalAnchor call back if encoder find an anchor during encoding.
+//
+// An anchor is found by the address its value stands at, so a document decoded
+// and encoded again keeps its anchors only where the decode left one value
+// under every name that points at it. Pass [ShareAliases] to Unmarshal for
+// that; without it each alias builds its own value and the anchored node is
+// written out in full at every one.
 func MarshalAnchor(callback func(*ast.AnchorNode, interface{}) error) EncodeOption {
 	return func(e *Encoder) error {
 		e.anchorCallback = callback

@@ -4,8 +4,10 @@
 package codec
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -39,7 +41,15 @@ type valueBuilder struct {
 	// open holds the anchors whose node is being read, innermost last. An alias
 	// naming one of them stands inside what it names.
 	open []string
-	err  error
+	// share hands every alias of one anchor the same value. See
+	// codec.ShareAliases.
+	share bool
+	// built counts the values copied for an alias, and budget bounds them. A
+	// chain of aliases multiplies, so an independent copy is what a document
+	// written to exhaust memory abuses.
+	built  int
+	budget int
+	err    error
 }
 
 type frameKind uint8
@@ -238,11 +248,20 @@ func (b *valueBuilder) propertyValue(n ast.Node) (any, error) {
 	return b.scalarValue(inner)
 }
 
-// aliasValue is what an alias names, which the anchor recorded as it closed.
+// aliasValue returns what an alias names, which the anchor recorded as it
+// closed.
 func (b *valueBuilder) aliasValue(n *ast.AliasNode) any {
 	name := anchorName(n.Value)
 	if v, named := b.named[name]; named {
-		return v
+		if b.share {
+			return v
+		}
+
+		// Two aliases of one anchor give two values, so writing through one
+		// leaves the other alone. The walk has handed the anchored nodes over
+		// already and cannot read them again, so the value it built is copied
+		// rather than rebuilt. See codec.ShareAliases.
+		return b.copyValue(v, n)
 	}
 	if slices.Contains(b.open, name) {
 		// The anchor is being read right now, so the alias stands inside what
@@ -258,6 +277,48 @@ func (b *valueBuilder) aliasValue(n *ast.AliasNode) any {
 	b.fail(yamlerrors.NewUnknownAnchor(name, n.GetToken()))
 
 	return nil
+}
+
+// copyValue returns v with nothing shared with it: a map and a slice are built
+// again and what they hold is copied in turn, and everything else is a value a
+// caller cannot write through.
+func (b *valueBuilder) copyValue(v any, at ast.Node) any {
+	if b.err != nil {
+		return nil
+	}
+	b.built++
+	if b.budget > 0 && b.built > b.budget {
+		b.fail(yamlerrors.NewExcessiveAliasing(b.built, b.budget, at.GetToken()))
+
+		return nil
+	}
+
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = b.copyValue(e, at)
+		}
+
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = b.copyValue(e, at)
+		}
+
+		return out
+	case []byte:
+		return bytes.Clone(t)
+	case *big.Int:
+		return new(big.Int).Set(t)
+	case *big.Float:
+		return new(big.Float).Set(t)
+	default:
+		// A string, a number, a bool, a time.Time, nil: a caller holding two of
+		// these cannot write through one and see the other.
+		return v
+	}
 }
 
 // deliver puts a value where the node that built it belongs.
@@ -425,7 +486,11 @@ func WalkValue(src []byte) (any, error) {
 // WalkValues reads every document of src by walking it, without building a
 // tree.
 func WalkValues(src []byte, opts ...parser.Option) ([]any, error) {
-	b := &valueBuilder{}
+	return walkValues(src, false, opts...)
+}
+
+func walkValues(src []byte, share bool, opts ...parser.Option) ([]any, error) {
+	b := &valueBuilder{share: share, budget: aliasBudget(len(src))}
 	opts = append(opts, parser.WithOmitNodePaths())
 
 	file, err := parser.New(opts...).Walk(src, b)

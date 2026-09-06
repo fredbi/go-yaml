@@ -62,6 +62,7 @@ type Decoder struct {
 	disallowUnknownField   bool
 	allowedFieldPrefixes   []string
 	allowDuplicateMapKey   bool
+	shareAliases           bool
 	useOrderedMap          bool
 	useStringKeys          bool
 	useJSONUnmarshaler     bool
@@ -611,16 +612,34 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			// it and no error at all.
 			return nil, yamlerrors.NewRecursiveAlias(text, n.Value.GetToken())
 		}
+		if v, exists := d.anchorValueMap[text]; exists && d.shareAliases {
+			// ShareAliases: one Go value under every name that points at it.
+			if !v.IsValid() {
+				return nil, nil
+			}
+
+			return v.Interface(), nil
+		}
+		if target, _ := d.aliasTarget(n); target != nil {
+			// Read the node again rather than hand back what it decoded to
+			// before. Two aliases of one anchor named one Go value, so writing
+			// through either changed the other and a caller who never wrote a
+			// document twice had two names for one map. Whether they shared
+			// even turned on whether the destination happened to declare a
+			// field for the anchor itself: with one, anchorValueMap held the
+			// value and every alias got it; without one, nothing recorded it
+			// and each alias decoded the node afresh.
+			//
+			// aliasBudget bounds what this costs.
+			return d.nodeToValue(ctx, target)
+		}
 		if v, exists := d.anchorValueMap[text]; exists {
-			// The anchored node has been decoded already, so the alias is that
-			// value rather than a second decode of the same subtree.
+			// No node to read: an anchor published by ReferenceFiles, which
+			// carries a value and not a tree of this document.
 			if !v.IsValid() {
 				return nil, nil
 			}
 			return v.Interface(), nil
-		}
-		if target, _ := d.aliasTarget(n); target != nil {
-			return d.nodeToValue(ctx, target)
 		}
 		return nil, yamlerrors.NewUnknownAnchor(text, n.Value.GetToken())
 	case *ast.LiteralNode:
@@ -1350,15 +1369,21 @@ func (d *Decoder) createDecodedNewValue(
 ) (reflect.Value, error) {
 	if alias, aliased := node.(*ast.AliasNode); aliased {
 		target, name := d.aliasTarget(alias)
-		value := d.anchorValueMap[name]
-		if value.IsValid() {
+		if value := d.anchorValueMap[name]; d.shareAliases && value.IsValid() {
 			v, err := d.castToAssignableValue(value, typ, node)
 			if err == nil {
 				return v, nil
 			}
 		}
 		if target != nil {
+			// Read the node again, so that two aliases of one anchor give two
+			// values. See the AliasNode case of nodeToValue.
 			node = target
+		} else if value := d.anchorValueMap[name]; value.IsValid() {
+			v, err := d.castToAssignableValue(value, typ, node)
+			if err == nil {
+				return v, nil
+			}
 		}
 	}
 	var newValue reflect.Value
@@ -2797,7 +2822,7 @@ func (d *Decoder) decodeInit(ctx context.Context, v reflect.Value) error {
 	d.built, d.budget = 0, aliasBudget(len(src))
 
 	if d.canWalk(v) {
-		walked, err := WalkValues(src, d.parserOptions()...)
+		walked, err := walkValues(src, d.shareAliases, d.parserOptions()...)
 		if err != nil {
 			return err
 		}

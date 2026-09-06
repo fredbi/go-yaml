@@ -252,8 +252,12 @@ collection:
   - <<: *user_1
     id: 5
 `
+	// MarshalAnchor finds an anchor by the address its value stands at, so the
+	// decode has to leave one value under every name that points at it.
+	// ShareAliases is what does that; without it the anchored node is written
+	// out in full at each alias.
 	var v rootObject
-	if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
+	if err := codec.UnmarshalWithOptions([]byte(yml), &v, codec.ShareAliases()); err != nil {
 		t.Fatal(err)
 	}
 	opt := codec.MarshalAnchor(func(anchor *ast.AnchorNode, value interface{}) error {
@@ -298,11 +302,14 @@ func TestMarshalWithModifiedAnchorAlias(t *testing.T) {
 a: &a 1
 b: *a
 `
+	// The ",anchor" tag names the anchor, but "b" is written as "*a" only
+	// because A and B stand at one address. ShareAliases is what leaves them
+	// there.
 	var v struct {
 		A *int `yaml:"a,anchor"`
 		B *int `yaml:"b"`
 	}
-	if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
+	if err := codec.UnmarshalWithOptions([]byte(yml), &v, codec.ShareAliases()); err != nil {
 		t.Fatal(err)
 	}
 	node, err := codec.ValueToNode(v)

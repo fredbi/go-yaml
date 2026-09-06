@@ -7,7 +7,7 @@
 // library's encoding packages, and take no option. Anything else lives a layer
 // down:
 //
-//   - [codec] holds Encoder and Decoder, the twenty-five options that steer
+//   - [codec] holds Encoder and Decoder, the twenty-six options that steer
 //     them, MapSlice, RawMessage, and the comment types. Use
 //     [codec.NewDecoder] to read a stream and [codec.UnmarshalWithOptions] to
 //     pass an option.
@@ -86,6 +86,25 @@
 // [github.com/go-openapi/go-yaml/ast.TagNode.Resolve], so every consumer of one
 // tree gives one answer: [Unmarshal], [codec.ToJSON] and a caller holding a
 // single node all read it there.
+//
+// # Anchors and aliases
+//
+// An alias builds its own value. "first: *b" and "second: *b" give two maps, so
+// a caller writing through one leaves the other alone, and a document naming
+// far more than it holds -- 259 bytes of nested aliases name 100,000 values --
+// is refused with [github.com/go-openapi/go-yaml/errors.ErrExcessiveAliasing]
+// rather than built.
+//
+// [codec.ShareAliases] hands every alias of one anchor the same value instead.
+// Ask for it when the anchors have to survive a round trip through a Go value:
+// [codec.MarshalAnchor], [codec.WithSmartAnchor] and the ",anchor" and ",alias"
+// struct tags find an anchor by the address its value stands at, so an encoder
+// can write "*name" only where the decode left one value under two names.
+// Reading a document into an [github.com/go-openapi/go-yaml/ast] tree and
+// rendering it keeps the anchors either way; this is about the Go value.
+//
+// Sharing was the default until 2026-09-07, and whether it applied turned on
+// whether the destination happened to declare a field for the anchor itself.
 package yaml
 
 import "github.com/go-openapi/go-yaml/codec"

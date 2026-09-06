@@ -87,8 +87,10 @@ b: &b [*a,*a]
 c: &c [*b,*b]
 d: &d [*c,*c]
 `
+	// ShareAliases: every alias of one anchor stands for one Go value, which is
+	// what this checks. Without it each builds its own and the addresses differ.
 	var v map[string]any
-	if err := yaml.Unmarshal([]byte(data), &v); err != nil {
+	if err := codec.UnmarshalWithOptions([]byte(data), &v, codec.ShareAliases()); err != nil {
 		t.Fatal(err)
 	}
 	a := v["a"]
@@ -117,8 +119,11 @@ g: &g [*f,*f,*f,*f,*f,*f,*f,*f,*f,*f]
 h: &h [*g,*g,*g,*g,*g,*g,*g,*g,*g,*g]
 i: &i [*h,*h,*h,*h,*h,*h,*h,*h,*h,*h]
 `
+	// WithSmartAnchor writes "*a" where two values stand at one address, so the
+	// decode has to leave them there: ShareAliases is what puts them there.
+	// Without it this document builds 10^9 values and the alias budget stops it.
 	var v any
-	if err := yaml.Unmarshal([]byte(data), &v); err != nil {
+	if err := codec.UnmarshalWithOptions([]byte(data), &v, codec.ShareAliases()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := codec.MarshalWithOptions(v, codec.WithSmartAnchor())
