@@ -53,6 +53,13 @@ import (
 // to a substitution that the earlier steps could not reach -- a mapping key
 // holding a quote of its own, which is what `mapping key "a"b" already defined`
 // leaves behind.
+//
+// So a refusal message must not contain an apostrophe. The quoted-run step
+// reads it as opening a quoted span and eats everything to the next one: `a
+// block scalar's content is not indented as far as its header's indentation
+// indicator states` signs as `a block scalar_s indentation indicator states`.
+// Single quotes in a message are placeholders for what the document
+// contributed, and an apostrophe is an accidental one.
 func RefusalSignature(err error) string {
 	if err == nil {
 		return ""

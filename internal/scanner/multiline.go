@@ -387,22 +387,32 @@ func (s *MultiLineState) updateSpaceOnlyIndentColumn(column int32) {
 	s.spaceOnlyIndentColumn = column
 }
 
+// validateIndentAfterSpaceOnly refuses a block scalar whose leading empty lines are indented past its content.
+//
+// YAML 1.2 admits s-indent(<n) for l-empty, so an empty line may hold fewer spaces than the block. More is an error:
+// the block takes its indentation from the first non-empty line, and a deeper empty line above it would leave that
+// indentation ambiguous.
 func (s *MultiLineState) validateIndentAfterSpaceOnly(column int32) error {
 	if s.firstLineIndentColumn != 0 {
 		return nil
 	}
 	if s.spaceOnlyIndentColumn > column {
-		return errors.New("invalid number of indent is specified after space only")
+		return errors.New("a leading empty line of a block scalar holds more spaces than its first content line")
 	}
 	return nil
 }
 
+// validateIndentColumn holds a block scalar's content to the width its header stated.
+//
+// c-indentation-indicator names the block's indentation outright, counted from the column of whatever encloses it, so
+// a content line indented less than that is not content of this block. A header stating no width sets indentIndicator
+// to 0 and takes its indentation from the first content line instead, which is nothing to check.
 func (s *MultiLineState) validateIndentColumn() error {
 	if s.indentIndicator == 0 {
 		return nil
 	}
 	if s.firstLineIndentColumn > s.lineIndentColumn {
-		return errors.New("invalid number of indent is specified in the multi-line header")
+		return errors.New("the content of a block scalar is indented less than the indicator in its header states")
 	}
 	return nil
 }
