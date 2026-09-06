@@ -261,3 +261,97 @@ func TestDefectATagNotWrittenAsAShorthandDoesNotTypeItsScalar(t *testing.T) {
 		assert.Equal(t, []any{uint64(1), math.Inf(1)}, got)
 	})
 }
+
+// TestDefectAnIntTagCannotBeReadIntoAGoInteger: `!!int` on a value cannot be
+// read into any Go integer, where the same value untagged reads into all of
+// them.
+//
+// [yamlgen.Tagged.Decoded] says where to look: an untagged non-negative integer
+// comes back as a uint64 and a negative one as an int64, and `!!int` overrides
+// both with a plain int. The reflection path has a case for the first two.
+func TestDefectAnIntTagCannotBeReadIntoAGoInteger(t *testing.T) {
+	type box struct {
+		N int64   `yaml:"n"`
+		I int     `yaml:"i"`
+		U uint64  `yaml:"u"`
+		S string  `yaml:"s"`
+		B bool    `yaml:"b"`
+		F float64 `yaml:"f"`
+		A any     `yaml:"a"`
+	}
+
+	t.Run("into an integer field, whatever its width", func(t *testing.T) {
+		for _, tc := range []struct{ src, says string }{
+			{src: "n: !!int 5\n", says: "of type int64"},
+			{src: "i: !!int 5\n", says: "of type int"},
+			{src: "u: !!int 5\n", says: "of type uint64"},
+			{src: "n: !<tag:yaml.org,2002:int> -5\n", says: "of type int64"},
+		} {
+			wellFormed(t, tc.src)
+
+			var got box
+			err := yaml.Unmarshal([]byte(tc.src), &got)
+			require.Error(t, err, "today: %q is refused", tc.src)
+			assert.Contains(t, err.Error(), "cannot unmarshal int into Go struct field")
+			assert.Contains(t, err.Error(), tc.says)
+		}
+	})
+
+	t.Run("into a slice and into a typed map", func(t *testing.T) {
+		var items []int64
+		assert.Error(t, yaml.Unmarshal([]byte("- !!int 5\n"), &items))
+
+		var byName map[string]int64
+		assert.Error(t, yaml.Unmarshal([]byte("n: !!int 5\n"), &byName))
+	})
+
+	t.Run("untagged the same documents read", func(t *testing.T) {
+		var got box
+		require.NoError(t, yaml.Unmarshal([]byte("n: 5\ni: 5\nu: 5\n"), &got))
+		assert.Equal(t, box{N: 5, I: 5, U: 5}, got)
+
+		var items []int64
+		require.NoError(t, yaml.Unmarshal([]byte("- 5\n"), &items))
+		assert.Equal(t, []int64{5}, items)
+	})
+
+	t.Run("and the other tags read, as does !!int into an any", func(t *testing.T) {
+		var got box
+		require.NoError(t, yaml.Unmarshal([]byte("s: !!str x\nb: !!bool true\nf: !!float 1.5\na: !!int 5\n"), &got))
+		assert.Equal(t, box{S: "x", B: true, F: 1.5, A: 5}, got)
+	})
+}
+
+// TestDefectOneNonStringKeyZeroesAWholeStruct: one key a struct cannot name
+// leaves every field at its zero value and reports nothing.
+//
+// ⏸ Parked until decodeStruct is inverted, which deletes the line it lives on.
+func TestDefectOneNonStringKeyZeroesAWholeStruct(t *testing.T) {
+	type named struct {
+		Name string `yaml:"name"`
+	}
+
+	for _, src := range []string{
+		"1: a\nname: x\n",
+		"name: x\n1: a\n",
+		"true: a\nname: x\n",
+	} {
+		wellFormed(t, src)
+
+		var got named
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equal(t, named{}, got, "today: %q leaves every field empty and reports nothing", src)
+	}
+
+	t.Run("the same documents read into an any", func(t *testing.T) {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("1: a\nname: x\n"), &got))
+		assert.Equal(t, map[string]any{"1": "a", "name": "x"}, got)
+	})
+
+	t.Run("and a string-keyed document reads into the struct", func(t *testing.T) {
+		var got named
+		require.NoError(t, yaml.Unmarshal([]byte("name: x\n"), &got))
+		assert.Equal(t, named{Name: "x"}, got)
+	})
+}

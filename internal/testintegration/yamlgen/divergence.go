@@ -70,6 +70,17 @@ const (
 	// mistake agree with each other while the file on disk is one no other tool
 	// will read.
 	RenderValid
+	// DecodeTyped: reading the emitted document into a Go type built from the
+	// value gives what reading it into an `any` gives.
+	//
+	// A separate property because it is a separate path through codec. Reading
+	// into an `any` walks the token stream; reading into a Go type gathers a
+	// tree and fills fields by reflection, and since the two stopped sharing
+	// code they can disagree silently. The comparison is against the `any`
+	// answer rather than against Value.Decoded, so a defect on both paths
+	// cancels out and only the destination is left as the variable. See
+	// [TargetFor].
+	DecodeTyped
 )
 
 func (p Property) String() string {
@@ -91,6 +102,9 @@ func (p Property) String() string {
 	}
 	if p&RenderValid != 0 {
 		names = append(names, "render-valid")
+	}
+	if p&DecodeTyped != 0 {
+		names = append(names, "decode-typed")
 	}
 
 	return strings.Join(names, "|")
@@ -177,6 +191,39 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "decode/an-int-tag-cannot-be-read-into-a-go-integer",
+		Reason: "`!!int` on a value cannot be read into any Go integer -- a struct field, a slice " +
+			"element or a map value. `n: !!int 5` into a struct with an int64 field is refused with " +
+			"`cannot unmarshal int into Go struct field box.N of type int64`, and so are int and " +
+			"uint64 fields, `- !!int 5` into a []int64 and `n: !!int 5` into a map[string]int64.\n\n" +
+			"Four things say it is the tag and nothing else. The same document untagged reads into " +
+			"all of them. `!!str`, `!!bool` and `!!float` on their matching fields read. `!!int` into " +
+			"an `any` field reads. And go.yaml.in/yaml/v3 v3.0.5 reads every one of them.\n\n" +
+			"[Tagged.Decoded] says where to look: an untagged non-negative integer comes back as a " +
+			"uint64 and a negative one as an int64, and `!!int` overrides both with a plain int. The " +
+			"reflection path has a case for the first two and none for int.\n\n" +
+			"Every spelling of the tag does it, the verbatim and handle forms included.",
+		Property: DecodeTyped,
+		Match:    writesAnIntTag,
+	},
+	{
+		Name: "decode/one-non-string-key-zeroes-a-whole-struct",
+		Reason: "One key a struct cannot name leaves every field at its zero value and reports " +
+			"nothing -- including the fields whose keys are strings, and whether the offending key " +
+			"stands before them or after. `1: a` beside `name: x` into a struct with a Name field " +
+			"gives an empty Name and no error.\n\n" +
+			"In keyToNodeMap, `key, ok := keyVal.(string)` falls to `return nil, err` where err is " +
+			"nil, so the whole key map comes back nil. go.yaml.in/yaml/v3 v3.0.5 reads the document " +
+			"and so does this library's own `any` path; only the struct path drops it.\n\n" +
+			"⏸ Parked deliberately -- Fred, 2026-09-06 -- until decodeStruct is inverted, which " +
+			"deletes the line it lives on. Fixing it in keyToNodeMap first would be work thrown " +
+			"away.\n\n" +
+			"The predicate matches any mapping with a key that is not a Str, which is what a struct " +
+			"tag cannot name.",
+		Property: DecodeTyped,
+		Match:    writesANonStringKey,
+	},
+	{
 		Name: "decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved",
 		Reason: "An entry whose value is a tag written in full with nothing after it stops the key on " +
 			"the next line from resolving. `a: !<tag:yaml.org,2002:null>` over `False: 1` reads the " +
@@ -240,6 +287,59 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 				return true
 			}
 		}
+	}
+
+	return false
+}
+
+// writesAnIntTag reports whether v carries `!!int` anywhere.
+func writesAnIntTag(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Tagged:
+		return n.Tag == TagInt || writesAnIntTag(n.V, Style{})
+	case Anchored:
+		return writesAnIntTag(n.V, Style{})
+	case Alias:
+		return writesAnIntTag(n.V, Style{})
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesAnIntTag(item, Style{})
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if writesAnIntTag(p.Key, Style{}) || writesAnIntTag(p.Val, Style{}) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writesANonStringKey reports whether v holds a mapping keyed by anything other
+// than a string, which is a key no struct tag names.
+func writesANonStringKey(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if _, text := p.Key.(Str); !text {
+				return true
+			}
+
+			if writesANonStringKey(p.Val, Style{}) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesANonStringKey(item, Style{})
+		})
+	case Anchored:
+		return writesANonStringKey(n.V, Style{})
+	case Alias:
+		return writesANonStringKey(n.V, Style{})
+	case Tagged:
+		return writesANonStringKey(n.V, Style{})
 	}
 
 	return false
