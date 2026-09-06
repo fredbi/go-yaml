@@ -6,6 +6,7 @@ package yamlgen
 import (
 	"math"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -97,6 +98,84 @@ func (t *Target) typeOf(v Value) reflect.Type {
 	return anyType
 }
 
+// TargetForDecoded builds the Go type a decoded value fits, for a document that
+// arrives as bytes rather than as a [Value].
+//
+// The enumerated shapes in yamlcorpus are written out as YAML and have no Value
+// behind them, and they are the documents the reflection path most needs: two
+// of the three defects found on it in 2026-09-06 were merge keys, which the
+// generator does not write and yamlcorpus enumerates.
+//
+// It works from what the `any` path read, so the type always fits by
+// construction and any disagreement is the destination's.
+func TargetForDecoded(v any) Target {
+	var t Target
+	t.Type = t.typeOfDecoded(v)
+
+	return t
+}
+
+func (t *Target) typeOfDecoded(v any) reflect.Type {
+	switch n := v.(type) {
+	case bool:
+		return boolType
+	case string:
+		return stringType
+	case int, int64, uint64:
+		return int64Type
+	case float64:
+		return floatType
+	case []any:
+		return reflect.SliceOf(t.decodedItemType(n))
+	case map[string]any:
+		return t.decodedMapType(n)
+	default:
+		return anyType
+	}
+}
+
+func (t *Target) decodedItemType(items []any) reflect.Type {
+	if len(items) == 0 {
+		return anyType
+	}
+
+	first := t.typeOfDecoded(items[0])
+	for _, item := range items[1:] {
+		if t.typeOfDecoded(item) != first {
+			return anyType
+		}
+	}
+
+	return first
+}
+
+func (t *Target) decodedMapType(m map[string]any) reflect.Type {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	if !nameable(keys) {
+		t.Fallbacks++
+
+		return anyMapType
+	}
+
+	fields := make([]reflect.StructField, 0, len(keys))
+	for i, key := range keys {
+		fields = append(fields, reflect.StructField{
+			Name: "F" + strconv.Itoa(i),
+			Type: t.typeOfDecoded(m[key]),
+			Tag:  reflect.StructTag(`yaml:"` + key + `"`),
+		})
+	}
+
+	t.Structs++
+
+	return reflect.StructOf(fields)
+}
+
 // itemType is the element type of a sequence, which is the item type where
 // every item agrees and `any` where they do not.
 func (t *Target) itemType(s Seq) reflect.Type {
@@ -140,16 +219,26 @@ func (t *Target) mapType(m Map) reflect.Type {
 // namesEveryKey reports whether every key of m can be written in a struct tag
 // and matched back to one field.
 func namesEveryKey(m Map) bool {
-	if len(m.Pairs) == 0 {
+	keys := make([]string, 0, len(m.Pairs))
+	for _, p := range m.Pairs {
+		keys = append(keys, KeyText(p.Key))
+	}
+
+	return nameable(keys)
+}
+
+// nameable reports whether every key can be written in a struct tag and matched
+// back to one field.
+func nameable(keys []string) bool {
+	if len(keys) == 0 {
 		// An empty struct is a destination with nothing to fill, so it says
 		// nothing about the reflection path. A map does.
 		return false
 	}
 
-	folded := make(map[string]struct{}, len(m.Pairs))
+	folded := make(map[string]struct{}, len(keys))
 
-	for _, p := range m.Pairs {
-		key := KeyText(p.Key)
+	for _, key := range keys {
 		// "-" is the tag that asks for a field to be left out, so a key
 		// spelled that way would name a field nothing ever fills.
 		if key == "" || key == "-" || strings.ContainsAny(key, `,"'`+"\n\r\t\\`") {
