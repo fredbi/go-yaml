@@ -129,8 +129,14 @@ func yamlPatches() []Patch {
 //     repeating it is an unbounded loop over nothing -- which our repeat
 //     combinator already stops, on the first step that consumed no input.
 //     Adopting it anyway would refuse two consecutive byte order marks, which
-//     the published grammar admits and no prose in the spec forbids. Left for
-//     libfyaml to settle.
+//     the published grammar admits and no prose in the spec forbids.
+//
+//     ✅ Settled against libfyaml 1.0.0b1 on 2026-09-09, and not adopting is
+//     right: it reads a document opening with two marks rather than refusing
+//     it. It takes the prefix once, the way their patch does, so the second
+//     mark is content -- "\ufeff\ufeffa: 1" comes back keyed "\ufeffa". Two
+//     readings of one document, and both accept it, so a patch that made us
+//     refuse would be wrong whichever reading is right.
 
 // FlowNode reports whether src is exactly one YAML 1.2 flow node.
 //

@@ -10,6 +10,7 @@ require (
 	github.com/go-openapi/testify/v2 v2.6.1
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/go-cmp v0.7.0
+	go.yaml.in/yaml/v3 v3.0.5
 	pgregory.net/rapid v1.3.0
 )
 
