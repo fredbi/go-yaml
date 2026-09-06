@@ -68,3 +68,59 @@ func TestDoubleQuoteRefusesAnUnknownEscape(t *testing.T) {
 		})
 	}
 }
+
+// TestDoubleQuoteCodePointEscapes holds the three escapes that name a code point by its digits.
+func TestDoubleQuoteCodePointEscapes(t *testing.T) {
+	for _, tc := range []struct {
+		written string
+		want    string
+	}{
+		{`\x41`, "A"},
+		{`\x00`, "\x00"},
+		{`\xff`, "\u00ff"},
+		{`\u00e9`, "\u00e9"},
+		{`\U0001F600`, "\U0001F600"},
+		{`\U0010FFFF`, "\U0010FFFF"},
+		{`\U00000000`, "\x00"},
+		// A UTF-16 pair is combined, so the two halves name one character between them.
+		{`\uD83D\uDE00`, "\U0001F600"},
+	} {
+		t.Run(tc.written, func(t *testing.T) {
+			var s scanner.Scanner
+			s.Init([]byte(`"` + tc.written + `"`))
+
+			tk, ok := s.NextToken()
+			require.True(t, ok)
+			require.NoError(t, s.Err())
+			assert.Equal(t, tc.want, tk.Value)
+		})
+	}
+}
+
+// TestDoubleQuoteRefusesACodePointThatIsNotACharacter holds the range check in escapedRune.
+//
+// "\U" takes eight hexadecimal digits, which reach past the largest code point and past what an int32 holds, and the
+// surrogate halves name no character on their own. Each of these used to read as U+FFFD -- a replacement character the
+// document never wrote, which no caller could tell from one it did.
+func TestDoubleQuoteRefusesACodePointThatIsNotACharacter(t *testing.T) {
+	for _, written := range []string{
+		`\UFFFFFFFF`, // wraps to -1 as an int32
+		`\U80000000`, // wraps to a negative int32
+		`\UDEADBEEF`,
+		`\U00110000`, // one past the largest code point
+		`\U0011FFFF`,
+		`\U0000D800`, // a surrogate half, written the long way
+		`\uDC00`,     // a low surrogate with no high surrogate in front of it
+		`\uDFFF`,
+	} {
+		t.Run(written, func(t *testing.T) {
+			var s scanner.Scanner
+			s.Init([]byte(`"` + written + `"`))
+
+			for range s.Tokens() { //nolint:revive // only what stopped the scan matters here
+			}
+
+			assert.ErrorContains(t, s.Err(), "found an escaped code point that is not a character")
+		})
+	}
+}

@@ -317,7 +317,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				if !isHex {
 					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(ctx.origin(), s.pos()))
 				}
-				value = utf8.AppendRune(value, rune(codeNum))
+				// Two hex digits, so codeNum is at most 0xFF and the narrowing cannot wrap.
+				value = utf8.AppendRune(value, rune(codeNum)) //nolint:gosec // ns-esc-8-bit takes two digits, so codeNum <= 0xFF
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
@@ -352,7 +353,11 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 					codeNum = ((high - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000
 					progress += 6
 				}
-				value = utf8.AppendRune(value, rune(codeNum))
+				escaped, isChar := escapedRune(codeNum)
+				if !isChar {
+					return token.Token{}, ErrInvalidToken(escapeNamesNoCharacter, token.Invalid(ctx.origin(), s.pos()))
+				}
+				value = utf8.AppendRune(value, escaped)
 			case 'U':
 				// \U00000000 style must have 9 characters at least.
 				if idx+9 >= size {
@@ -363,7 +368,11 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				if !isHex {
 					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(ctx.origin(), s.pos()))
 				}
-				value = utf8.AppendRune(value, rune(codeNum))
+				escaped, isChar := escapedRune(codeNum)
+				if !isChar {
+					return token.Token{}, ErrInvalidToken(escapeNamesNoCharacter, token.Invalid(ctx.origin(), s.pos()))
+				}
+				value = utf8.AppendRune(value, escaped)
 			case '\n':
 				isFirstLineChar = true
 				isNewLine = true
@@ -494,4 +503,27 @@ func hexDigitsToInt(b string) (int, bool) {
 	}
 
 	return sum, true
+}
+
+// escapeNamesNoCharacter is what "\uXXXX" and "\UXXXXXXXX" are refused with when their digits name no character.
+const escapeNamesNoCharacter = "found an escaped code point that is not a character"
+
+// escapedRune returns the character an escape's digits name, and false where they name none.
+//
+// "\U" takes eight hexadecimal digits, which reach 0xFFFFFFFF -- past the largest code point, and past what an int32
+// holds. rune is int32, so "\UFFFFFFFF" converted to -1, and utf8.AppendRune writes U+FFFD for any rune it cannot
+// encode: the scalar came back holding a replacement character the document never wrote, and nothing said so.
+//
+// D800 to DFFF are the other half. Each is one half of a UTF-16 pair and stands for no character alone, which is why
+// utf8.ValidRune refuses them; a pair written as "\uD83D\uDE00" is combined before this is asked.
+//
+// The range is tested before the conversion, not after, so the narrowing below cannot be the thing that decides.
+func escapedRune(codeNum int) (rune, bool) {
+	if codeNum < 0 || codeNum > utf8.MaxRune {
+		return 0, false
+	}
+
+	r := rune(codeNum)
+
+	return r, utf8.ValidRune(r)
 }
