@@ -64,6 +64,9 @@ type Entry struct {
 	// labeled for, and nothing here can tell which mutations did. It is the
 	// same reasoning that caps a mutant's VerdictAt at parsing.
 	Features []stance.Feature
+	// Readings is what the document denotes under each reading that disagrees
+	// with the core schema, empty where they all agree.
+	Readings map[string]any
 	// Tags are the rules this document breaks, where it was broken on purpose
 	// and the break is therefore known.
 	//
@@ -102,6 +105,7 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 			Src:      src,
 			Value:    value,
 			Features: written.Features,
+			Readings: written.Readings,
 		})
 
 		// Broken on purpose, on the value, so the break is labeled rather
@@ -115,6 +119,7 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 				Src:      []byte(broken.Text),
 				Mutation: b.How,
 				Features: broken.Features,
+				Readings: broken.Readings,
 				Tags:     b.Tags,
 			})
 		}

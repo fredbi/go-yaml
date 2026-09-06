@@ -37,6 +37,13 @@ const (
 	ReadingCore = "yaml-1.2-core"
 	// Reading11 is YAML 1.1's resolution, still widely implemented.
 	Reading11 = "yaml-1.1"
+	// ReadingJSON is YAML 1.2's JSON schema, spec §10.2, which resolves what
+	// JSON resolves and reads everything else as a string.
+	//
+	// Nothing here produces it: the spellings it parts company with core over
+	// are all numeric, and plainSafe writes those in quotes. yamlcorpus's
+	// enumerated scalars carry it.
+	ReadingJSON = "yaml-1.2-json"
 )
 
 // legacyBooleans are the plain spellings YAML 1.1 reads as booleans and YAML

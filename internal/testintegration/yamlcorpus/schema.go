@@ -107,7 +107,10 @@ func Resolutions() []Resolution {
 		{Scalar: "12:34:56", Core: "str", Legacy: "int", Exhibits: []stance.Tag{TagIntSexagesimal}},
 
 		{Scalar: "0x1A", Core: "int", JSONSchema: "str", Exhibits: []stance.Tag{TagIntNonDecimal}},
-		{Scalar: "0o17", Core: "int", JSONSchema: "str", Exhibits: []stance.Tag{TagIntNonDecimal}},
+		// "0o17" disagrees twice over. YAML 1.1's integer opens octal on a bare
+		// leading zero and has no "0o" prefix at all, so "0" followed by "o17"
+		// matches none of its five productions and the text stays a string.
+		{Scalar: "0o17", Core: "int", Legacy: "str", JSONSchema: "str", Exhibits: []stance.Tag{TagIntNonDecimal}},
 
 		{Scalar: "1e3", Core: "float", Legacy: "str", Exhibits: []stance.Tag{TagFloatExponentOnly}},
 		{Scalar: ".inf", Core: "float", JSONSchema: "str", Exhibits: []stance.Tag{TagFloatSpecial}},
@@ -158,3 +161,61 @@ func SchemaVocabulary() stance.Vocabulary {
 		TagIntNonDecimal:     stance.Construct,
 	}
 }
+
+// What a scalar denotes under each reading, written out.
+//
+// Computed nowhere: implementing three schemas here and then testing our
+// implementation against itself would prove nothing, which is the argument
+// coreValue already makes. These are the specification's answers read off its
+// regular expressions by hand, and a reader who disagrees with one has a line
+// to disagree with.
+
+// legacyValue is what YAML 1.1 resolves a scalar to.
+//
+// Empty Legacy on a [Resolution] means 1.1 and the core schema agree, and the
+// caller falls back to the core answer rather than a row being repeated here.
+func legacyValue(r Resolution) (any, bool) {
+	switch r.Scalar {
+	case "yes", "on", "y", "Yes":
+		return true, true
+	case "no", "off":
+		return false, true
+	case "0777":
+		// 1.1's integer opened octal on a leading zero: 0777 is 511.
+		return 511, true
+	case "1_000":
+		// The underscore is a digit separator in 1.1 and nothing in 1.2.
+		return 1000, true
+	case "0b1010":
+		return 10, true
+	case "1:30":
+		// Base 60 and positional: one sixty and thirty.
+		return 90, true
+	case "12:34:56":
+		return 45296, true
+	case "1e3":
+		// 1.1's float required a decimal point, so this is three characters.
+		return "1e3", true
+	case "0o17":
+		return "0o17", true
+	case ".inf", "-.Inf", ".nan", "2001-12-14":
+		// 1.1 resolves all four -- three floats and a timestamp -- and JSON has
+		// a spelling for none of them, so a meaning stated in JSON says nothing
+		// and says nothing instead.
+		return nil, false
+	default:
+		return nil, false
+	}
+}
+
+// The JSON schema states no values here, deliberately.
+//
+// [Resolution.JSONSchema] says "str" for "0x1A", "0o17", ".inf", "-.Inf" and
+// ".nan", and that reading is not settled enough to freeze as a value. Spec
+// §10.2.2 ends its tag resolution for a plain scalar with an error rather than
+// a string, so a scalar matching none of JSON's own productions may well be a
+// document the JSON schema refuses -- which is a verdict and not a meaning, and
+// nothing in [suite.Meaning] can say it.
+//
+// The field is left as it is and carries the tag, which is what it did before
+// anything read it. Settling §10.2.2 is what would turn it into an answer.

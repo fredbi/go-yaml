@@ -51,13 +51,16 @@
 // still what the oracle would say.
 package suite
 
+import "slices"
+
 // Format is the artifact layout version.
 //
 // It is bumped when a reader written against an older version would
 // misunderstand a newer file -- not when a field is added, which readers are
 // expected to ignore.
 //
-// Case.Features, Header.Features and Case.Meanings all arrived under that rule
+// Case.Features, Header.Features, Case.Meanings and Header.Readings all arrived
+// under that rule
 // and did not move it. A format-3 reader skips the first two and derives the
 // same expectation it always did, because nothing consulting them decides an
 // outcome; it skips the third and keeps reading Case.Meaning, which still
@@ -94,6 +97,14 @@ type Header struct {
 	//
 	// Sorted by tag, because the same corpus has to come out as the same bytes.
 	Vocabulary []TagSpec `json:"vocabulary"`
+	// Readings is every resolution of plain scalars this corpus weighed when it
+	// stated its meanings, sorted: "yaml-1.2-core", "yaml-1.1".
+	//
+	// A consumer asking for a reading not in this list gets no meaning at all,
+	// and that is the only safe answer. Most cases carry a single Meaning
+	// because no reading here disagrees about them -- which says nothing
+	// whatever about a reading nobody weighed. See [Header.MeaningFor].
+	Readings []string `json:"readings,omitempty"`
 	// Features is every feature name the cases use, sorted.
 	//
 	// A plain list, where Vocabulary is a list of specs: a feature has no stage
@@ -240,4 +251,50 @@ type Origin struct {
 	// for a document the grammar refuses. It is what a minimizer grouped on,
 	// recorded so that a later run can tell whether the grouping still holds.
 	Signature string `json:"signature,omitempty"`
+}
+
+// MeaningFor returns what a case denotes under the reading a consumer
+// implements, and whether this corpus states one.
+//
+// reads is [stance.Table.Reads]. Empty asks for the corpus's own default, which
+// is what [Case.Meaning] carries.
+//
+// Three answers, and the middle one is the reason this hangs off the header
+// rather than off the case:
+//
+//   - the case lists an answer under that reading, and it is returned;
+//   - the case lists none, and the corpus weighed that reading, so the readings
+//     agree about this document and [Case.Meaning] is every reading's answer;
+//   - the corpus never weighed that reading, and nothing is returned.
+//
+// Without [Header.Readings] the second and third are indistinguishable, and
+// reading them together is wrong in a way that does not announce itself. The
+// failsafe schema reads every scalar as a string, so it disagrees with the core
+// schema about "k: 1" and about most of the corpus -- and almost none of those
+// cases carries a list, because no reading this corpus weighed disagrees about
+// them. A consumer declaring failsafe would be handed the integer and marked
+// broken for saying "1".
+//
+// A case that states nothing under the reading asked for is not evidence about
+// that consumer's values, and the false return says so.
+func (h Header) MeaningFor(c Case, reads string) (Meaning, bool) {
+	if reads == "" {
+		if c.Meaning == nil {
+			return Meaning{}, false
+		}
+
+		return *c.Meaning, true
+	}
+
+	for _, m := range c.Meanings {
+		if m.Under == reads {
+			return m, true
+		}
+	}
+
+	if !slices.Contains(h.Readings, reads) || c.Meaning == nil || len(c.Meanings) > 0 {
+		return Meaning{}, false
+	}
+
+	return *c.Meaning, true
 }

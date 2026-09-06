@@ -4,22 +4,25 @@
 package yamlcorpus
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
+	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 
 	_ "embed"
 )
 
 // Generator names what produced a corpus, so a change here is as visible in an
 // artifact's header as a change to the grammar.
-const Generator = "yamlcorpus/6"
+const Generator = "yamlcorpus/7"
 
 // Build is the recipe for a corpus: how much to draw, and how much to keep.
 type Build struct {
@@ -91,6 +94,9 @@ func (b Build) Write(w io.Writer) error {
 		Vocabulary: suite.SpecsFor(
 			vocabularyOf(cases), Vocabulary(), allRules()),
 		Features: featuresOf(cases),
+		// Every reading readingsOfEntry and readingsOfResolution consult. The
+		// JSON schema is deliberately absent -- see schema.go.
+		Readings: []string{Reading, yamlgen.Reading11},
 	}
 
 	out, err := suite.NewWriter(w, header)
@@ -165,6 +171,7 @@ func (b Build) cases() []suite.Case {
 			Tags:       append(encodingTags(e.Src), names(e.Tags)...),
 			Features:   featureNames(e.Features),
 			Meaning:    meaning,
+			Meanings:   readingsOfEntry(e, meaning),
 			Origin: suite.Origin{
 				Document:  -1,
 				Mutation:  e.Mutation,
@@ -195,6 +202,31 @@ func meaningOfEntry(e Entry, wellFormed bool) *suite.Meaning {
 	}
 
 	return &suite.Meaning{Under: Reading, JSON: encoded}
+}
+
+// readingsOfEntry states what a generated document denotes under each reading,
+// and only where they disagree.
+//
+// The core answer is repeated among them so that a consumer matching on
+// stance.Table.Reads looks in one place. Where every reading agrees there is
+// nothing to choose between and the single Meaning says it.
+func readingsOfEntry(e Entry, core *suite.Meaning) []suite.Meaning {
+	if core == nil || len(e.Readings) == 0 {
+		return nil
+	}
+
+	out := []suite.Meaning{*core}
+
+	for _, name := range slices.Sorted(maps.Keys(e.Readings)) {
+		encoded, err := json.Marshal(e.Readings[name])
+		if err != nil {
+			return nil
+		}
+
+		out = append(out, suite.Meaning{Under: name, JSON: encoded})
+	}
+
+	return out
 }
 
 // encodingTags reports what a document's bytes exhibit, which for a generated
@@ -266,7 +298,7 @@ func vocabularyOf(cases []suite.Case) []string {
 // schema or YAML 1.1 disagrees about some of these and is told which by the
 // tags, rather than by the corpus trying to enumerate every implementation's
 // answer.
-const Reading = "yaml-1.2-core"
+const Reading = yamlgen.ReadingCore
 
 // Cases turns the enumerated families into corpus cases.
 //
@@ -373,6 +405,7 @@ func Cases() []suite.Case {
 			VerdictAt:  stance.Construct.String(),
 			Tags:       names(r.Exhibits),
 			Meaning:    meaningOfResolution(r),
+			Meanings:   readingsOfResolution(r),
 			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
 		})
 	}
@@ -523,4 +556,89 @@ func allRules() stance.Rules {
 	out = append(out, KeyRules()...)
 
 	return append(out, DirectiveRules()...)
+}
+
+// readingsOfResolution states what a plain scalar denotes under each reading
+// that has an answer.
+//
+// This is the family the field exists for. The document is valid under every
+// reading, so the verdict says nothing at all and the whole disagreement is
+// here: "0777" is 777 under the core schema and 511 under YAML 1.1, and a
+// corpus storing one of those scores a conforming reader of the other as
+// broken.
+//
+// A reading with no JSON rendering is left out rather than approximated: ".inf"
+// is a float under the core schema and under 1.1, and JSON writes neither, so
+// both say nothing here and the tag carries the disagreement on its own.
+//
+// The JSON schema states nothing at all. See the note beside jsonValue's
+// removal in schema.go: §10.2.2 may make those scalars a refusal rather than a
+// string, and a refusal is a verdict that no meaning can express.
+func readingsOfResolution(r Resolution) []suite.Meaning {
+	answers := []struct {
+		under string
+		value any
+		ok    bool
+	}{
+		{under: Reading},
+		{under: yamlgen.Reading11},
+	}
+
+	core, hasCore := coreValue(r)
+	answers[0].value, answers[0].ok = core, hasCore
+
+	if r.Legacy == "" {
+		// Empty means 1.1 and the core schema agree.
+		answers[1].value, answers[1].ok = core, hasCore
+	} else {
+		answers[1].value, answers[1].ok = legacyValue(r)
+	}
+
+	var out []suite.Meaning
+
+	for _, a := range answers {
+		if a.ok {
+			out = append(out, suite.Meaning{Under: a.under, JSON: mustEncodeScalar(a.value)})
+		}
+	}
+
+	if len(out) == 0 || nothingToChoose(out) {
+		return nil
+	}
+
+	return out
+}
+
+// nothingToChoose reports whether every reading with an answer gives the same
+// one and the core reading is among them, which is the case [suite.Case.Meaning]
+// already covers on its own.
+func nothingToChoose(out []suite.Meaning) bool {
+	var core bool
+
+	for _, m := range out {
+		if m.Under == Reading {
+			core = true
+		}
+
+		if !bytes.Equal(m.JSON, out[0].JSON) {
+			return false
+		}
+	}
+
+	return core
+}
+
+// mustEncodeScalar renders one resolved scalar as the document it stands in.
+//
+// The shapes write the scalar as a mapping value, so the meaning is the mapping
+// and not the scalar alone.
+func mustEncodeScalar(v any) []byte {
+	encoded, err := json.Marshal(map[string]any{"k": v})
+	if err != nil {
+		// Every value here is a Go string, bool, int or float, all of which
+		// encode.
+		panic("yamlcorpus: a resolved scalar that JSON cannot render: " + fmt.Sprint(v))
+	}
+
+	return encoded
 }
