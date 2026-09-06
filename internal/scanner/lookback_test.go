@@ -14,10 +14,10 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// A token's BlankLineAbove and CommentBreaksAbove are filled in as it is
-// emitted, from the tokens emitted before it, so the answers are carried on the
-// Scanner rather than found by walking back over the tokens already read. Init
-// has to drop what the last source left there.
+// A token's BlankLineAbove and CommentBreaksAbove are filled in as it is emitted, from the tokens emitted before it, so
+// the answers are carried on the Scanner rather than found by walking back over the tokens already read.
+//
+// Init has to drop what the last source left there.
 func TestScannerLookbackDoesNotLeakBetweenSources(t *testing.T) {
 	const src = `# one
 # two
@@ -65,8 +65,7 @@ c: 2
 			"token %d (%s %q): CommentBreaksAbove differs on the second Init", i, first[i].Type, first[i].Value)
 	}
 
-	// And the source really does exercise both fields, or the check above
-	// compares nothing.
+	// And the source really does exercise both fields, or the check above compares nothing.
 	var blanks, breaks int
 	for _, tk := range first {
 		if tk.BlankLineAbove() {
@@ -80,10 +79,10 @@ c: 2
 	assert.NotZerof(t, breaks, "expected the source to put a comment above some token")
 }
 
-// Scan, Next, Tokens and NextToken read the same source through the same scan:
-// by pulling one at a time and by being pushed them, which are the two ways a
-// caller drives the scanner. They have to agree token for token, and on the
-// refusal that ends them.
+// Scan, Next, Tokens and NextToken read the same source through the same scan: by pulling one at a time and by being
+// pushed them, which are the two ways a caller drives the scanner.
+//
+// They have to agree token for token, and on the refusal that ends them.
 func TestPushAndPullAgree(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
 	require.NoError(t, err)
@@ -130,8 +129,8 @@ func TestPushAndPullAgree(t *testing.T) {
 	require.NotZero(t, compared)
 }
 
-// Breaking out of Tokens leaves the scanner on the token after the one the loop
-// stopped on, so reading on picks the stream up where it was left.
+// Breaking out of Tokens leaves the scanner on the token after the one the loop stopped on, so reading on picks the
+// stream up where it was left.
 func TestTokensResumesAfterBreak(t *testing.T) {
 	const src = "a: 1\nb: 2\nc: 3\n"
 

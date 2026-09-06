@@ -11,22 +11,20 @@ import (
 	"github.com/go-openapi/go-yaml/internal/scanner"
 )
 
-// bom is written as an escape because a byte order mark in Go source is one the
-// compiler refuses: "illegal byte order mark".
+// bom is written as an escape because a byte order mark in Go source is one the compiler refuses: "illegal byte order
+// mark".
 const bom = "\ufeff"
 
 // TestByteOrderMarkStandsOnlyInADocumentPrefix checks where U+FEFF may appear.
 //
-// nb-char excludes the mark, so no node may hold one. l-document-prefix ::=
-// c-byte-order-mark? l-comment* is the only production that admits one, and
-// l-yaml-stream places those prefixes at the start of the stream, after a
-// document suffix, and before an explicit document.
+// nb-char excludes the mark, so no node may hold one. l-document-prefix ::= c-byte-order-mark? l-comment* is the only
+// production that admits one, and l-yaml-stream places those prefixes at the start of the stream, after a document
+// suffix, and before an explicit document.
 //
-// Every verdict below was taken from the recognizer compiled from
-// yaml-spec-1.2.json, in internal/testintegration/grammar, rather than read off
-// the specification by hand. The two that the ledgers named are the first pair:
-// "a: <mark>b" was read and is now refused, and "a: 1 / ... / <mark>--- / b: 2"
-// was refused and is now read.
+// Every verdict below was taken from the recognizer compiled from yaml-spec-1.2.json, in
+// internal/testintegration/grammar, rather than read off the specification by hand.
+// The two that the ledgers named are the first pair: "a: <mark>b" was read and is now refused, and "a: 1 / ... /
+// <mark>--- / b: 2" was refused and is now read.
 func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
 	tests := []struct {
 		name string
@@ -55,8 +53,8 @@ func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
 		{name: "before a directive that may not stand there", src: "a: 1\n" + bom + "%YAML 1.2\n---\nb: 2\n"},
 		{name: "inside a flow sequence", src: "[" + bom + "a]\n"},
 
-		// nb-double-char and nb-single-char are built from nb-json, which is
-		// #x9 | [#x20-#x10FFFF] and takes the mark like any other character.
+		// nb-double-char and nb-single-char are built from nb-json, which is #x9 | [#x20-#x10FFFF] and takes the mark like
+		// any other character.
 		// So a quoted scalar holds one where a plain or block scalar may not.
 		{name: "inside a double-quoted scalar", src: "a: \"x" + bom + "y\"\n", ok: true},
 		{name: "inside a single-quoted scalar", src: "a: 'x" + bom + "y'\n", ok: true},
@@ -78,9 +76,8 @@ func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
 	}
 }
 
-// TestByteOrderMarkIsDroppedRatherThanRead checks that a mark a document prefix
-// may carry leaves no trace in the tokens, which is what a file saved by an
-// editor that writes one needs.
+// TestByteOrderMarkIsDroppedRatherThanRead checks that a mark a document prefix may carry leaves no trace in the
+// tokens, which is what a file saved by an editor that writes one needs.
 func TestByteOrderMarkIsDroppedRatherThanRead(t *testing.T) {
 	plain := scanAll(t, "a: 1\n...\n---\nb: 2\n")
 	marked := scanAll(t, "a: 1\n...\n"+bom+"---\nb: 2\n")
@@ -95,8 +92,7 @@ func TestByteOrderMarkIsDroppedRatherThanRead(t *testing.T) {
 	}
 }
 
-// scanErr drives the scanner to exhaustion and returns the first error that is
-// not io.EOF.
+// scanErr drives the scanner to exhaustion and returns the first error that is not io.EOF.
 func scanErr(src string) error {
 	var s scanner.Scanner
 	s.Init([]byte(src))

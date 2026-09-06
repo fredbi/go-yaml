@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import (
@@ -12,68 +15,64 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// Context context at scanning
+// Context context at scanning.
 type Context struct {
 	idx             int
 	size            int
 	notSpaceCharPos int
 	src             string
-	// schema is the tag resolution plain scalars are read against. The zero
-	// value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner
-	// carries it across an Init.
+	// schema is the tag resolution plain scalars are read against.
+	//
+	// The zero value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner carries it across an Init.
 	schema token.Schema
-	// raw is src's own bytes, for the word-at-a-time scans in
-	// [github.com/go-openapi/go-yaml/internal/swar]. A string cannot be loaded
-	// eight bytes at a time without unsafe, and Init was handed the slice.
+	// raw is src's own bytes, for the word-at-a-time scans in [github.com/go-openapi/go-yaml/internal/swar].
+	//
+	// A string cannot be loaded eight bytes at a time without unsafe, and Init was handed the slice.
 	raw []byte
 	buf []byte
-	// originStart and originEnd bracket the current token's text in src. See
-	// [Context.origin].
+	// originStart and originEnd bracket the current token's text in src.
+	//
+	// See [Context.origin].
 	originStart int
 	originEnd   int
-	// originCopy holds the text once a cut has taken bytes out of the middle of
-	// it, and originCut says it is in use.
+	// originCopy holds the text once a cut has taken bytes out of the middle of it, and originCut says it is in use.
 	originCopy []byte
 	originCut  bool
 	// pending holds the tokens read but not yet handed over, as values.
 	//
-	// One step of the scan reads one token, or the two of a key that only turns
-	// out to be a key once the ':' is read, and NextToken drains what a step
-	// produced before taking the next -- so this holds two tokens at its
-	// fullest, whatever the document's length. TestBufferHoldsTwoTokens holds
-	// that bound.
+	// One step of the scan reads one token, or the two of a key that only turns out to be a key once the ':' is read, and
+	// NextToken drains what a step produced before taking the next -- so this holds two tokens at its fullest, whatever
+	// the document's length.
+	// TestBufferHoldsTwoTokens holds that bound.
 	pending []token.Token
-	// yield, where a caller is reading through Scanner.Tokens, takes each token
-	// as it is read instead of the buffer taking it. stopped records that yield
-	// asked to stop, which the scan loop reads to give up.
+	// yield, where a caller is reading through Scanner.Tokens, takes each token as it is read instead of the buffer taking
+	// it. stopped records that yield asked to stop, which the scan loop reads to give up.
 	yield   func(token.Token) bool
 	stopped bool
 	// read is the index in pending of the next token to hand over.
 	read int
-	// lastTk is a copy of the token emitted most recently. tokens is drained as
-	// the caller takes them, so it is not the place to ask what came before.
+	// lastTk is a copy of the token emitted most recently. tokens is drained as the caller takes them, so it is not the
+	// place to ask what came before.
 	lastTk    token.Token
 	hasLastTk bool
-	// lastContentTk is a copy of the last token emitted that is part of the
-	// document rather than a note about it. A comment may stand between a key
-	// and its ':', on its own line, without making the two any less adjacent.
+	// lastContentTk is a copy of the last token emitted that is part of the document rather than a note about it.
+	//
+	// A comment may stand between a key and its ':', on its own line, without making the two any less adjacent.
 	lastContentTk    token.Token
 	hasLastContentTk bool
-	// propRun describes the run of property tokens ending at lastTk, and
-	// prevPropRun the run ending at the token before it. keyStartColumn reads
-	// them to find where a key made only of already-cut tokens begins.
+	// propRun describes the run of property tokens ending at lastTk, and prevPropRun the run ending at the token before
+	// it. keyStartColumn reads them to find where a key made only of already-cut tokens begins.
 	propRun     propertyRun
 	prevPropRun propertyRun
-	// mstate points at block, or is nil where no block scalar is open. A block
-	// scalar cannot stand inside another -- its content is text, not nodes --
-	// so one is all that is ever open and block is the room it uses. Allocating
-	// a MultiLineState per header was a third of everything the scanner
-	// allocated reading a document of them.
+	// mstate points at block, or is nil where no block scalar is open.
+	//
+	// A block scalar cannot stand inside another -- its content is text, not nodes -- so one is all that is ever open and
+	// block is the room it uses.
+	// Allocating a MultiLineState per header was a third of everything the scanner allocated reading a document of them.
 	mstate *MultiLineState
 	block  MultiLineState
-	// lookback belongs to the Scanner and outlives the Context, so a token
-	// still reads what stands above it when the source is scanned in more than
-	// one pass.
+	// lookback belongs to the Scanner and outlives the Context, so a token still reads what stands above it when the
+	// source is scanned in more than one pass.
 	lookback *token.Lookback
 }
 
@@ -90,8 +89,7 @@ func (c *Context) forgetTokens() {
 	c.prevPropRun = propertyRun{}
 }
 
-// lastContentToken returns the last token emitted that is part of the document
-// rather than a note about it.
+// lastContentToken returns the last token emitted that is part of the document rather than a note about it.
 func (c *Context) lastContentToken() *token.Token {
 	if !c.hasLastContentTk {
 		return nil
@@ -100,12 +98,12 @@ func (c *Context) lastContentToken() *token.Token {
 	return &c.lastContentTk
 }
 
-// keyStartColumn reports the column a map key made only of already-cut tokens
-// begins at, or 0 where the tokens do not form such a key.
+// keyStartColumn reports the column a map key made only of already-cut tokens begins at, or 0 where the tokens do not
+// form such a key.
 //
-// A quoted scalar is one token and starts where it stands. An anchor, an alias
-// or a tag may carry an empty scalar, and then the key is the run of them: the
-// key of "&a : v" begins at the '&', two tokens before the ':'.
+// A quoted scalar is one token and starts where it stands.
+// An anchor, an alias or a tag may carry an empty scalar, and then the key is the run of them: the key of "&a : v"
+// begins at the '&', two tokens before the ':'.
 func (c *Context) keyStartColumn() int {
 	if !c.hasLastTk {
 		return 0
@@ -115,8 +113,7 @@ func (c *Context) keyStartColumn() int {
 	column := last.Position.Column
 	found := last.Type.Indicator() == token.QuotedScalarIndicator || isPropertyToken(last)
 
-	// The properties standing on the same line immediately before last are part
-	// of the same key.
+	// The properties standing on the same line immediately before last are part of the same key.
 	if c.prevPropRun.length > 0 && c.prevPropRun.line == last.Position.Line {
 		column = c.prevPropRun.startColumn
 		found = true
@@ -135,9 +132,8 @@ func (c *Context) reset(src string) {
 	c.size = len(src)
 	c.src = src
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
-	// pending keeps the room it holds: it never grows past a token or two, so a
-	// Scanner reading a second document carries nothing worth dropping and
-	// makes one allocation fewer.
+	// pending keeps the room it holds: it never grows past a token or two, so a Scanner reading a second document carries
+	// nothing worth dropping and makes one allocation fewer.
 	c.rewind()
 	c.yield = nil
 	c.stopped = false
@@ -154,20 +150,19 @@ func (c *Context) resetBuffer() {
 	c.originCut = false
 }
 
-// textAt returns buf as a string and where in the source it was found, or -1
-// where buf is not the source's own bytes.
+// textAt returns buf as a string and where in the source it was found, or -1 where buf is not the source's own bytes.
 //
-// A Go substring shares the bytes it is taken from, so a token whose text is
-// the source's own costs nothing: it points into the document rather than
-// carrying a copy of it. Scanning rewrites the text often enough -- escapes,
-// folding, chomping -- that the source window is compared with buf rather than
-// assumed equal to it.
+// A Go substring shares the bytes it is taken from, so a token whose text is the source's own costs nothing: it points
+// into the document rather than carrying a copy of it.
+// Scanning rewrites the text often enough -- escapes, folding, chomping -- that the source window is compared with buf
+// rather than assumed equal to it.
 //
-// start is where the caller believes buf begins. It is a guess for a value the
-// scanner folded: the offset it works out is the cursor less the folded
-// length, and folding makes the value shorter than the source it was read
-// from. Where the guess misses, the cursor gives the other end, and the offset
-// that matched is the one the token should carry.
+// start is where the caller believes buf begins.
+// It is a guess for a value the scanner folded: the offset it works out is the cursor less the folded length, and
+// folding makes the value shorter than the source it was read from.
+//
+// Where the guess misses, the cursor gives the other end, and the offset that matched is the one the token should
+// carry.
 func (c *Context) textAt(buf []byte, start int) (string, int) {
 	if span, ok := c.window(buf, start); ok {
 		return span, start
@@ -181,8 +176,7 @@ func (c *Context) textAt(buf []byte, start int) (string, int) {
 	return string(buf), -1
 }
 
-// window returns the len(buf) bytes of the source at start, and reports whether
-// they are buf's own.
+// window returns the len(buf) bytes of the source at start, and reports whether they are buf's own.
 func (c *Context) window(buf []byte, start int) (string, bool) {
 	end := start + len(buf)
 	if start < 0 || end > len(c.src) {
@@ -202,12 +196,10 @@ func (c *Context) getMultiLineState() *MultiLineState {
 	return c.mstate
 }
 
-// setLiteral opens a block scalar that keeps its line structure, the "|" of
-// [MultiLineState].
+// setLiteral opens a block scalar that keeps its line structure, the "|" of [MultiLineState].
 //
-// lastDelimColumn is the column of whatever encloses the block, which is what
-// the header's indentation indicator counts from: "|2" under a key at column 3
-// puts content at column 5.
+// lastDelimColumn is the column of whatever encloses the block, which is what the header's indentation indicator counts
+// from: "|2" under a key at column 3 puts content at column 5.
 func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	c.block = MultiLineState{
@@ -221,8 +213,8 @@ func (c *Context) setLiteral(lastDelimColumn int, opt string) {
 	c.mstate = &c.block
 }
 
-// setFolded opens a block scalar that folds its line breaks into spaces, the
-// ">" of [MultiLineState]. lastDelimColumn is read as in setLiteral.
+// setFolded opens a block scalar that folds its line breaks into spaces, the ">" of [MultiLineState]. lastDelimColumn
+// is read as in setLiteral.
 func (c *Context) setFolded(lastDelimColumn int, opt string) {
 	indent := firstLineIndentColumnByOpt(opt)
 	c.block = MultiLineState{
@@ -277,11 +269,10 @@ func (c *Context) addToken(tk *token.Token) {
 
 // addTokenValue hands over a token the caller holds by value.
 //
-// Nothing here keeps the token itself: Lookback stores copies, recordToken
-// copies into lastTk, and appendToken copies into the block it is filling. So a
-// caller building a token only to hand it over wants [token.MakeLiteral] and
-// its kind rather than [token.Literal] -- the pointer form has to put the token
-// on the heap for a value that is copied and dropped.
+// Nothing here keeps the token itself: Lookback stores copies, recordToken copies into lastTk, and appendToken copies
+// into the block it is filling.
+// So a caller building a token only to hand it over wants [token.MakeLiteral] and its kind rather than [token.Literal]
+// -- the pointer form has to put the token on the heap for a value that is copied and dropped.
 func (c *Context) addTokenValue(tk token.Token) {
 	c.lookback.Derive(&tk)
 	c.recordToken(&tk)
@@ -300,7 +291,6 @@ func (c *Context) addTokenValue(tk token.Token) {
 
 // recordToken keeps what the tokens already read say about the ones to come.
 func (c *Context) recordToken(tk *token.Token) {
-
 	c.prevPropRun = c.propRun
 	switch {
 	case !isPropertyToken(tk):
@@ -317,8 +307,8 @@ func (c *Context) recordToken(tk *token.Token) {
 	}
 }
 
-// propertyRun is a run of consecutive property tokens -- anchor, alias, tag --
-// standing on one line. startColumn is where the first of them begins.
+// propertyRun is a run of consecutive property tokens -- anchor, alias, tag -- standing on one line. startColumn is
+// where the first of them begins.
 type propertyRun struct {
 	startColumn int32
 	line        int32
@@ -345,18 +335,18 @@ func (c *Context) addBufWithTab(r rune) {
 	}
 }
 
-// origin is the text the current token was written as: everything read since
-// the last token was cut, indentation and line breaks included.
+// origin is the text the current token was written as: everything read since the last token was cut, indentation and
+// line breaks included.
 //
-// It is a window on the source. Nothing keeps it -- Origin left the token, and
-// what reads it now measures it -- so the scanner records what it reads by
-// moving originEnd rather than by copying the bytes into a buffer. Over the
-// fuzz corpus that holds for 107,805 of 107,811 reads.
+// It is a window on the source.
+// Nothing keeps it -- Origin left the token, and what reads it now measures it -- so the scanner records what it reads
+// by moving originEnd rather than by copying the bytes into a buffer.
+// Over the fuzz corpus that holds for 107,805 of 107,811 reads.
 //
-// The exception is a line whose trailing spaces are cut. Each cut takes a
-// suffix, but the scan goes on and reads more, so what is left has a gap in the
-// middle of it and no window can say so. The first cut copies what the window
-// held and everything after it appends to the copy.
+// The exception is a line whose trailing spaces are cut.
+// Each cut takes a suffix, but the scan goes on and reads more, so what is left has a gap in the middle of it and no
+// window can say so.
+// The first cut copies what the window held and everything after it appends to the copy.
 func (c *Context) origin() string {
 	if c.originCut {
 		return string(c.originCopy)
@@ -367,10 +357,9 @@ func (c *Context) origin() string {
 
 // addOriginBuf records that r was read as part of the current token.
 //
-// One add, where appending r to a buffer was 8% of the scanner: a call that
-// could not inline -- cost 106 against a budget of 80, utf8.AppendRune's body
-// being worth 70 on its own -- around an append that copied a byte already in
-// the source.
+// One add, where appending r to a buffer was 8% of the scanner: a call that could not inline -- cost 106 against a
+// budget of 80, utf8.AppendRune's body being worth 70 on its own -- around an append that copied a byte already in the
+// source.
 func (c *Context) addOriginBuf(r rune) {
 	if r < utf8.RuneSelf && !c.originCut {
 		c.originEnd++
@@ -381,9 +370,9 @@ func (c *Context) addOriginBuf(r rune) {
 	c.addOriginWide(r)
 }
 
-// skipOrigin records that the n bytes at the cursor were read, as n calls to
-// [Context.addOriginBuf] would. The caller has established they are ASCII, so
-// each is one character and one byte.
+// skipOrigin records that the n bytes at the cursor were read, as n calls to [Context.addOriginBuf] would.
+//
+// The caller has established they are ASCII, so each is one character and one byte.
 func (c *Context) skipOrigin(n int) {
 	if c.originCut {
 		c.originCopy = append(c.originCopy, c.src[c.idx:c.idx+n]...)
@@ -412,12 +401,10 @@ func (c *Context) addOriginWide(r rune) {
 	c.originEnd += utf8.RuneLen(r)
 }
 
-// removeRightSpaceFromBuf cuts the spaces and tabs a line ends with from the
-// token's text and from its value.
+// removeRightSpaceFromBuf cuts the spaces and tabs a line ends with from the token's text and from its value.
 //
-// Where the text is still a window, the run is found by reading back over the
-// source rather than by having marked it while reading forward: the mark cost a
-// compare and a store for every character of the document, and this costs the
+// Where the text is still a window, the run is found by reading back over the source rather than by having marked it
+// while reading forward: the mark cost a compare and a store for every character of the document, and this costs the
 // length of the run, once, and only where there is one.
 func (c *Context) removeRightSpaceFromBuf() {
 	if c.originCut {
@@ -450,9 +437,8 @@ func (c *Context) removeRightSpaceFromBuf() {
 // isOriginSpace reports whether c is whitespace a line may end with.
 func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 
-// The cursor addresses c.src by byte, and decodes UTF-8 to read a character.
-// c.idx and c.size are byte counts; every method below that speaks of a
-// character decodes one rather than indexing for it.
+// The cursor addresses c.src by byte, and decodes UTF-8 to read a character. c.idx and c.size are byte counts; every
+// method below that speaks of a character decodes one rather than indexing for it.
 
 // width is how many bytes the character at the cursor takes, or 0 at the end.
 func (c *Context) width() int {
@@ -472,7 +458,9 @@ func (c *Context) isEOS() bool {
 	return c.idx+c.width() >= c.size
 }
 
-// isNextEOS reports the same thing. Both spellings are in use.
+// isNextEOS reports the same thing.
+//
+// Both spellings are in use.
 func (c *Context) isNextEOS() bool {
 	return c.idx+c.width() >= c.size
 }
@@ -486,9 +474,8 @@ func (c *Context) source(s, e int) string {
 	return c.src[s:e]
 }
 
-// previousChar returns the character before the cursor, stepping back over a
-// byte order mark: the scanner steps over one rather than reading it, so
-// nothing that asks what came before should see it.
+// previousChar returns the character before the cursor, stepping back over a byte order mark: the scanner steps over
+// one rather than reading it, so nothing that asks what came before should see it.
 func (c *Context) previousChar() rune {
 	end := c.idx
 	for end > 0 {
@@ -541,18 +528,17 @@ func (c *Context) repeatNum(r rune) int {
 	return cnt
 }
 
-// progress advances the cursor by num characters and returns the bytes it
-// crossed. Callers count columns in characters and offsets in bytes, which is
-// why it reports both.
+// progress advances the cursor by num characters and returns the bytes it crossed.
+//
+// Callers count columns in characters and offsets in bytes, which is why it reports both.
 func (c *Context) progress(num int) int {
 	start := c.idx
 	for range num {
 		if c.idx >= c.size {
 			break
 		}
-		// A byte below utf8.RuneSelf stands for a character of its own, so its
-		// width is known without decoding it. Decoding every character to ask
-		// how wide it is was 12% of the scanner's time.
+		// A byte below utf8.RuneSelf stands for a character of its own, so its width is known without decoding it.
+		// Decoding every character to ask how wide it is was 12% of the scanner's time.
 		if c.src[c.idx] < utf8.RuneSelf {
 			c.idx++
 
@@ -575,17 +561,16 @@ func (c *Context) isMultiLine() bool {
 
 func (c *Context) bufferedSrc() []byte {
 	if probe.Enabled {
-		// Whether the mark is just "the length less the whitespace the buffer
-		// ends with", which a scan back over the buffer would give at the read
-		// instead of a compare and a store for every character written.
+		// Whether the mark is just "the length less the whitespace the buffer ends with", which a scan back over the buffer
+		// would give at the read instead of a compare and a store for every character written.
 		//
-		// addBuf marks past a space or a tab, addBufWithTab only past a space,
-		// and a block scalar is what says which was used.
-		// Outside a block scalar the mark trails whitespace and the break that
-		// scanNewLine appends to fold a line -- which is why it is not part of
-		// the value. Inside one the mark is set outright at the two sites that
-		// rewrite the buffer, and no scan of the bytes could tell a break that
-		// folds from one the block keeps.
+		// addBuf marks past a space or a tab, addBufWithTab only past a space, and a block scalar is what says which was
+		// used.
+		// Outside a block scalar the mark trails whitespace and the break that scanNewLine appends to fold a line -- which is
+		// why it is not part of the value.
+		//
+		// Inside one the mark is set outright at the two sites that rewrite the buffer, and no scan of the bytes could tell a
+		// break that folds from one the block keeps.
 		end := len(c.buf)
 		if !c.isMultiLine() {
 			for end > 0 && (c.buf[end-1] == ' ' || c.buf[end-1] == '\t' || c.buf[end-1] == '\n') {
@@ -596,8 +581,7 @@ func (c *Context) bufferedSrc() []byte {
 				end--
 			}
 		}
-		// The sharp one: a mark past the end of the buffer makes buf[:mark] a
-		// slice of what the last token left behind.
+		// The sharp one: a mark past the end of the buffer makes buf[:mark] a slice of what the last token left behind.
 		probe.Check("buf.notSpaceCharPos<=len(buf)", c.notSpaceCharPos <= len(c.buf), func() string {
 			return fmt.Sprintf("mark=%d len(buf)=%d cap=%d multiline=%v origin=%q",
 				c.notSpaceCharPos, len(c.buf), cap(c.buf), c.isMultiLine(),
@@ -626,8 +610,7 @@ func (c *Context) bufferedSrc() []byte {
 	src := c.buf[:c.notSpaceCharPos]
 	if c.isMultiLine() {
 		mstate := c.getMultiLineState()
-		// remove end '\n' character and trailing empty lines.
-		// https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator
+		// remove end '\n' character and trailing empty lines. https://yaml.org/spec/1.2.2/#8112-block-chomping-indicator.
 		if mstate.hasTrimAllEndNewlineOpt() {
 			// If the '-' flag is specified, all trailing newline characters will be removed.
 			src = bytes.TrimRight(src, "\n")
@@ -649,104 +632,96 @@ func (c *Context) bufferedSrc() []byte {
 		}
 
 		if string(src) == "\n" {
-			// If the content consists only of a newline,
-			// it can be considered as the document ending without any specified value,
-			// so it is treated as an empty string.
+			// If the content consists only of a newline, it can be considered as the document ending without any specified
+			// value, so it is treated as an empty string.
 			src = nil
 		}
 		if mstate.hasKeepAllEndNewlineOpt() && len(src) == 0 && mstate.sawLineBreak {
-			// '+' keeps every trailing break, including the one the rule above
-			// just dropped. Only where the content had a break to begin with:
-			// "--- |1+" ends the source at the header and reads as "".
+			// '+' keeps every trailing break, including the one the rule above just dropped.
+			// Only where the content had a break to begin with: "--- |1+" ends the source at the header and reads as "".
 			src = []byte{'\n'}
 		}
 	}
 	return src
 }
 
-// bufferedToken cuts the text read so far into a token, and reports false where
-// there is nothing to cut.
+// bufferedToken cuts the text read so far into a token, and reports false where there is nothing to cut.
 //
-// The token is returned by value: a caller that hands it straight to addToken
-// keeps it off the heap, since neither addToken nor setTokenTypeByPrevTag holds
-// on to it.
+// The token is returned by value: a caller that hands it straight to addToken keeps it off the heap, since neither
+// addToken nor setTokenTypeByPrevTag holds on to it.
 func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token, bool) {
 	if c.idx == 0 {
 		return token.Token{}, false
 	}
 	source := c.bufferedSrc()
 	if len(source) == 0 {
-		// The value's buffer only: the text of the token stands, and the
-		// caller goes on reading it.
+		// The value's buffer only: the text of the token stands, and the caller goes on reading it.
 		//
-		// The mark goes with it. Left where it was it outran the buffer, and
-		// bufferedSrc slices buf[:mark] -- which on an empty buffer with room
-		// left in it is a byte the last token wrote. Three reads in 137,129
-		// over the fuzz corpus, all of them after a block scalar whose content
-		// was whitespace.
+		// The mark goes with it.
+		// Left where it was it outran the buffer, and bufferedSrc slices buf[:mark] -- which on an empty buffer with room
+		// left in it is a byte the last token wrote.
+		// Three reads in 137,129 over the fuzz corpus, all of them after a block scalar whose content was whitespace.
 		c.buf = c.buf[:0]
 		c.notSpaceCharPos = 0
 
 		return token.Token{}, false
 	}
-	// The text the token was written as, and where it stands in the source. No
-	// searching for it: it is the window at originStart unless a cut took bytes
-	// out of the middle, and then it stands nowhere as a run.
+	// The text the token was written as, and where it stands in the source.
+	// No searching for it: it is the window at originStart unless a cut took bytes out of the middle, and then it stands
+	// nowhere as a run.
 	origin := c.origin()
 	originAt := c.originStart
 	if c.originCut {
 		originAt = -1
 	}
-	// pos.Offset() is where the value starts in the source. The cursor is not:
-	// a plain scalar is cut only once the scanner knows it did not run on to
-	// the next line, by which time the cursor stands well past it.
-	// Where the value is the source's own bytes, the offset it was found at is
-	// the one the token should carry: what the caller worked out by counting
-	// back from the cursor misses for anything folding shortened.
+	// pos.Offset() is where the value starts in the source.
+	// The cursor is not: a plain scalar is cut only once the scanner knows it did not run on to the next line, by which
+	// time the cursor stands well past it.
+	//
+	// Where the value is the source's own bytes, the offset it was found at is the one the token should carry: what the
+	// caller worked out by counting back from the cursor misses for anything folding shortened.
 	value, at := c.textAt(source, int(pos.Offset()))
 	switch {
 	case at >= 0:
 		pos.SetOffset(int32(at))
 	default:
-		// Folding rewrote the value, so it is nowhere in the source to be
-		// found. The origin is still the source's own bytes and the buffer
-		// knows where it began, so the value starts that far in, past the
-		// whitespace the line was indented by.
+		// Folding rewrote the value, so it is nowhere in the source to be found.
+		// The origin is still the source's own bytes and the buffer knows where it began, so the value starts that far in,
+		// past the whitespace the line was indented by.
 		if originAt == c.originStart {
 			pos.SetOffset(int32(c.originStart + leadingSpace(origin)))
 		}
 	}
 
-	// How far the token reaches. The scanner has read every byte of the origin
-	// to get here, so it need not read them again: where the origin began plus
-	// how long it is closes the token, and endLine says which line the text
-	// ends on.
+	// How far the token reaches.
 	//
-	// endLine is 0 where the caller cannot say -- a block scalar keeps its own
-	// line breaks, and a plain scalar cut at a remembered position may have run
-	// on since. A cut origin no longer stands in the source as a run. Those
-	// read the origin back through token.MeasureOrigin.
+	// The scanner has read every byte of the origin to get here, so it need not read them again: where the origin began
+	// plus how long it is closes the token, and endLine says which line the text ends on.
+	//
+	// endLine is 0 where the caller cannot say -- a block scalar keeps its own line breaks, and a plain scalar cut at a
+	// remembered position may have run on since.
+	// A cut origin no longer stands in the source as a run.
+	// Those read the origin back through token.MeasureOrigin.
 	var ext token.Extent
 	if endLine == 0 || c.originCut {
 		ext = token.MeasureOrigin(origin, pos)
 	} else {
-		// Only the blanks the origin ends with are read. The caller knows the
-		// line the text ends on, so the breaks inside it need not be counted --
-		// and for the tokens that reach here there are none.
+		// Only the blanks the origin ends with are read.
+		// The caller knows the line the text ends on, so the breaks inside it need not be counted -- and for the tokens that
+		// reach here there are none.
 		ext.Trailing = token.TrailingBreaksIn(origin)
 		ext.EndLine = endLine
 	}
 	if originAt >= 0 {
-		// The origin holds the source's own bytes, so where it was found plus
-		// how long it is closes the token exactly, whatever the offset points
-		// at inside it. Counting forward from the offset instead comes up short
-		// wherever a block scalar's indentation indicator leaves some of the
-		// leading spaces in the content.
+		// The origin holds the source's own bytes, so where it was found plus how long it is closes the token exactly,
+		// whatever the offset points at inside it.
+		// Counting forward from the offset instead comes up short wherever a block scalar's indentation indicator leaves some
+		// of the leading spaces in the content.
 		ext.End = int32(originAt + len(origin))
 	}
 
-	// A quoted or folded scalar is a string whatever it spells. Only text
-	// written plainly is read for a keyword or a number.
+	// A quoted or folded scalar is a string whatever it spells.
+	// Only text written plainly is read for a keyword or a number.
 	typ := token.StringType
 	if !c.isMultiLine() {
 		typ = token.ScalarType(value, c.schema)
@@ -755,8 +730,8 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 	tk := token.Assemble(typ, value, pos, ext)
 
 	if probe.Enabled {
-		// The extent the scanner worked out against the one read back from the
-		// origin, which is what token.Make would have used.
+		// The extent the scanner worked out against the one read back from the origin, which is what token.Make would have
+		// used.
 		want := token.MeasureOrigin(origin, pos)
 		if originAt >= 0 {
 			want.End = int32(originAt + len(origin))
@@ -794,17 +769,16 @@ func (c *Context) lastToken() *token.Token {
 	return &c.lastTk
 }
 
-// buffered counts the tokens read since the buffer was last emptied, those
-// already handed over included. The scan loop reads it to tell whether the step
-// it is running produced a token.
+// buffered counts the tokens read since the buffer was last emptied, those already handed over included.
+//
+// The scan loop reads it to tell whether the step it is running produced a token.
 func (c *Context) buffered() int { return len(c.pending) }
 
 // appendToken buffers tk for the next NextToken to hand over.
 func (c *Context) appendToken(tk token.Token) {
 	if probe.Enabled {
-		// How many tokens the scanner holds at once, and how much room pending
-		// has taken. rewind empties it without giving the room back, so the
-		// high mark is what a single scan step ever produced.
+		// How many tokens the scanner holds at once, and how much room pending has taken. rewind empties it without giving
+		// the room back, so the high mark is what a single scan step ever produced.
 		probe.Count("buffer.appends", 1)
 		probe.Max("buffer.heldAtOnce", int64(len(c.pending)-c.read+1))
 		probe.Max("buffer.roomTaken", int64(cap(c.pending)))
@@ -816,12 +790,10 @@ func (c *Context) appendToken(tk token.Token) {
 	c.pending = append(c.pending, tk)
 }
 
-// popValue takes a copy of the oldest token not yet handed over, and reports
-// false where there is none.
+// popValue takes a copy of the oldest token not yet handed over, and reports false where there is none.
 //
-// Nothing keeps the room the token stood in, so the buffer starts again from
-// the front once it runs dry: a caller reading by value holds the scanner to a
-// token or two whatever the document's length.
+// Nothing keeps the room the token stood in, so the buffer starts again from the front once it runs dry: a caller
+// reading by value holds the scanner to a token or two whatever the document's length.
 func (c *Context) popValue() (token.Token, bool) {
 	if c.read >= len(c.pending) {
 		c.rewind()
@@ -835,20 +807,20 @@ func (c *Context) popValue() (token.Token, bool) {
 	return tk, true
 }
 
-// rewind empties the buffer, keeping the room to be written again. Call it
-// only where every token read has been handed over by value.
+// rewind empties the buffer, keeping the room to be written again.
+//
+// Call it only where every token read has been handed over by value.
 func (c *Context) rewind() {
 	c.pending = c.pending[:0]
 	c.read = 0
 }
 
-// followsJSONLikeKey reports whether the key just read is one the spec calls
-// JSON-like: a quoted scalar, or a flow collection.
+// followsJSONLikeKey reports whether the key just read is one the spec calls JSON-like: a quoted scalar, or a flow
+// collection.
 //
-// Only after one of those may the ':' be adjacent, written with no space in
-// front of its value. Everywhere else the space is what separates the ':' from
-// the key, which is why [ a:b ] holds the one plain scalar "a:b" while
-// [ "a":b ] and [ {a: 1}:b ] each hold a pair.
+// Only after one of those may the ':' be adjacent, written with no space in front of its value.
+// Everywhere else the space is what separates the ':' from the key, which is why [ a:b ] holds the one plain scalar
+// "a:b" while [ "a":b ] and [ {a: 1}:b ] each hold a pair.
 func (c *Context) followsJSONLikeKey() bool {
 	if c.existsBuffer() {
 		return false

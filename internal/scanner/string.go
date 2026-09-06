@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import (
@@ -39,11 +42,12 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := len(src)
-	// A single-quoted scalar reads back as the source between its quotes unless
-	// a line break is folded or a "''" stands for one quote. Until one of those
-	// happens the value is a window on src and nothing is built: value stays
-	// nil and copied stays false. The first rewrite copies what has been passed
-	// over so far, and the rest of the scalar is appended as before.
+	// A single-quoted scalar reads back as the source between its quotes unless a line break is folded or a "''" stands
+	// for one quote.
+	// Until one of those happens the value is a window on src and nothing is built: value stays nil and copied stays
+	// false.
+	//
+	// The first rewrite copies what has been passed over so far, and the rest of the scalar is appended as before.
 	value := s.quoted[:0]
 	copied := false
 	keep := func(upto int) {
@@ -52,6 +56,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			copied = true
 		}
 	}
+
 	isFirstLineChar := false
 	isNewLine := false
 
@@ -65,16 +70,20 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			isNewLine = false
 		}
 		ctx.addOriginBuf(c)
-		if isNewLineChar(c) {
+
+		switch {
+		case isNewLineChar(c):
 			keep(idx)
 			notSpaceIdx := -1
 			for i, v := range slices.Backward(value) {
 				if v == ' ' {
 					continue
 				}
+
 				notSpaceIdx = i
 				break
 			}
+
 			if len(value) > notSpaceIdx {
 				value = value[:notSpaceIdx+1]
 			}
@@ -83,6 +92,7 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			} else {
 				value = append(value, ' ')
 			}
+
 			isFirstLineChar = true
 			isNewLine = true
 			s.progressLine(ctx)
@@ -96,22 +106,22 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			}
 
 			continue
-		} else if isFirstLineChar && c == ' ' {
+		case isFirstLineChar && c == ' ':
 			continue
-		} else if isFirstLineChar && c == '\t' {
+		case isFirstLineChar && c == '\t':
 			if s.lastDelimColumn >= s.column {
-				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in single-quoted text", token.Invalid(string(ctx.origin()), s.pos()))
+				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in single-quoted text", token.Invalid(ctx.origin(), s.pos()))
 			}
 
 			continue
-		} else if c != '\'' {
+		case c != '\'':
 			if copied {
 				value = utf8.AppendRune(value, c)
 			}
 			isFirstLineChar = false
 
 			continue
-		} else if idx+width < len(ctx.src) && ctx.src[idx+width] == '\'' {
+		case idx+width < len(ctx.src) && ctx.src[idx+width] == '\'':
 			// '' handle as ' character
 			keep(idx)
 			value = utf8.AppendRune(value, c)
@@ -120,21 +130,26 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 			s.progressColumn(ctx, 1)
 
 			continue
-		}
-		s.progressColumn(ctx, 1)
+		default:
+			// pick token
 
-		text := src[startIndex:idx]
-		if copied {
-			text = string(value)
-			s.quoted = value[:0]
-		}
+			s.progressColumn(ctx, 1)
+			text := src[startIndex:idx]
+			if copied {
+				text = string(value)
+				s.quoted = value[:0]
+			}
 
-		return token.MakeSingleQuote(text, ctx.origin(), srcpos), nil
+			return token.MakeSingleQuote(text, ctx.origin(), srcpos), nil
+		}
 	}
+
 	s.progressColumn(ctx, 1)
-	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(string(ctx.origin()), srcpos))
+
+	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(ctx.origin(), srcpos))
 }
 
+//nolint:mnd // we have a lot of runes to check and making them constants won't really improve readability.
 func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	ctx.addOriginBuf('"')
 	baseIndent := s.contentIndent()
@@ -142,11 +157,10 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := len(src)
-	// As in scanSingleQuote: the value is a window on src until something
-	// rewrites it -- a folded line break, an escape, or a tab dropped before
-	// one. keep copies what has been passed over the first time that happens,
-	// and the rest is appended as before. A scalar holding none of them, which
-	// is most of them, is never built.
+	// As in scanSingleQuote: the value is a window on src until something rewrites it -- a folded line break, an escape,
+	// or a tab dropped before one. keep copies what has been passed over the first time that happens, and the rest is
+	// appended as before.
+	// A scalar holding none of them, which is most of them, is never built.
 	value := s.quoted[:0]
 	copied := false
 	keep := func(upto int) {
@@ -168,7 +182,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			isNewLine = false
 		}
 		ctx.addOriginBuf(c)
-		if isNewLineChar(c) {
+		if isNewLineChar(c) { // TODO(fred): switch
 			keep(idx)
 			notSpaceIdx := -1
 			for i, v := range slices.Backward(value) {
@@ -202,7 +216,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			continue
 		} else if isFirstLineChar && c == '\t' {
 			if s.lastDelimColumn >= s.column {
-				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(string(ctx.origin()), s.pos()))
+				return token.Token{}, ErrInvalidToken("tab character cannot be used for indentation in double-quoted text", token.Invalid(ctx.origin(), s.pos()))
 			}
 			continue
 		} else if c == '\\' {
@@ -214,7 +228,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				continue
 			}
 			nextChar, _ := utf8.DecodeRuneInString(src[idx+1:])
-			progress := 0
+			var progress int
 			switch nextChar {
 			case '0':
 				progress = 1
@@ -287,23 +301,23 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			case 'x':
 				// \x00 style must have 3 characters at least.
 				if idx+3 >= size {
-					return token.Token{}, ErrInvalidToken("not enough length for escaped 8-bit character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped 8-bit character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				progress = 3
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+progress+1])
 				if !isHex {
-					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped 8-bit character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case 'u':
 				// \u0000 style must have 5 characters at least.
 				if idx+5 >= size {
-					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				progress = 5
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+6])
 				if !isHex {
-					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-16 character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-16 character", token.Invalid(ctx.origin(), s.pos()))
 				}
 
 				// handle surrogate pairs.
@@ -312,19 +326,19 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 
 					// \u0000\u0000 style must have 11 characters at least.
 					if idx+11 >= size {
-						return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 surrogate pair", token.Invalid(string(ctx.origin()), s.pos()))
+						return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-16 surrogate pair", token.Invalid(ctx.origin(), s.pos()))
 					}
 
 					if src[idx+6] != '\\' || src[idx+7] != 'u' {
-						return token.Token{}, ErrInvalidToken("found unexpected character after high surrogate for UTF-16 surrogate pair", token.Invalid(string(ctx.origin()), s.pos()))
+						return token.Token{}, ErrInvalidToken("found unexpected character after high surrogate for UTF-16 surrogate pair", token.Invalid(ctx.origin(), s.pos()))
 					}
 
 					low, isHex := hexDigitsToInt(src[idx+8 : idx+12])
 					if !isHex {
-						return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in the low surrogate", token.Invalid(string(ctx.origin()), s.pos()))
+						return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in the low surrogate", token.Invalid(ctx.origin(), s.pos()))
 					}
 					if low < 0xDC00 || low > 0xDFFF {
-						return token.Token{}, ErrInvalidToken("found unexpected low surrogate after high surrogate", token.Invalid(string(ctx.origin()), s.pos()))
+						return token.Token{}, ErrInvalidToken("found unexpected low surrogate after high surrogate", token.Invalid(ctx.origin(), s.pos()))
 					}
 					codeNum = ((high - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000
 					progress += 6
@@ -333,12 +347,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			case 'U':
 				// \U00000000 style must have 9 characters at least.
 				if idx+9 >= size {
-					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-32 character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("not enough length for escaped UTF-32 character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				progress = 9
 				codeNum, isHex := hexDigitsToInt(src[idx+2 : idx+10])
 				if !isHex {
-					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(string(ctx.origin()), s.pos()))
+					return token.Token{}, ErrInvalidToken("found a character that is not a hexadecimal digit in escaped UTF-32 character", token.Invalid(ctx.origin(), s.pos()))
 				}
 				value = utf8.AppendRune(value, rune(codeNum))
 			case '\n':
@@ -366,13 +380,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				value = utf8.AppendRune(value, nextChar)
 			default:
 				s.progressColumn(ctx, 1)
-				return token.Token{}, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(string(ctx.origin()), s.pos()))
+				return token.Token{}, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(ctx.origin(), s.pos()))
 			}
-			// The escapes that name a code point -- \xXX, \uXXXX, \UXXXXXXXX --
-			// leave the marker and its digits to be recorded here. Every other
-			// case adds what it consumed as it goes; these cannot, because a
-			// surrogate pair settles how far it reaches only after the low half
-			// is read.
+			// The escapes that name a code point -- \xXX, \uXXXX, \UXXXXXXXX -- leave the marker and its digits to be recorded
+			// here.
+			// Every other case adds what it consumed as it goes; these cannot, because a surrogate pair settles how far it
+			// reaches only after the low half is read.
 			if isCodePointEscape(nextChar) {
 				for i := idx + 1; i <= idx+progress && i < size; i++ {
 					ctx.addOriginBuf(rune(src[i]))
@@ -397,8 +410,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				foundNotSpaceChar = true
 			}
 			if foundNotSpaceChar {
-				// The tab stands in the text, so it is the source's own byte
-				// and the window still holds.
+				// The tab stands in the text, so it is the source's own byte and the window still holds.
 				if copied {
 					value = utf8.AppendRune(value, c)
 				}
@@ -406,8 +418,7 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 					s.progressColumn(ctx, 1)
 				}
 			} else {
-				// Dropped, with the whitespace after it, so the value parts
-				// company with the source here.
+				// Dropped, with the whitespace after it, so the value parts company with the source here.
 				keep(idx)
 				idx += progress
 				s.progressColumn(ctx, progress)
@@ -420,8 +431,8 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			isFirstLineChar = false
 			continue
 		}
-		s.progressColumn(ctx, 1)
 
+		s.progressColumn(ctx, 1)
 		text := src[startIndex:idx]
 		if copied {
 			text = string(value)
@@ -432,5 +443,5 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	}
 	s.progressColumn(ctx, 1)
 
-	return token.Token{}, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(string(ctx.origin()), srcpos))
+	return token.Token{}, ErrInvalidToken("could not find end character of double-quoted text", token.Invalid(ctx.origin(), srcpos))
 }

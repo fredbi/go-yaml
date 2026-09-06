@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import (
@@ -9,14 +12,14 @@ import (
 
 func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) error {
 	if s.foundDocumentSeparatorMarker(src) {
-		return ErrInvalidToken("found unexpected document separator", token.Invalid(string(ctx.origin()), s.pos()))
+		return ErrInvalidToken("found unexpected document separator", token.Invalid(ctx.origin(), s.pos()))
 	}
 
 	return nil
 }
 
-// foundDocumentSeparatorMarker reports that src opens with "---" or "...",
-// standing alone rather than beginning a longer scalar.
+// foundDocumentSeparatorMarker reports that src opens with "---" or "...", standing alone rather than beginning a
+// longer scalar.
 func (s *Scanner) foundDocumentSeparatorMarker(src string) bool {
 	if !strings.HasPrefix(src, "---") && !strings.HasPrefix(src, "...") {
 		return false
@@ -48,7 +51,7 @@ func (s *Scanner) scanDocumentStart(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentHeader(string(ctx.origin())+"---", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentHeader(ctx.origin()+"---", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	s.clearState()
@@ -68,7 +71,7 @@ func (s *Scanner) scanDocumentEnd(ctx *Context) bool {
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentEnd(string(ctx.origin())+"...", s.pos()))
+	ctx.addTokenValue(token.MakeDocumentEnd(ctx.origin()+"...", s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
 	return true

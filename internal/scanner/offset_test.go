@@ -15,18 +15,17 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// sourceText is a token's text as it stands in the source: the text it was
-// written as, without the whitespace and line breaks in front of it.
+// sourceText is a token's text as it stands in the source: the text it was written as, without the whitespace and line
+// breaks in front of it.
 func sourceText(origin string) string {
 	return strings.TrimLeft(origin, " \t\n\r")
 }
 
 // at returns the source from offset onwards.
 //
-// Token.Position.Offset() is a 0-based byte index into the source as it was
-// handed in, byte order marks included: the scanner steps over a mark rather
-// than deleting it. This is the one place the test encodes what an Offset
-// means.
+// Token.Position.Offset() is a 0-based byte index into the source as it was handed in, byte order marks included: the
+// scanner steps over a mark rather than deleting it.
+// This is the one place the test encodes what an Offset means.
 func at(src string, offset int) string {
 	if offset < 0 || offset > len(src) {
 		return ""
@@ -35,47 +34,46 @@ func at(src string, offset int) string {
 	return src[offset:]
 }
 
-// offsetMissLedger records how many tokens of each type carry an Offset that
-// does not address their own text, over the whole YAML Test Suite.
+// offsetMissLedger records how many tokens of each type carry an Offset that does not address their own text, over the
+// whole YAML Test Suite.
 //
-// 101 of 3,489, which is 97.1% correct. It was 1,031 until three places in the
-// scanner stopped stepping over a character without counting its byte:
-// scanTag over the '!', scanComment over the '#', and scanMultiLineHeaderOption
-// over the '|' or '>'. Each left s.offset one byte behind ctx.idx for the rest
-// of the document, so every token after the first tag, comment or block scalar
-// was reported that many bytes early. Twenty-one of the twenty-five types now
-// miss nothing at all.
+// 101 of 3,489, which is 97.1% correct.
+// It was 1,031 until three places in the scanner stopped stepping over a character without counting its byte: scanTag
+// over the '!', scanComment over the '#', and scanMultiLineHeaderOption over the '|' or '>'.
 //
-// What is left is 18 of 3,489, and none of it is the counter drifting. 13 are
-// Invalid, the tokens an error carries, built from the whole origin buffer
-// rather than from one token's worth of it. 5 are multi-line String values --
-// block scalar content.
+// Each left s.offset one byte behind ctx.idx for the rest of the document, so every token after the first tag, comment
+// or block scalar was reported that many bytes early.
+// Twenty-one of the twenty-five types now miss nothing at all.
 //
-// It was 25 while this read the source through Scan, which returns a refusal as
-// an error where NextToken hands over the token the refusal names. The stream
-// the parser reads is the one measured here.
+// What is left is 18 of 3,489, and none of it is the counter drifting.
+// 13 are Invalid, the tokens an error carries, built from the whole origin buffer rather than from one token's worth of
+// it.
+// 5 are multi-line String values -- block scalar content.
 //
-// It was 33 before that, while the comparison ran against Token.Origin. That
-// field held the scanner's buffer, which is not always the document:
-// Context.removeRightSpaceFromBuf trims the spaces a line ends with from the
-// origin as well as from the value, so "a: one \n  two" -- a plain scalar
-// continued over two lines, the first ending in a space -- had an Origin of
-// "a: one\n  two", which the document does not contain. Reading the text back
-// from the extents compares against the document itself.
+// It was 25 while this read the source through Scan, which returns a refusal as an error where NextToken hands over the
+// token the refusal names.
+// The stream the parser reads is the one measured here.
 //
-// Line and Column were right throughout, which is what made the drift hard to
-// see: 3,287 of 3,489 columns address their token.
+// It was 33 before that, while the comparison ran against Token.Origin.
+// That field held the scanner's buffer, which is not always the document: Context.removeRightSpaceFromBuf trims the
+// spaces a line ends with from the origin as well as from the value, so "a: one \n two" -- a plain scalar continued
+// over two lines, the first ending in a space -- had an Origin of "a: one\n two", which the document does not contain.
 //
-// The ledger is a ratchet in both directions. A type that starts missing more
-// fails as a regression; one that starts missing fewer fails too, and the fix
-// is recorded by lowering the count.
-var offsetMissLedger = map[string]int{
+// Reading the text back from the extents compares against the document itself.
+//
+// Line and Column were right throughout, which is what made the drift hard to see: 3,287 of 3,489 columns address their
+// token.
+//
+// The ledger is a ratchet in both directions.
+// A type that starts missing more fails as a regression; one that starts missing fewer fails too, and the fix is
+// recorded by lowering the count.
+var offsetMissLedger = map[string]int{ //nolint:gochecknoglobals // ok to store and immutable map as a global
 	"Invalid": 13,
 	"String":  5,
 }
 
-// TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how
-// often a token's Offset addresses that token in the source.
+// TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how often a token's Offset addresses that token
+// in the source.
 func TestTokenOffsetsAddressTheSource(t *testing.T) {
 	tests, err := yamltestsuite.TestSuites()
 	require.NoError(t, err)
@@ -128,13 +126,13 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 
 // originsOf reads back the text the document wrote each token as.
 //
-// [token.Token] does not carry it. The tokens' extents tile the source --
-// TestOriginsTileTheSource is where that is checked -- so the text of the token
-// at i is the source between the end of the one before it and its own end,
-// leading whitespace included.
-func originsOf(src string, tokens token.Tokens) []string {
+// [token.Token] does not carry it.
+// The tokens' extents tile the source -- TestOriginsTileTheSource is where that is checked -- so the text of the token
+// at i is the source between the end of the one before it and its own end, leading whitespace included.
+func originsOf(src string, tokens []token.Token) []string {
 	origins := make([]string, len(tokens))
 	prev := 0
+
 	for i, tk := range tokens {
 		end := int(tk.EndOffset())
 		if end < prev || end > len(src) {
@@ -143,6 +141,7 @@ func originsOf(src string, tokens token.Tokens) []string {
 
 			continue
 		}
+
 		origins[i] = src[prev:end]
 		prev = end
 	}

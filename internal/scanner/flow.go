@@ -1,14 +1,15 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import "github.com/go-openapi/go-yaml/token"
 
-// scanFlowDash reports a '-' that is neither a sequence entry nor the start of
-// a scalar.
+// scanFlowDash reports a '-' that is neither a sequence entry nor the start of a scalar.
 //
-// A plain scalar may begin with '-' only when what follows can continue it. In
-// a flow collection the characters that structure the collection cannot, so
-// "[-]" and "[-, -]" hold no scalar at all -- they used to be read as the
-// one-character string "-".
+// A plain scalar may begin with '-' only when what follows can continue it.
+// In a flow collection the characters that structure the collection cannot, so "[-]" and "[-, -]" hold no scalar at all
+// -- they used to be read as the one-character string "-".
 func (s *Scanner) scanFlowDash(ctx *Context) error {
 	if ctx.existsBuffer() || !s.isFlowMode() {
 		return nil
@@ -24,7 +25,7 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 	ctx.addOriginBuf('-')
 	err := ErrInvalidToken(
 		"'-' is not a scalar, and a flow collection has no sequence entries",
-		token.Invalid(string(ctx.origin()), s.pos()),
+		token.Invalid(ctx.origin(), s.pos()),
 	)
 	s.progressColumn(ctx, 1)
 	ctx.clear()
@@ -34,8 +35,8 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 
 // enterFlow records what a flow collection's continuation lines must clear.
 //
-// Only the outermost one matters: a collection nested inside another is already
-// past the indentation its parent required.
+// Only the outermost one matters: a collection nested inside another is already past the indentation its parent
+// required.
 func (s *Scanner) enterFlow() {
 	if s.isFlowMode() {
 		return

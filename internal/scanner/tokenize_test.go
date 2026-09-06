@@ -1,18 +1,215 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner_test
 
 import (
+	"iter"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/token"
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
 )
 
 func TestTokenize(t *testing.T) {
-	tests := []struct {
-		YAML   string
-		Tokens []wantToken
-	}{
+	t.Parallel()
+
+	for test := range tokenizeTestCases() {
+		t.Run(test.YAML, func(t *testing.T) {
+			tokens := tokenize(t, test.YAML)
+			require.Lenf(t, tokens, len(test.Tokens),
+				"tokenize(%q) token count mismatch, expected: %d got: %d",
+				test.YAML, len(test.Tokens), len(tokens),
+			)
+
+			origins := originsOf(test.YAML, tokens)
+			for i := range test.Tokens {
+				assert.EqualTf(t, test.Tokens[i].Type, tokens[i].Type,
+					"tokenize(%q)[%d] token.Type mismatch, expected: %s got: %s",
+					test.YAML, i, test.Tokens[i].Type, tokens[i].Type,
+				)
+				assert.EqualTf(t, test.Tokens[i].Value, tokens[i].Value,
+					"tokenize(%q)[%d] token.Value mismatch, expected: %q got: %q",
+					test.YAML, i, test.Tokens[i].Value, tokens[i].Value,
+				)
+				assert.EqualTf(t, test.Tokens[i].Origin, origins[i],
+					"tokenize(%q)[%d] origin mismatch, expected: %q got: %q",
+					test.YAML, i, test.Tokens[i].Origin, origins[i],
+				)
+			}
+		})
+	}
+}
+
+func TestSingleLineToken_ValueLineColumnPosition(t *testing.T) {
+	t.Parallel()
+
+	for tc := range lineColTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tokenize(t, tc.src)
+			sort.Slice(got, func(i, j int) bool { // expectations are sorted by column
+				return got[i].Position.Column < got[j].Position.Column
+			})
+			expected := tc.expected()
+			assert.Lenf(t, got, len(expected),
+				"tokenize(%s) token count mismatch, expected:%d got:%d",
+				tc.src, len(expected), len(got),
+			)
+
+			t.Run("tokens should match in value and position", func(t *testing.T) {
+				for i, tok := range got {
+					assert.Truef(t, tokenMatches(tok, expected[i]),
+						"tokenize(%s) expected:%+v got line:%d column:%d value:%s",
+						tc.src, expected[i], tok.Position.Line, tok.Position.Column, tok.Value,
+					)
+				}
+			})
+		})
+	}
+}
+
+func TestMultiLineToken_ValueLineColumnPosition(t *testing.T) {
+	t.Parallel()
+
+	for tc := range valueLineColTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tokenize(t, tc.src)
+			sort.Slice(got, func(i, j int) bool {
+				// sort by line, then column
+				if got[i].Position.Line < got[j].Position.Line {
+					return true
+				}
+
+				if got[i].Position.Line == got[j].Position.Line {
+					return got[i].Position.Column < got[j].Position.Column
+				}
+
+				return false
+			})
+
+			sort.Slice(tc.expect, func(i, j int) bool {
+				if tc.expect[i].line < tc.expect[j].line {
+					return true
+				}
+				if tc.expect[i].line == tc.expect[j].line {
+					return tc.expect[i].column < tc.expect[j].column
+				}
+
+				return false
+			})
+
+			assert.Lenf(t, got, len(tc.expect),
+				"tokenize() token count mismatch, expected:%d got:%d",
+				len(tc.expect), len(got),
+			)
+
+			for i, tok := range got {
+				assert.Truef(t, tokenMatches(tok, tc.expect[i]),
+					"tokenize() expected:%+v got line:%d column:%d value:%s",
+					tc.expect[i], tok.Position.Line, tok.Position.Column, tok.Value,
+				)
+			}
+		})
+	}
+}
+
+func TestInvalid(t *testing.T) {
+	t.Parallel()
+
+	for test := range testInvalidTokenCases() {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := scanTokens(test.src)
+			require.Errorf(t, err, "expected the scanner to refuse this")
+			shouldContainInvalidTokens(t, got)
+		})
+	}
+}
+
+// TestTokenOffset checks that Offset addresses the token in the source.
+//
+// Offset is a 0-based byte index, so content[Offset:] begins with the token.
+// "1.2.3" stands at byte 21 of the CR LF text and at byte 20 of the LF one, the two differing by the extra CR on the
+// first line.
+func TestTokenOffset(t *testing.T) {
+	t.Parallel()
+
+	t.Run("crlf", func(t *testing.T) {
+		content := "project:\r\n  version: 1.2.3\r\n"
+		tokens := tokenize(t, content)
+		if len(tokens) != 5 {
+			t.Fatalf("invalid token num. got %d", len(tokens))
+		}
+		if tokens[4].Value != "1.2.3" {
+			t.Fatalf("unexpected value. got %q", tokens[4].Value)
+		}
+		if tokens[4].Position.Offset() != 21 {
+			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
+		}
+	})
+
+	t.Run("lf", func(t *testing.T) {
+		content := "project:\n  version: 1.2.3\n"
+		tokens := tokenize(t, content)
+		if len(tokens) != 5 {
+			t.Fatalf("invalid token num. got %d", len(tokens))
+		}
+		if tokens[4].Value != "1.2.3" {
+			t.Fatalf("unexpected value. got %q", tokens[4].Value)
+		}
+		if tokens[4].Position.Offset() != 20 {
+			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
+		}
+		if !strings.HasPrefix(content[tokens[4].Position.Offset():], "1.2.3") {
+			t.Fatalf("offset %d does not address the token", tokens[4].Position.Offset())
+		}
+	})
+}
+
+func shouldContainInvalidTokens(t *testing.T, tokens []token.Token) {
+	t.Helper()
+
+	var hasInvalid bool
+	for _, tok := range tokens {
+		if tok.Type == token.InvalidType {
+			hasInvalid = true
+			break
+		}
+	}
+
+	assert.Truef(t, hasInvalid, "expected to contain an invalid token")
+}
+
+func tokenMatches(t token.Token, e testToken) bool {
+	return true && t.Value == e.value &&
+		int(t.Position.Line) == e.line &&
+		int(t.Position.Column) == e.column
+}
+
+// =================================================================== tokenize test cases
+// ===================================================================.
+
+type tokenizeTestCase struct {
+	YAML   string
+	Tokens []wantToken
+}
+
+// wantToken is what a scan should give back: a token's type and value, and the text the document wrote it as.
+//
+// Origin is not a field of [token.Token] -- carrying the text would cost every token two registers -- so it is read
+// back from the source with the token's extent.
+// See originsOf.
+type wantToken struct {
+	Type   token.Type
+	Value  string
+	Origin string
+}
+
+func tokenizeTestCases() iter.Seq[tokenizeTestCase] {
+	return slices.Values([]tokenizeTestCase{
 		{
 			YAML: `null
   `,
@@ -67,8 +264,8 @@ func TestTokenize(t *testing.T) {
 			},
 		},
 		{
-			// A leading zero made a number octal in YAML 1.1. The 1.2 decimal
-			// form is "[-+]? [0-9]+", which reads the zero and nothing into it.
+			// A leading zero made a number octal in YAML 1.1. The 1.2 decimal form is "[-+]?
+			// [0-9]+", which reads the zero and nothing into it.
 			YAML: `0100`,
 			Tokens: []wantToken{
 				{
@@ -150,7 +347,7 @@ func TestTokenize(t *testing.T) {
 				{
 					Type:  token.StringType,
 					Value: "a",
-					// nolint: gci
+					//nolint: gci
 					Origin: "	a",
 				},
 			},
@@ -1527,14 +1724,12 @@ e: f
 				{
 					Type:  token.StringType,
 					Value: "b\nc d",
-					// Short of the "d \n" that closes the scalar, and the next
-					// token starts that much early to make up for it.
-					// Context.removeRightSpaceFromBuf trims the spaces a line
-					// ends with from the origin buffer as well as from the
-					// value, so the buffer is shorter than the source it was
-					// read from and the extent taken from its length falls
-					// behind. It is the same defect offsetMissLedger counts
-					// under String.
+					// Short of the "d \n" that closes the scalar, and the next token starts that much early to make up for it.
+					// Context.removeRightSpaceFromBuf trims the spaces a line ends with from the origin buffer as well as from the
+					// value, so the buffer is shorter than the source it was read from and the extent taken from its length falls
+					// behind.
+					//
+					// It is the same defect offsetMissLedger counts under String.
 					Origin: "   \n b   \n\n  \n c\n ",
 				},
 				{
@@ -2001,8 +2196,8 @@ s: >-3
 			},
 		},
 		{
-			// 9 and 8 are not octal digits, so this was a string under YAML 1.1.
-			// Under 1.2 it is a decimal number that opens with a zero.
+			// 9 and 8 are not octal digits, so this was a string under YAML 1.1. Under 1.2 it is a decimal number that opens
+			// with a zero.
 			YAML: `098765`,
 			Tokens: []wantToken{
 				{
@@ -2022,53 +2217,38 @@ s: >-3
 				},
 			},
 		},
+	})
+}
+
+// =================================================================== token line & column test cases
+// ===================================================================.
+
+type lineColTestCase struct {
+	name   string
+	src    string
+	expect map[int]string // Column -> Value map.
+}
+
+func (tok lineColTestCase) expected() []testToken {
+	expected := make([]testToken, 0, len(tok.expect))
+	for k, v := range tok.expect {
+		tt := testToken{
+			line:   1,
+			column: k,
+			value:  v,
+		}
+		expected = append(expected, tt)
 	}
-	for _, test := range tests {
-		t.Run(test.YAML, func(t *testing.T) {
-			tokens := tokenize(t, test.YAML)
-			if len(tokens) != len(test.Tokens) {
-				t.Fatalf("Tokenize(%q) token count mismatch, expected: %d got: %d", test.YAML, len(test.Tokens), len(tokens))
-			}
-			origins := originsOf(test.YAML, tokens)
-			for i := range test.Tokens {
-				if tokens[i].Type != test.Tokens[i].Type {
-					t.Errorf("Tokenize(%q)[%d] token.Type mismatch, expected: %s got: %s", test.YAML, i, test.Tokens[i].Type, tokens[i].Type)
-				}
-				if tokens[i].Value != test.Tokens[i].Value {
-					t.Errorf("Tokenize(%q)[%d] token.Value mismatch, expected: %q got: %q", test.YAML, i, test.Tokens[i].Value, tokens[i].Value)
-				}
-				if origins[i] != test.Tokens[i].Origin {
-					t.Errorf("Tokenize(%q)[%d] origin mismatch, expected: %q got: %q", test.YAML, i, test.Tokens[i].Origin, origins[i])
-				}
-			}
-		})
-	}
+
+	sort.Slice(expected, func(i, j int) bool {
+		return expected[i].column < expected[j].column
+	})
+
+	return expected
 }
 
-// wantToken is what a scan should give back: a token's type and value, and the
-// text the document wrote it as.
-//
-// Origin is not a field of [token.Token] -- carrying the text would cost every
-// token two registers -- so it is read back from the source with the token's
-// extent. See originsOf.
-type wantToken struct {
-	Type   token.Type
-	Value  string
-	Origin string
-}
-
-type testToken struct {
-	line   int
-	column int
-	value  string
-}
-
-func TestSingleLineToken_ValueLineColumnPosition(t *testing.T) {
-	tests := []struct {
-		name   string
-		src    string
-		expect map[int]string // Column -> Value map.
-	}{
+func lineColTestCases() iter.Seq[lineColTestCase] {
+	return slices.Values([]lineColTestCase{
 		{
 			name: "single quote, single value array",
 			src:  "test: ['test']",
@@ -2280,55 +2460,30 @@ func TestSingleLineToken_ValueLineColumnPosition(t *testing.T) {
 				6: "b",
 			},
 		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tokenize(t, tc.src)
-			sort.Slice(got, func(i, j int) bool {
-				return got[i].Position.Column < got[j].Position.Column
-			})
-			var expected []testToken
-			for k, v := range tc.expect {
-				tt := testToken{
-					line:   1,
-					column: k,
-					value:  v,
-				}
-				expected = append(expected, tt)
-			}
-			sort.Slice(expected, func(i, j int) bool {
-				return expected[i].column < expected[j].column
-			})
-			if len(got) != len(expected) {
-				t.Errorf("Tokenize(%s) token count mismatch, expected:%d got:%d", tc.src, len(expected), len(got))
-			}
-			for i, tok := range got {
-				if !tokenMatches(tok, expected[i]) {
-					t.Errorf("Tokenize(%s) expected:%+v got line:%d column:%d value:%s", tc.src, expected[i], tok.Position.Line, tok.Position.Column, tok.Value)
-				}
-			}
-		})
-	}
+	})
 }
 
-func tokenMatches(t *token.Token, e testToken) bool {
-	return t != nil && true &&
-		t.Value == e.value &&
-		int(t.Position.Line) == e.line &&
-		int(t.Position.Column) == e.column
+// =================================================================== line, column for token (2)
+// ===================================================================.
+
+type valueLineColTestCase struct {
+	name   string
+	src    string
+	expect []testToken
 }
 
-func TestMultiLineToken_ValueLineColumnPosition(t *testing.T) {
-	tests := []struct {
-		name   string
-		src    string
-		expect []testToken
-	}{
+type testToken struct {
+	line   int
+	column int
+	value  string
+}
+
+func valueLineColTestCases() iter.Seq[valueLineColTestCase] {
+	return slices.Values([]valueLineColTestCase{
 		{
 			name: "double quote",
-			// The continuation lines are indented under their key, as a scalar
-			// spanning lines has to be: without that they are not part of it.
+			// The continuation lines are indented under their key, as a scalar spanning lines has to be: without that they are
+			// not part of it.
 			src: `one: "1 2 3 4 5"
 two: "1 2
  3 4
@@ -2385,8 +2540,7 @@ three: "1 2 3 4
 		},
 		{
 			name: "single quote in an array",
-			// As above: a scalar carrying on to the next line is indented under
-			// the key whose value it is.
+			// As above: a scalar carrying on to the next line is indented under the key whose value it is.
 			src: `arr: ['1', 'and
  two']
 last: 'hello'`,
@@ -2581,45 +2735,19 @@ b: 1`,
 				},
 			},
 		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tokenize(t, tc.src)
-			sort.Slice(got, func(i, j int) bool {
-				// sort by line, then column
-				if got[i].Position.Line < got[j].Position.Line {
-					return true
-				} else if got[i].Position.Line == got[j].Position.Line {
-					return got[i].Position.Column < got[j].Position.Column
-				}
-				return false
-			})
-			sort.Slice(tc.expect, func(i, j int) bool {
-				if tc.expect[i].line < tc.expect[j].line {
-					return true
-				} else if tc.expect[i].line == tc.expect[j].line {
-					return tc.expect[i].column < tc.expect[j].column
-				}
-				return false
-			})
-			if len(got) != len(tc.expect) {
-				t.Errorf("Tokenize() token count mismatch, expected:%d got:%d", len(tc.expect), len(got))
-			}
-			for i, tok := range got {
-				if !tokenMatches(tok, tc.expect[i]) {
-					t.Errorf("Tokenize() expected:%+v got line:%d column:%d value:%s", tc.expect[i], tok.Position.Line, tok.Position.Column, tok.Value)
-				}
-			}
-		})
-	}
+	})
 }
 
-func TestInvalid(t *testing.T) {
-	tests := []struct {
-		name string
-		src  string
-	}{
+// =================================================================== invalid tokens
+// ===================================================================.
+
+type testInvalidTokenCase struct {
+	name string
+	src  string
+}
+
+func testInvalidTokenCases() iter.Seq[testInvalidTokenCase] {
+	return slices.Values([]testInvalidTokenCase{
 		{
 			name: "literal opt with content",
 			src: `
@@ -2653,7 +2781,7 @@ a: |invalid`,
 		},
 		{
 			name: "use tab character as indent",
-			// nolint: gci
+			//nolint: gci
 			src: "	a: b",
 		},
 		{
@@ -2684,53 +2812,5 @@ a: |
 			name: "invalid UTF-32 character",
 			src:  `"\U0000"`,
 		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := scanTokens(test.src)
-			if err == nil {
-				t.Fatal("expected the scanner to refuse this")
-			}
-			if got.InvalidToken() == nil {
-				t.Fatal("expected contains invalid token")
-			}
-		})
-	}
-}
-
-// TestTokenOffset checks that Offset addresses the token in the source.
-//
-// Offset is a 0-based byte index, so content[Offset:] begins with the token.
-// "1.2.3" stands at byte 21 of the CR LF text and at byte 20 of the LF one,
-// the two differing by the extra CR on the first line.
-func TestTokenOffset(t *testing.T) {
-	t.Run("crlf", func(t *testing.T) {
-		content := "project:\r\n  version: 1.2.3\r\n"
-		tokens := tokenize(t, content)
-		if len(tokens) != 5 {
-			t.Fatalf("invalid token num. got %d", len(tokens))
-		}
-		if tokens[4].Value != "1.2.3" {
-			t.Fatalf("unexpected value. got %q", tokens[4].Value)
-		}
-		if tokens[4].Position.Offset() != 21 {
-			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
-		}
-	})
-	t.Run("lf", func(t *testing.T) {
-		content := "project:\n  version: 1.2.3\n"
-		tokens := tokenize(t, content)
-		if len(tokens) != 5 {
-			t.Fatalf("invalid token num. got %d", len(tokens))
-		}
-		if tokens[4].Value != "1.2.3" {
-			t.Fatalf("unexpected value. got %q", tokens[4].Value)
-		}
-		if tokens[4].Position.Offset() != 20 {
-			t.Fatalf("unexpected offset. got %d", tokens[4].Position.Offset())
-		}
-		if !strings.HasPrefix(content[tokens[4].Position.Offset():], "1.2.3") {
-			t.Fatalf("offset %d does not address the token", tokens[4].Position.Offset())
-		}
 	})
 }

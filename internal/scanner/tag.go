@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import (
@@ -28,19 +31,18 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	}
 
 	ctx.addOriginBuf('!')
-	// The offset counts the bytes the cursor has crossed, so it takes the '!'
-	// too. Left out, it stayed one byte behind for the rest of the document and
-	// every token after this one was reported a byte early. tagPos is taken
-	// before the step, where the tag's own text begins.
+	// The offset counts the bytes the cursor has crossed, so it takes the '!' too.
+	// Left out, it stayed one byte behind for the rest of the document and every token after this one was reported a byte
+	// early. tagPos is taken before the step, where the tag's own text begins.
 	tagPos := s.pos()
 	s.progress(ctx, 1) // skip '!' character
 
-	// A verbatim tag, "!<...>", holds a URI and takes it as written: the
-	// characters a shorthand may not contain are ordinary inside the brackets.
+	// A verbatim tag, "!<...>", holds a URI and takes it as written: the characters a shorthand may not contain are
+	// ordinary inside the brackets.
 	verbatim := ctx.currentChar() == '<'
 
-	// idx counts bytes into the source; progress counts the characters the
-	// column has to advance by, which is not the same thing.
+	// idx counts bytes into the source; progress counts the characters the column has to advance by, which is not the same
+	// thing.
 	var progress int
 	for idx, c := range ctx.src[ctx.idx:] {
 		progress++
@@ -72,12 +74,12 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				ctx.clear()
 				return true, nil
 			}
-			// Outside a flow collection nothing ends the tag here, and a ',' is
-			// not a character a tag may contain: it has to be percent-encoded.
+			// Outside a flow collection nothing ends the tag here, and a ',' is not a character a tag may contain: it has to be
+			// percent-encoded.
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 
-			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(string(ctx.origin()), s.pos()))
+			return false, ErrInvalidToken(fmt.Sprintf("found invalid tag character %q", c), token.Invalid(ctx.origin(), s.pos()))
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
@@ -89,9 +91,8 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			return true, nil
 		case '}', ']':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
-				// The closer ends the collection the tag stands in, so it ends
-				// the tag: "[!]" is the non-specific tag on the empty node and
-				// not a tag whose name is "]".
+				// The closer ends the collection the tag stands in, so it ends the tag: "[!]" is the non-specific tag on the empty
+				// node and not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
 				if err := s.addTag(ctx, value, tagPos); err != nil {
 					return false, err
@@ -106,14 +107,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
-			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
+			invalidTk := token.Invalid(ctx.origin(), s.pos())
 
 			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		case '{':
 			ctx.addOriginBuf(c)
 			s.progressColumn(ctx, progress)
 			invalidMsg := fmt.Sprintf("found invalid tag character %q", c)
-			invalidTk := token.Invalid(string(ctx.origin()), s.pos())
+			invalidTk := token.Invalid(ctx.origin(), s.pos())
 
 			return false, ErrInvalidToken(invalidMsg, invalidTk)
 		default:

@@ -13,9 +13,9 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// scalarTypes reads src through and returns the type the scanner gave each
-// scalar, against its text. Quoted scalars are kept so that a test can hold
-// them to a string whatever they spell.
+// scalarTypes reads src through and returns the type the scanner gave each scalar, against its text.
+//
+// Quoted scalars are kept so that a test can hold them to a string whatever they spell.
 func scalarTypes(t *testing.T, src string, schema token.Schema) map[string]token.Type {
 	t.Helper()
 
@@ -28,6 +28,8 @@ func scalarTypes(t *testing.T, src string, schema token.Schema) map[string]token
 		switch tk.Type.Indicator() {
 		case token.NotIndicator, token.QuotedScalarIndicator:
 			got[tk.Value] = tk.Type
+		default:
+			// skip
 		}
 	}
 	require.NoError(t, s.Err())
@@ -35,14 +37,11 @@ func scalarTypes(t *testing.T, src string, schema token.Schema) map[string]token
 	return got
 }
 
-// TestSetSchemaChangesWhatAScalarResolvesTo holds the scanner to the schema it
-// was given.
+// TestSetSchemaChangesWhatAScalarResolvesTo holds the scanner to the schema it was given.
 //
-// A plain scalar's meaning is a question about a schema, not about its text:
-// "0100" is 100 under YAML 1.2 and 64 under 1.1, and "no" is a string under 1.2
-// and false under 1.1. The scanner reads whichever it was told and reads
-// nothing into the choice -- the parser makes it, from the "%YAML" directive
-// and from the option that will stand beside it.
+// A plain scalar's meaning is a question about a schema, not about its text: "0100" is 100 under YAML 1.2 and 64 under
+// 1.1, and "no" is a string under 1.2 and false under 1.1. The scanner reads whichever it was told and reads nothing
+// into the choice -- the parser makes it, from the "%YAML" directive and from the option that will stand beside it.
 func TestSetSchemaChangesWhatAScalarResolvesTo(t *testing.T) {
 	const src = `
 plain: 0100
@@ -90,11 +89,10 @@ nothing: null
 	})
 }
 
-// TestSchemaSurvivesInitAndTakesEffectMidScan holds the two things the parser
-// needs of SetSchema: a scanner reused on a second document keeps the schema it
-// was given, and a schema set part way through a scan reaches the scalars that
-// follow it -- which is what lets the parser read a "%YAML 1.1" directive and
-// then set it before pulling the document's first scalar.
+// TestSchemaSurvivesInitAndTakesEffectMidScan holds the two things the parser needs of SetSchema: a scanner reused on a
+// second document keeps the schema it was given, and a schema set part way through a scan reaches the scalars that
+// follow it -- which is what lets the parser read a "%YAML 1.1" directive and then set it before pulling the document's
+// first scalar.
 func TestSchemaSurvivesInitAndTakesEffectMidScan(t *testing.T) {
 	var s scanner.Scanner
 	assert.Equal(t, token.Schema12, s.Schema(), "a scanner starts on the 1.2 core schema")

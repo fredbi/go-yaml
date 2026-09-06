@@ -104,9 +104,8 @@ func TestHighBitsFindsNonASCII(t *testing.T) {
 
 // TestInlinable holds every function here inside the compiler's inline budget.
 //
-// The point of the package is that a caller's hot loop pays no call: the bit
-// math is meant to land in the loop body. A function that stops inlining keeps
-// working and stops being worth having, which no other test would notice.
+// The point of the package is that a caller's hot loop pays no call: the bit math is meant to land in the loop body.
+// A function that stops inlining keeps working and stops being worth having, which no other test would notice.
 func TestInlinable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds the package to read the compiler's inlining decisions")
@@ -125,14 +124,13 @@ func TestInlinable(t *testing.T) {
 	}
 }
 
-// TestControlMasksMatchTheByteRule holds the two control masks to the rule they
-// stand for, over every word one lane of which is any byte under 0x80 and the
-// other seven are drawn from the awkward neighborhood: the boundaries of the
+// TestControlMasksMatchTheByteRule holds the two control masks to the rule they stand for, over every word one lane of
+// which is any byte under 0x80 and the other seven are drawn from the awkward neighborhood: the boundaries of the
 // control range, the three characters c-printable admits, and DEL.
 //
-// The masks are exact, which the cheap forms in this file are not: a lane may
-// not be flagged because a lower lane matched. TestControlMaskHasNoBorrow holds
-// that separately.
+// The masks are exact, which the cheap forms in this file are not: a lane may not be flagged because a lower lane
+// matched.
+// TestControlMaskHasNoBorrow holds that separately.
 func TestControlMasksMatchTheByteRule(t *testing.T) {
 	// unprintable is c-printable's verdict on a byte under 0x80.
 	unprintable := func(c byte) bool {
@@ -169,12 +167,11 @@ func TestControlMasksMatchTheByteRule(t *testing.T) {
 	}
 }
 
-// TestControlMaskHasNoBorrow holds the mask to reporting nothing for a word of
-// bytes a stream may all hold.
+// TestControlMaskHasNoBorrow holds the mask to reporting nothing for a word of bytes a stream may all hold.
 //
-// This is the failure the cheap forms have: "\n " subtracts and the space's
-// lane borrows, so a word that is entirely valid comes back flagged. A mask
-// read for emptiness has to be right in every lane, not only in the lowest.
+// This is the failure the cheap forms have: "\n " subtracts and the space's lane borrows, so a word that is entirely
+// valid comes back flagged.
+// A mask read for emptiness has to be right in every lane, not only in the lowest.
 func TestControlMaskHasNoBorrow(t *testing.T) {
 	for _, text := range []string{
 		"\n       ", " \n      ", "\n \n \n \n ", "\ta\rb\nc d",

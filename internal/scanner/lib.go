@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2026 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package scanner
 
 import (
@@ -11,40 +14,36 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// isCodePointEscape reports whether an escape names a code point by its digits,
-// and so consumes more of the source than the backslash and one marker.
+// isCodePointEscape reports whether an escape names a code point by its digits, and so consumes more of the source than
+// the backslash and one marker.
 func isCodePointEscape(marker rune) bool {
 	return marker == 'x' || marker == 'u' || marker == 'U'
 }
 
 // byteOrderMark is YAML 1.2's c-byte-order-mark.
 //
-// nb-char is c-printable less b-char and this, so a byte order mark is not a
-// character any node may hold: it marks a document prefix and nothing else.
-// Scanner.checkByteOrderMark refuses one anywhere a node may go, and the scan
-// steps over the rest, which is what a file saved by an editor that writes one
-// needs.
+// nb-char is c-printable less b-char and this, so a byte order mark is not a character any node may hold: it marks a
+// document prefix and nothing else.
+// Scanner.checkByteOrderMark refuses one anywhere a node may go, and the scan steps over the rest, which is what a file
+// saved by an editor that writes one needs.
 //
-// A mark says nothing here about the encoding. The spec has a stream announce
-// UTF-16 or UTF-32 with one, and this library reads UTF-8 only -- the one place
-// it departs from YAML 1.2.2 on purpose. A UTF-16 stream's mark is two bytes
-// that are not a character, which validateStream refuses.
+// A mark says nothing here about the encoding.
+// The spec has a stream announce UTF-16 or UTF-32 with one, and this library reads UTF-8 only -- the one place it
+// departs from YAML 1.2.2 on purpose.
+// A UTF-16 stream's mark is two bytes that are not a character, which validateStream refuses.
 const byteOrderMark = '\ufeff'
 
-// byteOrderMarkText is the mark's three bytes, for the prefix tests that step
-// over a run of them.
+// byteOrderMarkText is the mark's three bytes, for the prefix tests that step over a run of them.
 const byteOrderMarkText = string(byteOrderMark)
 
 // validateStream checks that the source is text a YAML stream may hold.
 //
-// c-printable is the set of characters a stream may contain at all, so the
-// control characters below x20 other than tab, line feed and carriage return
-// are not YAML however they are arrived at.
+// c-printable is the set of characters a stream may contain at all, so the control characters below x20 other than tab,
+// line feed and carriage return are not YAML however they are arrived at.
 //
 // A stream is also Unicode, and a byte that is part of no character is not one.
-// Converting the source to runes turns each of them into U+FFFD, so by the time
-// anything else looks the byte is gone and nothing has said so -- which is why
-// this reads the string rather than the runes the rest of the scanner works on.
+// Converting the source to runes turns each of them into U+FFFD, so by the time anything else looks the byte is gone
+// and nothing has said so -- which is why this reads the string rather than the runes the rest of the scanner works on.
 func validateStream(text string) error {
 	if at := firstUnprintable(text); at >= 0 {
 		return unprintableErr(text, at)
@@ -53,15 +52,13 @@ func validateStream(text string) error {
 	return nil
 }
 
-// firstUnprintable returns the offset of the first byte the stream may not
-// hold, or -1 where every one of them is a character c-printable admits.
+// firstUnprintable returns the offset of the first byte the stream may not hold, or -1 where every one of them is a
+// character c-printable admits.
 //
-// Eight bytes at a time while they are ASCII, which is nearly all of them in
-// nearly every document: one word says whether any of the eight is a control
-// character other than tab, line feed and carriage return, or DEL. A word
-// carrying a byte over 0x7f is stepped through a character at a time, since
-// what c-printable admits up there is a question about the character rather
-// than about the byte, and the word loop takes over again after it.
+// Eight bytes at a time while they are ASCII, which is nearly all of them in nearly every document: one word says
+// whether any of the eight is a control character other than tab, line feed and carriage return, or DEL.
+// A word carrying a byte over 0x7f is stepped through a character at a time, since what c-printable admits up there is
+// a question about the character rather than about the byte, and the word loop takes over again after it.
 func firstUnprintable(text string) int {
 	raw := unsafe.Slice(unsafe.StringData(text), len(text))
 
@@ -87,21 +84,17 @@ func firstUnprintable(text string) int {
 	return firstUnprintableTail(text, i)
 }
 
-// readNonASCII steps over the characters of the word at i that carries a byte
-// over 0x7f, and returns where the bytes are ASCII again, or where the stream
-// holds a character it may not.
+// readNonASCII steps over the characters of the word at i that carries a byte over 0x7f, and returns where the bytes
+// are ASCII again, or where the stream holds a character it may not.
 //
-// It takes the whole run rather than one character: a document written in a
-// script of three bytes to the character loaded and tested a word for every one
-// of them, and every test failed the same way. It is a call rather than the
-// loop's own code so that the word loop above stays small -- the run is the
-// cold path, and twitter_status, the most non-Latin of the workloads, reaches
-// it for one word in five.
+// It takes the whole run rather than one character: a document written in a script of three bytes to the character
+// loaded and tested a word for every one of them, and every test failed the same way.
+// It is a call rather than the loop's own code so that the word loop above stays small -- the run is the cold path, and
+// twitter_status, the most non-Latin of the workloads, reaches it for one word in five.
 func readNonASCII(text string, w uint64, i int) (int, int) {
-	// The ASCII bytes standing in front of the first one over 0x7f are read
-	// from the word as usual.
+	// The ASCII bytes standing in front of the first one over 0x7f are read from the word as usual.
 	k := swar.FirstByte(w & swar.HighBits)
-	if m := (swar.ControlMask(w) &^ swar.AllowedControlMask(w)) & (1<<(8*k) - 1); m != 0 {
+	if m := (swar.ControlMask(w) &^ swar.AllowedControlMask(w)) & (1<<(8*k) - 1); m != 0 { //nolint:mnd // the shift is fine
 		return 0, i + swar.FirstByte(m)
 	}
 	i += k
@@ -120,8 +113,7 @@ func readNonASCII(text string, w uint64, i int) (int, int) {
 	return i, -1
 }
 
-// firstUnprintableTail reads the last bytes of the source, fewer than a word of
-// them, one character at a time.
+// firstUnprintableTail reads the last bytes of the source, fewer than a word of them, one character at a time.
 func firstUnprintableTail(text string, i int) int {
 	for i < len(text) {
 		if c := text[i]; c < utf8.RuneSelf {
@@ -135,8 +127,7 @@ func firstUnprintableTail(text string, i int) int {
 
 		r, width := utf8.DecodeRuneInString(text[i:])
 		if r == utf8.RuneError && width <= 1 {
-			// Either a byte that is not text, or a U+FFFD the author wrote:
-			// only the width tells them apart.
+			// Either a byte that is not text, or a U+FFFD the author wrote: only the width tells them apart.
 			return i
 		}
 		if !printable(r) {
@@ -148,8 +139,7 @@ func firstUnprintableTail(text string, i int) int {
 	return -1
 }
 
-// unprintableErr names the character at offset i, which firstUnprintable found
-// the stream may not hold.
+// unprintableErr names the character at offset i, which firstUnprintable found the stream may not hold.
 func unprintableErr(text string, i int) error {
 	r, width := utf8.DecodeRuneInString(text[i:])
 	if r == utf8.RuneError && width <= 1 {
@@ -163,15 +153,15 @@ func unprintableErr(text string, i int) error {
 	)
 }
 
-// printableASCII answers [printable] for the bytes below utf8.RuneSelf, where
-// it comes to one range and the three line and tab characters outside it.
+// printableASCII answers [printable] for the bytes below utf8.RuneSelf, where it comes to one range and the three line
+// and tab characters outside it.
 func printableASCII(c byte) bool {
 	return c >= 0x20 && c <= 0x7E || c == 0x09 || c == 0x0A || c == 0x0D
 }
 
-// streamPosition counts the characters before byte i, for the error that says
-// which one a stream may not hold. Line, column and offset all count from 1,
-// and offset counts characters rather than bytes, as validateStream reported
+// streamPosition counts the characters before byte i, for the error that says which one a stream may not hold.
+//
+// Line, column and offset all count from 1, and offset counts characters rather than bytes, as validateStream reported
 // them when it counted every character to report one.
 func streamPosition(text string, i int) token.Position {
 	line, column, offset := 1, 1, 1
@@ -202,6 +192,8 @@ func blankOrComment(line string) bool {
 }
 
 // printable is YAML 1.2's c-printable.
+//
+//nolint:mnd // we have a lot of runes to check and making them constants won't really improve readability.
 func printable(r rune) bool {
 	switch {
 	case r == 0x09 || r == 0x0A || r == 0x0D:
@@ -247,10 +239,12 @@ func isNewLineChar(c rune) bool {
 	return false
 }
 
-// hexToInt returns the value of one hexadecimal digit, and whether the rune is
-// one at all. Answering that is the point: subtracting '0' from whatever turned
-// up gave a number for every rune, so an escape whose digits were not digits
-// decoded to some other character instead of being refused.
+// hexToInt returns the value of one hexadecimal digit, and whether the rune is one at all.
+//
+// Answering that is the point: subtracting '0' from whatever turned up gave a number for every rune, so an escape whose
+// digits were not digits decoded to some other character instead of being refused.
+//
+//nolint:mnd // hex to int is fine, no need to redefine constants for these symbols
 func hexToInt(b rune) (int, bool) {
 	switch {
 	case b >= '0' && b <= '9':
@@ -264,10 +258,8 @@ func hexToInt(b rune) (int, bool) {
 	}
 }
 
-// hexRunesToInt returns the value a run of hexadecimal digits spells, and
-// whether every rune in it was a digit.
-// hexDigitsToInt reads b as hexadecimal digits, and reports whether every one
-// of them is a digit at all.
+// hexRunesToInt returns the value a run of hexadecimal digits spells, and whether every rune in it was a digit.
+// hexDigitsToInt reads b as hexadecimal digits, and reports whether every one of them is a digit at all.
 func hexDigitsToInt(b string) (int, bool) {
 	sum := 0
 	for i := range len(b) {
@@ -275,14 +267,15 @@ func hexDigitsToInt(b string) (int, bool) {
 		if !isHex {
 			return 0, false
 		}
-		sum += digit << (uint(len(b)-i-1) * 4)
+		sum += digit << (uint(len(b)-i-1) * 4) //nolint:mnd // the shift is fine
 	}
 
 	return sum, true
 }
 
-// lineIndent returns how many spaces begin the line, and whether the line holds
-// nothing else. A blank line is part of no indentation.
+// lineIndent returns how many spaces begin the line, and whether the line holds nothing else.
+//
+// A blank line is part of no indentation.
 func lineIndent(src string) (int, bool) {
 	indent := 0
 	for _, c := range src {
@@ -290,8 +283,7 @@ func lineIndent(src string) (int, bool) {
 		case ' ':
 			indent++
 		case '\t':
-			// A tab is whitespace but not indentation: it neither adds to
-			// the count nor ends the line.
+			// A tab is whitespace but not indentation: it neither adds to the count nor ends the line.
 		case '\n', '\r':
 			return indent, true
 		default:
@@ -302,15 +294,17 @@ func lineIndent(src string) (int, bool) {
 	return indent, true
 }
 
-// isFlowIndicator reports whether c is one of the characters that end an entry
-// of a flow collection. A plain scalar cannot hold one, so a ':' in front of
-// one closes the key rather than belonging to it: "{a:}" is the pair a/null.
+// isFlowIndicator reports whether c is one of the characters that end an entry of a flow collection.
+//
+// A plain scalar cannot hold one, so a ':' in front of one closes the key rather than belonging to it: "{a:}" is the
+// pair a/null.
 func isFlowIndicator(c rune) bool {
 	return c == ',' || c == '}' || c == ']'
 }
 
-// isPropertyToken reports whether tk introduces a node property: an anchor, an
-// alias or a tag. Each may stand alone, with the empty scalar as its node.
+// isPropertyToken reports whether tk introduces a node property: an anchor, an alias or a tag.
+//
+// Each may stand alone, with the empty scalar as its node.
 func isPropertyToken(tk *token.Token) bool {
 	switch tk.Type {
 	case token.AnchorType, token.AliasType, token.TagType:
@@ -320,22 +314,20 @@ func isPropertyToken(tk *token.Token) bool {
 	}
 }
 
-// validateMultiLineHeaderOption checks the indicators a block scalar header
-// carries.
+// validateMultiLineHeaderOption checks the indicators a block scalar header carries.
 //
-// c-b-block-header(m,t) takes one indentation indicator and one chomping
-// indicator, in either order, and either may be left out. Two of either is not
-// a header: "|--" used to pass because the check trimmed one indicator off each
-// end and found nothing left in the middle.
-// validateMultiLineHeaderOption refuses a block scalar header that carries
-// anything but its two indicators, or two of either.
+// c-b-block-header(m,t) takes one indentation indicator and one chomping indicator, in either order, and either may be
+// left out.
 //
-// opt is what stands between the "|" or ">" and the end of its line, with any
-// comment already cut off: at most one digit 1 to 9 and at most one of "-" or
-// "+", in either order. [MultiLineState] says what each of them does.
+// Two of either is not a header: "|--" used to pass because the check trimmed one indicator off each end and found
+// nothing left in the middle. validateMultiLineHeaderOption refuses a block scalar header that carries anything but its
+// two indicators, or two of either.
 //
-// "|--" used to pass, the check having trimmed one indicator off each end and
-// found nothing left in the middle.
+// opt is what stands between the "|" or ">" and the end of its line, with any comment already cut off: at most one
+// digit 1 to 9 and at most one of "-" or "+", in either order.
+// [MultiLineState] says what each of them does.
+//
+// "|--" used to pass, the check having trimmed one indicator off each end and found nothing left in the middle.
 func validateMultiLineHeaderOption(opt string) error {
 	var chomping, indentation bool
 
@@ -347,8 +339,7 @@ func validateMultiLineHeaderOption(opt string) error {
 			}
 			chomping = true
 		case c >= '1' && c <= '9':
-			// c-indentation-indicator is ns-dec-digit less '0': a block cannot
-			// be introduced by no indentation at all.
+			// c-indentation-indicator is ns-dec-digit less '0': a block cannot be introduced by no indentation at all.
 			if indentation {
 				return fmt.Errorf("invalid header option: %q", opt)
 			}
@@ -361,19 +352,17 @@ func validateMultiLineHeaderOption(opt string) error {
 	return nil
 }
 
-// firstLineIndentColumnByOpt reads the indentation indicator out of a block
-// scalar header's options, or 0 where it carries none.
+// firstLineIndentColumnByOpt reads the indentation indicator out of a block scalar header's options, or 0 where it
+// carries none.
 //
-// c-indentation-indicator is one digit, 1 to 9, and validateMultiLineHeaderOption
-// has already refused an option holding anything else or holding two of them.
+// c-indentation-indicator is one digit, 1 to 9, and validateMultiLineHeaderOption has already refused an option holding
+// anything else or holding two of them.
 // So the digit is found by looking for it.
 //
-// strconv.ParseInt read it before, over the option with its chomping indicator
-// trimmed off either end. For a header carrying no width -- a plain "|" or ">",
-// which is most of them -- that is ParseInt("") and a *strconv.NumError
-// allocated to say so. validateIndentColumn asked once per character of
-// content, and it came to 95% of everything the scanner allocated reading block
-// scalars.
+// strconv.ParseInt read it before, over the option with its chomping indicator trimmed off either end.
+// For a header carrying no width -- a plain "|" or ">", which is most of them -- that is ParseInt("") and a
+// *strconv.NumError allocated to say so. validateIndentColumn asked once per character of content, and it came to 95%
+// of everything the scanner allocated reading block scalars.
 func firstLineIndentColumnByOpt(opt string) int {
 	for i := range len(opt) {
 		if c := opt[i]; c >= '1' && c <= '9' {

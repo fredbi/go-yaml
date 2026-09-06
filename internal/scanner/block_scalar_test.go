@@ -12,15 +12,12 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// TestBlockScalarHeaderEndingTheSource checks a block scalar header that ends
-// the source with no line break after it.
+// TestBlockScalarHeaderEndingTheSource checks a block scalar header that ends the source with no line break after it.
 //
-// The header scan stopped at the last character it read rather than past it, so
-// the header lost its final character. A header written "|1+" was read as "|1",
-// losing the chomping indicator; one written ">1#" was read as ">1", losing the
-// '#' that makes it malformed -- and the comment was then made out of what came
-// before it. Each case is paired with the same document written with a trailing
-// line break, which was always read correctly.
+// The header scan stopped at the last character it read rather than past it, so the header lost its final character.
+// A header written "|1+" was read as "|1", losing the chomping indicator; one written ">1#" was read as ">1", losing
+// the '#' that makes it malformed -- and the comment was then made out of what came before it.
+// Each case is paired with the same document written with a trailing line break, which was always read correctly.
 func TestBlockScalarHeaderEndingTheSource(t *testing.T) {
 	tests := map[string]struct {
 		src       string

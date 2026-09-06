@@ -11,12 +11,10 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 )
 
-// TestOffsetsCountAByteOrderMark checks that a mark the scanner steps over is
-// still counted in the offsets after it.
+// TestOffsetsCountAByteOrderMark checks that a mark the scanner steps over is still counted in the offsets after it.
 //
-// Init used to delete every mark before scanning, so a document carrying one
-// was tokenized against a text the caller never wrote and every offset after
-// the mark was three bytes short.
+// Init used to delete every mark before scanning, so a document carrying one was tokenized against a text the caller
+// never wrote and every offset after the mark was three bytes short.
 func TestOffsetsCountAByteOrderMark(t *testing.T) {
 	tests := map[string]struct {
 		src  string
