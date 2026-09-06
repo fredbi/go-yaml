@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 
@@ -105,6 +106,13 @@ type Written struct {
 	Text string
 	// Features are the constructs it contains, sorted.
 	Features []stance.Feature
+	// Readings is what the document denotes under each reading that disagrees
+	// with YAML 1.2's core schema, keyed by the reading's name.
+	//
+	// Empty for almost every document: the core answer is Value.Decoded() and
+	// the readings only part company where a plain scalar's spelling is one
+	// they resolve differently. See reading.go.
+	Readings map[string]any
 }
 
 // Write emits v in the presentation st asks for and reports what it wrote.
@@ -114,12 +122,22 @@ type Written struct {
 // tens of thousands of documents and wants the labels; a property check emits
 // millions and wants none of them.
 func Write(v Value, st Style) Written {
-	e := &emitter{st: st, feat: features{}}
+	e := &emitter{
+		st:    st,
+		feat:  features{},
+		reads: &readings{plain: map[string]bool{}, split: map[string]bool{}},
+	}
 	text := e.emit(v)
 
 	valueFeatures(v, e.feat)
 
-	return Written{Text: text, Features: e.feat.sorted()}
+	w := Written{Text: text, Features: e.feat.sorted()}
+
+	if alt, differs := e.reads.under(v); differs && !reflect.DeepEqual(alt, v.Decoded()) {
+		w.Readings = map[string]any{Reading11: alt}
+	}
+
+	return w
 }
 
 // features is the set an emitter fills as it writes.

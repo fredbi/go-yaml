@@ -68,6 +68,9 @@ type emitter struct {
 	// feat collects the constructs this document is written with. Nil when
 	// nobody asked, which is how Emit stays as cheap as it was.
 	feat features
+	// reads records how each scalar the readings disagree about was written.
+	// Nil on the same terms as feat.
+	reads *readings
 	// comments numbers the comments as they are written, so that a test can
 	// check the same set came back rather than merely counting them.
 	comments int
@@ -285,7 +288,16 @@ func (e *emitter) inlineWith(v Value, flow bool, tag string) (string, bool) {
 			return "", false
 		}
 
-		return e.scalarString(n.V, flow, tag == TagStr), true
+		out := e.scalarString(n.V, flow, tag == TagStr)
+
+		// A tag settles the type, so only an untagged scalar resolves by its
+		// spelling. scalarString hands back the text unchanged exactly when it
+		// wrote it plain; every quoting adds delimiters.
+		if tag == "" {
+			e.reads.sawScalar(n.V, out == n.V)
+		}
+
+		return out, true
 	default:
 		return e.simpleScalar(v, flow), true
 	}
@@ -431,6 +443,8 @@ func (e *emitter) child(v Value, indent, depth int) {
 // block scalar at the root of a document is measured from -1, not from 0, so
 // the root passes one more than the column it writes at.
 func (e *emitter) literal(s string, indent, stated int) {
+	e.reads.sawScalar(s, false)
+
 	if e.folds(s) {
 		e.foldedScalar(s, indent, stated)
 
