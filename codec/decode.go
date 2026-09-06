@@ -70,8 +70,9 @@ type Decoder struct {
 	// rather than by building a tree and walking that. src is kept beside it so
 	// that a later Decode wanting something the walk cannot serve can still
 	// build the tree. See canWalk.
-	walked   []any
-	walkedOK bool
+	walked    []any
+	walkedOK  bool
+	typedWalk bool
 	// strs holds the text of every string a decode hands back, copied out of
 	// the document so that the values outlive it.
 	strs        arena
@@ -2756,6 +2757,21 @@ func (d *Decoder) decodeInit(ctx context.Context, v reflect.Value) error {
 		return nil
 	}
 
+	// SPIKE: reading into a Go type by walking, falling back to the tree for
+	// everything it cannot serve. See errNeedsTheTree.
+	if d.canWalkTyped(v) {
+		switch err := d.walkInto(src, v); {
+		case err == nil:
+			d.walkedOK, d.walked = true, nil
+			d.typedWalk = true
+
+			return nil
+		case !errors.Is(err, errNeedsTheTree):
+			return err
+		}
+		// Fall through and read it again into a tree.
+	}
+
 	file, err := d.parse(ctx, src)
 	if err != nil {
 		return err
@@ -2763,6 +2779,31 @@ func (d *Decoder) decodeInit(ctx context.Context, v reflect.Value) error {
 	d.parsedFile = file
 
 	return nil
+}
+
+// canWalkTyped reports whether this decode may try the typed walk. SPIKE.
+func (d *Decoder) canWalkTyped(v reflect.Value) bool {
+	if !typedWalkEnabled {
+		return false
+	}
+	if d.toCommentMap != nil || d.useOrderedMap || d.disallowUnknownField || d.validator != nil {
+		return false
+	}
+	if len(d.referenceFiles) > 0 || len(d.referenceDirs) > 0 || len(d.referenceReaders) > 0 {
+		return false
+	}
+	if len(d.customUnmarshalerMap) > 0 || d.allowDuplicateMapKey || d.useJSONUnmarshaler {
+		return false
+	}
+	if !v.IsValid() || v.Kind() != reflect.Pointer || v.IsNil() {
+		return false
+	}
+	dst := v.Elem()
+	if dst.Kind() != reflect.Struct || !dst.CanSet() {
+		return false
+	}
+
+	return walkableType(dst.Type())
 }
 
 // buildTree reads the source into a tree, for a decode the walk cannot serve.
@@ -2832,6 +2873,13 @@ func isEmptyDocument(doc *ast.DocumentNode) bool {
 }
 
 func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
+	if d.typedWalk {
+		// The destination was filled as the parse read the source.
+		d.typedWalk, d.walkedOK = false, false
+		d.streamIndex++
+
+		return nil
+	}
 	if d.walkedOK {
 		if d.canWalk(v) {
 			return d.handWalked(v)
