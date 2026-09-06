@@ -285,8 +285,8 @@ func (s *Scanner) scanMultiLineHeaderOption(ctx *Context) error {
 		// included, so a bump here is counted twice.
 		pos := headerPos
 		fromHeader := headerBuf[headerIndex:]
-		pos.SetOffset(pos.Offset() + int32(len(fromHeader)))
-		pos.Column += int32(utf8.RuneCountInString(fromHeader))
+		pos.SetOffset(pos.Offset() + posInt(len(fromHeader)))
+		pos.Column += posInt(utf8.RuneCountInString(fromHeader))
 		ctx.addTokenValue(token.MakeComment(comment, ctx.origin()[len(headerBuf):], pos))
 	}
 

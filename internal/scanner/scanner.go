@@ -118,7 +118,7 @@ type Scanner struct {
 // here and not at the call.
 func (s *Scanner) Init(src []byte) {
 	text := nocopy.String(src)
-	s.initErr = validateStream(text)
+	s.initErr = validateSource(text)
 	s.reset(text)
 }
 
@@ -481,7 +481,7 @@ func (s *Scanner) pos() token.Position {
 
 	s.lastIndentLevel = s.indentLevel
 
-	return token.At(int32(s.line), int32(s.column), int32(s.ctx.idx), int32(s.indentNum))
+	return token.At(posInt(s.line), posInt(s.column), posInt(s.ctx.idx), posInt(s.indentNum))
 }
 
 func (s *Scanner) addBufferedTokenIfExists(ctx *Context) {
@@ -520,13 +520,13 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 
 	// The token is cut where the scanner stands, so its text ends on the line it starts on -- except in a block scalar,
 	// whose value carries its own line breaks and whose end the origin has to give.
-	endLine := int32(line)
+	endLine := posInt(line)
 	if ctx.isMultiLine() {
 		endLine = 0
 	}
 
 	return ctx.bufferedToken(token.At(
-		int32(line), int32(column), int32(ctx.idx-len(ctx.buf)), int32(s.indentNum),
+		posInt(line), posInt(column), posInt(ctx.idx-len(ctx.buf)), posInt(s.indentNum),
 	), endLine)
 }
 

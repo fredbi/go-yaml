@@ -57,8 +57,8 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	if len(ctx.buf) > 0 && !s.hasSavedPos {
 		buffered := ctx.bufferedSrc()
 		s.savedPos = s.pos()
-		s.savedPos.Column -= int32(utf8.RuneCount(buffered))
-		s.savedPos.SetOffset(s.savedPos.Offset() - int32(len(buffered)))
+		s.savedPos.Column -= posInt(utf8.RuneCount(buffered))
+		s.savedPos.SetOffset(s.savedPos.Offset() - posInt(len(buffered)))
 		s.hasSavedPos = true
 	}
 

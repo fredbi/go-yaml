@@ -678,13 +678,13 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 	value, at := c.textAt(source, int(pos.Offset()))
 	switch {
 	case at >= 0:
-		pos.SetOffset(int32(at))
+		pos.SetOffset(posInt(at))
 	default:
 		// Folding rewrote the value, so it is nowhere in the source to be found.
 		// The origin is still the source's own bytes and the buffer knows where it began, so the value starts that far in,
 		// past the whitespace the line was indented by.
 		if originAt == c.originStart {
-			pos.SetOffset(int32(c.originStart + leadingSpace(origin)))
+			pos.SetOffset(posInt(c.originStart + leadingSpace(origin)))
 		}
 	}
 
@@ -712,7 +712,7 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 		// whatever the offset points at inside it.
 		// Counting forward from the offset instead comes up short wherever a block scalar's indentation indicator leaves some
 		// of the leading spaces in the content.
-		ext.End = int32(originAt + len(origin))
+		ext.End = posInt(originAt + len(origin))
 	}
 
 	// A quoted or folded scalar is a string whatever it spells.
@@ -729,7 +729,7 @@ func (c *Context) bufferedToken(pos token.Position, endLine int32) (token.Token,
 		// used.
 		want := token.MeasureOrigin(origin, pos)
 		if originAt >= 0 {
-			want.End = int32(originAt + len(origin))
+			want.End = posInt(originAt + len(origin))
 		}
 		probe.Check("token.extentMatchesTheOrigin", ext == want, func() string {
 			return fmt.Sprintf("%s %q: scanner says %+v, the origin says %+v", typ, value, ext, want)
