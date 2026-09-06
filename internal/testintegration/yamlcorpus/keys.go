@@ -43,6 +43,12 @@ const (
 	//
 	// The control, and the one that fails a text-comparing checker.
 	TagDistinctAfterResolution stance.Tag = "key/distinct-after-resolution"
+	// TagKeyIntegralFloat is a mapping key that resolves to a float whose
+	// value is a whole number: "1.0", "1e3", "-0.0".
+	//
+	// Its own tag because a float key is a key like any other everywhere else,
+	// and this is the one shape where naming the key loses which type it was.
+	TagKeyIntegralFloat stance.Tag = "key/integral-float"
 )
 
 // KeyRules is what the specification settles about them.
@@ -82,6 +88,9 @@ func KeyVocabulary() stance.Vocabulary {
 		TagDuplicateKey:             stance.Parse,
 		TagDuplicateAfterResolution: stance.Compose,
 		TagDistinctAfterResolution:  stance.Compose,
+		// Naming a key happens when the representation becomes a native value,
+		// so which text a float ends up under is a construction question.
+		TagKeyIntegralFloat: stance.Construct,
 	}
 }
 
@@ -92,6 +101,23 @@ func KeyShapes() []stance.Shape {
 			Name:   "the same key twice",
 			Src:    []byte("a: 1\na: 2\n"),
 			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
+			Name:   "a key that is a float with a whole value",
+			Src:    []byte("1.0: a\n"),
+			Intent: []stance.Tag{TagKeyIntegralFloat},
+		},
+		{
+			Name:   "a key written as a float in exponent form",
+			Src:    []byte("1e3: a\n"),
+			Intent: []stance.Tag{TagKeyIntegralFloat},
+		},
+		{
+			// The consequence rather than the spelling: two keys of different
+			// types, one of which loses its type when it is named.
+			Name:   "a whole-valued float key beside the integer of the same value",
+			Src:    []byte("1.0: a\n1: b\n"),
+			Intent: []stance.Tag{TagKeyIntegralFloat},
 		},
 		{
 			Name:   "the same key twice inside a flow mapping",

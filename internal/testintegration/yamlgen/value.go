@@ -124,11 +124,19 @@ func KeyText(v Value) string {
 	case Int:
 		return strconv.Itoa(n.V)
 	case Float:
-		// Go's own formatting of a float64, which is what the decoder ends up
-		// applying: 1.0 is "1", a million is "1e+06". Deliberately not the
-		// emitter's spelling, which avoids exponent form because this library
-		// reads "1e3" as a string -- writing the key and naming the key are
-		// two different jobs.
+		// ⚠️ This one is a defect, recorded rather than worked around.
+		//
+		// It is Go's own formatting of a float64, which is what the decoder
+		// ends up applying: 1.0 is named "1" and 1e3 is named "1000", so a
+		// whole-valued float key loses the fact that it was a float. libfyaml
+		// names them "1.0" and "1000.0" and is right to. A fractional float is
+		// unaffected either way, 0.5 being "0.5".
+		//
+		// Kept matching the library on purpose, the way Int.Decoded keeps its
+		// uint64/int64 asymmetry: a generator that quietly wrote the correct
+		// answer would report every drawn document as broken and stop noticing
+		// when the real thing is fixed. See yamlcorpus.Departures, "a key that
+		// is a float with a whole value".
 		return strconv.FormatFloat(n.V, 'g', -1, 64)
 	case Str:
 		return n.V
