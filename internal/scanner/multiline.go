@@ -344,20 +344,24 @@ type MultiLineState struct {
 	lineIndentColumn                 int
 	lastNotSpaceOnlyLineIndentColumn int
 	spaceOnlyIndentColumn            int
-	foldedNewLine                    bool
+	// start is where the block scalar's content begins in the source, recorded when the first byte of it is read.
+	//
+	// The token is cut at the end of the block, where the cursor says nothing about where the content started.
+	start token.Position
+
+	// The five fields below take one byte each and stand together, as in Scanner and Context. Context holds a
+	// MultiLineState by value, in block, so the 8 bytes of padding saved here are saved there.
+
+	foldedNewLine bool
+
 	// sawLineBreak records that a line break was read as part of this block scalar's content.
 	//
 	// Under '+' an empty buffer then still keeps one break; where the header ended the source there was never a break to
 	// keep.
 	sawLineBreak bool
-	// start is where the block scalar's content begins in the source, recorded when the first byte of it is read.
-	//
-	// The token is cut at the end of the block, where the cursor says nothing about where the content started.
-	start    token.Position
-	hasStart bool
-
-	isRawFolded bool
-	isLiteral   bool
+	hasStart     bool
+	isRawFolded  bool
+	isLiteral    bool
 }
 
 func (s *MultiLineState) lastDelimColumn() int {

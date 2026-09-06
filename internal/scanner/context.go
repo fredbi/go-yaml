@@ -21,10 +21,6 @@ type Context struct {
 	size            int
 	notSpaceCharPos int
 	src             string
-	// schema is the tag resolution plain scalars are read against.
-	//
-	// The zero value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner carries it across an Init.
-	schema token.Schema
 	// raw is src's own bytes, for the word-at-a-time scans in [github.com/go-openapi/go-yaml/internal/swar].
 	//
 	// A string cannot be loaded eight bytes at a time without unsafe, and Init was handed the slice.
@@ -37,7 +33,6 @@ type Context struct {
 	originEnd   int
 	// originCopy holds the text once a cut has taken bytes out of the middle of it, and originCut says it is in use.
 	originCopy []byte
-	originCut  bool
 	// pending holds the tokens read but not yet handed over, as values.
 	//
 	// One step of the scan reads one token, or the two of a key that only turns out to be a key once the ':' is read, and
@@ -47,19 +42,16 @@ type Context struct {
 	pending []token.Token
 	// yield, where a caller is reading through Scanner.Tokens, takes each token as it is read instead of the buffer taking
 	// it. stopped records that yield asked to stop, which the scan loop reads to give up.
-	yield   func(token.Token) bool
-	stopped bool
+	yield func(token.Token) bool
 	// read is the index in pending of the next token to hand over.
 	read int
 	// lastTk is a copy of the token emitted most recently. tokens is drained as the caller takes them, so it is not the
 	// place to ask what came before.
-	lastTk    token.Token
-	hasLastTk bool
+	lastTk token.Token
 	// lastContentTk is a copy of the last token emitted that is part of the document rather than a note about it.
 	//
 	// A comment may stand between a key and its ':', on its own line, without making the two any less adjacent.
-	lastContentTk    token.Token
-	hasLastContentTk bool
+	lastContentTk token.Token
 	// propRun describes the run of property tokens ending at lastTk, and prevPropRun the run ending at the token before
 	// it. keyStartColumn reads them to find where a key made only of already-cut tokens begins.
 	propRun     propertyRun
@@ -74,6 +66,18 @@ type Context struct {
 	// lookback belongs to the Scanner and outlives the Context, so a token still reads what stands above it when the
 	// source is scanned in more than one pass.
 	lookback *token.Lookback
+
+	// The five fields below take one byte each and stand together, as in Scanner and MultiLineState. They cost the
+	// struct 32 bytes of padding scattered among the words above, and a Context lasts as long as its source.
+
+	// schema is the tag resolution plain scalars are read against.
+	//
+	// The zero value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner carries it across an Init.
+	schema           token.Schema
+	originCut        bool
+	stopped          bool
+	hasLastTk        bool
+	hasLastContentTk bool
 }
 
 func (c *Context) clear() {

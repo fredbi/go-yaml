@@ -19,10 +19,6 @@ import (
 //
 // It can be allocated as part of another data structure but must be initialized via Init before use.
 type Scanner struct {
-	// schema is the tag resolution plain scalars are read against.
-	//
-	// See SetSchema.
-	schema token.Schema
 	// quoted is the room a quoted scalar is rewritten in, kept between tokens.
 	//
 	// A scalar with nothing to rewrite never reaches for it -- its value is a window on the source -- and one that does
@@ -45,24 +41,10 @@ type Scanner struct {
 	indentNum int
 	// prevLineIndentNum indicates the number of spaces used for indentation at previous line.
 	prevLineIndentNum int
-	// deepIndent says a line of this document has opened with indentEager spaces or more.
-	//
-	// Indentation runs together: a document that has indented once indents again, and the next line's run is read eight
-	// bytes at a time from its first space rather than probed for.
-	deepIndent bool
 	// indentLevel indicates the level of indent depth.
 	//
 	// This value does not match the column value.
-	indentLevel       int
-	isFirstCharAtLine bool
-	// indentHasTab records that a tab stood among this line's leading whitespace.
-	//
-	// Block structure is introduced by s-indent(n), which is spaces and nothing else, so an entry on such a line is not
-	// one.
-	indentHasTab           bool
-	isAnchor               bool
-	isAlias                bool
-	isDirective            bool
+	indentLevel            int
 	startedFlowSequenceNum int
 	startedFlowMapNum      int
 	// flowIndent is the indentation the line that opened the outermost flow collection carried.
@@ -72,8 +54,7 @@ type Scanner struct {
 	indentState IndentState
 	// savedPos holds the position a token was started at, where the scanner noticed the start only after passing it.
 	// hasSavedPos says whether there is one.
-	savedPos    token.Position
-	hasSavedPos bool
+	savedPos token.Position
 	// lastIndentLevel is the indent level the last token was given.
 	//
 	// A block scalar's content sits one level below whatever opened it, and that is the only thing that asks.
@@ -98,6 +79,31 @@ type Scanner struct {
 	//
 	// Once set it stays set: the scanner serves the tokens it had already read and then nothing more.
 	err error
+
+	// The eight fields below take one byte each and stand together. Scattered among the words above they cost the
+	// struct 24 bytes of padding, and a Scanner lasts as long as the scan does.
+
+	// schema is the tag resolution plain scalars are read against.
+	//
+	// See SetSchema.
+	schema token.Schema
+
+	// deepIndent says a line of this document has opened with indentEager spaces or more.
+	//
+	// Indentation runs together: a document that has indented once indents again, and the next line's run is read eight
+	// bytes at a time from its first space rather than probed for.
+	deepIndent        bool
+	isFirstCharAtLine bool
+
+	// indentHasTab records that a tab stood among this line's leading whitespace.
+	//
+	// Block structure is introduced by s-indent(n), which is spaces and nothing else, so an entry on such a line is not
+	// one.
+	indentHasTab bool
+	isAnchor     bool
+	isAlias      bool
+	isDirective  bool
+	hasSavedPos  bool
 }
 
 // Init sets s to read src from its first byte.
