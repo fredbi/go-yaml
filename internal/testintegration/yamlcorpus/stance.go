@@ -86,6 +86,30 @@ var GoYAML = stance.Table{
 		// have a processor accept a version beyond its own, so refusing 1.9 is
 		// a choice, and libfyaml makes the same one.
 		TagYAMLMinorVersion: stance.Refuses,
+
+		// A tag naming a type the scalar cannot be read as, measured, and the
+		// library does not answer it the same way twice.
+		//
+		// Three refusals, each naming what it could not read: "cannot convert
+		// \"7\" to boolean", "cannot read \"not-a-date\" as a timestamp",
+		// "cannot read \"not base64!\" as base64".
+		//
+		// And three acceptances that lose the value with nothing reported:
+		// "!!int abc" reads 0, "!!float xyz" reads 0, "!!null 5" reads nil. A
+		// caller gets a number it can neither distinguish from a written zero
+		// nor trace back to the four characters that produced it.
+		//
+		// Every one of the six is a position YAML permits, so none is a
+		// Departure. The split is the thing worth writing down: a consumer
+		// reading this table learns that "!!int" and "!!bool" behave
+		// differently here, which nothing in the specification would have told
+		// them.
+		TagBoolNotABoolean:   stance.Refuses,
+		TagTimestampNotADate: stance.Refuses,
+		TagBinaryNotBase64:   stance.Refuses,
+		TagIntNotAnInteger:   stance.Accepts,
+		TagFloatNotANumber:   stance.Accepts,
+		TagNullNotNull:       stance.Accepts,
 	},
 }
 

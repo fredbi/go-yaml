@@ -55,6 +55,39 @@ const (
 	TagYAMLDirective stance.Tag = "directive/yaml-version"
 )
 
+// A tag naming a type the scalar under it cannot be read as.
+//
+// # Why one tag per type, and not one for the family
+//
+// Because this library takes a different position on each, and a [stance.Table]
+// holds one position per tag. Read the stands in [GoYAML] down the column and
+// the split is on the page: "!!bool 7", "!!timestamp not-a-date" and
+// "!!binary not base64!" are refused, each naming what it could not read, while
+// "!!int abc" reads 0, "!!float xyz" reads 0 and "!!null 5" reads nil -- three
+// documents whose value is gone with nothing reported.
+//
+// # Why none of this is a rule
+//
+// A tag suppresses resolution and states the type outright, and YAML says what
+// the type means without saying what a processor owes a scalar that cannot be
+// read as it. Refusing is a position, reading a zero is a position, and reading
+// the text back as a string is a third that libfyaml takes. So the corpus
+// records where this library stands and scores nobody for standing elsewhere.
+const (
+	// TagIntNotAnInteger is "!!int abc".
+	TagIntNotAnInteger stance.Tag = "tag/int-not-an-integer"
+	// TagFloatNotANumber is "!!float xyz".
+	TagFloatNotANumber stance.Tag = "tag/float-not-a-number"
+	// TagBoolNotABoolean is "!!bool 7".
+	TagBoolNotABoolean stance.Tag = "tag/bool-not-a-boolean"
+	// TagNullNotNull is "!!null 5".
+	TagNullNotNull stance.Tag = "tag/null-not-null"
+	// TagTimestampNotADate is "!!timestamp not-a-date".
+	TagTimestampNotADate stance.Tag = "tag/timestamp-not-a-date"
+	// TagBinaryNotBase64 is "!!binary not base64!".
+	TagBinaryNotBase64 stance.Tag = "tag/binary-not-base64"
+)
+
 // TagRules is what the specification settles about the above.
 //
 // One rejection, and it is the same shape as the alias rules: resolving a
@@ -118,6 +151,16 @@ func TagVocabulary() stance.Vocabulary {
 		TagVerbatim:    stance.Compose,
 		TagNonSpecific: stance.Compose,
 		TagLocal:       stance.Construct,
+
+		// Whether a scalar can be read as the type its tag names is settled
+		// when the representation becomes a native value, and not before: the
+		// parse and the compose are both happy with "!!int abc".
+		TagIntNotAnInteger:   stance.Construct,
+		TagFloatNotANumber:   stance.Construct,
+		TagBoolNotABoolean:   stance.Construct,
+		TagNullNotNull:       stance.Construct,
+		TagTimestampNotADate: stance.Construct,
+		TagBinaryNotBase64:   stance.Construct,
 	}
 }
 
@@ -175,6 +218,41 @@ func TagShapes() []stance.Shape {
 			Name:   "a version directive",
 			Src:    []byte("%YAML 1.2\n---\nk: v\n"),
 			Intent: []stance.Tag{TagYAMLDirective},
+		},
+
+		// A tag over a scalar that cannot be read as the type it names. The
+		// generator writes none of these: TagFor offers only the tags that
+		// agree with a value's kind, which is right for keeping presentation
+		// invariance honest and is why these are enumerated.
+		{
+			Name:   "an int tag over text that is not an integer",
+			Src:    []byte("k: !!int abc\n"),
+			Intent: []stance.Tag{TagSecondary, TagIntNotAnInteger},
+		},
+		{
+			Name:   "a float tag over text that is not a number",
+			Src:    []byte("k: !!float xyz\n"),
+			Intent: []stance.Tag{TagSecondary, TagFloatNotANumber},
+		},
+		{
+			Name:   "a bool tag over text that is not a boolean",
+			Src:    []byte("k: !!bool 7\n"),
+			Intent: []stance.Tag{TagSecondary, TagBoolNotABoolean},
+		},
+		{
+			Name:   "a null tag over a scalar that is not null",
+			Src:    []byte("k: !!null 5\n"),
+			Intent: []stance.Tag{TagSecondary, TagNullNotNull},
+		},
+		{
+			Name:   "a timestamp tag over text that is not a date",
+			Src:    []byte("k: !!timestamp not-a-date\n"),
+			Intent: []stance.Tag{TagSecondary, TagTimestampNotADate},
+		},
+		{
+			Name:   "a binary tag over text that is not base64",
+			Src:    []byte("k: !!binary not base64!\n"),
+			Intent: []stance.Tag{TagSecondary, TagBinaryNotBase64},
 		},
 	}
 }
