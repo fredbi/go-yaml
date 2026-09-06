@@ -55,6 +55,10 @@ package suite
 // It is bumped when a reader written against an older version would
 // misunderstand a newer file -- not when a field is added, which readers are
 // expected to ignore.
+//
+// Case.Features and Header.Features arrived under that rule and did not move
+// it. A format-3 reader that skips them derives the same expectation it always
+// did, because nothing consulting them decides an outcome.
 const Format = 3
 
 // Header describes an artifact and is the first line of one.
@@ -87,6 +91,14 @@ type Header struct {
 	//
 	// Sorted by tag, because the same corpus has to come out as the same bytes.
 	Vocabulary []TagSpec `json:"vocabulary"`
+	// Features is every feature name the cases use, sorted.
+	//
+	// A plain list, where Vocabulary is a list of specs: a feature has no stage
+	// and no rule, so there is nothing to say about one beyond its name. It is
+	// here so that a consumer selecting on "presentation/block-folded" can find
+	// out from the file whether this corpus writes any, rather than filtering
+	// on a name nothing carries and reporting an empty run as a pass.
+	Features []string `json:"features,omitempty"`
 }
 
 // TagSpec is one tag and everything a consumer needs to reason about it.
@@ -133,6 +145,18 @@ type Case struct {
 	Opaque bool `json:"opaque,omitempty"`
 	// Tags are the implementation-defined properties the document exhibits.
 	Tags []string `json:"tags,omitempty"`
+	// Features are the constructs the document contains: a flow collection, a
+	// CRLF break, an anchor, a "!!" shorthand.
+	//
+	// They decide nothing. A consumer derives its expectation from Tags,
+	// WellFormed and VerdictAt exactly as before, and a feature never makes a
+	// case unscored. The stance package's Feature type carries the argument.
+	//
+	// What they are for is selection and reporting. A consumer runs the corpus
+	// minus the block scalars instead of declaring a position it does not hold,
+	// and a failure report can say what the document was carrying without
+	// anybody reading the bytes.
+	Features []string `json:"features,omitempty"`
 	// VerdictAt is the furthest stage at which WellFormed is evidence, as a
 	// stage name. Empty means parse, which is the least this can claim.
 	//
