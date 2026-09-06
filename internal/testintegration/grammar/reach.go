@@ -394,7 +394,31 @@ func (c *Coverage) Impossible(r *Reach) []string {
 	return c.buckets(r, func(live, entered bool) bool { return !live && entered })
 }
 
+// Unmatched names the buckets something entered and nothing ever satisfied, in
+// name order.
+//
+// The other half of the number [Coverage.Against] reports. Entering a
+// production only means the recognizer tried it there; matching means a
+// document in the corpus was one it accepted. So a bucket here is a shape the
+// corpus makes the grammar consider and never writes -- a work list of the same
+// kind as [Coverage.Missing], one rung further up.
+//
+// Read it whenever the matched count drops. A value kind added to the generator
+// takes its share of the draws from every other kind, and this says which
+// productions paid for it.
+func (c *Coverage) Unmatched(r *Reach) []string {
+	return c.satisfied(r, func(live, matched bool) bool { return live && !matched })
+}
+
 func (c *Coverage) buckets(r *Reach, want func(live, entered bool) bool) []string {
+	return c.over(r, c.attempts, want)
+}
+
+func (c *Coverage) satisfied(r *Reach, want func(live, matched bool) bool) []string {
+	return c.over(r, c.successes, want)
+}
+
+func (c *Coverage) over(r *Reach, counts []uint32, want func(live, hit bool) bool) []string {
 	c.mustReach(r)
 
 	const fold = numIndentBins * numIndentBins
@@ -404,7 +428,7 @@ func (c *Coverage) buckets(r *Reach, want func(live, entered bool) bool) []strin
 	var out []string
 
 	for i, live := range r.in {
-		entered := slices.ContainsFunc(c.attempts[i*fold:(i+1)*fold], positive)
+		entered := slices.ContainsFunc(counts[i*fold:(i+1)*fold], positive)
 		if !want(live, entered) {
 			continue
 		}

@@ -205,6 +205,15 @@ func TestTheCorpusReachesMostOfTheGrammar(t *testing.T) {
 		t.Errorf("the corpus enters %d of %d buckets", reached, total)
 	}
 
+	// The unmatched buckets are logged rather than counted against a ceiling.
+	// They move by a few whenever the generator changes, because each is
+	// reached by a handful of documents and a changed draw sequence hands them
+	// to different ones -- see the sweep recorded on yamlgen.drawInt. Log them
+	// so a real narrowing can be told from that jitter by reading the names.
+	if unmatched := cover.Unmatched(reach); len(unmatched) > 0 {
+		t.Logf("entered and never matched (%d):\n  %s", len(unmatched), strings.Join(unmatched, "\n  "))
+	}
+
 	// Nothing is left out any more, so this logs nothing. It used to name
 	// thirteen productions nothing entered -- nine of them tags, which the
 	// emitter did not write until yamlgen.Tagged, one a %YAML directive, one an
