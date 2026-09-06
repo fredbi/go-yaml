@@ -129,9 +129,16 @@ type readFields struct {
 	// an encode makes. An embedded field is left out: it takes the whole
 	// mapping rather than the entry its own name would match.
 	byRenderName map[string]*StructField
-	// inline lists the embedded fields, which are read after the rest.
+	// inline lists the embedded fields, which the tree decoder reads after the
+	// rest.
 	inline []*StructField
-	err    error
+	// flat finds the field a mapping key names through the embedded structs
+	// standing between, by the index path reflect.Value.FieldByIndex takes. A
+	// walk needs it: it meets an entry once and has to place it then, where the
+	// tree decoder can hand the whole mapping to each embedded struct in turn.
+	// Nil where the type embeds nothing.
+	flat map[string][]int
+	err  error
 }
 
 // structFieldMap returns the fields of structType, keyed by Go field name.
@@ -190,8 +197,61 @@ func readType(structType reflect.Type) *readFields {
 		r.byRenderName[sf.RenderName] = sf
 	}
 	slices.SortFunc(r.inline, func(a, b *StructField) int { return a.Index - b.Index })
+	if len(r.inline) > 0 {
+		r.flat = map[string][]int{}
+		flatten(structType, fields, r.inline, nil, r.flat, map[reflect.Type]bool{structType: true})
+	}
 
 	return r
+}
+
+// flatten records where each name a mapping key may write reaches, following
+// the embedded structs.
+//
+// An outer field wins over an embedded one of the same name and a shallower
+// embedding over a deeper one: the type's own fields are recorded first and an
+// embedded struct writes only the names still free, which is how Go resolves a
+// promoted field.
+//
+// It reads each embedded type with readStructFields and not with structFields,
+// because structFields is what calls this and the type it is reading is not in
+// the cache yet. Two types embedding one another would otherwise never finish.
+func flatten(
+	t reflect.Type, fields StructFieldMap, inline []*StructField,
+	at []int, out map[string][]int, seen map[reflect.Type]bool,
+) {
+	for _, sf := range fields {
+		if sf.IsInline {
+			continue
+		}
+		if _, taken := out[sf.RenderName]; !taken {
+			out[sf.RenderName] = append(append([]int{}, at...), sf.Index)
+		}
+	}
+
+	for _, sf := range inline {
+		embedded := t.Field(sf.Index).Type
+		if embedded.Kind() == reflect.Pointer {
+			embedded = embedded.Elem()
+		}
+		if embedded.Kind() != reflect.Struct || seen[embedded] {
+			continue
+		}
+		seen[embedded] = true
+
+		under, err := readStructFields(embedded)
+		if err != nil {
+			continue
+		}
+		var deeper []*StructField
+		for _, f := range under {
+			if f.IsInline {
+				deeper = append(deeper, f)
+			}
+		}
+		slices.SortFunc(deeper, func(a, b *StructField) int { return a.Index - b.Index })
+		flatten(embedded, under, deeper, append(at, sf.Index), out, seen)
+	}
 }
 
 func readStructFields(structType reflect.Type) (StructFieldMap, error) {

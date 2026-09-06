@@ -61,6 +61,60 @@ type typedBuilder struct {
 	stack []typedFrame
 	strs  *arena
 	err   error
+
+	// values builds the subtree under a destination that holds an "any", where
+	// the document says what the value is and the type does not. It is made
+	// when the walk reaches one and dropped when that subtree closes; anyInto is
+	// where the value it built goes.
+	values  *valueBuilder
+	anyInto reflect.Value
+	share   bool
+	budget  int
+}
+
+// holdsAnything reports a destination that takes whatever the document writes.
+func holdsAnything(v reflect.Value) bool {
+	return v.Kind() == reflect.Interface && v.Type().NumMethod() == 0
+}
+
+// forward hands a node to the nested value builder and closes the subtree once
+// the builder has finished one.
+func (b *typedBuilder) forward(node ast.Node, at parser.Step, entering bool) bool {
+	var proceed bool
+	if entering {
+		proceed = b.values.Enter(node, at)
+	} else {
+		b.values.Leave(node, at)
+	}
+	if b.values.err != nil {
+		b.fail(b.values.err)
+
+		return false
+	}
+	b.closeAny()
+
+	return proceed
+}
+
+// closeAny writes what the nested builder made into the destination that asked
+// for it, once it has made one.
+func (b *typedBuilder) closeAny() {
+	if b.values == nil || len(b.values.stack) > 0 || len(b.values.docs) == 0 {
+		return
+	}
+
+	built := b.values.docs[0]
+	dst := b.anyInto
+	b.values, b.anyInto = nil, reflect.Value{}
+
+	if dst.IsValid() && dst.CanSet() {
+		if built == nil {
+			dst.Set(reflect.Zero(dst.Type()))
+		} else {
+			dst.Set(reflect.ValueOf(built))
+		}
+	}
+	b.settle(dst)
 }
 
 func (b *typedBuilder) fail(err error) {
@@ -119,24 +173,49 @@ func (b *typedBuilder) Enter(node ast.Node, at parser.Step) bool {
 		return false
 	}
 
-	switch n := node.(type) {
+	switch node.(type) {
 	case *ast.AnchorNode, *ast.AliasNode, *ast.TagNode, *ast.MappingKeyNode:
+		// A property or an alias, inside an "any" subtree or out of one. The
+		// nested builder reads anchors of its own and would answer for the
+		// document's, so both go to the tree together.
 		b.fail(errNeedsTheTree)
 
 		return false
 	case *ast.CommentGroupNode:
 		return false
+	}
+
+	if b.values != nil {
+		return b.forward(node, at, true)
+	}
+
+	// A key names the entry that follows rather than being a value, so it is
+	// read before the destination is looked at.
+	if at.Key && len(b.stack) > 0 {
+		return b.openEntry(&b.stack[len(b.stack)-1], node)
+	}
+
+	// Read where this goes once and hand it on: destination makes a sequence's
+	// entry as it is asked for, so asking twice makes two.
+	dst, wanted := b.destination()
+	if wanted && holdsAnything(dst) {
+		b.anyInto = dst
+		b.values = &valueBuilder{share: b.share, budget: b.budget}
+
+		return b.forward(node, at, true)
+	}
+
+	switch n := node.(type) {
 	case *ast.MappingNode:
-		return b.openMapping()
+		return b.openMapping(dst, wanted)
 	case *ast.SequenceNode:
-		return b.openSequence()
+		return b.openSequence(dst, wanted)
 	default:
-		return b.scalar(n, at)
+		return b.scalar(n, dst, wanted)
 	}
 }
 
-func (b *typedBuilder) openMapping() bool {
-	dst, wanted := b.destination()
+func (b *typedBuilder) openMapping(dst reflect.Value, wanted bool) bool {
 	if !wanted {
 		// Inside an entry no field claims. Read the mapping and drop it.
 		b.stack = append(b.stack, typedFrame{kind: typedStruct, dropped: true})
@@ -180,8 +259,7 @@ func (b *typedBuilder) openMapping() bool {
 	}
 }
 
-func (b *typedBuilder) openSequence() bool {
-	dst, wanted := b.destination()
+func (b *typedBuilder) openSequence(dst reflect.Value, wanted bool) bool {
 	if !wanted {
 		b.stack = append(b.stack, typedFrame{kind: typedSlice, dropped: true})
 
@@ -230,15 +308,7 @@ func (b *typedBuilder) indirect(v reflect.Value) reflect.Value {
 
 // scalar reads a leaf: a mapping's key names the entry that follows, and
 // anything else is a value to write.
-func (b *typedBuilder) scalar(node ast.Node, at parser.Step) bool {
-	if len(b.stack) > 0 {
-		top := &b.stack[len(b.stack)-1]
-		if at.Key {
-			return b.openEntry(top, node)
-		}
-	}
-
-	dst, wanted := b.destination()
+func (b *typedBuilder) scalar(node ast.Node, dst reflect.Value, wanted bool) bool {
 	if !wanted {
 		b.settle(reflect.Value{})
 
@@ -281,15 +351,27 @@ func (b *typedBuilder) openEntry(top *typedFrame, keyNode ast.Node) bool {
 
 			return false
 		}
-		sf, known := fields.byRenderName[name]
-		if !known || len(fields.inline) > 0 {
-			// An embedded struct claims what the outer one does not, and this
-			// walk has no flattened index yet.
-			if len(fields.inline) > 0 {
-				b.fail(errNeedsTheTree)
+		if fields.flat != nil {
+			// The type embeds another, so the name may reach a field of it.
+			at, known := fields.flat[name]
+			if !known {
+				top.skip, top.target = true, reflect.Value{}
 
 				return false
 			}
+			field, err := fieldAt(top.dst, at)
+			if err != nil {
+				b.fail(err)
+
+				return false
+			}
+			top.skip, top.target = false, field
+
+			return false
+		}
+
+		sf, known := fields.byRenderName[name]
+		if !known {
 			top.skip, top.target = true, reflect.Value{}
 
 			return false
@@ -307,6 +389,32 @@ func (b *typedBuilder) openEntry(top *typedFrame, keyNode ast.Node) bool {
 	}
 
 	return false
+}
+
+// fieldAt walks the index path an embedded field stands at, making the pointers
+// between as it goes. reflect.Value.FieldByIndex panics on a nil one and
+// FieldByIndexErr refuses rather than filling it, and a document writing through
+// an embedded pointer expects it filled.
+func fieldAt(v reflect.Value, at []int) (reflect.Value, error) {
+	for i, step := range at {
+		if i > 0 {
+			for v.Kind() == reflect.Pointer {
+				if v.IsNil() {
+					if !v.CanSet() {
+						return reflect.Value{}, errNeedsTheTree
+					}
+					v.Set(reflect.New(v.Type().Elem()))
+				}
+				v = v.Elem()
+			}
+			if v.Kind() != reflect.Struct {
+				return reflect.Value{}, errNeedsTheTree
+			}
+		}
+		v = v.Field(step)
+	}
+
+	return v, nil
 }
 
 // entryText reads the name a mapping key addresses its entry by.
@@ -426,8 +534,13 @@ func scalarNumber(node ast.Node) any {
 	}
 }
 
-func (b *typedBuilder) Leave(node ast.Node, _ parser.Step) {
+func (b *typedBuilder) Leave(node ast.Node, at parser.Step) {
 	if b.err != nil {
+		return
+	}
+	if b.values != nil {
+		b.forward(node, at, false)
+
 		return
 	}
 	switch node.(type) {
@@ -542,9 +655,7 @@ func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return readWalkable(t.Elem(), seen)
 	case reflect.Struct:
 		fields, err := structFields(t)
-		if err != nil || len(fields.inline) > 0 {
-			// An embedded struct takes the whole mapping, which needs a
-			// flattened field index the walk does not have.
+		if err != nil {
 			return false
 		}
 		for _, sf := range fields.fields {
@@ -562,6 +673,10 @@ func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return readWalkable(t.Elem(), seen)
 	case reflect.Slice:
 		return readWalkable(t.Elem(), seen)
+	case reflect.Interface:
+		// An "any" holds whatever the document writes, which valueBuilder
+		// builds. Anything narrower needs a type this walk cannot pick.
+		return t.NumMethod() == 0
 	case reflect.String, reflect.Bool,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
@@ -576,7 +691,13 @@ func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
 // walkInto reads src into v by walking it. It returns errNeedsTheTree where the
 // document or the destination needs one.
 func (d *Decoder) walkInto(src []byte, v reflect.Value) error {
-	b := &typedBuilder{dec: d, root: v.Elem(), strs: &d.strs}
+	b := &typedBuilder{
+		dec:    d,
+		root:   v.Elem(),
+		strs:   &d.strs,
+		share:  d.shareAliases,
+		budget: aliasBudget(len(src)),
+	}
 	if _, err := parser.New(parser.WithOmitNodePaths()).Walk(src, b); err != nil {
 		return err
 	}
