@@ -595,7 +595,33 @@ func (r *Renderer) anchor(n *AnchorNode) string {
 }
 
 func (r *Renderer) tag(n *TagNode) string {
-	return r.prefixed(n.Start.Value, n.Value)
+	return r.taggedWithComment(n, r.prefixed(n.Start.Value, n.Value))
+}
+
+// taggedWithComment puts a tag's own comment back at the end of the line the
+// tag ends.
+//
+// An anchor reaches its comment through the name node it renders, which carries
+// one itself. A tag holds it on the node, and rendering only n.Start.Value
+// dropped it: "!!null # c1" and "- &a2 !!seq # c2" came back without theirs,
+// while "!!null null # c1" kept one because the comment had been hung on the
+// scalar instead.
+//
+// The first line is the tag's, whatever follows: a tag ending its line has
+// either no value or a block written underneath, and one with a value beside it
+// carries no comment of its own.
+func (r *Renderer) taggedWithComment(n *TagNode, text string) string {
+	if !r.comments || n.Comment == nil {
+		return text
+	}
+
+	head, rest, wrapped := strings.Cut(text, "\n")
+	head = addCommentString(head, n.Comment)
+	if !wrapped {
+		return head
+	}
+
+	return head + "\n" + rest
 }
 
 // prefixed renders a node introduced by a marker -- an anchor name or a tag --
@@ -670,7 +696,7 @@ func (r *Renderer) documentBody(n Node) string {
 	case *AnchorNode:
 		return r.prefixedAt("&"+r.String(node.Name), node.Value, true)
 	case *TagNode:
-		return r.prefixedAt(node.Start.Value, node.Value, true)
+		return r.taggedWithComment(node, r.prefixedAt(node.Start.Value, node.Value, true))
 	default:
 		return r.String(n)
 	}

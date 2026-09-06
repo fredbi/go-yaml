@@ -103,31 +103,6 @@ func TestDefectTagBeforeAnchorIsDropped(t *testing.T) {
 	})
 }
 
-// TestDefectCommentAfterALineEndingTagIsDropped: a comment sitting after a tag
-// that is the last thing on its line does not survive a render.
-//
-// The anchor on its own keeps it, which is what says this is about the tag and
-// not about comments at the end of a property line in general.
-func TestDefectCommentAfterALineEndingTagIsDropped(t *testing.T) {
-	for _, src := range []string{
-		"!!null # c1\n",
-		"&a1 !!null # c1\n",
-		"k: !!null # c1\n",
-		"- !!null # c1\n",
-		"- &a2 !!seq # c2\n  - 1\n",
-	} {
-		wellFormed(t, src)
-		assert.NotContains(t, renderOnce(t, src), "#", "today: %q loses its comment", src)
-	}
-
-	t.Run("kept without the tag, and kept once anything follows it", func(t *testing.T) {
-		for _, src := range []string{"&a1 # c1\n", "!!null null # c1\n", "&a1 !!str x # c1\n"} {
-			wellFormed(t, src)
-			assert.Contains(t, renderOnce(t, src), "# c1", "%q", src)
-		}
-	})
-}
-
 // TestDefectCommentAboveAPropertyLineMoves: a comment on the line that
 // introduces a node whose properties are written on the next line comes back
 // attached to that node's last entry.

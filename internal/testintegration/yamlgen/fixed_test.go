@@ -642,3 +642,45 @@ func TestFixedANullKeepsTheSpellingItWasWrittenWith(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedACommentAfterALineEndingTagSurvives covers a comment sitting after a
+// tag that is the last thing on its line.
+//
+// The parse attached it to the tag node correctly; Renderer.tag rendered only
+// n.Start.Value and the node it stands on, so the comment on the node itself
+// went unread. "!!null # c1" and "- &a2 !!seq # c2" came back without theirs.
+//
+// An anchor never lost one, which is what said this was the tag and not
+// comments on a property line in general: Renderer.anchor renders the name
+// node, and the parse hangs the comment there. Nor did a tag with anything
+// after it on the line -- "!!null null # c1" -- because the comment had been
+// hung on the scalar instead.
+func TestFixedACommentAfterALineEndingTagSurvives(t *testing.T) {
+	for _, src := range []string{
+		"!!null # c1\n",
+		"&a1 !!null # c1\n",
+		"k: !!null # c1\n",
+		"- !!null # c1\n",
+		"- &a2 !!seq # c2\n  - 1\n",
+		"!!seq # c1\n- 1\n",
+		"!!str # c1\n",
+
+		// The shapes that always kept it, so the fix did not move them.
+		"&a1 # c1\n",
+		"!!null null # c1\n",
+		"&a1 !!str x # c1\n",
+		"k: !!str x # c1\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			wellFormed(t, src)
+			assert.Equal(t, src, renderOnce(t, src))
+		})
+	}
+
+	t.Run("and it is still dropped when comments are off", func(t *testing.T) {
+		// The renderer writes no comment without WithComments, tag or no tag.
+		f, err := parser.ParseBytes([]byte("!!null # c1\n"))
+		require.NoError(t, err)
+		assert.NotContains(t, f.String(), "#")
+	})
+}

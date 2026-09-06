@@ -159,19 +159,6 @@ var Ledger = []Divergence{
 		Property: Parses | Decode | Render | Settle | CommentsKept,
 		Match:    writesBrokenTaggedAnchor,
 	},
-	{
-		Name: "render/a-comment-after-a-line-ending-tag-is-dropped",
-		Reason: "A comment sitting after a tag that is the last thing on its line does not " +
-			"survive a render. `!!null # c1` and `&a1 !!null # c1` come back as `!!null` " +
-			"and `&a1 !!null`; so does `- &a2 !!seq # c2` with its entries on the lines " +
-			"below. The anchor on its own keeps the comment -- `&a1 # c1` renders " +
-			"unchanged -- and so does the same tag once anything follows it on the line, " +
-			"as in `!!null null # c1`.",
-		Property: CommentsKept,
-		Match: func(v Value, st Style) bool {
-			return st.Comments.line() && writesTagAtLineEnd(v, st)
-		},
-	},
 }
 
 // writesBrokenTaggedAnchor reports whether emitting v in st writes a tag before
@@ -242,15 +229,6 @@ func writesPropertyLine(v Value, st Style) bool {
 	e.root(v)
 
 	return e.propertyLines > 0
-}
-
-// writesTagAtLineEnd reports whether emitting v in st writes a tag as the last
-// thing on its line.
-func writesTagAtLineEnd(v Value, st Style) bool {
-	e := &emitter{st: st}
-	e.root(v)
-
-	return e.taggedLineEnds > 0
 }
 
 // Known returns the ledger entry describing this pairing for the given
