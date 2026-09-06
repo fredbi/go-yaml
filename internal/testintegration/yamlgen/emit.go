@@ -5,6 +5,7 @@ package yamlgen
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -640,8 +641,31 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 	case Float:
 		e.feat.add(FeaturePlain)
 
-		// Never exponent form: this library reads 1e3 as a string, so an
-		// exponent would come back as something other than a number.
+		// The infinities and NaN are spelled the way YAML spells them. Go
+		// prints "+Inf" and "NaN", which this library reads as strings.
+		//
+		// "+.inf" is deliberately not written for positive infinity: §10.3.2
+		// admits the sign and this library reads "+.inf" as a string, which is
+		// a recorded departure rather than something to generate around.
+		switch {
+		case math.IsInf(n.V, 1):
+			e.feat.add(FeatureValueFloatSpecial)
+
+			return ".inf"
+		case math.IsInf(n.V, -1):
+			e.feat.add(FeatureValueFloatSpecial)
+
+			return "-.inf"
+		case math.IsNaN(n.V):
+			e.feat.add(FeatureValueFloatSpecial)
+
+			return ".nan"
+		}
+
+		// Never exponent form. The library reads "1e3" as the float 1000, so an
+		// exponent would round-trip -- but it would also cross the spelling
+		// axis this emitter does not have yet, and a float written two ways is
+		// that axis's question rather than this one's.
 		s := strconv.FormatFloat(n.V, 'f', -1, 64)
 		if !strings.Contains(s, ".") {
 			// An integral float formats without a point, and a number without

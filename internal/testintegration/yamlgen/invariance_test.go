@@ -37,7 +37,7 @@ func TestPresentationInvariance(t *testing.T) {
 
 			var got any
 			err := yaml.Unmarshal([]byte(src), &got)
-			diverged := err != nil || !assert.ObjectsAreEqual(expected, got)
+			diverged := err != nil || !sameValue(expected, got)
 
 			if known != nil {
 				tally.record(known.Name, diverged)

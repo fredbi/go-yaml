@@ -168,7 +168,14 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 
 	// The ceiling moves down as documents are added and up only if the parser
 	// grows a message nothing provokes. Lower it when it drops.
-	const ceiling = 27
+	//
+	// It went 27 -> 28 on 2026-09-10, when drawing the infinities changed the
+	// documents and the corpus stopped reaching `unexpected scalar value`.
+	// Searching for a replacement found only one document that provokes it --
+	// "a:" then ": 2" -- and that is the empty-key defect, so pinning it would
+	// pin a bug rather than a rule. Recorded in stream 8 instead: when the
+	// empty-key defect is fixed the message may have no reacher at all.
+	const ceiling = 28
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+

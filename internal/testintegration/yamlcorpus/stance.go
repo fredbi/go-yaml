@@ -195,6 +195,17 @@ type Departure struct {
 // different once resolved.
 var Departures = []Departure{
 	{
+		Pattern:  "a key tagged !!float",
+		Kind:     Value,
+		Observed: `"!!float 226.0: x" comes back keyed "226" where "226.0: x" comes back keyed "226.0"`,
+		Because: "the tag says what the node is and nothing else; naming it should not depend on whether " +
+			"the tag was written. The canonical spelling of a float carries its \".0\", which is what " +
+			"keeps a float out of the integers' namespace, so the tagged form loses the distinction the " +
+			"untagged form keeps. !!int, !!str, !!bool and !!null on a key are all named correctly",
+		Corroborated: "codec.ToJSON writes \"226.0\" for both spellings, so the two converters in this " +
+			"library disagree with each other -- which is what found it",
+	},
+	{
 		Pattern: "a key that is a boolean",
 		Kind:    Value,
 		Observed: `"true: a" beside "\"true\": b" comes back as the single entry {"true": "b"}, ` +

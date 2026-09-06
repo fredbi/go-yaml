@@ -115,3 +115,28 @@ func TestFixedTwoTypesAreTwoKeys(t *testing.T) {
 		assert.Len(t, read(t, ".inf: a\n-.inf: b\n"), 2)
 	})
 }
+
+// TestDefectAnExplicitFloatTagOnAKeyLosesItsFloatness: writing the tag changes
+// the name, where writing it should change nothing.
+//
+// Found on 2026-09-10 by the two converters in this library disagreeing with
+// each other: ToJSON writes "226.0" for both spellings and the decoder writes
+// "226" for the tagged one.
+func TestDefectAnExplicitFloatTagOnAKeyLosesItsFloatness(t *testing.T) {
+	assert.Contains(t, read(t, "226.0: x\n"), "226.0", "untagged, the float keeps its name")
+	assert.Contains(t, read(t, "!!float 226.0: x\n"), "226",
+		"today: the tag costs the key its \".0\"")
+	assert.Contains(t, read(t, "!!float 226: x\n"), "226",
+		"today: and a whole number under !!float is named as an integer")
+
+	t.Run("the other tags name a key correctly", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "!!int 226: x\n", key: "226"},
+			{src: "!!str 226.0: x\n", key: "226.0"},
+			{src: "!!bool True: x\n", key: "true"},
+			{src: "!!null ~: x\n", key: "null"},
+		} {
+			assert.Contains(t, read(t, tc.src), tc.key, "%q", tc.src)
+		}
+	})
+}

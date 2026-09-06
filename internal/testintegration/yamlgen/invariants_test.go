@@ -7,7 +7,6 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 	"pgregory.net/rapid"
 
@@ -69,7 +68,7 @@ func TestInvariantEveryPresentationReadsAsTheValue(t *testing.T) {
 				style, indent(src), err)
 		}
 
-		if !assert.ObjectsAreEqual(expected, got) {
+		if !sameValue(expected, got) {
 			rt.Fatalf("style %s: read back as a different value:\n%s\nexpected: %#v\ngot:      %#v\n\nreproducer:\n%s",
 				style, indent(src), expected, got,
 				indent(yamlgen.Reproducer("PresentationInvariance", src, expected, got)))

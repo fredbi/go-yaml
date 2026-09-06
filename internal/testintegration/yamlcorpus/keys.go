@@ -124,6 +124,11 @@ func KeyShapes() []stance.Shape {
 			Intent: []stance.Tag{TagKeyNotAString},
 		},
 		{
+			Name:   "a key tagged !!float",
+			Src:    []byte("!!float 226.0: x\n"),
+			Intent: []stance.Tag{TagKeyIntegralFloat},
+		},
+		{
 			Name:   "a key that is a float with a whole value",
 			Src:    []byte("1.0: a\n"),
 			Intent: []stance.Tag{TagKeyIntegralFloat},

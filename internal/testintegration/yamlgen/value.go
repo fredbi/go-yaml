@@ -33,8 +33,16 @@ type (
 	Bool struct{ V bool }
 	// Int is an integer.
 	Int struct{ V int }
-	// Float is a floating point number, excluding the infinities and NaN,
-	// whose spellings are their own conformance question.
+	// Float is a floating point number, the infinities and NaN included.
+	//
+	// They were excluded for a long time, on the grounds that their spellings
+	// were their own conformance question. They are worth having and the
+	// question was worth asking: each is a float the library resolves, JSON has
+	// no spelling for any of them, and the encoder round-trips them. Three
+	// properties rather than one thing to defer.
+	//
+	// A NaN costs the property tests one helper: it is not equal to itself, so
+	// they compare with sameValue rather than with reflect's equality.
 	Float struct{ V float64 }
 	// Str is a string, and the interesting one: most of the ways to write a
 	// YAML document differently are ways to write a string differently.
@@ -586,6 +594,18 @@ func Strings() *rapid.Generator[string] {
 // there says nothing about presentation invariance.
 func floats() *rapid.Generator[float64] {
 	return rapid.Custom(func(t *rapid.T) float64 {
+		// One float in nine is a special. Weighted low on purpose: they are
+		// three values against a continuum, and a corpus that drew them evenly
+		// would spend most of its floats on three documents.
+		switch rapid.IntRange(0, 8).Draw(t, "kind") {
+		case 0:
+			return math.Inf(1)
+		case 1:
+			return math.Inf(-1)
+		case 2:
+			return math.NaN()
+		}
+
 		f := rapid.Float64Range(-1e6, 1e6).Draw(t, "f")
 		if math.IsInf(f, 0) || math.IsNaN(f) {
 			return 0

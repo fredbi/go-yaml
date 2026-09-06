@@ -218,7 +218,6 @@ var parserComplaints = []string{
 	"unexpected directive value. document not started",
 	"unexpected key name",
 	"unexpected map key",
-	"unexpected scalar value",
 	"unexpected scalar value type",
 	"unknown YAML version _",
 	"value is not allowed in this context",

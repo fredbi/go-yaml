@@ -6,7 +6,6 @@ package yamlgen_test
 import (
 	"testing"
 
-	"github.com/go-openapi/testify/v2/assert"
 	"pgregory.net/rapid"
 
 	"github.com/go-openapi/go-yaml"
@@ -40,7 +39,7 @@ func renderChangesValue(src []byte) bool {
 		return true
 	}
 
-	return !assert.ObjectsAreEqual(before, after)
+	return !sameValue(before, after)
 }
 
 // renderDoesNotSettle reports whether rendering a document twice gives two
@@ -130,7 +129,7 @@ func TestRenderPreservesValue(t *testing.T) {
 
 		var got any
 		err = yaml.Unmarshal([]byte(rendered), &got)
-		diverged := err != nil || !assert.ObjectsAreEqual(value.Decoded(), got)
+		diverged := err != nil || !sameValue(value.Decoded(), got)
 
 		if known := yamlgen.Known(yamlgen.Render, value, style); known != nil {
 			tally.record(known.Name, diverged)

@@ -102,6 +102,10 @@ const (
 	// boolean or a number. A consumer reading into a string-keyed map selects
 	// on this.
 	FeatureValueNonStringKey stance.Feature = "value/non-string-key"
+	// FeatureValueFloatSpecial is an infinity or a NaN. JSON has a spelling for
+	// none of them, so a consumer bound for JSON selects on this and a stated
+	// meaning skips it.
+	FeatureValueFloatSpecial stance.Feature = "value/float-special"
 )
 
 // Written is a document and what the emitter put in it.
