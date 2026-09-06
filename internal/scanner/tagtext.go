@@ -18,6 +18,8 @@ import (
 //
 // So "<" and ">" belong to neither, which is what makes "!!<x>" a tag no
 // document may carry, and a lone "%" is not a URI character however it looks.
+//
+//nolint:dupword // no it's not a duplicate in the grammar line.
 const (
 	uriPunctuation = "-#;/?:@&=+$,_.!~*'()[]"
 	tagPunctuation = "-#;/?:@&=+$_.~*'()"

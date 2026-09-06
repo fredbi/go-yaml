@@ -18,7 +18,7 @@ import (
 // grammar has no production for.
 func (s *Scanner) addTag(ctx *Context, value string, tagPos token.Position) error {
 	if msg := checkTagText(value); msg != "" {
-		return ErrInvalidToken(msg, token.Invalid(string(ctx.origin()), s.pos()))
+		return ErrInvalidToken(msg, token.Invalid(ctx.origin(), s.pos()))
 	}
 	ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 

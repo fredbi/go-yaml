@@ -30,6 +30,7 @@ linters:
     - cyclop
     - gocognit
     - maintidx
+    - mnd
   settings:
     dupl:
       threshold: 200
