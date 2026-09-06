@@ -10,12 +10,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// addTag makes the token for a tag the scan has read through, and reports the
-// error for one the YAML 1.2 grammar does not admit.
+// addTag builds the token for a tag the scan has read through, and returns the error for one the YAML 1.2 grammar
+// does not admit.
 //
-// Held here rather than at the parse because the scanner already refuses a tag
-// holding a flow indicator, and "!<>" is the same kind of complaint: a tag the
-// grammar has no production for.
+// It sits here and not in the parser because the scanner already refuses a tag holding a flow indicator.
+// "!<>" raises the same complaint: the grammar has no production for it.
 func (s *Scanner) addTag(ctx *Context, value string, tagPos token.Position) error {
 	if msg := checkTagText(value); msg != "" {
 		return ErrInvalidToken(msg, token.Invalid(ctx.origin(), s.pos()))

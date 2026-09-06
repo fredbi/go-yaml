@@ -9,18 +9,18 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// scanPlainFirst reports an indicator that no scan function claimed.
+// scanPlainFirst refuses an indicator that no other scan function claimed.
 //
-// ns-plain-first(c) is ns-char less c-indicator, so a plain scalar cannot open on one of them.
-// Inside a scalar they are ordinary characters -- "a: b}c" holds a '}' and means it -- so this refuses only one that
-// would start a token, which is what a '}' outside a flow mapping or a ',' outside a flow collection does.
+// ns-plain-first(c) is ns-char less c-indicator, so a plain scalar cannot open on an indicator.
+// Once a scalar is under way those characters are ordinary text: "a: b}c" holds a '}' and means it.
+// So this refuses only an indicator that would open a token: a '}' outside a flow mapping, or a ',' outside a flow
+// collection.
 //
-// TODO: this comment is not understandable.
-//
-// A buffer holding an anchor or alias name is not a scalar in progress: the name ends at a flow indicator, so one
-// arriving there starts the next token rather than continuing this one.
-// Inside a flow collection the indicator is claimed before it reaches here, which is what keeps "[&a, b]" -- an anchor
-// on an empty node -- apart from "&a," at the root.
+// A buffer holding an anchor or an alias name is not a scalar under way.
+// Such a name ends at a flow indicator, so an indicator arriving there opens the next token and does not continue the
+// name.
+// Inside a flow collection another scan function claims the indicator first, which keeps "[&a, b]", an anchor on an
+// empty node, apart from "&a," at the root.
 func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
 	if ctx.existsBuffer() && !s.isAnchor && !s.isAlias {
 		return nil

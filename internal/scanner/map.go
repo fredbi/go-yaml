@@ -16,8 +16,8 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		return false, nil
 	}
 	if nc != ' ' && nc != '\t' && !isNewLineChar(nc) && !ctx.isEOS() {
-		// Nothing separates this ':' from what follows it, so it only delimits a pair where the spec allows the value to be
-		// adjacent: after a JSON-like key, or where the value is absent and the next character is what ends the entry.
+		// Nothing separates this ':' from what follows it, so it delimits a pair only where the spec admits an adjacent
+		// value: after a JSON-like key, or where the value is absent and the next character closes the entry.
 		if !s.isFlowMode() || (!isFlowIndicator(nc) && !ctx.followsJSONLikeKey()) {
 			return false, nil
 		}
@@ -43,8 +43,8 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	if s.indentHasTab && !s.isFlowMode() {
 		// A block mapping entry is introduced by s-indent(n), which is spaces and nothing else, so a tab among this line's
 		// indentation leaves the entry with nothing to sit on.
-		// A tab is separation rather than indentation, which is why it is allowed in front of a flow node or a scalar in the
-		// same place -- "\t{}" is a document and "\tfoo: 1" is not.
+		// A tab counts as separation and not as indentation, so it is allowed in front of a flow node or a scalar in
+		// the same place: "\t{}" is a document and "\tfoo: 1" is not.
 		//
 		// The check above reads the origin buffer, which a quoted key resets: "\tfoo: 1" was refused there and "\t\"\": 1"
 		// was not.
@@ -63,14 +63,14 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 	} else if col := ctx.keyStartColumn(); col > 0 {
 		// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty scalar
 		// carrying an anchor, an alias or a tag.
-		// What the following lines are measured against is where the key begins, so for "&a :" that is the '&' and not the
-		// name after it.
+		// The following lines are measured against the start of the key, so for "&a :" that is the '&' and not the name
+		// after it.
 		s.lastDelimColumn = col
 	} else if last := ctx.lastContentToken(); last == nil || last.Position.Line != s.line {
 		// Nothing precedes this ':' on its line, so the key was written above it after a '?'.
 		// The ':' is then where the entry sits, and the level its value is measured against.
-		// Left at the level of whatever the key held -- a sequence entry, most often -- the value's own lines read as no
-		// further in than the key, which cut a block scalar short.
+		// Left at the level of whatever the key held, most often a sequence entry, the value's own lines read as no
+		// further in than the key, and that cut a block scalar short.
 		s.lastDelimColumn = s.column
 	}
 
@@ -86,11 +86,10 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 		return false
 	}
 
-	// c-l-block-map-explicit-key is "?" followed by s-l+block-indented, and the separation that introduces it may be a
-	// line break rather than a space.
-	// So a '?' ending its line opens an entry whose key is the empty node, and a '?' ending the stream opens one too.
-	//
-	// TODO: jargon not understandable.
+	// c-l-block-map-explicit-key is "?" followed by s-l+block-indented, and a line break may separate the two just as
+	// a space may.
+	// So a '?' at the end of its line opens an entry whose key is the empty node, and so does a '?' at the end of the
+	// stream.
 	switch nc := ctx.nextChar(); nc {
 	case ' ', '\t', '\n', '\r', rune(0):
 	default:
@@ -108,8 +107,8 @@ func (s *Scanner) scanMapKey(ctx *Context) bool {
 
 // isFlowIndicator reports whether c is one of the characters that end an entry of a flow collection.
 //
-// A plain scalar cannot hold one, so a ':' in front of one closes the key rather than belonging to it: "{a:}" is the
-// pair a/null.
+// A plain scalar cannot hold one, so a ':' in front of one closes the key and does not belong to it:
+// "{a:}" is the pair a and null.
 func isFlowIndicator(c rune) bool {
 	return c == ',' || c == '}' || c == ']'
 }

@@ -20,12 +20,12 @@ func (s *Scanner) scanWhiteSpace(ctx *Context) bool {
 	}
 
 	if s.isFirstCharAtLine {
-		// The whole run of indentation at once, where the state says the line is opening.
-		// Nothing in the run needs looking at one space at a time: each adds one to the column, one to the offset, one to the
+		// Take the whole run of indentation at once, the state showing that the line is opening.
+		// No space in the run needs separate treatment: each adds one to the column, one to the offset, one to the
 		// indentation and one to the token's text.
 		//
-		// The main loop counted the first space through updateIndent before it got here, which is why the indentation gains
-		// one fewer than the run.
+		// updateIndent counted the first space in the main loop before reaching here, so the indentation gains one
+		// fewer than the length of the run.
 		if n := s.indentRun(ctx); n > 1 {
 			ctx.skipOrigin(n)
 			s.progressASCII(ctx, n)
@@ -72,7 +72,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	// There is no problem that we ignore CR which followed by LF and normalize it to LF, because of following YAML1.2
 	// spec. > Line breaks inside scalar content must be normalized by the YAML processor.
 	// Each such line break must be parsed into a single line feed character. > Outside scalar content, YAML allows any
-	// line break to be used to terminate lines. > -- https://yaml.org/spec/1.2/spec.html.
+	// line break to be used to terminate lines. > See https://yaml.org/spec/1.2/spec.html.
 	if c == '\r' && ctx.nextChar() == '\n' {
 		ctx.addOriginBuf('\r')
 		s.progress(ctx, 1)
@@ -140,8 +140,9 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 // It can be told from the document: indentation runs together, and one that has opened a line with four spaces opens
 // the next ones the same way.
 //
-// So the probe is what a document pays until it shows a deep line and nothing after -- rather than four comparisons on
-// every line of every document, which is what a shallow one was paying for a run it never has.
+// So a document pays the probe until it shows one deep line, and pays nothing after that.
+// The alternative charged four comparisons to every line of every document, which a shallowly indented one paid for a
+// run it never has.
 const (
 	indentProbe = 4
 	indentEager = 4
@@ -149,10 +150,11 @@ const (
 
 // indentRun returns how many spaces open the line at the cursor, or 0 where the scan must go on a character at a time.
 //
-// updateIndent counted this space before the switch reached here and the column has not moved for it yet, so the two
-// stand equal where the line is genuinely opening.
-// Where they do not, characters have been read on this line by a path that never reached updateIndent -- a block
-// scalar's content, a quoted scalar spanning a break -- and the counts this advances in step are already apart.
+// updateIndent counted this space before the switch reached here, and the column has not moved for it yet, so the two
+// stand equal on a line that is genuinely opening.
+// Where they differ, a path that never reached updateIndent has already read characters on this line: a block
+// scalar's content, or a quoted scalar spanning a break.
+// The counts this advances in step have then diverged.
 func (s *Scanner) indentRun(ctx *Context) int32 {
 	if s.indentNum != s.column {
 		return 0

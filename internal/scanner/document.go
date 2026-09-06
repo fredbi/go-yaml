@@ -24,8 +24,8 @@ func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) erro
 	return nil
 }
 
-// foundDocumentSeparatorMarker reports that src opens with "---" or "...", standing alone rather than beginning a
-// longer scalar.
+// foundDocumentSeparatorMarker reports that src opens with "---" or "...", standing alone and not opening a longer
+// scalar.
 func foundDocumentSeparatorMarker(src string) bool {
 	if !strings.HasPrefix(src, docMarker) && !strings.HasPrefix(src, altDocMarker) {
 		return false

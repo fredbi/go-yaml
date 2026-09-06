@@ -7,9 +7,9 @@ import "github.com/go-openapi/go-yaml/token"
 
 // scanFlowDash reports a '-' that is neither a sequence entry nor the start of a scalar.
 //
-// A plain scalar may begin with '-' only when what follows can continue it.
-// In a flow collection the characters that structure the collection cannot, so "[-]" and "[-, -]" hold no scalar at all
-// -- they used to be read as the one-character string "-".
+// A plain scalar may begin with '-' only when the character after it can continue the scalar.
+// The characters structuring a flow collection cannot, so "[-]" and "[-, -]" hold no scalar at all.
+// Both used to read as the one-character string "-".
 func (s *Scanner) scanFlowDash(ctx *Context) error {
 	if ctx.existsBuffer() || !s.isFlowMode() {
 		return nil

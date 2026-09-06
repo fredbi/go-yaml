@@ -12,16 +12,17 @@ import (
 
 // maxSourceLen is the longest source the scanner reads.
 //
-// [token.Position] counts lines, columns, offsets and indentation in int32, which is what holds a token to 56 bytes.
-// The scan counts them in int and narrows at every position it builds. Each of those numbers is bounded by the length
-// of the source -- an offset addresses a byte of it, a column stands at most one past the last byte of its line -- so
-// one refusal here is what makes every narrowing safe.
+// [token.Position] stores lines, columns, offsets and indentation as int32, which keeps a token to 56 bytes.
+// The scan counts them in int and narrows at every position it builds.
+// The length of the source bounds all of them: an offset addresses a byte of it,
+// and a column stands at most one past the last byte of its line.
+// Refusing a longer source here, once, makes every one of those narrowings safe.
 //
-// A checked conversion at each of the eleven sites would instead spend a compare per token, to report a document that
-// does not fit in memory to begin with.
+// The alternative was a checked conversion at each of the eleven sites.
+// That spends a compare per token to report a document too large to hold in memory.
 const maxSourceLen = math.MaxInt32 - 1
 
-// validateSource checks what has to hold of the source before a byte of it is read.
+// validateSource checks the source before the scan reads a byte of it.
 func validateSource(text string) error {
 	if sourceTooLong(len(text)) {
 		return ErrInvalidToken(
@@ -33,15 +34,18 @@ func validateSource(text string) error {
 	return validateStream(text)
 }
 
-// sourceTooLong reports whether a source of n bytes is one the scanner refuses.
+// sourceTooLong reports whether the scanner refuses a source of n bytes.
 //
-// Apart so that the bound can be tested at its edge: no test allocates two gigabytes to reach it.
+// It stands apart from validateSource so that a test can check the bound at its edge.
+// No test allocates two gigabytes to reach the refusal itself.
 func sourceTooLong(n int) bool { return n > maxSourceLen }
 
-// posInt narrows a count the scan keeps in int to the int32 a [token.Position] holds it in.
+// posInt narrows an int count to the int32 that [token.Position] stores.
 //
-// The scanner's own counters are int32, so this is only for the counts the standard library hands back as int --
-// utf8.RuneCount and len -- on their way into a Position field. See maxSourceLen for why it cannot wrap.
+// The scanner's own counters are already int32.
+// This converts the counts the standard library returns as int, utf8.RuneCount and len,
+// on their way into a Position field.
+// See maxSourceLen for why the conversion cannot wrap.
 func posInt(n int) int32 {
 	return int32(n)
 }

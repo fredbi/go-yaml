@@ -11,9 +11,10 @@ import (
 
 // scanCommentIndicator reports the '#' that scanComment declined.
 //
-// Inside a plain scalar a '#' is an ordinary character, so one that follows something already buffered is left alone.
-// Starting a token it is neither a comment -- nothing separates it from what came before -- nor the first character of
-// a plain scalar, which YAML does not allow it to be.
+// Inside a plain scalar a '#' is an ordinary character, so this leaves alone one that follows something already
+// buffered.
+// Opening a token it is neither a comment, nothing separating it from what came before, nor the first character of a
+// plain scalar, which YAML forbids.
 func (s *Scanner) scanCommentIndicator(ctx *Context) error {
 	if ctx.existsBuffer() {
 		return nil
@@ -34,10 +35,11 @@ func (s *Scanner) scanCommentIndicator(ctx *Context) error {
 func (s *Scanner) scanComment(ctx *Context) bool {
 	// A comment starts a line or follows a space.
 	//
-	// The check used to run only while a plain scalar was being buffered, so a '#' pressed up against anything that had
-	// already been emitted -- a closing quote, a comma, a bracket -- started a comment where YAML has none. previousChar
-	// steps back over a byte order mark and returns 0 where nothing stands before the cursor, so a comment opening the
-	// stream after one is a comment that starts a line.
+	// The check used to run only while a plain scalar was being buffered.
+	// A '#' pressed up against something already emitted, a closing quote, a comma or a bracket, then started a
+	// comment where YAML has none.
+	// previousChar steps back over a byte order mark and returns 0 when nothing stands before the cursor, so a comment
+	// opening the stream after a mark still starts a line.
 	if c := ctx.previousChar(); c != rune(0) && c != ' ' && c != '\t' && !isNewLineChar(c) {
 		return false
 	}

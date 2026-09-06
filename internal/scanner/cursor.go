@@ -5,31 +5,32 @@ package scanner
 
 import "unicode/utf8"
 
-// cursor is what reading one byte of the source costs.
+// cursor holds the state that reading one byte of the source costs.
 //
 // Every character the scan reads touches src, buf, idx, size, originEnd, notSpaceCharPos and originCut, through
-// next, currentChar, progress, addBuf and addOriginBuf. Those seven come to 61 bytes and stand first, so a cache line
-// holds all of them; the fields below the gap are read once a line or once a token and would otherwise sit among them.
+// next, currentChar, progress, addBuf and addOriginBuf.
+// Those seven come to 61 bytes and stand first, so one cache line holds all of them.
+// The fields below the gap are read once a line or once a token, and would otherwise sit among the seven.
 //
-// The order is by how often a field is read, not by width, which is what the rest of the package is ordered by.
+// This orders its fields by how often the scan reads each one. The rest of the package orders fields by width.
 //
-// [Context] embeds it, so c.idx and c.src read as they did.
+// [Context] embeds cursor, so c.idx and c.src still read as plain field accesses.
 type cursor struct {
 	// src is the source, held as Init was given it. size is len(src).
 	src string
-	// buf is where the value of the token being read is built, when the scan has to rewrite what it read.
+	// buf collects the value of the token being read, for a token whose value the scan must rewrite.
 	buf []byte
 	// idx is the byte of src the scan stands on.
 	idx  int32
 	size int32
-	// originEnd is where the current token's text ends in src, and originStart where it begins.
+	// originStart and originEnd bracket the current token's text in src.
 	//
-	// See [Context.origin].
+	// See [cursor.origin].
 	originEnd int32
-	// notSpaceCharPos is how much of buf is the value, leaving out the whitespace it ends with.
+	// notSpaceCharPos marks how much of buf belongs to the value, leaving out the whitespace it ends with.
 	notSpaceCharPos int32
 	originStart     int32
-	// originCut says originCopy is in use, a cut having taken bytes out of the middle of the text.
+	// originCut records that originCopy is in use, a cut having taken bytes out of the middle of the text.
 	originCut bool
 
 	// Below the line the scan reads for every character.
@@ -89,8 +90,9 @@ func (c *cursor) nextChar() rune {
 	return rune(0)
 }
 
-// previousChar returns the character before the cursor, stepping back over a byte order mark: the scanner steps over
-// one rather than reading it, so nothing that asks what came before should see it.
+// previousChar returns the character before the cursor, stepping back over a byte order mark.
+//
+// The scan steps over such a mark instead of reading it, so nothing looking backwards should meet one.
 func (c *cursor) previousChar() rune {
 	end := c.idx
 	for end > 0 {
@@ -119,9 +121,9 @@ func (c *cursor) repeatNum(r rune) int32 {
 	return cnt
 }
 
-// progress advances the cursor by num characters and returns the bytes it crossed.
+// progress advances the cursor by num characters and returns the number of bytes it crossed.
 //
-// Callers count columns in characters and offsets in bytes, which is why it reports both.
+// Callers count columns in characters and offsets in bytes, so progress reports both.
 func (c *cursor) progress(num int32) int32 {
 	start := c.idx
 	for range num {
@@ -149,17 +151,16 @@ func (c *cursor) source(s, e int32) string {
 
 // textAt returns buf as a string and where in the source it was found, or -1 where buf is not the source's own bytes.
 //
-// A Go substring shares the bytes it is taken from, so a token whose text is the source's own costs nothing: it points
-// into the document rather than carrying a copy of it.
-// Scanning rewrites the text often enough -- escapes, folding, chomping -- that the source window is compared with buf
-// rather than assumed equal to it.
+// A Go substring shares the bytes it is taken from, so a token whose text is the source's own costs nothing:
+// it points into the document and carries no copy.
+// Escapes, folding and chomping rewrite the text often enough that textAt compares the source window against buf
+// instead of assuming the two are equal.
 //
-// start is where the caller believes buf begins.
-// It is a guess for a value the scanner folded: the offset it works out is the cursor less the folded length, and
-// folding makes the value shorter than the source it was read from.
+// start holds where the caller believes buf begins.
+// For a folded value that is a guess: the caller works the offset out as the cursor less the folded length, and
+// folding shortens the value below the source it came from.
 //
-// Where the guess misses, the cursor gives the other end, and the offset that matched is the one the token should
-// carry.
+// When the guess misses, the cursor gives the other end, and the token should carry whichever offset matched.
 func (c *cursor) textAt(buf []byte, start int32) (string, int32) {
 	if span, ok := c.window(buf, start); ok {
 		return span, start
@@ -208,14 +209,14 @@ func (c *cursor) addBufWithTab(r rune) {
 // line breaks included.
 //
 // It is a window on the source.
-// Nothing keeps it -- Origin left the token, and what reads it now measures it -- so the scanner records what it reads
-// by moving originEnd rather than by copying the bytes into a buffer.
-// Over the fuzz corpus that holds for 107,805 of 107,811 reads.
+// Origin left the token, and its readers now measure it instead of keeping it, so the scan records what it reads by
+// moving originEnd and copies no bytes into a buffer.
+// That holds for 107,805 of 107,811 reads over the fuzz corpus.
 //
-// The exception is a line whose trailing spaces are cut.
-// Each cut takes a suffix, but the scan goes on and reads more, so what is left has a gap in the middle of it and no
-// window can say so.
-// The first cut copies what the window held and everything after it appends to the copy.
+// A line whose trailing spaces are cut is the exception.
+// Each cut takes a suffix, and the scan then reads on, so the text left behind has a gap in its middle that no window
+// can express.
+// The first cut copies what the window held, and everything after it appends to that copy.
 func (c *cursor) origin() string {
 	if c.originCut {
 		return string(c.originCopy)
@@ -226,9 +227,9 @@ func (c *cursor) origin() string {
 
 // addOriginBuf records that r was read as part of the current token.
 //
-// One add, where appending r to a buffer was 8% of the scanner: a call that could not inline -- cost 106 against a
-// budget of 80, utf8.AppendRune's body being worth 70 on its own -- around an append that copied a byte already in the
-// source.
+// One add, where appending r to a buffer was 8% of the scanner.
+// That was a call the inliner refused, at cost 106 against a budget of 80, utf8.AppendRune's body accounting for 70
+// on its own, wrapped around an append that copied a byte already present in the source.
 func (c *cursor) addOriginBuf(r rune) {
 	if r < utf8.RuneSelf && !c.originCut {
 		c.originEnd++
@@ -239,12 +240,11 @@ func (c *cursor) addOriginBuf(r rune) {
 	c.addOriginWide(r)
 }
 
-// addOriginWide records a character that the window cannot count in one byte,
-// or any character once a cut has put the text in a buffer.
+// addOriginWide records a character the window cannot count in one byte, and any character at all once a cut has put
+// the text in a buffer.
 //
-// It is kept out of [cursor.addOriginBuf] so that one stays inside the
-// inliner's budget: appending a rune is worth more than the whole budget on its
-// own, and this is called for a byte in a thousand.
+// It stands apart from [cursor.addOriginBuf] to keep that one inside the inliner's budget: appending a rune costs more
+// than the whole budget on its own, and addOriginWide runs for about one byte in a thousand.
 //
 //go:noinline
 func (c *cursor) addOriginWide(r rune) {

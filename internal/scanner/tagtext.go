@@ -16,8 +16,8 @@ import (
 //	              | "[" | "]"
 //	ns-tag-char ::= ns-uri-char - "!" - c-flow-indicator
 //
-// So "<" and ">" belong to neither, which is what makes "!!<x>" a tag no
-// document may carry, and a lone "%" is not a URI character however it looks.
+// So "<" and ">" belong to neither set, which makes "!!<x>" a tag no document may carry.
+// A lone "%" is not a URI character either, however it looks.
 //
 //nolint:dupword // no it's not a duplicate in the grammar line.
 const (
@@ -52,12 +52,11 @@ func isHexDigit(c byte) bool {
 	}
 }
 
-// checkTagText reports why the YAML 1.2 grammar does not admit value as a tag,
-// or "" where it does.
+// checkTagText reports why the YAML 1.2 grammar does not admit value as a tag, or "" where it does.
 //
-// value is the tag as written, leading "!" and all. Three shapes are legal: the
-// non-specific "!" on its own, a verbatim "!<uri>", and a shorthand -- a handle
-// of "!", "!!" or "!name!" followed by at least one tag character.
+// value is the tag as written, leading "!" and all.
+// Three shapes are legal: the non-specific "!" on its own, a verbatim "!<uri>", and a shorthand.
+// A shorthand is a handle of "!", "!!" or "!name!" followed by at least one tag character.
 func checkTagText(value string) string {
 	if value == "" || value[0] != '!' {
 		// Not a tag at all; the caller only reaches this with one.
@@ -75,8 +74,7 @@ func checkTagText(value string) string {
 	return checkShorthandTag(value)
 }
 
-// checkVerbatimTag holds "!<uri>" to c-verbatim-tag, which takes one URI
-// character or more between the brackets.
+// checkVerbatimTag holds "!<uri>" to c-verbatim-tag, which takes one URI character or more between the brackets.
 func checkVerbatimTag(value string) string {
 	if !strings.HasSuffix(value, ">") || len(value) < len("!<>") {
 		return "a verbatim tag must end with '>'"
@@ -90,8 +88,8 @@ func checkVerbatimTag(value string) string {
 	return checkURI(uri, isURIChar)
 }
 
-// checkShorthandTag holds "!suffix", "!!suffix" and "!handle!suffix" to
-// c-ns-shorthand-tag, whose suffix takes one tag character or more.
+// checkShorthandTag holds "!suffix", "!!suffix" and "!handle!suffix" to c-ns-shorthand-tag, whose suffix takes one
+// tag character or more.
 func checkShorthandTag(value string) string {
 	rest := value[1:]
 
@@ -99,9 +97,8 @@ func checkShorthandTag(value string) string {
 		// The secondary handle, "!!".
 		rest = rest[1:]
 	} else if i := strings.IndexByte(rest, '!'); i >= 0 {
-		// A named handle, "!name!". Its name takes word characters only, and a
-		// "!" that is not one is what the parser reports as an undefined
-		// handle rather than a malformed tag.
+		// A named handle, "!name!". Its name takes word characters only.
+		// The parser reports a "!" that is not one as an undefined handle, not as a malformed tag.
 		for j := range i {
 			if !isWordChar(rest[j]) {
 				return "a tag handle takes letters, digits and '-' between its '!' characters"
@@ -117,8 +114,7 @@ func checkShorthandTag(value string) string {
 	return checkURI(rest, isTagChar)
 }
 
-// checkURI holds every character of text to admits, reading "%" as the start of
-// a percent escape.
+// checkURI holds every character of text to admits, and reads "%" as the start of a percent escape.
 func checkURI(text string, admits func(byte) bool) string {
 	for i := 0; i < len(text); i++ {
 		c := text[i]
@@ -131,8 +127,8 @@ func checkURI(text string, admits func(byte) bool) string {
 			continue
 		}
 		if !admits(c) {
-			// Spelled as the scanner spells the same complaint elsewhere, so
-			// the two are one entry in the refusal vocabulary and not two.
+			// Spelled as the scanner spells the same complaint elsewhere, so the two make one entry in the refusal
+			// vocabulary and not two.
 			return fmt.Sprintf("found invalid tag character %q", string(c))
 		}
 	}

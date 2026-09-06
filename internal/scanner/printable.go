@@ -15,15 +15,15 @@ import (
 
 // byteOrderMark is YAML 1.2's c-byte-order-mark.
 //
-// nb-char is c-printable less b-char and this, so a byte order mark is not a character any node may hold: it marks a
-// document prefix and nothing else.
-// Scanner.checkByteOrderMark refuses one anywhere a node may go, and the scan steps over the rest, which is what a file
-// saved by an editor that writes one needs.
+// nb-char is c-printable less b-char and less this, so no node may hold a byte order mark: it marks a document
+// prefix and nothing else.
+// Scanner.checkByteOrderMark refuses one anywhere a node may go, and the scan steps over the rest, so a file saved by
+// an editor that writes a mark still reads.
 //
-// A mark says nothing here about the encoding.
-// The spec has a stream announce UTF-16 or UTF-32 with one, and this library reads UTF-8 only -- the one place it
-// departs from YAML 1.2.2 on purpose.
-// A UTF-16 stream's mark is two bytes that are not a character, which validateStream refuses.
+// A mark carries no information about the encoding here.
+// The spec lets a stream announce UTF-16 or UTF-32 with one; this library reads UTF-8 only, and departs from
+// YAML 1.2.2 on purpose in that one place.
+// A UTF-16 stream's mark is two bytes that form no character, and validateStream refuses them.
 const byteOrderMark = '\ufeff'
 
 // byteOrderMarkText is the mark's three bytes, for the prefix tests that step over a run of them.
@@ -31,12 +31,13 @@ const byteOrderMarkText = string(byteOrderMark)
 
 // validateStream checks that the source is text a YAML stream may hold.
 //
-// c-printable is the set of characters a stream may contain at all, so the control characters below x20 other than tab,
-// line feed and carriage return are not YAML however they are arrived at.
+// c-printable admits every character a stream may contain, so the control characters below 0x20 apart from tab, line
+// feed and carriage return are not YAML however they got there.
 //
-// A stream is also Unicode, and a byte that is part of no character is not one.
-// Converting the source to runes turns each of them into U+FFFD, so by the time anything else looks the byte is gone
-// and nothing has said so -- which is why this reads the string rather than the runes the rest of the scanner works on.
+// A stream is also Unicode, and a byte belonging to no character is not a character.
+// Converting the source to runes turns each such byte into U+FFFD, and by the time anything else looks, the byte has
+// gone unreported.
+// So this reads the string, where the rest of the scanner works on runes.
 func validateStream(text string) error {
 	if at := firstUnprintable(text); at >= 0 {
 		return unprintableErr(text, at)
@@ -48,10 +49,12 @@ func validateStream(text string) error {
 // firstUnprintable returns the offset of the first byte the stream may not hold, or -1 where every one of them is a
 // character c-printable admits.
 //
-// Eight bytes at a time while they are ASCII, which is nearly all of them in nearly every document: one word says
-// whether any of the eight is a control character other than tab, line feed and carriage return, or DEL.
-// A word carrying a byte over 0x7f is stepped through a character at a time, since what c-printable admits up there is
-// a question about the character rather than about the byte, and the word loop takes over again after it.
+// Eight bytes at a time while they are ASCII, which covers nearly all of them in nearly every document.
+// One word answers whether any of the eight is DEL, or a control character other than tab, line feed and carriage
+// return.
+// A word carrying a byte over 0x7f is stepped through one character at a time, because above 0x7f c-printable admits
+// or refuses a character and not a byte.
+// The word loop resumes after the run.
 func firstUnprintable(text string) int {
 	raw := unsafe.Slice(unsafe.StringData(text), len(text))
 
@@ -80,10 +83,11 @@ func firstUnprintable(text string) int {
 // readNonASCII steps over the characters of the word at i that carries a byte over 0x7f, and returns where the bytes
 // are ASCII again, or where the stream holds a character it may not.
 //
-// It takes the whole run rather than one character: a document written in a script of three bytes to the character
-// loaded and tested a word for every one of them, and every test failed the same way.
-// It is a call rather than the loop's own code so that the word loop above stays small -- the run is the cold path, and
-// twitter_status, the most non-Latin of the workloads, reaches it for one word in five.
+// It takes the whole run, not one character.
+// A document written in a script of three bytes to the character loaded and tested a word for every one of them, and
+// every test failed the same way.
+// It is a call, and not the loop's own code, to keep the word loop above small.
+// The run is the cold path: twitter_status, the most non-Latin of the workloads, reaches it for one word in five.
 func readNonASCII(text string, w uint64, i int) (int, int) {
 	// The ASCII bytes standing in front of the first one over 0x7f are read from the word as usual.
 	k := swar.FirstByte(w & swar.HighBits)
@@ -152,10 +156,10 @@ func printableASCII(c byte) bool {
 	return c >= 0x20 && c <= 0x7E || c == 0x09 || c == 0x0A || c == 0x0D
 }
 
-// streamPosition counts the characters before byte i, for the error that says which one a stream may not hold.
+// streamPosition counts the characters before byte i, for the error naming the character a stream may not hold.
 //
-// Line, column and offset all count from 1, and offset counts characters rather than bytes, as validateStream reported
-// them when it counted every character to report one.
+// Line, column and offset all count from 1, and offset counts characters, not bytes.
+// validateStream reported them that way back when it counted every character to report one.
 func streamPosition(text string, i int) token.Position {
 	line, column, offset := 1, 1, 1
 	for _, r := range text[:i] {

@@ -100,12 +100,13 @@ func (s *Scanner) isChangedToIndentStateUp() bool {
 
 // checkFlowIndent rejects the line about to start when it is not indented past the line its flow collection opened on.
 //
-// This is what makes "flow: [a,\nb]" invalid: "b" sits in the same column as the key that owns the collection, so
-// nothing marks it as belonging to it.
+// This refuses "flow: [a,\nb]": "b" sits in the same column as the key owning the collection, so nothing marks it as
+// part of that collection.
 // Indentation is spaces, so a line led by a tab clears nothing.
 //
-// It runs from scanNewLine, which a quoted or literal scalar spanning lines never reaches -- their own line breaks are
-// theirs, not the collection's.
+// It runs from scanNewLine.
+// A quoted or literal scalar spanning lines never reaches scanNewLine, its line breaks belonging to the scalar and not
+// to the collection.
 func (s *Scanner) checkFlowIndent(ctx *Context) error {
 	if !s.isFlowMode() {
 		return nil
@@ -127,8 +128,8 @@ func (s *Scanner) contentIndent() int32 {
 		return s.flowIndent
 	}
 
-	// The indentation of the block node this belongs to, which is the key or the '-' that introduced it -- not the line
-	// the construct happens to start on, which may already be indented under that key.
+	// The indentation of the block node this belongs to: the key or the '-' that introduced it.
+	// Not the line the construct starts on, which may already be indented under that key.
 	//
 	// Zero means nothing introduced it: the construct is the document's own root, and its further lines have nothing to be
 	// indented past.

@@ -157,10 +157,10 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := int32(len(src))
-	// As in scanSingleQuote: the value is a window on src until something rewrites it -- a folded line break, an escape,
-	// or a tab dropped before one. keep copies what has been passed over the first time that happens, and the rest is
-	// appended as before.
-	// A scalar holding none of them, which is most of them, is never built.
+	// As in scanSingleQuote: the value stays a window on src until a folded line break, an escape, or a tab dropped
+	// before one rewrites it.
+	// The first time that happens, keep copies everything passed over so far, and the rest appends as before.
+	// A scalar holding none of the three, which is most of them, is never built.
 	value := s.quoted[:0]
 	copied := false
 	keep := func(upto int32) {
@@ -235,9 +235,9 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 			//
 			// Two rewrites were tried against BenchmarkScannerNextToken, interleaved in one window, and both cost. A
 			// [utf8.RuneSelf]-wide lookup table behind a five-case switch is +3.1% per token on escaped-dense-1000
-			// (p=0.047, n=12) -- an indexed load where there was none. One switch whose arms set only the character, with
-			// the three statements after it, is +1.2% geomean and +4.6% on escaped-100 (p=0.003, n=10) -- a branch on
-			// every escape where there was none.
+			// (p=0.047, n=12), an indexed load where there was none.
+			// One switch whose arms set only the character, with the three statements after it, is +1.2% geomean and
+			// +4.6% on escaped-100 (p=0.003, n=10), a branch where there was none.
 			switch nextChar {
 			case '0':
 				progress = 1
@@ -400,10 +400,10 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				s.progressColumn(ctx, 1)
 				return token.Token{}, ErrInvalidToken(fmt.Sprintf("found unknown escape character %q", nextChar), token.Invalid(ctx.origin(), s.pos()))
 			}
-			// The escapes that name a code point -- \xXX, \uXXXX, \UXXXXXXXX -- leave the marker and its digits to be recorded
-			// here.
-			// Every other case adds what it consumed as it goes; these cannot, because a surrogate pair settles how far it
-			// reaches only after the low half is read.
+			// The escapes naming a code point, \xXX, \uXXXX and \UXXXXXXXX, leave the marker and its digits to be
+			// recorded here.
+			// Every other case records what it consumed as it goes.
+			// These three cannot: a surrogate pair settles how far it reaches only once the low half is read.
 			if isCodePointEscape(nextChar) {
 				for i := idx + 1; i <= idx+progress && i < size; i++ {
 					ctx.addOriginBuf(rune(src[i]))
@@ -505,17 +505,18 @@ func hexDigitsToInt(b string) (int, bool) {
 	return sum, true
 }
 
-// escapeNamesNoCharacter is what "\uXXXX" and "\UXXXXXXXX" are refused with when their digits name no character.
+// escapeNamesNoCharacter refuses a "\uXXXX" or "\UXXXXXXXX" whose digits name no character.
 const escapeNamesNoCharacter = "found an escaped code point that is not a character"
 
 // escapedRune returns the character an escape's digits name, and false where they name none.
 //
-// "\U" takes eight hexadecimal digits, which reach 0xFFFFFFFF -- past the largest code point, and past what an int32
-// holds. rune is int32, so "\UFFFFFFFF" converted to -1, and utf8.AppendRune writes U+FFFD for any rune it cannot
-// encode: the scalar came back holding a replacement character the document never wrote, and nothing said so.
+// "\U" takes eight hexadecimal digits, reaching 0xFFFFFFFF, past the largest code point and past what an int32 holds.
+// rune is int32, so "\UFFFFFFFF" converted to -1, and utf8.AppendRune writes U+FFFD for any rune it cannot encode.
+// The scalar then came back carrying a replacement character the document never wrote, and nothing reported it.
 //
-// D800 to DFFF are the other half. Each is one half of a UTF-16 pair and stands for no character alone, which is why
-// utf8.ValidRune refuses them; a pair written as "\uD83D\uDE00" is combined before this is asked.
+// D800 to DFFF are the other half.
+// Each is one half of a UTF-16 pair and denotes no character alone, so utf8.ValidRune refuses them.
+// A pair written as "\uD83D\uDE00" is combined before escapedRune sees it.
 //
 // The range is tested before the conversion, not after, so the narrowing below cannot be the thing that decides.
 func escapedRune(codeNum int) (rune, bool) {
