@@ -36,13 +36,15 @@ func WithComments(on bool) RenderOption {
 }
 
 // WithAliasTargets renders each alias as the node its anchor names, taking the
-// nodes from anchors keyed by anchor name. Without it an alias renders as the
-// reference it was written as, "*name", which is also what an alias whose
-// anchor is missing from the map falls back to.
+// nodes from anchors keyed by anchor name and otherwise from
+// [AliasNode.Target], which the parser fills. Without this option an alias
+// renders as the reference it was written as, "*name", which is also what an
+// alias with neither falls back to.
 //
-// The decoder passes the anchors it has collected so that a custom
-// UnmarshalYAML receives the value an alias stands for rather than a reference
-// it has no way to look up.
+// Pass an empty map to resolve from the tree alone. The map is for a tree built
+// by hand, and for anchors that came from somewhere else: the decoder passes
+// the ones it has collected so that a custom UnmarshalYAML receives the value
+// an alias stands for rather than a reference it has no way to look up.
 func WithAliasTargets(anchors map[string]Node) RenderOption {
 	return func(r *Renderer) {
 		r.aliasTargets = anchors
@@ -394,7 +396,7 @@ func (r *Renderer) keyComment(key Node) string {
 // alias as "*a1" rather than exhausting the stack.
 func (r *Renderer) alias(n *AliasNode) string {
 	name := n.Value.GetToken().Value
-	target := r.aliasTargets[name]
+	target := r.aliasTarget(n, name)
 	if target == nil || r.resolving[name] {
 		return n.String()
 	}
@@ -418,11 +420,27 @@ func (r *Renderer) deref(n Node) Node {
 		return n
 	}
 
-	if target := r.aliasTargets[alias.Value.GetToken().Value]; target != nil {
+	if target := r.aliasTarget(alias, alias.Value.GetToken().Value); target != nil {
 		return target
 	}
 
 	return n
+}
+
+// aliasTarget returns the node an alias names, from the anchors the caller
+// passed or from the alias itself.
+//
+// The parser fills [AliasNode.Target] where the alias stands, so a node
+// rendered on its own carries what its aliases name even when the caller's
+// table was built from something else -- the decoder hands a custom
+// UnmarshalYAML one node and the anchors of the whole file, and an alias whose
+// anchor stood outside that node was in neither.
+func (r *Renderer) aliasTarget(n *AliasNode, name string) Node {
+	if target := r.aliasTargets[name]; target != nil {
+		return target
+	}
+
+	return n.Target
 }
 
 func (r *Renderer) value(n Node, keyCommented bool) string {
