@@ -191,6 +191,69 @@ func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	}
 }
 
+// TestParseRefusesATagTheGrammarRefuses covers the tag shapes YAML 1.2 has no
+// production for.
+//
+// The scanner read a tag through to whatever ended it and never looked at the
+// characters. Three shapes came back as ordinary tags and resolved to !!str,
+// so "!<> x" decoded to "x" and nothing said the tag was not one:
+//
+//	c-verbatim-tag  ::= "!" "<" ns-uri-char+ ">"
+//	ns-uri-char     ::= "%" ns-hex-digit ns-hex-digit | ns-word-char | ...
+//	ns-tag-char     ::= ns-uri-char - "!" - c-flow-indicator
+//
+// So a verbatim tag takes at least one URI character, a "%" stands only in
+// front of two hexadecimal digits, and neither "<" nor ">" is a character any
+// tag may hold. Checked against grammar.NewRecognizer, which reads the
+// specification's own grammar and refuses all of these.
+func TestParseRefusesATagTheGrammarRefuses(t *testing.T) {
+	for source, want := range map[string]string{
+		"k: !<> x\n":    "must name a URI",
+		"k: !<%> x\n":   "two hexadecimal digits",
+		"k: !<%4> x\n":  "two hexadecimal digits",
+		"k: !<%zz> x\n": "two hexadecimal digits",
+		"k: !<a x\n":    "must end with '>'",
+		"k: !!<x> y\n":  "invalid tag character",
+		"k: !!\n":       "must name a suffix",
+		"k: !a!\n":      "must name a suffix",
+	} {
+		t.Run(source, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), want)
+		})
+	}
+}
+
+// TestParseKeepsEveryTagTheGrammarAdmits is the other half, and the reason the
+// check above is written from the productions rather than from the three
+// documents that started it.
+//
+// A local tag especially: sixteen YAML Test Suite cases carry one, and it is
+// how CloudFormation writes "!Ref" and GitLab CI writes "!reference".
+func TestParseKeepsEveryTagTheGrammarAdmits(t *testing.T) {
+	for _, source := range []string{
+		"k: ! x\n",                               // the non-specific tag
+		"k: !\n",                                 // and on the empty node
+		"k: !!str x\n",                           // the secondary handle
+		"k: !fred x\n",                           // a local tag
+		"k: !Ref x\n",                            // as CloudFormation writes one
+		"k: !foo/bar x\n",                        // "/" is a URI character
+		"k: !x'y z\n",                            // so is "'"
+		"k: !<%41> x\n",                          // a percent escape that is one
+		"k: !<tag:a,2000:b> x\n",                 // "," and ":" inside a verbatim tag
+		"k: !<urn:a:b> x\n",                      // and a URN
+		"k: !<!foo> x\n",                         // "!" is a URI character, though not a tag character
+		"[!!str a, !b c]\n",                      // a tag ended by a flow indicator
+		"%TAG !e! tag:a,2000:\n---\nk: !e!x y\n", // a named handle a directive defined
+	} {
+		t.Run(source, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source))
+			assert.NoError(t, err)
+		})
+	}
+}
+
 // TestParseKeepsATagThatEndsWhereTheDocumentDoes covers a tag with no break
 // after it.
 //

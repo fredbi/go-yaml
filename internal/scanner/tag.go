@@ -7,6 +7,21 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
+// addTag makes the token for a tag the scan has read through, and reports the
+// error for one the YAML 1.2 grammar does not admit.
+//
+// Held here rather than at the parse because the scanner already refuses a tag
+// holding a flow indicator, and "!<>" is the same kind of complaint: a tag the
+// grammar has no production for.
+func (s *Scanner) addTag(ctx *Context, value string, tagPos token.Position) error {
+	if msg := checkTagText(value); msg != "" {
+		return ErrInvalidToken(msg, token.Invalid(string(ctx.origin()), s.pos()))
+	}
+	ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+
+	return nil
+}
+
 func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	if ctx.existsBuffer() || s.isDirective {
 		return false, nil
@@ -41,14 +56,18 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case ' ':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+			if err := s.addTag(ctx, value, tagPos); err != nil {
+				return false, err
+			}
 			s.progressColumn(ctx, utf8.RuneCountInString(value))
 			ctx.clear()
 			return true, nil
 		case ',':
 			if s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0 {
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+				if err := s.addTag(ctx, value, tagPos); err != nil {
+					return false, err
+				}
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before collect-entry for scanning it at scanFlowEntry function.
 				ctx.clear()
 				return true, nil
@@ -62,7 +81,9 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 		case '\n', '\r':
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+idx)
-			ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+			if err := s.addTag(ctx, value, tagPos); err != nil {
+				return false, err
+			}
 			s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before new-line-char for scanning new-line-char at scanNewLine function.
 			ctx.clear()
 			return true, nil
@@ -72,7 +93,9 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 				// the tag: "[!]" is the non-specific tag on the empty node and
 				// not a tag whose name is "]".
 				value := ctx.source(ctx.idx-1, ctx.idx+idx)
-				ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+				if err := s.addTag(ctx, value, tagPos); err != nil {
+					return false, err
+				}
 				s.progressColumn(ctx, utf8.RuneCountInString(value)-1) // progress column before the closer so it is scanned on its own
 
 				ctx.clear()
@@ -102,7 +125,9 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	// ever emits on the character that ends the tag, so falling out of it here
 	// dropped the token and the tag with it.
 	value := ctx.source(ctx.idx-1, len(ctx.src))
-	ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
+	if err := s.addTag(ctx, value, tagPos); err != nil {
+		return false, err
+	}
 	s.progressColumn(ctx, progress)
 	ctx.clear()
 
