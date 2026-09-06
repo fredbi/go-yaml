@@ -161,6 +161,7 @@ func TestARefusalSignatureKeepsTheParserAndDropsTheDocument(t *testing.T) {
 // reports. Regenerate it on the same commit that regenerates the corpus, and
 // read the diff: a line that leaves is a complaint nothing provokes any more.
 var parserComplaints = []string{
+	"YAML version has already been specified",
 	"_ is a reserved character",
 	"_ is not a scalar, and a flow collection has no sequence entries",
 	"_ or _ must be specified",
@@ -206,6 +207,7 @@ var parserComplaints = []string{
 	"sequence entries are not allowed after anchor on the same line",
 	"tab character cannot use as a map key directly",
 	"tab character cannot use as a sequence delimiter",
+	"tag handle _ has already been declared by a TAG directive",
 	"tag handle _ is not defined by a TAG directive",
 	"tag is not allowed in this context",
 	"tag is not allowed in this sequence context",

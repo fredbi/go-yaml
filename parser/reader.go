@@ -49,6 +49,10 @@ type reader struct {
 	// being read has run out. tail says the empty document at the end of a
 	// stream has been handed over.
 	taken, ended, tail bool
+	// tookDirective says the body just handed a directive over. A directive is
+	// a document of its own, so the next one closes this document rather than
+	// standing beside it.
+	tookDirective bool
 
 	// err is a refusal bodyToken could not report, since the descent's pull
 	// answers with a token or nothing.
@@ -131,6 +135,7 @@ func (r *reader) openDocument() (*token.Token, bool, error) {
 		return nil, false, err
 	}
 	r.ended = false
+	r.tookDirective = false
 
 	if tk == nil {
 		// The stream ends here. It holds one last document -- the empty one --
@@ -185,13 +190,41 @@ func (r *reader) bodyToken() (*tapeToken, bool) {
 		return nil, false
 	}
 
+	if r.tookDirective && isDirectiveToken(tk) {
+		// A directive stands on its own: the body of a document is one node,
+		// and 6.8 lets several directives stand before one "---". Handing them
+		// over together made the second one a second value in one body, which
+		// parseDocumentBody refuses as "value is not allowed in this context",
+		// so "%YAML 1.2" over "%TAG !e! ..." -- the ordinary prelude -- could
+		// not be read at all.
+		//
+		// The next directive is what ends this one, not the next token of any
+		// kind: a comment written under a directive belongs to it, which is
+		// what the Test Suite's spec-example-6-13-reserved-directives is.
+		r.ended = true
+
+		return nil, false
+	}
+
 	if _, err := r.take(); err != nil {
 		r.err = err
 
 		return nil, false
 	}
+	r.tookDirective = isDirectiveToken(tk)
 
 	return tk, true
+}
+
+// isDirectiveToken reports whether tk is a directive, grouped with its values
+// or with its name alone.
+func isDirectiveToken(tk *tapeToken) bool {
+	switch tk.GroupType() {
+	case TokenGroupDirective, TokenGroupDirectiveName:
+		return true
+	default:
+		return false
+	}
 }
 
 // closeDocument finishes the document being read and returns the "..." that

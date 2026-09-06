@@ -383,15 +383,20 @@ func stageDirectives(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tap
 			d.comments = append(d.comments, tk)
 
 			return out
-		case tk.Type() != token.DocumentHeaderType:
+		case tk.Type() != token.DocumentHeaderType && tk.Type() != token.DirectiveType:
 			g.fail(yamlerrors.NewSyntax("unexpected directive value. document not started", d.head.RawToken()))
 
 			return out
 		}
 
+		// The directive ends here, on the '---' or on the '%' of the next one.
+		// §6.8 puts no limit on how many directives a document may carry, and a
+		// "%YAML" beside a "%TAG" is the ordinary prelude rather than an exotic
+		// shape; refusing the second one turned the commonest header YAML has
+		// into "unexpected directive value".
 		out = g.emitDirective(at, out)
-		// The '---' is not part of the directive, and is read as any other
-		// token would be.
+		// Neither the '---' nor the next '%' is part of the directive just
+		// emitted, and each is read below as it would be on its own.
 	}
 
 	if tk.Type() == token.DirectiveType {

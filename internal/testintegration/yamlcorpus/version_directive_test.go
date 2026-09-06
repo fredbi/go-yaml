@@ -5,6 +5,7 @@ package yamlcorpus_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/go-yaml/codec"
@@ -155,5 +156,80 @@ func equalAny(a, b any) bool {
 		return true
 	default:
 		return a == b
+	}
+}
+
+// TestFixedADocumentCarriesMoreThanOneDirective covers the commonest header
+// YAML has.
+//
+// §6.8 puts no limit on how many directives a document may carry, and a "%YAML"
+// beside a "%TAG" is the ordinary prelude. Every document with two was refused,
+// whatever the two were: "unexpected directive value. document not started".
+//
+// The grouping read the '%' of the second one as a value belonging to the
+// first, and the reader then handed both to one document body, which holds a
+// single node. So the fix is in two places -- a '%' on a new line ends the
+// directive it follows, and the next directive ends the document that carried
+// the previous one.
+func TestFixedADocumentCarriesMoreThanOneDirective(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{src: "%YAML 1.2\n%TAG !e! tag:example.com,2000:\n---\nk: 1\n", want: map[string]any{"k": uint64(1)}},
+		{src: "%TAG !e! tag:example.com,2000:\n%YAML 1.2\n---\nk: 1\n", want: map[string]any{"k": uint64(1)}},
+		{src: "%TAG !e! tag:a,2000:\n%TAG !f! tag:b,2000:\n---\nk: !e!x 1\n", want: map[string]any{"k": "1"}},
+		{src: "%YAML 1.2\n%FOO bar\n---\nk: 1\n", want: map[string]any{"k": uint64(1)}},
+
+		// The version still reaches the root scalar through two directives.
+		{src: "%YAML 1.1\n%TAG !e! tag:a,2000:\n---\nN\n", want: false},
+	} {
+		if v := reading(t, tc.src); !equalAny(v, tc.want) {
+			t.Errorf("%q reads %#v, want %#v", tc.src, v, tc.want)
+		}
+
+		f, err := parser.ParseBytes([]byte(tc.src))
+		if err != nil {
+			t.Errorf("%q: %v", tc.src, err)
+
+			continue
+		}
+		if got := f.String(); got != tc.src {
+			t.Errorf("%q renders as %q", tc.src, got)
+		}
+	}
+}
+
+// TestADirectiveIsStillDeclaredOnce holds the two rules the specification does
+// state about repeating one, both of which the parser could not reach while any
+// second directive was refused at the grouping.
+//
+// §6.8.1 for the version and §6.8.2.2 for the handle: "It is an error to
+// specify more than one '%TAG' directive for the same handle in the same
+// document."
+func TestADirectiveIsStillDeclaredOnce(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{src: "%YAML 1.2\n%YAML 1.1\n---\nk: 1\n", want: "YAML version has already been specified"},
+		{
+			src:  "%TAG !e! tag:a,2011:\n%TAG !e! tag:b,2011:\n---\na: 1\n",
+			want: "tag handle !e! has already been declared",
+		},
+	} {
+		_, err := parser.ParseBytes([]byte(tc.src))
+		if err == nil {
+			t.Errorf("%q is read, and the specification says it is an error", tc.src)
+
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q reports %v, want %q", tc.src, err, tc.want)
+		}
+	}
+
+	// A handle declared again in another document is a different document's
+	// handle: the scope of a directive is the document that follows it.
+	const twice = "%TAG !e! tag:a,2011:\n---\na: 1\n...\n%TAG !e! tag:b,2011:\n---\nb: 2\n"
+	if _, err := parser.ParseBytes([]byte(twice)); err != nil {
+		t.Errorf("%q: %v", twice, err)
 	}
 }

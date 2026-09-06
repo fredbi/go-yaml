@@ -103,7 +103,11 @@ func divergesOnPurpose(err error) (string, bool) {
 // acceptsOnPurpose reports whether a refusal the frozen parser makes is one the
 // shipped parser no longer makes.
 //
-// One rule so far, and it is the mirror of the first entry above. A collection
+// Two rules. A document may carry more than one directive: 6.8 puts no limit on
+// them, and a "%YAML" beside a "%TAG" is the commonest header YAML has.
+// refparser refuses the second one whatever it says.
+//
+// And, the mirror of the first entry above, a collection
 // tag reads the node under it whatever kind that node is: "!!seq 5" and
 // "!!str [1, 2]" are YAML 1.2, since the grammar puts no constraint on which
 // tag stands on which node, and grammar.NewRecognizer reads both. So they parse
@@ -124,6 +128,13 @@ func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 		return "", false
 	}
 
+	if strings.Contains(err.Error(), "unexpected directive value") && countDirectives(got) > 1 {
+		// 6.8 puts no limit on how many directives a document may carry, and a
+		// "%YAML" beside a "%TAG" is the ordinary prelude. refparser refuses
+		// the second one whatever it says.
+		return "a document may carry more than one directive (6.8)", true
+	}
+
 	switch msg := err.Error(); {
 	case strings.Contains(msg, "could not find map"),
 		strings.Contains(msg, "value is not allowed in this context"):
@@ -136,6 +147,18 @@ func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 	}
 
 	return "a collection tag reads the node under it, and the load refuses a kind it does not name", true
+}
+
+// countDirectives returns how many directives f carries.
+func countDirectives(f *ast.File) int {
+	var n int
+	for _, doc := range f.Docs {
+		if _, directive := doc.Body.(*ast.DirectiveNode); directive {
+			n++
+		}
+	}
+
+	return n
 }
 
 // holdsCollectionTag reports whether f carries a tag naming a kind.

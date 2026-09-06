@@ -172,14 +172,6 @@ type Departure struct {
 // not to see it.
 var Departures = []Departure{
 	{
-		Pattern:  "a version directive and a tag directive together",
-		Kind:     Verdict,
-		Observed: "a document carrying more than one directive is refused: unexpected directive value",
-		Because: "6.8: nothing limits a document to one directive, and a %YAML beside a %TAG is the ordinary " +
-			"prelude -- so this is not an exotic shape but the commonest one there is",
-		Corroborated: "libfyaml 1.0.0a8 reads it, and reads two %TAG handles together as well",
-	},
-	{
 		Pattern:  "two keys alike in text and different once resolved",
 		Kind:     Verdict,
 		Observed: `"1: x" and "\"1\": y" in one mapping are refused as a duplicate key`,

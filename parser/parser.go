@@ -2478,6 +2478,14 @@ func (p *Parser) parseDirective(ctx context, g *tokenGroup) (*ast.DirectiveNode,
 		if p.tagHandles == nil {
 			p.tagHandles = make(map[string]string)
 		}
+		if _, declared := p.tagHandles[tagKey.Value]; declared {
+			// §6.8.2.2: "It is an error to specify more than one '%TAG'
+			// directive for the same handle in the same document." The same
+			// rule the "%YAML" case above states for a version.
+			return nil, yamlerrors.NewSyntax(
+				fmt.Sprintf("tag handle %s has already been declared by a TAG directive", tagKey.Value),
+				g.At(1).RawToken())
+		}
 		p.tagHandles[tagKey.Value] = tagValue.Value
 		directive.Values = append(directive.Values, tagKey, tagValue)
 	default:
