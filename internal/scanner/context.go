@@ -17,22 +17,11 @@ import (
 
 // Context context at scanning.
 type Context struct {
-	idx             int32
-	size            int32
-	notSpaceCharPos int32
-	src             string
-	// raw is src's own bytes, for the word-at-a-time scans in [github.com/go-openapi/go-yaml/internal/swar].
+	// cursor is what reading one byte of the source costs, kept together and kept first.
 	//
-	// A string cannot be loaded eight bytes at a time without unsafe, and Init was handed the slice.
-	raw []byte
-	buf []byte
-	// originStart and originEnd bracket the current token's text in src.
-	//
-	// See [Context.origin].
-	originStart int32
-	originEnd   int32
-	// originCopy holds the text once a cut has taken bytes out of the middle of it, and originCut says it is in use.
-	originCopy []byte
+	// See [cursor] for which fields the per-character scan touches and why their order is what it is.
+	cursor
+
 	// pending holds the tokens read but not yet handed over, as values.
 	//
 	// One step of the scan reads one token, or the two of a key that only turns out to be a key once the ':' is read, and
@@ -74,7 +63,6 @@ type Context struct {
 	//
 	// The zero value is YAML 1.2; Scanner.SetSchema is what changes it, and Scanner carries it across an Init.
 	schema           token.Schema
-	originCut        bool
 	stopped          bool
 	hasLastTk        bool
 	hasLastContentTk bool
