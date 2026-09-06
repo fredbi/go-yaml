@@ -13,9 +13,13 @@ package yamlgen
 // this list the harness would go on not watching it.
 //
 // That is what every entry here had in common: an empty node standing where the
-// generator only ever puts a full one. Widening the generator to reach them
-// wants Pair.Key to become a Value, which is a larger change than pinning them
-// here.
+// generator only ever puts a full one.
+//
+// ✅ Pair.Key became a Value on 2026-09-08 and the generator reaches that class
+// now, so a document of this shape is a [Divergence] rather than a Strictness --
+// see parse/a-mapping-key-written-empty-is-refused, which the change opened on
+// its first deep run. What is left here is the narrower case: a valid document
+// this package cannot produce at all.
 type Strictness struct {
 	// Name is short and stable, so a count can be reported against it.
 	Name string

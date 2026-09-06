@@ -122,6 +122,26 @@ func (r *readings) under(v Value) (any, bool) {
 	return r.legacy(v), true
 }
 
+// legacyKey is [KeyText] under YAML 1.1.
+//
+// A key resolves before it is stringified, so a plain "yes:" is the key "true"
+// under 1.1 and the key "yes" under 1.2 -- the same divergence as a value, in
+// the one place where getting it wrong would put a wrong key in a stated
+// meaning rather than a wrong value.
+func (r *readings) legacyKey(v Value) string {
+	if n, ok := v.(Str); ok {
+		if b, diverges := legacyBooleans[n.V]; diverges && r.plain[n.V] && !r.split[n.V] {
+			if b {
+				return "true"
+			}
+
+			return "false"
+		}
+	}
+
+	return KeyText(v)
+}
+
 // legacy rebuilds the decoded value with the divergent plain scalars read as
 // YAML 1.1 reads them.
 //
@@ -145,7 +165,7 @@ func (r *readings) legacy(v Value) any {
 	case Map:
 		out := make(map[string]any, len(n.Pairs))
 		for _, p := range n.Pairs {
-			out[p.Key] = r.legacy(p.Val)
+			out[r.legacyKey(p.Key)] = r.legacy(p.Val)
 		}
 
 		return out

@@ -47,6 +47,25 @@ var reachShapes = []stance.Shape{
 		Src:  []byte("|+\n a\n\n\n"),
 	},
 	{
+		// Reaches l-keep-empty@block-out, the mirror of the one above: the same
+		// scalar as a mapping value rather than at the root.
+		//
+		// Entered by luck until 2026-09-08, when Pair.Key became a Value and
+		// the key draw shifted rapid's stream. No document changed for a reason
+		// that had anything to do with block scalars; the one that had been
+		// turning this corner simply stopped being drawn.
+		Name: "a block scalar that keeps its trailing breaks, as a mapping value",
+		Src:  []byte("k: |+\n a\n\n\n"),
+	},
+	{
+		// Reaches b-l-spaced@block-out. A folded scalar and not a literal one:
+		// b-l-spaced is the break between two *spaced* lines, and a line
+		// indented past the first is exactly what folding leaves alone. Lost
+		// the same day and the same way as the entry above.
+		Name: "a folded scalar with a more-indented line, as a mapping value",
+		Src:  []byte("k: >\n a\n  b\n"),
+	},
+	{
 		// Reaches ns-flow-map-explicit-entry@flow-in, and the next one reaches
 		// it at flow-key.
 		//

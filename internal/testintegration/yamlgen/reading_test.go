@@ -21,7 +21,7 @@ func plainStyle() yamlgen.Style {
 
 // TestAPlainLegacyBooleanGetsASecondReading is the case the field exists for.
 func TestAPlainLegacyBooleanGetsASecondReading(t *testing.T) {
-	v := yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: yamlgen.Str{V: "yes"}}}}
+	v := yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Str{V: "yes"}}}}
 
 	w := yamlgen.Write(v, plainStyle())
 
@@ -45,7 +45,7 @@ func TestAPlainLegacyBooleanGetsASecondReading(t *testing.T) {
 // The same Value under three styles: quoted twice and written as a block
 // scalar once, and none of the three resolves to anything but a string.
 func TestQuotingSettlesTheQuestion(t *testing.T) {
-	v := yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: yamlgen.Str{V: "yes"}}}}
+	v := yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Str{V: "yes"}}}}
 
 	for _, st := range []yamlgen.Style{
 		{Quoting: yamlgen.QuoteDouble, Indent: 1, NullSpelling: "null"},
@@ -63,7 +63,7 @@ func TestQuotingSettlesTheQuestion(t *testing.T) {
 // resolving.
 func TestATagSettlesTheQuestionToo(t *testing.T) {
 	v := yamlgen.Map{Pairs: []yamlgen.Pair{
-		{Key: "k", Val: yamlgen.Tagged{Tag: yamlgen.TagStr, V: yamlgen.Str{V: "yes"}}},
+		{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Tagged{Tag: yamlgen.TagStr, V: yamlgen.Str{V: "yes"}}},
 	}}
 
 	if w := yamlgen.Write(v, plainStyle()); len(w.Readings) != 0 {
@@ -86,8 +86,8 @@ func TestOneTextWrittenTwoWaysDropsTheReading(t *testing.T) {
 	st.FlowFrom = 2
 
 	v := yamlgen.Map{Pairs: []yamlgen.Pair{
-		{Key: "block", Val: yamlgen.Str{V: "yes"}},
-		{Key: "flow", Val: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: yamlgen.Str{V: "yes"}}}}},
+		{Key: yamlgen.Str{V: "block"}, Val: yamlgen.Str{V: "yes"}},
+		{Key: yamlgen.Str{V: "flow"}, Val: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Str{V: "yes"}}}}},
 	}}
 
 	w := yamlgen.Write(v, st)
@@ -135,7 +135,9 @@ func holdsLegacySpelling(v yamlgen.Value) bool {
 		return slices.ContainsFunc(n.Items, holdsLegacySpelling)
 	case yamlgen.Map:
 		for _, p := range n.Pairs {
-			if holdsLegacySpelling(p.Val) {
+			// Keys as well as values: a key is a node now, so a plain "yes:"
+			// is the key "true" under YAML 1.1.
+			if holdsLegacySpelling(p.Key) || holdsLegacySpelling(p.Val) {
 				return true
 			}
 		}

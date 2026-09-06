@@ -98,6 +98,10 @@ const (
 	FeatureValueSequence        stance.Feature = "value/sequence"
 	FeatureValueMapping         stance.Feature = "value/mapping"
 	FeatureValueEmptyCollection stance.Feature = "value/empty-collection"
+	// FeatureValueNonStringKey is a mapping key that is not a string: a null, a
+	// boolean or a number. A consumer reading into a string-keyed map selects
+	// on this.
+	FeatureValueNonStringKey stance.Feature = "value/non-string-key"
 )
 
 // Written is a document and what the emitter put in it.
@@ -221,6 +225,10 @@ func valueFeatures(v Value, into features) {
 		}
 
 		for _, p := range n.Pairs {
+			if _, text := p.Key.(Str); !text {
+				into.add(FeatureValueNonStringKey)
+			}
+
 			valueFeatures(p.Val, into)
 		}
 	case Anchored:

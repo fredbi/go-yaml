@@ -150,13 +150,13 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 	}{
 		{
 			name:  "block mapping",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Int{V: 1}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Int{V: 1}}}},
 			style: block,
 			want:  "a: 1\n",
 		},
 		{
 			name:  "nested block mapping",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "b", Val: yamlgen.Int{V: 2}}}}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "b"}, Val: yamlgen.Int{V: 2}}}}}}},
 			style: block,
 			want:  "a:\n  b: 2\n",
 		},
@@ -168,31 +168,31 @@ func TestEmitterAgreesOnKnownDocuments(t *testing.T) {
 		},
 		{
 			name:  "empty collections have no block spelling",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Seq{}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Seq{}}}},
 			style: block,
 			want:  "a: []\n",
 		},
 		{
 			name:  "flow mapping",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Seq{Items: []yamlgen.Value{yamlgen.Int{V: 1}}}}}},
 			style: flow,
 			want:  "{a: [1]}\n",
 		},
 		{
 			name:  "literal block scalar clips one trailing newline",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Str{V: "one\ntwo\n"}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Str{V: "one\ntwo\n"}}}},
 			style: literal,
 			want:  "a: |\n  one\n  two\n",
 		},
 		{
 			name:  "literal block scalar strips when there is none",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Str{V: "one\ntwo"}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Str{V: "one\ntwo"}}}},
 			style: literal,
 			want:  "a: |-\n  one\n  two\n",
 		},
 		{
 			name:  "literal block scalar keeps the extra ones",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Str{V: "one\n\n"}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Str{V: "one\n\n"}}}},
 			style: literal,
 			want:  "a: |+\n  one\n\n",
 		},
@@ -237,7 +237,7 @@ func commentCases() []struct {
 	both.Comments = yamlgen.AllComments
 
 	pair := func(k string, v yamlgen.Value) yamlgen.Value {
-		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: k, Val: v}}}
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: k}, Val: v}}}
 	}
 
 	return []struct {
@@ -260,7 +260,7 @@ func commentCases() []struct {
 		},
 		{
 			name:  "both, numbered in the order they are written",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "a", Val: yamlgen.Int{V: 1}}, {Key: "b", Val: yamlgen.Int{V: 2}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "a"}, Val: yamlgen.Int{V: 1}}, {Key: yamlgen.Str{V: "b"}, Val: yamlgen.Int{V: 2}}}},
 			style: both,
 			want:  "# c1\na: 1 # c2\n# c3\nb: 2 # c4\n",
 		},
@@ -313,22 +313,22 @@ func anchorCases() []struct {
 	}{
 		{
 			name:  "an anchored scalar keeps the anchor on its line",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: one}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: one}}},
 			style: block,
 			want:  "k: &a1 1\n",
 		},
 		{
 			name: "an alias refers back to it",
 			value: yamlgen.Map{Pairs: []yamlgen.Pair{
-				{Key: "a", Val: one},
-				{Key: "b", Val: yamlgen.Alias{Name: "a1", V: yamlgen.Int{V: 1}}},
+				{Key: yamlgen.Str{V: "a"}, Val: one},
+				{Key: yamlgen.Str{V: "b"}, Val: yamlgen.Alias{Name: "a1", V: yamlgen.Int{V: 1}}},
 			}},
 			style: block,
 			want:  "a: &a1 1\nb: *a1\n",
 		},
 		{
 			name:  "an anchored block collection takes the line above it",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: seq}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: seq}}},
 			style: block,
 			want:  "k: &a1\n  - 1\n",
 		},
@@ -340,7 +340,7 @@ func anchorCases() []struct {
 		},
 		{
 			name:  "an anchored block scalar keeps its header on the line",
-			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: yamlgen.Anchored{Name: "a1", V: yamlgen.Str{V: "x\n"}}}}},
+			value: yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Anchored{Name: "a1", V: yamlgen.Str{V: "x\n"}}}}},
 			style: literal,
 			want:  "k: &a1 |\n  x\n",
 		},
@@ -388,7 +388,7 @@ func blockScalarCases() []struct {
 	deep.Indent = 3
 
 	pair := func(v yamlgen.Value) yamlgen.Value {
-		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: v}}}
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: v}}}
 	}
 
 	return []struct {
@@ -455,7 +455,7 @@ func foldedCases() []struct {
 	stated.BlockIndicator = true
 
 	pair := func(v yamlgen.Value) yamlgen.Value {
-		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: "k", Val: v}}}
+		return yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: v}}}
 	}
 
 	return []struct {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 
 	"pgregory.net/rapid"
 )
@@ -79,9 +81,70 @@ type (
 
 // Pair is one mapping entry. Keys are strings because that is what decoding
 // into an `any` produces, whatever the document said.
+// Pair is one mapping entry.
 type Pair struct {
-	Key string
+	// Key is the node written before the colon.
+	//
+	// A Value rather than a string, because YAML lets any node be a key and
+	// this library reads several of them differently. "1:", "01:" and "0x1:"
+	// are one key, "null:", "~:" and a key left empty are another, and a
+	// quoted "\"1\":" is a third that collides with the first once resolved.
+	// None of that is reachable while a key is Go text.
+	Key Value
+	// Val is the node written after it.
 	Val Value
+}
+
+// KeyText is what this library makes of a key when it decodes a mapping into an
+// `any`.
+//
+// Measured, and the measurement is the whole reason this is a function rather
+// than a field. Decoding into an `any` always produces a map[string]any, and
+// the key is stringified **from the value the scalar resolves to** rather than
+// from the text that was written: ":", "~:", "Null:", "NULL:" and
+// "!!null null:" all arrive as "null", and "1:", "01:", "1.0:" and "0x1:" all
+// arrive as "1".
+//
+// That is what makes a key presentation-invariant, and it is why the generator
+// can draw a key of any scalar kind and still state what the document means.
+// It also means two keys can collide after resolution while looking nothing
+// alike -- Int{1} and Str{"1"} are both "1" -- which the library refuses as a
+// duplicate and [yamlcorpus.Departures] records as wrong. drawMap keeps out of
+// that; breakRules produces it on purpose.
+func KeyText(v Value) string {
+	switch n := v.(type) {
+	case Null:
+		return "null"
+	case Bool:
+		if n.V {
+			return "true"
+		}
+
+		return "false"
+	case Int:
+		return strconv.Itoa(n.V)
+	case Float:
+		// Go's own formatting of a float64, which is what the decoder ends up
+		// applying: 1.0 is "1", a million is "1e+06". Deliberately not the
+		// emitter's spelling, which avoids exponent form because this library
+		// reads "1e3" as a string -- writing the key and naming the key are
+		// two different jobs.
+		return strconv.FormatFloat(n.V, 'g', -1, 64)
+	case Str:
+		return n.V
+	case Anchored:
+		return KeyText(n.V)
+	case Alias:
+		return KeyText(n.V)
+	case Tagged:
+		return KeyText(n.V)
+	default:
+		// A collection used as a key. The library renders it with Go's %v and
+		// codec.ToJSON writes something else again, which is a recorded
+		// divergence rather than a meaning -- so the generator does not draw
+		// one and nothing here has to name it.
+		return fmt.Sprintf("%v", v.Decoded())
+	}
 }
 
 func (Null) Decoded() any   { return nil }
@@ -146,7 +209,7 @@ func (a Alias) Decoded() any { return a.V.Decoded() }
 func (m Map) Decoded() any {
 	out := make(map[string]any, len(m.Pairs))
 	for _, p := range m.Pairs {
-		out[p.Key] = p.Val.Decoded()
+		out[KeyText(p.Key)] = p.Val.Decoded()
 	}
 
 	return out
@@ -402,22 +465,102 @@ func drawSeq(t *rapid.T, depth int) Value {
 func drawMap(t *rapid.T, depth int) Value {
 	n := rapid.IntRange(0, 4).Draw(t, "pairs")
 
-	// Distinct keys: a document with a duplicate key is a different question
-	// than the one this generator asks.
+	// Distinct once resolved, not distinct as written. Int{1} and Str{"1"} are
+	// two different nodes and one key: this library refuses such a document as
+	// a duplicate, and whether it is right to is a question breakRules asks on
+	// purpose rather than one every drawn document should stumble into.
 	seen := make(map[string]struct{}, n)
 	pairs := make([]Pair, 0, n)
+
 	for range n {
-		key := Strings().Draw(t, "key")
-		if _, dup := seen[key]; dup {
+		key := Keys().Draw(t, "key")
+
+		text := keyFamily(key)
+		if _, dup := seen[text]; dup {
 			continue
 		}
-		seen[key] = struct{}{}
+
+		seen[text] = struct{}{}
 		pairs = append(pairs, Pair{Key: key, Val: values(depth+1).Draw(t, "value")})
 	}
 
-	sort.Slice(pairs, func(i, j int) bool { return pairs[i].Key < pairs[j].Key })
+	sort.Slice(pairs, func(i, j int) bool { return keyFamily(pairs[i].Key) < keyFamily(pairs[j].Key) })
 
 	return Map{Pairs: pairs}
+}
+
+// keyFamily is [KeyText] widened to the spellings this library treats as one
+// key, which is coarser than resolution and deliberately so.
+//
+// Str{"NULL"} resolves to the three letters and Null{} resolves to nothing, so
+// they are two keys and KeyText says so. This library refuses the document
+// anyway -- "mapping key \"NULL\" already defined" -- because it compares keys
+// by the text that was written and NullSpelling may well have written the same
+// letters. That is the departure yamlcorpus records as "two keys alike in text
+// and different once resolved", and drawing a document that trips it would mean
+// every such draw failing on a defect the corpus already states. breakRules
+// produces the collision on purpose instead.
+//
+// Int{1} and Str{"1"} need no widening: KeyText already calls both "1".
+func keyFamily(v Value) string {
+	s, text := v.(Str)
+	if !text {
+		return KeyText(v)
+	}
+
+	if s.V == "~" {
+		return "null"
+	}
+
+	if _, resolves := resolving[s.V]; resolves {
+		return strings.ToLower(s.V)
+	}
+
+	// A string that spells a number belongs with the number: "1.0" and
+	// Float{1} are one key to this library, whichever of them was written
+	// first. ParseFloat is generous -- it takes "Inf" and "1e3", which YAML
+	// spells differently -- and being generous here only makes the dedupe
+	// coarser, which costs a draw and never a wrong document.
+	if f, err := strconv.ParseFloat(s.V, 64); err == nil {
+		return KeyText(Float{V: f})
+	}
+
+	return s.V
+}
+
+// Keys generates a mapping key, weighted heavily towards strings.
+//
+// Weighted, because a corpus of mappings keyed by floats would look nothing
+// like the documents this library reads and would spend its draws away from
+// where the defects are. One key in six is a non-string, which is enough to
+// reach the class in most documents that have more than a pair or two.
+//
+// Scalars only. A sequence or a mapping used as a key is a document YAML
+// admits, and what this library makes of one is a recorded divergence rather
+// than a settled value -- see [KeyText] -- so drawing one would mean generating
+// documents whose meaning the corpus cannot state.
+func Keys() *rapid.Generator[Value] {
+	return rapid.Custom(func(t *rapid.T) Value {
+		// Five draws in six are strings. The weighting is measured, not
+		// guessed: an even spread over the five kinds put two thirds of all
+		// keys on a non-string, which cost the corpus a grammar bucket and six
+		// matched ones -- awkwardStrings is what reaches the corners, and a
+		// key drawn as a float reaches none of them.
+		if rapid.IntRange(0, 5).Draw(t, "keykind") > 0 {
+			return Str{V: Strings().Draw(t, "key")}
+		}
+
+		switch rapid.IntRange(0, 3).Draw(t, "scalar") {
+		case 0:
+			return Null{}
+		case 1:
+			return Bool{V: rapid.Bool().Draw(t, "bool")}
+		case 2:
+			return Int{V: rapid.IntRange(-1000, 1000).Draw(t, "int")}
+		default:
+			return Float{V: rapid.Float64Range(-1000, 1000).Draw(t, "float")}
+		}
+	})
 }
 
 // Strings generates a string, weighted toward the ones that are awkward to

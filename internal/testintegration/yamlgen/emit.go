@@ -93,6 +93,9 @@ type emitter struct {
 	collectionTagAnchors int
 	emptyTagAnchors      int
 	taggedAnchorNames    []string
+	// emptyKeyTagAnchors counts the nodes written with a tag ahead of an
+	// anchor whose first mapping key is written empty.
+	emptyKeyTagAnchors int
 }
 
 // comment returns the next comment body. Comments are numbered rather than
@@ -199,6 +202,20 @@ func (e *emitter) propText(p props) string {
 	}
 
 	return p.text(e.st)
+}
+
+// opensOnAnEmptyKey reports whether v is a block mapping whose first entry
+// writes no key at all, which happens when the key is null and the style spells
+// null as nothing.
+func (e *emitter) opensOnAnEmptyKey(v Value) bool {
+	m, ok := v.(Map)
+	if !ok || len(m.Pairs) == 0 || e.st.NullSpelling != "" {
+		return false
+	}
+
+	_, empty := m.Pairs[0].Key.(Null)
+
+	return empty
 }
 
 // countEmptyTagAnchor records a tag written ahead of an anchor on a node with
@@ -318,6 +335,11 @@ func (e *emitter) block(v Value, indent, depth int) {
 		// belongs to its first entry, so the properties take a line of their
 		// own.
 		e.pad(indent)
+
+		if p.anchor != "" && p.tag != "" && e.st.PropertyOrder == TagFirst && e.opensOnAnEmptyKey(node) {
+			e.emptyKeyTagAnchors++
+		}
+
 		e.buf.WriteString(e.propText(p))
 
 		if s, ok := node.(Str); ok && e.blockScalar(s.V) {
@@ -563,8 +585,29 @@ func (e *emitter) flowMap(n Map) string {
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
 
-func (e *emitter) keyIn(k string, flow bool) string {
-	return e.scalarString(k, flow, false)
+// keyIn writes a mapping key.
+//
+// A key is a node, so it is written the way the same node would be written as a
+// value -- which is what keeps "1:" and "\"1\":" apart, and what makes
+// canPlain's refusal of every numeric spelling load-bearing rather than merely
+// conservative: Str{"1"} has to reach the document quoted or it resolves to the
+// integer and becomes a different key.
+func (e *emitter) keyIn(k Value, flow bool) string {
+	s, ok := k.(Str)
+	if !ok {
+		// Null, Bool, Int and Float, whose spelling has no choices beyond the
+		// ones Style names. A Null key under the empty spelling writes nothing
+		// at all, which is the ": a" shape.
+		return e.simpleScalar(k, flow)
+	}
+
+	// Deliberately not inline(): a key is written on the line that introduces
+	// the entry, so it can never be a block scalar however Style.Literal is
+	// set.
+	out := e.scalarString(s.V, flow, false)
+	e.reads.sawScalar(s.V, out == s.V)
+
+	return out
 }
 
 // simpleScalar writes the scalars whose spelling has no interesting choices

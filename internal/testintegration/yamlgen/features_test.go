@@ -345,7 +345,7 @@ func scalarFree(v yamlgen.Value, chars string) bool {
 		}
 	case yamlgen.Map:
 		for _, p := range n.Pairs {
-			if strings.ContainsAny(p.Key, chars) || !scalarFree(p.Val, chars) {
+			if !scalarFree(p.Key, chars) || !scalarFree(p.Val, chars) {
 				return false
 			}
 		}
