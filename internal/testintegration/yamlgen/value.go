@@ -107,6 +107,14 @@ type Pair struct {
 //
 // That is what makes a key presentation-invariant, and it is why the generator
 // can draw a key of any scalar kind and still state what the document means.
+//
+// ⚠️ This whole function moves when the decoder is fixed. Stringifying a key
+// belongs in codec.ToJSON, where a JSON member name has to be a string; the
+// decoder should keep the key's type the way go.yaml.in/yaml/v3 does, and
+// codec.UseStringKeys should be what turns stringification on. When that
+// lands, Map.Decoded returns a map[any]any keyed by the values themselves and
+// KeyText becomes the answer for the ToJSON and UseStringKeys paths alone. See
+// yamlcorpus.Departures, "a key that is a boolean" and "a key that is null".
 // It also means two keys can collide after resolution while looking nothing
 // alike -- Int{1} and Str{"1"} are both "1" -- which the library refuses as a
 // duplicate and [yamlcorpus.Departures] records as wrong. drawMap keeps out of

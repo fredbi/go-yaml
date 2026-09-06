@@ -49,6 +49,16 @@ const (
 	// Its own tag because a float key is a key like any other everywhere else,
 	// and this is the one shape where naming the key loses which type it was.
 	TagKeyIntegralFloat stance.Tag = "key/integral-float"
+	// TagKeyNotAString is a mapping key that resolves to something other than
+	// a string: a number, a boolean, a null.
+	//
+	// The question is what a decoder hands back for one. Keeping the type is a
+	// position -- go.yaml.in/yaml/v3 reads "1.0: a" as map[any]any keyed by
+	// float64(1) -- and stringifying it is another, which is what JSON needs
+	// and what codec.ToJSON has to do. A library may reasonably offer both;
+	// what it cannot do is offer an option for one and give the other either
+	// way.
+	TagKeyNotAString stance.Tag = "key/not-a-string"
 )
 
 // KeyRules is what the specification settles about them.
@@ -91,6 +101,7 @@ func KeyVocabulary() stance.Vocabulary {
 		// Naming a key happens when the representation becomes a native value,
 		// so which text a float ends up under is a construction question.
 		TagKeyIntegralFloat: stance.Construct,
+		TagKeyNotAString:    stance.Construct,
 	}
 }
 
@@ -101,6 +112,16 @@ func KeyShapes() []stance.Shape {
 			Name:   "the same key twice",
 			Src:    []byte("a: 1\na: 2\n"),
 			Intent: []stance.Tag{TagDuplicateKey},
+		},
+		{
+			Name:   "a key that is a boolean",
+			Src:    []byte("true: a\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
+		},
+		{
+			Name:   "a key that is null",
+			Src:    []byte("~: a\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
 		},
 		{
 			Name:   "a key that is a float with a whole value",
