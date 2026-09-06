@@ -501,15 +501,8 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	column := s.column - int32(utf8.RuneCount(ctx.buf))
 	level := s.indentLevel
 	if ctx.isMultiLine() {
-		line -= newLineCount(ctx.buf)
-		// The column counts, in characters, where the value starts inside the original text.
-		// Folding rewrites a value so that it is no longer a slice of that text, and then the column stays 0.
-		// The caller below reads 0 as "no content".
-		column = 0
-		if at := strings.Index(ctx.origin(), nocopy.String(ctx.buf)); at >= 0 {
-			column = int32(utf8.RuneCountInString(ctx.origin()[:at])) + 1
-		}
-		// Since we are in a literal, folded or raw folded we can use the indent level from the last token.
+		line, column = s.multiLinePosition(ctx)
+		// Inside a literal, folded or raw folded scalar the indent level comes from the last token.
 		if ctx.lastToken() != nil { // The last token should never be nil here.
 			level = s.lastIndentLevel + 1
 		}
@@ -526,6 +519,32 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	return ctx.bufferedToken(token.At(
 		line, column, ctx.idx-int32(len(ctx.buf)), s.indentNum,
 	), endLine)
+}
+
+// multiLinePosition returns the line and column of a block scalar's content token.
+//
+// The block recorded where its content began when it read the first byte of it, and that is what the token carries.
+// emitMultiLine, which ends a block scalar at the end of the source, has always read the position from there.
+//
+// This serves the other path, where a dedent ends the block. Working the position out again gets it wrong for a folded
+// scalar: the buffer holds fewer breaks than the source, so counting them back from the cursor comes up short, and the
+// folded value is no longer a substring of the origin, so searching for it fails and leaves the column at 0. Twelve
+// cases of the YAML Test Suite reported a content token at column 0 until this read the recorded start instead.
+func (s *Scanner) multiLinePosition(ctx *Context) (int32, int32) {
+	if state := ctx.getMultiLineState(); state != nil && state.hasStart {
+		return state.start.Line, state.start.Column
+	}
+
+	// The block read no content, so it recorded no start. The column counts, in characters, where the value begins
+	// inside the original text, and stays 0 when the value stands nowhere in it.
+	line := s.line - newLineCount(ctx.buf)
+
+	var column int32
+	if at := strings.Index(ctx.origin(), nocopy.String(ctx.buf)); at >= 0 {
+		column = int32(utf8.RuneCountInString(ctx.origin()[:at])) + 1
+	}
+
+	return line, column
 }
 
 // checkByteOrderMark reports whether the mark at the cursor stands where YAML 1.2 admits one.
