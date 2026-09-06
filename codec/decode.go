@@ -70,8 +70,11 @@ type Decoder struct {
 	// rather than by building a tree and walking that. src is kept beside it so
 	// that a later Decode wanting something the walk cannot serve can still
 	// build the tree. See canWalk.
-	walked      []any
-	walkedOK    bool
+	walked   []any
+	walkedOK bool
+	// strs holds the text of every string a decode hands back, copied out of
+	// the document so that the values outlive it.
+	strs        arena
 	src         []byte
 	parsedFile  *ast.File
 	streamIndex int
@@ -215,7 +218,7 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 		return "", err
 	}
 
-	return mapKeyString(node, key), nil
+	return d.strs.clone(mapKeyString(node, key)), nil
 }
 
 // mapKeyString is the text a decoded mapping key is addressed by.
@@ -484,7 +487,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 	case *ast.NullNode:
 		return nil, nil
 	case *ast.StringNode:
-		return n.GetValue(), nil
+		return d.strs.value(n.Value), nil
 	case *ast.IntegerNode:
 		return n.GetValue(), nil
 	case *ast.FloatNode:
@@ -515,7 +518,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if res.Lax {
 				// parser.WithLaxTags: the characters the scalar was written
 				// with stand in for the value the tag could not make of them.
-				return res.Text, nil
+				return d.strs.value(res.Text), nil
 			}
 
 			return nil, yamlerrors.NewSyntax(
@@ -575,7 +578,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		}
 		return nil, yamlerrors.NewUnknownAnchor(text, n.Value.GetToken())
 	case *ast.LiteralNode:
-		return n.Value.GetValue(), nil
+		return d.strs.value(n.Value.Value), nil
 	case *ast.MappingKeyNode:
 		return d.nodeToValue(ctx, n.Value)
 	case *ast.MappingValueNode:
@@ -1468,11 +1471,12 @@ func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resol
 		// "!!str 0x10" is "0x10" and not "16", and "!!str False" keeps its
 		// capital F. An anchor over that scalar names the same string, so
 		// its recorded value is replaced too.
+		text := d.strs.clone(res.Text)
 		if anchor, anchored := n.Value.(*ast.AnchorNode); anchored {
-			d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(res.Text)
+			d.anchorValueMap[anchor.Name.GetToken().Value] = reflect.ValueOf(text)
 		}
 
-		return res.Text, nil
+		return text, nil
 	default:
 		// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The
 		// node is read as it stands.
@@ -2102,7 +2106,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 				// takes apart again.
 				return yamlerrors.NewUnhashableKey(reflect.TypeOf(keyValue), key.GetToken())
 			}
-			k = reflect.ValueOf(mapKeyString(key, keyValue)).Convert(decodeKeyAs)
+			k = reflect.ValueOf(d.strs.clone(mapKeyString(key, keyValue))).Convert(decodeKeyAs)
 		default:
 			keyVal, err := d.createDecodedNewValue(ctx, decodeKeyAs, reflect.Value{}, key)
 			if err != nil {

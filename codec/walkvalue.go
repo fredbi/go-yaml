@@ -33,6 +33,9 @@ type valueBuilder struct {
 	// named holds what each anchor of the document named, for an alias to name
 	// again. It is emptied at each document, since an anchor belongs to one.
 	named map[string]any
+	// strs holds the text of every string this builds, copied out of the
+	// document so that the values outlive it.
+	strs arena
 	// open holds the anchors whose node is being read, innermost last. An alias
 	// naming one of them stands inside what it names.
 	open []string
@@ -111,7 +114,7 @@ func (b *valueBuilder) Enter(node ast.Node, at parser.Step) bool {
 	case *ast.CommentGroupNode:
 		return false
 	default:
-		v, err := scalarValue(node)
+		v, err := b.scalarValue(node)
 		if err != nil {
 			b.fail(err)
 
@@ -171,7 +174,7 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 		// here, as jsonWriter.closeTag does. An anchor between a tag and its
 		// scalar is the same shape. A property standing on nothing reads as the
 		// empty node.
-		v, err := propertyValue(frame.node)
+		v, err := b.propertyValue(frame.node)
 		if err != nil {
 			return nil, err
 		}
@@ -192,7 +195,7 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 
 		return value, nil
 	case *ast.TagNode:
-		tagged, err := taggedWalkValue(n, value)
+		tagged, err := b.taggedWalkValue(n, value)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +218,7 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 
 // propertyValue reads the node a property stands on, for the scalars the parse
 // builds without handing over.
-func propertyValue(n ast.Node) (any, error) {
+func (b *valueBuilder) propertyValue(n ast.Node) (any, error) {
 	var inner ast.Node
 	switch t := n.(type) {
 	case *ast.AnchorNode:
@@ -232,7 +235,7 @@ func propertyValue(n ast.Node) (any, error) {
 		return nil, nil
 	}
 
-	return scalarValue(inner)
+	return b.scalarValue(inner)
 }
 
 // aliasValue is what an alias names, which the anchor recorded as it closed.
@@ -271,7 +274,7 @@ func (b *valueBuilder) deliver(v any, node ast.Node, at parser.Step) {
 				// Named from the node and not from the value, so that the type
 				// spells it: mapKeyString writes an integer in decimal and a
 				// float with the point that tells it from one.
-				top.key, top.hasKey = mapKeyString(node, v), true
+				top.key, top.hasKey = b.strs.clone(mapKeyString(node, v)), true
 
 				return
 			}
@@ -330,8 +333,8 @@ func (b *valueBuilder) fail(err error) {
 	}
 }
 
-// scalarValue is what a scalar node denotes.
-func scalarValue(n ast.Node) (any, error) {
+// scalarValue reads the Go value a scalar node denotes.
+func (b *valueBuilder) scalarValue(n ast.Node) (any, error) {
 	switch t := n.(type) {
 	case *ast.NullNode:
 		return nil, nil
@@ -340,7 +343,9 @@ func scalarValue(n ast.Node) (any, error) {
 			return "", nil
 		}
 
-		return t.Value.Value, nil
+		return b.strs.value(t.Value.Value), nil
+	case *ast.StringNode:
+		return b.strs.value(t.Value), nil
 	case ast.ScalarNode:
 		return t.GetValue(), nil
 	default:
@@ -348,8 +353,8 @@ func scalarValue(n ast.Node) (any, error) {
 	}
 }
 
-// taggedWalkValue is what a tag makes of the value its node built.
-func taggedWalkValue(n *ast.TagNode, value any) (any, error) {
+// taggedWalkValue applies a tag to the value its node built.
+func (b *valueBuilder) taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 	res := n.Resolve()
 
 	switch res.Verdict {
@@ -360,7 +365,7 @@ func taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 			fmt.Sprintf("%s names a kind this node is not", res.Tag), n.GetToken())
 	case ast.TagValueMismatch:
 		if res.Lax {
-			return res.Text, nil
+			return b.strs.value(res.Text), nil
 		}
 
 		return nil, yamlerrors.NewSyntax(
@@ -377,7 +382,7 @@ func taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 	// which JSON has a spelling for.
 	switch res.Tag {
 	case token.StringTag:
-		return res.Text, nil
+		return b.strs.value(res.Text), nil
 	case token.NullTag:
 		return nil, nil
 	case token.IntegerTag:

@@ -66,16 +66,26 @@ func TestReferenceStreamBuildsATree(t *testing.T) {
 	}
 }
 
-func TestWalkMatchesTheStream(t *testing.T) {
-	var srcs []struct{ name, text string }
+// corpusSource is one document of the corpus the codec is swept over.
+type corpusSource struct{ name, text string }
+
+// corpusSources returns the YAML test suite and the fuzz seeds together.
+func corpusSources() []corpusSource {
+	var srcs []corpusSource
 	suites, _ := yamltestsuite.TestSuites()
 	for _, s := range suites {
-		srcs = append(srcs, struct{ name, text string }{"suite/" + s.Name, string(s.InYAML)})
+		srcs = append(srcs, corpusSource{"suite/" + s.Name, string(s.InYAML)})
 	}
 	seeds, _ := fuzzseeds.All()
 	for i, s := range seeds {
-		srcs = append(srcs, struct{ name, text string }{fmt.Sprintf("seed/%04d", i), s})
+		srcs = append(srcs, corpusSource{fmt.Sprintf("seed/%04d", i), s})
 	}
+
+	return srcs
+}
+
+func TestWalkMatchesTheStream(t *testing.T) {
+	srcs := corpusSources()
 
 	var same, differ, bothErr, oneErr, skipped int
 	for _, src := range srcs {
