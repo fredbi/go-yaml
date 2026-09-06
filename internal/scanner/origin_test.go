@@ -18,14 +18,16 @@ import (
 // TestOriginsTileTheSource checks that the tokens' extents follow one another with nothing between, so that
 // src[previous end:this end] is the text the document wrote each token as, indentation and all.
 //
-// That span is the verbatim image of the document: it is what writes a file back with its comments, its blank lines and
+// That span is the verbatim image of the document, and it writes a file back with its comments, its blank lines and
 // the spelling the author chose.
 //
-// Only a scanner that records everything it consumes can offer it, and one did not -- the escapes naming a code point,
+// Only a scanner that records everything it consumes can offer it, and this one did not: the escapes naming a code
+// point,
 // \xXX, \uXXXX and \UXXXXXXXX, set how far to skip and appended the decoded rune to the value without counting the
 // marker or its digits, so the extents fell behind by the length of every escape in the document.
 //
-// The ends have to reach the end of the source, less the final line break, which closes the stream rather than opening
+// The ends have to reach the end of the source, less the final line break, which closes the stream instead of
+// opening
 // a token.
 func TestOriginsTileTheSource(t *testing.T) {
 	for tc := range originTileCases(t) {

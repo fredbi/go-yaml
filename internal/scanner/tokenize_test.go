@@ -197,9 +197,9 @@ type tokenizeTestCase struct {
 	Tokens []wantToken
 }
 
-// wantToken is what a scan should give back: a token's type and value, and the text the document wrote it as.
+// wantToken describes the token a scan should return: its type, its value, and the text the document wrote it as.
 //
-// Origin is not a field of [token.Token] -- carrying the text would cost every token two registers -- so it is read
+// Origin is not a field of [token.Token], carrying the text costing every token two registers, so it is read
 // back from the source with the token's extent.
 // See originsOf.
 type wantToken struct {

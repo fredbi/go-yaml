@@ -65,7 +65,7 @@ func ComparePositionLedgers(t *testing.T, measured, known PositionLedger) {
 	for name, want := range known {
 		_, still := measured[name]
 		assert.Truef(t, still,
-			"%s: no longer shows %s -- if that is a fix, delete the ledger entry",
+			"%s: no longer shows %s. If that is a fix, delete the ledger entry",
 			name, want,
 		)
 	}

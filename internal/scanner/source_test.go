@@ -14,8 +14,8 @@ import (
 // TestSourceLengthBound holds maxSourceLen at its edge.
 //
 // The refusal itself is out of a test's reach: it takes a source of two gigabytes. That is why the bound is a
-// predicate of its own rather than a comparison written inline in validateSource -- an off-by-one is how this check
-// fails, and the predicate can be read at any size.
+// predicate of its own, and not a comparison written inline in validateSource.
+// An off-by-one is how this check fails, and a predicate can be read at any size.
 //
 // A column stands one past the last byte of its line, so a source of exactly math.MaxInt32 bytes would put a column at
 // math.MaxInt32+1 and wrap it. maxSourceLen leaves room for that byte.
@@ -29,7 +29,7 @@ func TestSourceLengthBound(t *testing.T) {
 }
 
 // TestValidateSourceReadsAnOrdinarySource checks that the length gate hands an ordinary document on to the printable
-// check rather than standing in front of it.
+// check instead of standing in front of it.
 func TestValidateSourceReadsAnOrdinarySource(t *testing.T) {
 	require.NoError(t, validateSource("a: 1\nb: [c, d]\n"))
 	assert.ErrorContains(t, validateSource("a: \x00\n"), "a YAML stream may not hold")

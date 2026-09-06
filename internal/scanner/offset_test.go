@@ -23,8 +23,8 @@ func sourceText(origin string) string {
 
 // at returns the source from offset onwards.
 //
-// Token.Position.Offset() is a 0-based byte index into the source as it was handed in, byte order marks included: the
-// scanner steps over a mark rather than deleting it.
+// Token.Position.Offset() is a 0-based byte index into the source as it was handed in, byte order marks included.
+// The scanner steps over a mark and does not delete it.
 // This is the one place the test encodes what an Offset means.
 func at(src string, offset int) string {
 	if offset < 0 || offset > len(src) {
@@ -46,23 +46,23 @@ func at(src string, offset int) string {
 // Twenty-one of the twenty-five types now miss nothing at all.
 //
 // What is left is 18 of 3,489, and none of it is the counter drifting.
-// 13 are Invalid, the tokens an error carries, built from the whole origin buffer rather than from one token's worth of
+// 13 are Invalid, the tokens an error carries, built from the whole origin buffer and not from one token's worth of
 // it.
-// 5 are multi-line String values -- block scalar content.
+// 5 are multi-line String values, which is block scalar content.
 //
 // It was 25 while this read the source through Scan, which returns a refusal as an error where NextToken hands over the
 // token the refusal names.
 // The stream the parser reads is the one measured here.
 //
 // It was 33 before that, while the comparison ran against Token.Origin.
-// That field held the scanner's buffer, which is not always the document: Context.removeRightSpaceFromBuf trims the
-// spaces a line ends with from the origin as well as from the value, so "a: one \n two" -- a plain scalar continued
-// over two lines, the first ending in a space -- had an Origin of "a: one\n two", which the document does not contain.
+// That field held the scanner's buffer, which is not always the document.
+// Context.removeRightSpaceFromBuf trims the spaces a line ends with from the origin as well as from the value, so
+// "a: one \n two", a plain scalar continued over two lines with the first ending in a space, had an Origin of
+// "a: one\n two". The document contains no such text.
 //
 // Reading the text back from the extents compares against the document itself.
 //
-// Line and Column were right throughout, which is what made the drift hard to see: 3,287 of 3,489 columns address their
-// token.
+// Line and Column were right throughout, which hid the drift: 3,287 of 3,489 columns address their token.
 //
 // The ledger is a ratchet in both directions.
 // A type that starts missing more fails as a regression; one that starts missing fewer fails too, and the fix is
@@ -117,7 +117,7 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 			assert.Zerof(t, got, "%s: %d tokens gained an offset that misses their text", name, got)
 		case got == 0:
 			assert.Failf(t, "ledger entry is stale",
-				"%s: no longer misses %d offsets -- if that is a fix, delete the entry", name, want)
+				"%s: no longer misses %d offsets. If that is a fix, delete the entry", name, want)
 		default:
 			assert.Equalf(t, want, got, "%s: offset misses changed", name)
 		}
@@ -127,7 +127,7 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 // originsOf reads back the text the document wrote each token as.
 //
 // [token.Token] does not carry it.
-// The tokens' extents tile the source -- TestOriginsTileTheSource is where that is checked -- so the text of the token
+// The tokens' extents tile the source, which TestOriginsTileTheSource checks, so the text of the token
 // at i is the source between the end of the one before it and its own end, leading whitespace included.
 func originsOf(src string, tokens []token.Token) []string {
 	origins := make([]string, len(tokens))

@@ -22,7 +22,7 @@ const bom = "\ufeff"
 // suffix, and before an explicit document.
 //
 // Every verdict below was taken from the recognizer compiled from yaml-spec-1.2.json, in
-// internal/testintegration/grammar, rather than read off the specification by hand.
+// internal/testintegration/grammar, and not read off the specification by hand.
 // The two that the ledgers named are the first pair: "a: <mark>b" was read and is now refused, and "a: 1 / ... /
 // <mark>--- / b: 2" was refused and is now read.
 func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
@@ -77,7 +77,7 @@ func TestByteOrderMarkStandsOnlyInADocumentPrefix(t *testing.T) {
 }
 
 // TestByteOrderMarkIsDroppedRatherThanRead checks that a mark a document prefix may carry leaves no trace in the
-// tokens, which is what a file saved by an editor that writes one needs.
+// tokens, so a file saved by an editor that writes a mark still reads.
 func TestByteOrderMarkIsDroppedRatherThanRead(t *testing.T) {
 	plain := scanAll(t, "a: 1\n...\n---\nb: 2\n")
 	marked := scanAll(t, "a: 1\n...\n"+bom+"---\nb: 2\n")

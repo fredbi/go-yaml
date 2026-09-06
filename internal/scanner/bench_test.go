@@ -14,7 +14,7 @@ import (
 // ===================================== Scanner benchmarks =====================================.
 
 // The benchmarks below are the regression baseline for the scanner.
-// They measure this library only -- comparisons against other libraries live in the benchmarks and analysis modules,
+// They measure this library only. Comparisons against other libraries live in the benchmarks and analysis modules,
 // which take the dependencies for it.
 //
 // To compare two revisions:
@@ -25,17 +25,17 @@ import (
 // 	benchstat old.txt new.txt
 //
 // Read ns/token before sec/op.
-// A change that speeds up the scan and a change that emits fewer tokens both move sec/op, and only the first is what
-// these are watching; ns/token separates them.
+// A change that speeds up the scan and a change that emits fewer tokens both move sec/op, and these watch only the
+// first. ns/token separates the two.
 //
-// B/op and allocs/op matter as much as either, because the token stream is where most of the object graph is born and
-// GC costs more than the parse does today.
+// B/op and allocs/op matter as much as either: the token stream builds most of the object graph, and GC costs more
+// than the parse does today.
 
 // BenchmarkScannerNextToken is the scanner's own baseline: NextToken and nothing kept.
 //
-// It is the call the parser makes -- reader.fill pulls one token at a time -- and the one whose cost multiplies by the
-// token count, so it is the number to move.
-// Nothing is stored, so what it reports is the scan rather than the growth of a slice to put the result in.
+// It is the call the parser makes, reader.fill pulling one token at a time, and its cost multiplies by the token
+// count, so it is the number to move.
+// Nothing is stored, so it reports the scan and not the growth of a slice to hold the result.
 func BenchmarkScannerNextToken(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
 		var tokens int64
@@ -78,7 +78,7 @@ func BenchmarkScannerTokens(b *testing.B) {
 
 // BenchmarkScanInit measures Init alone, which settles the source and resets the state without reading a token.
 //
-// It is the floor the others are measured against.
+// It is the floor. The others are measured against it.
 func BenchmarkScanInit(b *testing.B) {
 	corpus.ForEachScanDocument(b, func(b *testing.B, src []byte) {
 		for b.Loop() {
@@ -88,12 +88,12 @@ func BenchmarkScanInit(b *testing.B) {
 	})
 }
 
-// BenchmarkScannerWorkloads reads the documents in the analysis workloads, which are what people write rather than what
-// a generator produces.
+// BenchmarkScannerWorkloads reads the documents in the analysis workloads, which people wrote and a generator did
+// not.
 //
 // The corpus shapes are shallow: every one but deepindent opens its lines with three spaces or fewer, where these
-// average 14.5 and golang_source 21.9. A change that pays on a long run is worth what this says it is worth, not what
-// the shapes say.
+// average 14.5 and golang_source 21.9. Price a change that pays on a long run against this, not against the
+// shapes.
 func BenchmarkScannerWorkloads(b *testing.B) {
 	for _, doc := range testscanner.WorkloadDocs(b) {
 		src := doc.Bytes()
@@ -117,7 +117,7 @@ func BenchmarkScannerWorkloads(b *testing.B) {
 // reportPerToken adds the per-token cost of a run that read tokens in total.
 //
 // sec/op is a document, and documents differ in how many tokens they hold, so it compares one shape against itself and
-// nothing else. ns/token compares across shapes and says which construct is dear.
+// nothing else. ns/token compares across shapes and shows which construct is dear.
 func reportPerToken(b *testing.B, tokens int64) {
 	b.Helper()
 

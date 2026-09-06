@@ -54,7 +54,7 @@ func TestDoubleQuoteEscapes(t *testing.T) {
 }
 
 // TestDoubleQuoteRefusesAnUnknownEscape holds the default arm of the escape switch: a marker that begins no escape
-// stops the scan rather than being read as itself.
+// stops the scan instead of being read as itself.
 func TestDoubleQuoteRefusesAnUnknownEscape(t *testing.T) {
 	for _, written := range []string{`\q`, `\1`, `\!`} {
 		t.Run(written, func(t *testing.T) {
@@ -100,8 +100,9 @@ func TestDoubleQuoteCodePointEscapes(t *testing.T) {
 // TestDoubleQuoteRefusesACodePointThatIsNotACharacter holds the range check in escapedRune.
 //
 // "\U" takes eight hexadecimal digits, which reach past the largest code point and past what an int32 holds, and the
-// surrogate halves name no character on their own. Each of these used to read as U+FFFD -- a replacement character the
-// document never wrote, which no caller could tell from one it did.
+// surrogate halves name no character on their own.
+// Each of these used to read as U+FFFD, a replacement character the document never wrote and no caller could tell
+// from one it did.
 func TestDoubleQuoteRefusesACodePointThatIsNotACharacter(t *testing.T) {
 	for _, written := range []string{
 		`\UFFFFFFFF`, // wraps to -1 as an int32

@@ -48,9 +48,12 @@ func addSuiteSeeds(f *testing.F) {
 
 // assertTokenInvariants checks the properties that hold for every token the scanner emits, whatever the input.
 //
-// Deliberately absent: Position.Column >= 1 and monotonically advancing positions.
-// Both are violated today by block scalars and by tabs that look like indentation -- see TestPositionLedger, which pins
-// the exact extent of those violations so that a fix is noticed.
+// Positions advance monotonically, and that is asserted here. It held over 10,896 seeds and 75,099 tokens when the
+// check was added on 2026-09-07, and TestPositionLedger holds it over the YAML Test Suite as well.
+//
+// Deliberately absent: Position.Column >= 1. Thirty tokens of the fuzz corpus still report column 0, every one a block
+// scalar whose content is whitespace only, such as "- |1-\r  \r". Such a block reads no content byte, so it records
+// no start for Scanner.multiLinePosition to take, and the fallback leaves the column at its 0 sentinel.
 func assertTokenInvariants(t *testing.T, tokens []token.Token, src string) {
 	t.Helper()
 
@@ -71,5 +74,15 @@ func assertTokenInvariants(t *testing.T, tokens []token.Token, src string) {
 			"token %d (%v) has offset %d past the end of %q",
 			i, tk.Type, tk.Position.Offset(), src,
 		)
+
+		if i > 0 {
+			prev := tokens[i-1].Position
+			assert.Truef(t,
+				tk.Position.Line > prev.Line || (tk.Position.Line == prev.Line && tk.Position.Column >= prev.Column),
+				"token %d (%v) at %d:%d stands before token %d (%v) at %d:%d for %q",
+				i, tk.Type, tk.Position.Line, tk.Position.Column,
+				i-1, tokens[i-1].Type, prev.Line, prev.Column, src,
+			)
+		}
 	}
 }

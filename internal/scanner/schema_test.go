@@ -41,7 +41,7 @@ func scalarTypes(t *testing.T, src string, schema token.Schema) map[string]token
 //
 // A plain scalar's meaning is a question about a schema, not about its text: "0100" is 100 under YAML 1.2 and 64 under
 // 1.1, and "no" is a string under 1.2 and false under 1.1. The scanner reads whichever it was told and reads nothing
-// into the choice -- the parser makes it, from the "%YAML" directive and from the option that will stand beside it.
+// into the choice. The parser makes it, from the "%YAML" directive and from the option that will stand beside it.
 func TestSetSchemaChangesWhatAScalarResolvesTo(t *testing.T) {
 	const src = `
 plain: 0100
@@ -91,7 +91,7 @@ nothing: null
 
 // TestSchemaSurvivesInitAndTakesEffectMidScan holds the two things the parser needs of SetSchema: a scanner reused on a
 // second document keeps the schema it was given, and a schema set part way through a scan reaches the scalars that
-// follow it -- which is what lets the parser read a "%YAML 1.1" directive and then set it before pulling the document's
+// follow it, so the parser can read a "%YAML 1.1" directive and set the schema before pulling the document's
 // first scalar.
 func TestSchemaSurvivesInitAndTakesEffectMidScan(t *testing.T) {
 	var s scanner.Scanner

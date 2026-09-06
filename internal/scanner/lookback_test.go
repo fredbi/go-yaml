@@ -15,7 +15,7 @@ import (
 )
 
 // A token's BlankLineAbove and CommentBreaksAbove are filled in as it is emitted, from the tokens emitted before it, so
-// the answers are carried on the Scanner rather than found by walking back over the tokens already read.
+// the Scanner carries the answers instead of walking back over the tokens already read.
 //
 // Init has to drop what the last source left there.
 func TestScannerLookbackDoesNotLeakBetweenSources(t *testing.T) {

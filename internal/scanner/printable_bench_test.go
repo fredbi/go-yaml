@@ -16,7 +16,7 @@ var unprintableSink int //nolint:gochecknoglobals // used to prevent bench from 
 // BenchmarkFirstUnprintable reads the character check on its own, away from the
 // scan around it.
 //
-// The three shapes are what the workloads hold: four of the six are ASCII
+// The three shapes cover what the workloads hold: four of the six are ASCII
 // throughout and never reach the decoder, citm_catalog needs it for one word in
 // 350, and twitter_status for one in five.
 //

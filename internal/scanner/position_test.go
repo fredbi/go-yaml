@@ -100,7 +100,7 @@ func TestBlockScalarPositionDoesNotDependOnWhatFollows(t *testing.T) {
 	}
 }
 
-// blockContentToken returns the string token holding a block scalar's content, which is the one after its header.
+// blockContentToken returns the string token holding a block scalar's content, which follows its header.
 func blockContentToken(t *testing.T, src string) token.Token {
 	t.Helper()
 

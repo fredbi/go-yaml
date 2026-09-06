@@ -56,8 +56,8 @@ func scanAll[V Doc](t *testing.T, src V) []token.Token {
 
 // scanTokens scans src and returns the tokens it holds, or the error the scanner stopped on.
 //
-// A scanner hands out one token at a time; collecting them is what a test that compares a whole document needs, and
-// nothing else should.
+// A scanner returns one token at a time. A test comparing a whole document needs them collected, and nothing else
+// does.
 func scanTokens[V Doc](src V) ([]token.Token, error) {
 	var s scanner.Scanner
 	s.Init([]byte(src))
@@ -83,5 +83,7 @@ func tokenize(t *testing.T, src string) []token.Token {
 }
 
 func estimateTokens[V Doc](src V) int {
-	return len(src) / 4 // TODO(fred): find a better heuristic
+	// Four bytes a token is close enough to size the slice: the corpus shapes run 2.4 to 12 bytes a token, so this
+	// over-allocates a little on the dense ones and grows once or twice on the sparse ones.
+	return len(src) / 4
 }

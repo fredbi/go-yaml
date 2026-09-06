@@ -16,8 +16,8 @@ import (
 
 // WorkloadDoc is one of the workload documents, under the name of the file it was read from.
 //
-// A benchmark reports that name rather than an index, so a number quoted in a commit says which document it was
-// measured on.
+// A benchmark reports that name and not an index, so a number quoted in a commit names the document it was measured
+// on.
 type WorkloadDoc struct {
 	Name string
 	Text string

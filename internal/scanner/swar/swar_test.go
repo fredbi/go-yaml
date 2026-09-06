@@ -77,7 +77,7 @@ func TestSpaceMask(t *testing.T) {
 		{"  a     ", 2},
 		{"  \t     ", 2},
 		{"  \n     ", 2},
-		// The lane after a run of matches is where a borrow would land.
+		// A borrow would land in the lane after a run of matches.
 		{"  !!null", 2},
 		{"       !", 7},
 		{"  \x00     ", 2},

@@ -14,13 +14,13 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// A token's Value is a window into the source wherever the source says exactly what the value is: the scalar costs no
-// memory of its own, and a caller reading numbers as text -- validating them rather than converting them -- reads the
-// document's own bytes.
+// A token's Value is a window into the source wherever the source spells the value exactly.
+// The scalar then costs no memory of its own, and a caller reading numbers as text, validating them without
+// converting them, reads the document's own bytes.
 //
 // Where scanning rewrote the text, Value is a copy and has to be: an escape stands for a character the document did not
 // write, and a folded scalar loses its layout.
-// Losing the quotes is not a rewrite -- the text between them is still the source's own bytes -- so a quoted scalar
+// Losing the quotes is not a rewrite, the text between them still being the source's own bytes, so a quoted scalar
 // holding no escape windows onto the source like any other.
 func TestValueAliasesTheSource(t *testing.T) {
 	const src = "int: 1234567890\n" +
