@@ -1653,6 +1653,263 @@ func (d *Decoder) decodeDuration(ctx context.Context, dst reflect.Value, src ast
 }
 
 // getMergeAliasName support single alias only
+// mapEntryFunc is handed one entry of a mapping. merged says the entry comes
+// from a "<<" rather than from the mapping itself.
+type mapEntryFunc func(name string, keyNode, valueNode, entryNode ast.Node, merged bool) error
+
+// rangeMapEntries reads the mapping src names and hands its entries over: the
+// ones it writes itself first, in document order, then the ones each "<<"
+// merges in, the earliest "<<" first.
+//
+// Order carries the precedence, so nothing has to be collected to get it right.
+// A field the mapping writes itself is set before any merged entry reaches it,
+// and an earlier "<<" is read before a later one, which is what YAML 1.1's
+// merge asks for. The caller skips a merged entry whose field is already set.
+func (d *Decoder) rangeMapEntries(ctx context.Context, src ast.Node, ignoreMergeKey bool, visit mapEntryFunc) error {
+	d.stepIn()
+	defer d.stepOut()
+	if d.isExceededMaxDepth() {
+		return ErrExceededMaxDepth
+	}
+
+	mapNode, err := d.getMapNode(src, false)
+	if err != nil {
+		return err
+	}
+
+	var merges []ast.Node
+
+	mapIter := mapNode.MapRange()
+	for mapIter.Next() {
+		keyNode := mapIter.Key()
+		if keyNode.IsMergeKey() {
+			if !ignoreMergeKey {
+				merges = append(merges, mapIter.Value())
+			}
+
+			continue
+		}
+
+		name, named, err := d.entryName(ctx, keyNode)
+		if err != nil {
+			return err
+		}
+		if !named {
+			continue
+		}
+		if err := visit(name, keyNode, mapIter.Value(), mapIter.KeyValue(), false); err != nil {
+			return err
+		}
+	}
+
+	for _, from := range merges {
+		if err := d.rangeMergedEntries(ctx, from, ignoreMergeKey, visit); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// rangeMergedEntries hands over the entries of what a "<<" names, which is a
+// mapping or a sequence of them: getMapNode folds a sequence into one MapNode,
+// in the order it was written.
+func (d *Decoder) rangeMergedEntries(ctx context.Context, src ast.Node, ignoreMergeKey bool, visit mapEntryFunc) error {
+	d.stepIn()
+	defer d.stepOut()
+	if d.isExceededMaxDepth() {
+		return ErrExceededMaxDepth
+	}
+
+	mapNode, err := d.getMapNode(src, true)
+	if err != nil {
+		return err
+	}
+
+	var merges []ast.Node
+
+	mapIter := mapNode.MapRange()
+	for mapIter.Next() {
+		keyNode := mapIter.Key()
+		if keyNode.IsMergeKey() {
+			if !ignoreMergeKey {
+				merges = append(merges, mapIter.Value())
+			}
+
+			continue
+		}
+
+		name, named, err := d.entryName(ctx, keyNode)
+		if err != nil {
+			return err
+		}
+		if !named {
+			continue
+		}
+		if err := visit(name, keyNode, mapIter.Value(), mapIter.KeyValue(), true); err != nil {
+			return err
+		}
+	}
+
+	for _, from := range merges {
+		if err := d.rangeMergedEntries(ctx, from, ignoreMergeKey, visit); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// entryName reads the text a mapping key addresses its entry by. named is false
+// for a key that is not a string, such as "1:" or "[a]:", which no struct field
+// can be named after.
+func (d *Decoder) entryName(ctx context.Context, keyNode ast.Node) (string, bool, error) {
+	keyVal, err := d.nodeToValue(ctx, keyNode)
+	if err != nil {
+		return "", false, err
+	}
+	name, isText := keyVal.(string)
+
+	return name, isText, nil
+}
+
+// writtenFields records which fields a mapping has set, so that what a "<<"
+// merges in does not overwrite them. A struct of 64 fields or fewer costs no
+// allocation.
+type writtenFields struct {
+	first uint64
+	rest  []uint64
+}
+
+func (w *writtenFields) mark(i int) {
+	if i < 64 {
+		w.first |= 1 << uint(i%64)
+
+		return
+	}
+	word := i/64 - 1
+	for len(w.rest) <= word {
+		w.rest = append(w.rest, 0)
+	}
+	w.rest[word] |= 1 << uint(i%64)
+}
+
+func (w *writtenFields) has(i int) bool {
+	if i < 64 {
+		return w.first&(1<<uint(i%64)) != 0
+	}
+	word := i/64 - 1
+
+	return word < len(w.rest) && w.rest[word]&(1<<uint(i%64)) != 0
+}
+
+// decodeInlineFields reads the embedded fields of a struct, each from the whole
+// mapping rather than from an entry of it.
+//
+// They are read after the rest: an embedded struct is handed every entry, the
+// ones an outer field has already claimed included, and only the names it knows
+// itself stop counting as unknown.
+func (d *Decoder) decodeInlineFields(
+	ctx context.Context, dst reflect.Value, src ast.Node, fields *readFields,
+	ignoreMergeKey bool, unknownFields map[string]ast.Node, foundErr *error,
+) error {
+	structType := dst.Type()
+	aliasName := d.getMergeAliasName(src)
+
+	var entries map[string]ast.Node
+
+	for _, sf := range fields.inline {
+		fieldValue := dst.Field(sf.Index)
+		if sf.IsAutoAlias {
+			if aliasName == "" {
+				continue
+			}
+			newFieldValue := d.anchorValueMap[aliasName]
+			if !newFieldValue.IsValid() {
+				continue
+			}
+			value, err := d.castToAssignableValue(newFieldValue, fieldValue.Type(), d.anchorNodeMap[aliasName])
+			if err != nil {
+				return err
+			}
+			fieldValue.Set(value)
+
+			continue
+		}
+		if !fieldValue.CanSet() {
+			field := structType.Field(sf.Index)
+
+			return fmt.Errorf("cannot set embedded type as unexported field %s.%s", field.PkgPath, field.Name)
+		}
+		if fieldValue.Type().Kind() == reflect.Pointer && src.Type() == ast.NullType {
+			// set nil value to pointer
+			fieldValue.Set(reflect.Zero(fieldValue.Type()))
+
+			continue
+		}
+
+		if entries == nil {
+			var err error
+			if entries, err = d.keyToValueNodeMap(ctx, src, ignoreMergeKey); err != nil {
+				return err
+			}
+		}
+		mapNode := ast.Mapping(nil, false)
+		for k, v := range entries {
+			key := &ast.StringNode{Value: k}
+			mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
+		}
+
+		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, mapNode)
+		if unknownFields != nil {
+			if err := d.deleteStructKeys(fieldValue.Type(), unknownFields); err != nil {
+				return err
+			}
+		}
+		if err != nil {
+			if *foundErr != nil {
+				continue
+			}
+			var te *yamlerrors.Error
+			if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
+				leaf := te.StructField()
+				if leaf == "" {
+					leaf = sf.FieldName
+				}
+				te.SetStructField(structType.Name() + "." + leaf)
+				*foundErr = te
+
+				continue
+			}
+			*foundErr = err
+
+			continue
+		}
+		_ = d.setDefaultValueIfConflicted(newFieldValue, fields.fields)
+		fieldValue.Set(newFieldValue)
+	}
+
+	return nil
+}
+
+// findEntry returns the value a mapping writes under name, and the entry that
+// writes it. Both are nil where the mapping does not write it.
+//
+// This walks the mapping rather than reading a map built up front: only a
+// document that fails validation asks, and only for the field that failed.
+func (d *Decoder) findEntry(ctx context.Context, src ast.Node, ignoreMergeKey bool, name string) (value, entry ast.Node) {
+	_ = d.rangeMapEntries(ctx, src, ignoreMergeKey,
+		func(entryName string, _, valueNode, entryNode ast.Node, _ bool) error {
+			if value == nil && entryName == name {
+				value, entry = valueNode, entryNode
+			}
+
+			return nil
+		})
+
+	return value, entry
+}
+
 func (d *Decoder) getMergeAliasName(src ast.Node) string {
 	mapNode, err := d.getMapNode(src, true)
 	if err != nil {
@@ -1691,128 +1948,83 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 		dst.Set(srcValue)
 		return nil
 	}
-	structFieldMap, err := structFieldMap(structType)
+	fields, err := structFields(structType)
 	if err != nil {
 		return err
 	}
-	ignoreMergeKey := structFieldMap.hasMergeProperty()
-	keyToNodeMap, err := d.keyToValueNodeMap(ctx, src, ignoreMergeKey)
-	if err != nil {
-		return err
-	}
+	ignoreMergeKey := fields.fields.hasMergeProperty()
+
 	var unknownFields map[string]ast.Node
 	if d.disallowUnknownField {
-		unknownFields, err = d.keyToKeyNodeMap(ctx, src, ignoreMergeKey)
-		if err != nil {
-			return err
-		}
-	}
-	// A validation error is reported at the entry that writes the field, which
-	// is the ':' rather than anything inside the value. Read the entries only
-	// where a validator will ask for them.
-	var entries map[string]ast.Node
-	if d.validator != nil {
-		entries, err = d.keyToNodeMap(ctx, src, ignoreMergeKey,
-			func(it *ast.MapNodeIter) ast.Node { return it.KeyValue() })
-		if err != nil {
-			return err
-		}
+		unknownFields = map[string]ast.Node{}
 	}
 
-	aliasName := d.getMergeAliasName(src)
-	var foundErr error
+	var (
+		written  writtenFields
+		foundErr error
+	)
 
-	for i := 0; i < structType.NumField(); i++ {
-		field := structType.Field(i)
-		if isIgnoredStructField(field) {
-			continue
-		}
-		structField := structFieldMap[field.Name]
-		if structField.IsInline {
-			fieldValue := dst.FieldByName(field.Name)
-			if structField.IsAutoAlias {
-				if aliasName != "" {
-					newFieldValue := d.anchorValueMap[aliasName]
-					if newFieldValue.IsValid() {
-						value, err := d.castToAssignableValue(newFieldValue, fieldValue.Type(), d.anchorNodeMap[aliasName])
-						if err != nil {
-							return err
-						}
-						fieldValue.Set(value)
-					}
-				}
-				continue
-			}
-			if !fieldValue.CanSet() {
-				return fmt.Errorf("cannot set embedded type as unexported field %s.%s", field.PkgPath, field.Name)
-			}
-			if fieldValue.Type().Kind() == reflect.Pointer && src.Type() == ast.NullType {
-				// set nil value to pointer
-				fieldValue.Set(reflect.Zero(fieldValue.Type()))
-				continue
-			}
-			mapNode := ast.Mapping(nil, false)
-			for k, v := range keyToNodeMap {
-				key := &ast.StringNode{Value: k}
-				mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
-			}
-			newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, mapNode)
-			if d.disallowUnknownField {
-				if err := d.deleteStructKeys(fieldValue.Type(), unknownFields); err != nil {
-					return err
+	// Walk the document and look each entry's field up, rather than walking the
+	// fields and looking each entry up. What has to be held is then the struct's
+	// fields -- read once per type and shared -- and not a map of every entry
+	// the mapping writes.
+	setField := func(name string, keyNode, valueNode, entryNode ast.Node, merged bool) error {
+		sf, named := fields.byRenderName[name]
+		if !named {
+			if unknownFields != nil {
+				if _, seen := unknownFields[name]; !seen {
+					unknownFields[name] = keyNode
 				}
 			}
 
-			if err != nil {
-				if foundErr != nil {
-					continue
-				}
-				var te *yamlerrors.Error
-				if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
-					leaf := te.StructField()
-					if leaf == "" {
-						leaf = field.Name
-					}
-					te.SetStructField(structType.Name() + "." + leaf)
-					foundErr = te
-					continue
-				}
-				foundErr = err
-				continue
-			}
-			_ = d.setDefaultValueIfConflicted(newFieldValue, structFieldMap)
-			fieldValue.Set(newFieldValue)
-			continue
+			return nil
 		}
-		v, exists := keyToNodeMap[structField.RenderName]
-		if !exists {
-			continue
+		if merged && written.has(sf.Index) {
+			// The mapping writes this itself, or an earlier "<<" does.
+			return nil
 		}
-		delete(unknownFields, structField.RenderName)
-		fieldValue := dst.FieldByName(field.Name)
+		written.mark(sf.Index)
+
+		fieldValue := dst.Field(sf.Index)
 		if fieldValue.Type().Kind() == reflect.Pointer && src.Type() == ast.NullType {
 			// set nil value to pointer
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
-			continue
+
+			return nil
 		}
-		prevEntry := d.enterEntry(entries[structField.RenderName])
-		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, v)
+
+		prevEntry := d.enterEntry(entryNode)
+		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, valueNode)
 		d.entry = prevEntry
 		if err != nil {
 			if foundErr != nil {
-				continue
+				return nil
 			}
 			var te *yamlerrors.Error
 			if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
-				te.SetStructField(structType.Name() + "." + field.Name)
+				te.SetStructField(structType.Name() + "." + sf.FieldName)
 				foundErr = te
 			} else {
 				foundErr = err
 			}
-			continue
+
+			return nil
 		}
 		fieldValue.Set(newFieldValue)
+
+		return nil
 	}
+
+	if err := d.rangeMapEntries(ctx, src, ignoreMergeKey, setField); err != nil {
+		return err
+	}
+
+	if len(fields.inline) > 0 {
+		if err := d.decodeInlineFields(ctx, dst, src, fields, ignoreMergeKey, unknownFields, &foundErr); err != nil {
+			return err
+		}
+	}
+
 	if foundErr != nil {
 		return foundErr
 	}
@@ -1838,23 +2050,26 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 		if err := d.validator.Struct(dst.Interface()); err != nil {
 			ev := reflect.ValueOf(err)
 			if ev.Type().Kind() == reflect.Slice {
+				// A validation error is reported at the entry that writes the
+				// field, which is the ":" rather than anything inside the value.
+				// The entries are read here rather than during the decode: a
+				// document that validates never needs them.
 				for i := 0; i < ev.Len(); i++ {
 					fieldErr, ok := ev.Index(i).Interface().(FieldError)
 					if !ok {
 						continue
 					}
 					fieldName := fieldErr.StructField()
-					structField, exists := structFieldMap[fieldName]
+					structField, exists := fields.fields[fieldName]
 					if !exists {
 						continue
 					}
-					if node, exists := keyToNodeMap[structField.RenderName]; exists {
+					value, entry := d.findEntry(ctx, src, ignoreMergeKey, structField.RenderName)
+					if value != nil {
 						// TODO: to make FieldError message cutomizable
-						return yamlerrors.NewSyntax(
-							fmt.Sprintf("%s", err),
-							validationErrorToken(node, entries[structField.RenderName]),
-						)
-					} else if t := d.missingFieldToken(src); t != nil {
+						return yamlerrors.NewSyntax(fmt.Sprintf("%s", err), validationErrorToken(value, entry))
+					}
+					if t := d.missingFieldToken(src); t != nil {
 						// A missing field has no entry of its own, so the error
 						// goes to the mapping that should have held it.
 						return yamlerrors.NewSyntax(fmt.Sprintf("%s", err), t)

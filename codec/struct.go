@@ -3,6 +3,7 @@ package codec
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -14,6 +15,9 @@ const (
 
 // StructField information for each the field in structure
 type StructField struct {
+	// Index is where the field stands in the struct, for reflect.Value.Field.
+	// FieldByName walks the type's fields and compares names on every call.
+	Index        int
 	FieldName    string
 	RenderName   string
 	AnchorName   string
@@ -37,7 +41,7 @@ func getTag(field reflect.StructField) string {
 	return tag
 }
 
-func structField(field reflect.StructField) *StructField {
+func structField(field reflect.StructField, index int) *StructField {
 	tag := getTag(field)
 	fieldName := strings.ToLower(field.Name)
 	options := strings.Split(tag, ",")
@@ -47,6 +51,7 @@ func structField(field reflect.StructField) *StructField {
 		}
 	}
 	sf := &StructField{
+		Index:      index,
 		FieldName:  field.Name,
 		RenderName: fieldName,
 	}
@@ -119,6 +124,13 @@ var structFieldMaps sync.Map
 // reads.
 type readFields struct {
 	fields StructFieldMap
+	// byRenderName finds the field a mapping key names, which is the lookup a
+	// decode makes. StructFieldMap is keyed by Go field name, which is the one
+	// an encode makes. An embedded field is left out: it takes the whole
+	// mapping rather than the entry its own name would match.
+	byRenderName map[string]*StructField
+	// inline lists the embedded fields, which are read after the rest.
+	inline []*StructField
 	err    error
 }
 
@@ -141,11 +153,45 @@ func structFieldMap(structType reflect.Type) (StructFieldMap, error) {
 		return r.fields, r.err
 	}
 
-	fields, err := readStructFields(structType)
-	cached, _ := structFieldMaps.LoadOrStore(structType, &readFields{fields: fields, err: err})
+	r := readType(structType)
+	cached, _ := structFieldMaps.LoadOrStore(structType, r)
+
+	return cached.(*readFields).fields, cached.(*readFields).err
+}
+
+// structFields returns everything read from structType: the fields by Go name,
+// by the name a mapping key writes, and the embedded ones on their own.
+func structFields(structType reflect.Type) (*readFields, error) {
+	if cached, read := structFieldMaps.Load(structType); read {
+		r := cached.(*readFields)
+
+		return r, r.err
+	}
+
+	cached, _ := structFieldMaps.LoadOrStore(structType, readType(structType))
 	r := cached.(*readFields)
 
-	return r.fields, r.err
+	return r, r.err
+}
+
+func readType(structType reflect.Type) *readFields {
+	fields, err := readStructFields(structType)
+	if err != nil {
+		return &readFields{err: err}
+	}
+
+	r := &readFields{fields: fields, byRenderName: make(map[string]*StructField, len(fields))}
+	for _, sf := range fields {
+		if sf.IsInline {
+			r.inline = append(r.inline, sf)
+
+			continue
+		}
+		r.byRenderName[sf.RenderName] = sf
+	}
+	slices.SortFunc(r.inline, func(a, b *StructField) int { return a.Index - b.Index })
+
+	return r
 }
 
 func readStructFields(structType reflect.Type) (StructFieldMap, error) {
@@ -156,7 +202,7 @@ func readStructFields(structType reflect.Type) (StructFieldMap, error) {
 		if isIgnoredStructField(field) {
 			continue
 		}
-		sf := structField(field)
+		sf := structField(field, i)
 		if _, exists := renderNameMap[sf.RenderName]; exists {
 			return nil, fmt.Errorf("duplicated struct field name %s", sf.RenderName)
 		}
