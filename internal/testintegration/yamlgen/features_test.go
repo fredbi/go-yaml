@@ -55,9 +55,8 @@ func marks() []mark {
 
 	return []mark{
 		{feature: yamlgen.FeatureDocumentMarker, in: opensTheDocument},
-		{feature: yamlgen.FeatureTagDirective, in: func(s string) bool {
-			return strings.HasPrefix(s, "%TAG ")
-		}},
+		{feature: yamlgen.FeatureTagDirective, in: directiveLine("%TAG ")},
+		{feature: yamlgen.FeatureYAMLDirective, in: directiveLine("%YAML ")},
 		{feature: yamlgen.FeatureCommentAbove, in: has("#"), rune: '#'},
 		{feature: yamlgen.FeatureCommentInline, in: has("#"), rune: '#'},
 		{feature: yamlgen.FeatureFlowCollection, in: func(s string) bool {
@@ -102,6 +101,24 @@ func marks() []mark {
 
 		{feature: yamlgen.FeatureAnchor, in: has("&"), rune: '&'},
 		{feature: yamlgen.FeatureAlias, in: has("*"), rune: '*'},
+	}
+}
+
+// directiveLine reports a directive written above the "---", wherever it stands
+// among them: a document may carry both a "%YAML" and a "%TAG", and this package
+// writes them in that order.
+func directiveLine(prefix string) func(string) bool {
+	return func(s string) bool {
+		for line := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+			if strings.HasPrefix(line, "---") {
+				return false
+			}
+			if strings.HasPrefix(line, prefix) {
+				return true
+			}
+		}
+
+		return false
 	}
 }
 
@@ -207,9 +224,10 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 		w := yamlgen.Write(v, st)
 
 		permits := map[stance.Feature]bool{
-			// A %TAG directive forces the marker whatever the style asked
-			// for: the directive applies to the document the "---" opens.
-			yamlgen.FeatureDocumentMarker:  st.Markers || st.TagSpelling == yamlgen.SpellHandle,
+			// A directive forces the marker whatever the style asked for: it
+			// applies to the document the "---" opens.
+			yamlgen.FeatureDocumentMarker: st.Markers ||
+				st.TagSpelling == yamlgen.SpellHandle || st.Version != "",
 			yamlgen.FeatureCommentAbove:    st.Comments == yamlgen.HeadComments || st.Comments == yamlgen.AllComments,
 			yamlgen.FeatureCommentInline:   st.Comments == yamlgen.LineComments || st.Comments == yamlgen.AllComments,
 			yamlgen.FeatureFlowPair:        st.FlowPairs,
@@ -234,6 +252,7 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureExplicitKey:     st.ExplicitKeys,
 			yamlgen.FeatureChompKeep:       st.Chomping == yamlgen.ChompKeep,
 			yamlgen.FeatureChompPadded:     st.Chomping == yamlgen.ChompPadded,
+			yamlgen.FeatureYAMLDirective:   st.Version != "",
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,
@@ -275,8 +294,12 @@ func TestEveryMarkInTheBytesIsLabeled(t *testing.T) {
 			rt.Fatalf("a document marker and its label disagree\n%q\n%v", w.Text, w.Features)
 		}
 
-		if strings.HasPrefix(w.Text, "%TAG ") != slices.Contains(w.Features, yamlgen.FeatureTagDirective) {
+		if directiveLine("%TAG ")(w.Text) != slices.Contains(w.Features, yamlgen.FeatureTagDirective) {
 			rt.Fatalf("a %%TAG directive and its label disagree\n%q\n%v", w.Text, w.Features)
+		}
+
+		if directiveLine("%YAML ")(w.Text) != slices.Contains(w.Features, yamlgen.FeatureYAMLDirective) {
+			rt.Fatalf("a %%YAML directive and its label disagree\n%q\n%v", w.Text, w.Features)
 		}
 
 		// A verbatim tag's URI holds characters the marks below read as

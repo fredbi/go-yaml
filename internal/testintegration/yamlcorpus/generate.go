@@ -67,6 +67,10 @@ type Entry struct {
 	// Readings is what the document denotes under each reading that disagrees
 	// with the core schema, empty where they all agree.
 	Readings map[string]any
+	// Means is what the document denotes given the version it declares, and
+	// Value.Decoded() for one that declares none. Nil where the generator will
+	// not say -- see yamlgen.Written.MeansUnclear.
+	Means any
 	// Tags are the rules this document breaks, where it was broken on purpose
 	// and the break is therefore known.
 	//
@@ -74,6 +78,16 @@ type Entry struct {
 	// it broke, which is why its acceptance is claimed for parsing and no
 	// further -- see suite.Case.VerdictAt.
 	Tags []stance.Tag
+}
+
+// meansOf is what a written document denotes, and nil where the generator will
+// not say.
+func meansOf(w yamlgen.Written) any {
+	if w.MeansUnclear {
+		return nil
+	}
+
+	return w.Means
 }
 
 // Generate draws documents from a seed and breaks each of them.
@@ -106,6 +120,7 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 			Value:    value,
 			Features: written.Features,
 			Readings: written.Readings,
+			Means:    meansOf(written),
 		})
 
 		// Broken on purpose, on the value, so the break is labeled rather
@@ -120,6 +135,7 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 				Mutation: b.How,
 				Features: broken.Features,
 				Readings: broken.Readings,
+				Means:    meansOf(broken),
 				Tags:     b.Tags,
 			})
 		}

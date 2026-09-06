@@ -191,27 +191,29 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
-		Name: "render/a-kept-folded-scalar-gains-a-break-every-time-it-is-rendered",
-		Reason: "The renderer writes a blank line between a folded block scalar and the entry after " +
-			"it, and `+` keeps every break it is given -- so the value grows one break per rendering. " +
-			"`- >+` over `  x` over a blank over `  y` over `- 1` reads [\"x\\ny\\n\", 1] and " +
-			"renders to a document that reads [\"x\\ny\\n\\n\", 1]. Rendering that again adds " +
-			"another.\n\n" +
-			"Four things are needed and dropping any one of them makes it right. Folded, not literal: " +
-			"`|+` over the same content renders unchanged. `+`, not clip: `>` over the same content " +
-			"gets the same blank line and discards it. A break inside the content, which is what the " +
-			"blank line in the middle spells. And an entry after it, since the blank is written to " +
-			"separate them.\n\n" +
-			"⚠️ A regression, and a recent one. It arrived with a5e7cc5, \"fix(scanner): position a " +
-			"block scalar's content where its content begins\"; its parent renders the same document " +
-			"unchanged. Bisected on 2026-09-07, the day the scanner work landed, by rebasing this " +
-			"branch onto it -- Style.Chomping had been green over 60,000 draws the day before and " +
-			"failed within 7,473 against the new scanner.\n\n" +
-			"So the fix moved a block scalar's content position and the renderer's separating blank " +
-			"line moved with it. The value only survives where chomping throws the blank away, which " +
-			"is every indicator except the one that keeps.",
-		Property: Render | Settle,
-		Match:    writesAKeptFoldedScalar,
+		Name: "parse/a-version-directive-resolves-the-root-block-scalar-it-opens",
+		Reason: "A `%YAML` directive over a document whose body is a block scalar makes the parse fail " +
+			"when the scalar's content is a word the schema would resolve. `%YAML 1.1` over `---` " +
+			"over `>-` over ` null` reports `unexpected token. required string token`; the same three " +
+			"lines without the directive read the string \"null\".\n\n" +
+			"The content decides it, and only when it is one whole token: `null`, `~`, `True`, `yes`, " +
+			"`5` and `1.5` are all refused, where `x`, `x y` and `null x` read. The version does not: " +
+			"`%YAML 1.2` refuses it too. Nor does any other directive -- a `%TAG` line over the same " +
+			"document reads, and so does a bare `---`. And the body has to be the root: `k: >-` over " +
+			"`  null` reads under the directive.\n\n" +
+			"A block scalar is a string under every schema, so there is nothing here to resolve. " +
+			"internal/lab's resolvesDifferentlyOnPurpose describes the machinery: the grouping reads " +
+			"one token past the directive to know the directive's own document has ended, and for a " +
+			"document whose body is a bare scalar that token is the body. It is cut before the " +
+			"directive is read and typed again afterwards -- as a null or a bool or an integer, " +
+			"where a block scalar's content is none of those.\n\n" +
+			"libfyaml 1.0.0b1 reads every one of them as the string, and the reference parser passes " +
+			"them. Found on 2026-09-07 by Style.Version, on its first run.\n\n" +
+			"📌 It is the one document that provokes `unexpected token. required string token`, which " +
+			"stream 8 lists as unreached. Like `unexpected scalar value`, a Refusals entry for it " +
+			"would pin a bug rather than a rule.",
+		Property: Parses | Decode | Render | Settle | CommentsKept,
+		Match:    writesAResolvingRootBlockScalarUnderADirective,
 	},
 	{
 		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
@@ -399,46 +401,61 @@ func writesFloatTaggedWideNumber(v Value, _ Style) bool {
 // entry the long way, with a quoted key and a value the emitter may write as a
 // block scalar.
 //
-// writesAKeptFoldedScalar reports whether st writes a folded block scalar with
-// "+" over content that holds a break of its own.
-func writesAKeptFoldedScalar(v Value, st Style) bool {
-	if !st.Folded {
+// writesAResolvingRootBlockScalarUnderADirective reports whether st writes a
+// "%YAML" line over a document whose body is a block scalar the schemas would
+// resolve if it were plain.
+func writesAResolvingRootBlockScalarUnderADirective(v Value, st Style) bool {
+	if st.Version == "" {
 		return false
 	}
 
-	return holdsAKeptFoldedString(v, st)
+	s, text := peelProperties(v).(Str)
+
+	return text && blockScalarIn(s.V, st) && resolvesAlone(strings.TrimRight(s.V, "\n"))
 }
 
-func holdsAKeptFoldedString(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Str:
-		body := strings.TrimRight(n.V, "\n")
-		trailing := len(n.V) - len(body)
-
-		// "+" is written for two or more trailing breaks whatever the style
-		// says, and for one when Style.Chomping asks for it.
-		kept := trailing >= 2 || (trailing == 1 && st.Chomping == ChompKeep)
-
-		return kept && canFolded(n.V) && strings.Contains(body, "\n")
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return holdsAKeptFoldedString(item, st)
-		})
-	case Map:
-		for _, p := range n.Pairs {
-			if holdsAKeptFoldedString(p.Val, st) {
-				return true
-			}
+// peelProperties returns the node an anchor and a tag decorate.
+func peelProperties(v Value) Value {
+	for {
+		switch n := v.(type) {
+		case Anchored:
+			v = n.V
+		case Tagged:
+			v = n.V
+		default:
+			return v
 		}
-	case Anchored:
-		return holdsAKeptFoldedString(n.V, st)
-	case Alias:
-		return holdsAKeptFoldedString(n.V, st)
-	case Tagged:
-		return holdsAKeptFoldedString(n.V, st)
+	}
+}
+
+// resolvesAlone reports whether a whole text is a token some schema reads as
+// something other than a string.
+//
+// Two rules rather than a copy of every schema's productions. A scalar that
+// resolves to a number, a date or a time begins with a digit, a sign, a dot or
+// a tilde -- 5, 1.5, -0x1f, .inf, 12:34:56, 2001-12-14 -- so the first
+// character answers for all of them without this having to know 1.1's
+// sexagesimals. Everything else that resolves is a word, and the two tables
+// hold every word both schemas read.
+//
+// Generous where it is unsure, which is the right side here: the predicate
+// excuses a document rather than accusing one.
+func resolvesAlone(text string) bool {
+	if text == "" || strings.ContainsAny(text, " \n") {
+		return false
 	}
 
-	return false
+	if strings.ContainsAny(text[:1], "0123456789-+.~") {
+		return true
+	}
+
+	if _, core := resolving[text]; core {
+		return true
+	}
+
+	_, legacy := legacyBooleans[text]
+
+	return legacy
 }
 
 // writesABlankLineBeforeAComment reports whether st pads a block scalar with
@@ -674,31 +691,48 @@ func writesAnIntTag(v Value, _ Style) bool {
 
 // writesANonStringKey reports whether v holds a mapping keyed by anything other
 // than a string, which is a key no struct tag names.
-func writesANonStringKey(v Value, _ Style) bool {
+//
+// The style decides one case. A document declaring "%YAML 1.1" resolves "yes:"
+// to the boolean key true, so a Str holding one of 1.1's boolean words is a
+// non-string key there and a string key everywhere else.
+func writesANonStringKey(v Value, st Style) bool {
 	switch n := v.(type) {
 	case Map:
 		for _, p := range n.Pairs {
-			if _, text := p.Key.(Str); !text {
-				return true
-			}
-
-			if writesANonStringKey(p.Val, Style{}) {
+			if nonStringKey(p.Key, st) || writesANonStringKey(p.Val, st) {
 				return true
 			}
 		}
 	case Seq:
 		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesANonStringKey(item, Style{})
+			return writesANonStringKey(item, st)
 		})
 	case Anchored:
-		return writesANonStringKey(n.V, Style{})
+		return writesANonStringKey(n.V, st)
 	case Alias:
-		return writesANonStringKey(n.V, Style{})
+		return writesANonStringKey(n.V, st)
 	case Tagged:
-		return writesANonStringKey(n.V, Style{})
+		return writesANonStringKey(n.V, st)
 	}
 
 	return false
+}
+
+// nonStringKey reports whether a key reaches the decoder as something other
+// than a Go string.
+func nonStringKey(k Value, st Style) bool {
+	s, text := k.(Str)
+	if !text {
+		return true
+	}
+
+	if st.Version != Reading11Version || st.Quoting != QuotePlain {
+		return false
+	}
+
+	_, legacy := legacyBooleans[s.V]
+
+	return legacy
 }
 
 // writesALongTagOnAnEmptyNode reports whether v writes a tag in one of the long

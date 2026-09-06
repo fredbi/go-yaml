@@ -343,6 +343,19 @@ type Style struct {
 	TagHandle string
 	// NumberForm is the base or shape a number is written in.
 	NumberForm NumberForm
+	// Version is the YAML version the document declares, written as a "%YAML"
+	// directive. Empty declares none, which is the ordinary case.
+	//
+	// The one axis here that changes what the document means. 1.1 resolves a
+	// plain scalar by its own productions, so "yes" is a boolean there and the
+	// string "yes" under the core schema, and "0o37" is the string where core
+	// reads 31. [Written.Means] is what the document denotes given its own
+	// directive, and it is what the properties compare against.
+	//
+	// "1.2" is the control: it declares the schema the corpus already assumes,
+	// so a document carrying it must mean exactly what the same document means
+	// without it.
+	Version string
 	// Chomping is how a block scalar's trailing breaks are written, where the
 	// value admits more than one spelling.
 	Chomping Chomping
@@ -419,6 +432,10 @@ func (s Style) String() string {
 
 	spelling += s.Chomping.String()
 
+	if s.Version != "" {
+		spelling += " %YAML " + s.Version
+	}
+
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String()
@@ -479,6 +496,10 @@ func Styles() *rapid.Generator[Style] {
 			// block scalar, and the two that are not exact are the ones no
 			// generator had written.
 			Chomping: Chomping(rapid.IntRange(0, 2).Draw(t, "chomping")),
+			// Most documents declare no version, which is what documents do.
+			// The two that are declared are drawn evenly, since 1.2 is the
+			// control for 1.1 and worth as many draws.
+			Version: rapid.SampledFrom([]string{"", "", "", "", "", "", "1.1", "1.2"}).Draw(t, "version"),
 		}
 	})
 }

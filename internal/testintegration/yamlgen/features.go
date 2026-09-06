@@ -106,6 +106,8 @@ const (
 	// FeatureChompPadded is a block scalar followed by blank lines its
 	// chomping indicator discards.
 	FeatureChompPadded stance.Feature = "presentation/chomp-padded"
+	// FeatureYAMLDirective is a "%YAML" line declaring the version.
+	FeatureYAMLDirective stance.Feature = "presentation/yaml-directive"
 
 	// FeatureValueNull and the rest name what the document denotes, drawn from
 	// the Value rather than from the text. A consumer that cannot hold a float
@@ -147,6 +149,25 @@ type Written struct {
 	// the readings only part company where a plain scalar's spelling is one
 	// they resolve differently. See reading.go.
 	Readings map[string]any
+	// Means is what this document denotes, given the version it declares.
+	//
+	// Value.Decoded() for almost every document, and the YAML 1.1 answer for
+	// one that declares "%YAML 1.1" and writes a spelling the two schemas
+	// resolve differently. So it is what a reader of *this* document gets,
+	// where Readings says what other readers would make of it.
+	//
+	// Read MeansUnclear first: Means is Value.Decoded() and wrong where that
+	// is set.
+	Means any
+	// MeansUnclear says this package will not state what the document means.
+	//
+	// One shape sets it, and only under "%YAML 1.1": a text that resolves
+	// there written plain in one place and quoted or as a block scalar in
+	// another. "? no" over ": >-" over " no" is the key false and the string
+	// "no", and readings tracks a spelling rather than a node, so it cannot
+	// say which occurrence resolved. Guessing would put a wrong meaning in the
+	// corpus, which is the one failure this whole layer exists to avoid.
+	MeansUnclear bool
 }
 
 // Write emits v in the presentation st asks for and reports what it wrote.
@@ -172,9 +193,19 @@ func Write(v Value, st Style) Written {
 
 	w := Written{Text: text, Features: e.feat.sorted()}
 
-	if alt, differs := e.reads.under(v); differs && !reflect.DeepEqual(alt, v.Decoded()) {
+	w.Means = v.Decoded()
+
+	if alt, differs := e.reads.under(v); differs && !reflect.DeepEqual(alt, w.Means) {
 		w.Readings = map[string]any{Reading11: alt}
+
+		if st.Version == Reading11Version {
+			// The document says which schema reads it, so that is what it
+			// means and the core answer is the one that belongs in Readings.
+			w.Means = alt
+		}
 	}
+
+	w.MeansUnclear = st.Version == Reading11Version && e.reads.splitALegacySpelling()
 
 	return w
 }

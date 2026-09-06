@@ -266,5 +266,13 @@ func Refusals() []Refusal {
 			Name: "two anchors on one node",
 			Src:  "a: &x\n  &y 1\n", Says: "anchors cannot be used consecutively",
 		},
+		{
+			// 7.4.1: inside a flow sequence an implicit key and its ':' are on
+			// one line. The generator reaches this only when a mutation puts a
+			// break in the right place, which the draws stopped doing when the
+			// version axis shifted them.
+			Name: "a flow sequence entry whose key ends a line",
+			Src:  "[a\n: 1]\n", Says: "map key definition includes an implicit line break",
+		},
 	}
 }

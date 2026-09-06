@@ -41,7 +41,7 @@ import (
 // its own right. The fallback is reported by [TargetFor] rather than silent:
 // see [Target.Structs].
 
-// Target is a Go type built to hold a drawn value.
+// Target is a Go type built to hold a decoded value.
 type Target struct {
 	// Type is the destination to decode into.
 	Type reflect.Type
@@ -53,14 +53,6 @@ type Target struct {
 	Fallbacks int
 }
 
-// TargetFor builds the Go type v decodes into.
-func TargetFor(v Value) Target {
-	var t Target
-	t.Type = t.typeOf(v)
-
-	return t
-}
-
 var (
 	anyType    = reflect.TypeFor[any]()
 	stringType = reflect.TypeFor[string]()
@@ -70,44 +62,20 @@ var (
 	anyMapType = reflect.TypeFor[map[string]any]()
 )
 
-func (t *Target) typeOf(v Value) reflect.Type {
-	switch n := v.(type) {
-	case Bool:
-		return boolType
-	case Int:
-		return int64Type
-	case Float:
-		return floatType
-	case Str:
-		return stringType
-	case Anchored:
-		return t.typeOf(n.V)
-	case Alias:
-		return t.typeOf(n.V)
-	case Tagged:
-		return t.typeOf(n.V)
-	case Seq:
-		return reflect.SliceOf(t.itemType(n))
-	case Map:
-		return t.mapType(n)
-	}
-
-	// Null, BigInt and BigFloat: no Go scalar holds them, and a nil into a
-	// typed field would be a question about the field rather than about the
-	// document.
-	return anyType
-}
-
-// TargetForDecoded builds the Go type a decoded value fits, for a document that
-// arrives as bytes rather than as a [Value].
+// TargetForDecoded builds the Go type a decoded value fits.
 //
-// The enumerated shapes in yamlcorpus are written out as YAML and have no Value
-// behind them, and they are the documents the reflection path most needs: two
-// of the three defects found on it in 2026-09-06 were merge keys, which the
-// generator does not write and yamlcorpus enumerates.
+// It works from what the `any` path read rather than from the [Value] a
+// document was written from, and that is the whole of why it is the only
+// builder here. A destination built from the Value names its mapping fields by
+// [KeyText], which is the core schema's spelling; a document declaring
+// "%YAML 1.1" resolves "yes:" to the key "true", and a struct tagged `yaml:"yes"`
+// then matches nothing. Building from the read that is already the yardstick
+// cannot disagree with it.
 //
-// It works from what the `any` path read, so the type always fits by
-// construction and any disagreement is the destination's.
+// It also serves the enumerated shapes in yamlcorpus, which are written out as
+// YAML and have no Value behind them -- and those are the documents the
+// reflection path most needs, since two of the three defects found on it were
+// merge keys, which the generator does not write.
 func TargetForDecoded(v any) Target {
 	var t Target
 	t.Type = t.typeOfDecoded(v)
@@ -174,57 +142,6 @@ func (t *Target) decodedMapType(m map[string]any) reflect.Type {
 	t.Structs++
 
 	return reflect.StructOf(fields)
-}
-
-// itemType is the element type of a sequence, which is the item type where
-// every item agrees and `any` where they do not.
-func (t *Target) itemType(s Seq) reflect.Type {
-	if len(s.Items) == 0 {
-		return anyType
-	}
-
-	first := t.typeOf(s.Items[0])
-	for _, item := range s.Items[1:] {
-		if t.typeOf(item) != first {
-			return anyType
-		}
-	}
-
-	return first
-}
-
-// mapType builds a struct with a field per pair, or falls back to
-// map[string]any where a key cannot be named in a tag.
-func (t *Target) mapType(m Map) reflect.Type {
-	if !namesEveryKey(m) {
-		t.Fallbacks++
-
-		return anyMapType
-	}
-
-	fields := make([]reflect.StructField, 0, len(m.Pairs))
-	for i, p := range m.Pairs {
-		fields = append(fields, reflect.StructField{
-			Name: "F" + strconv.Itoa(i),
-			Type: t.typeOf(p.Val),
-			Tag:  reflect.StructTag(`yaml:"` + KeyText(p.Key) + `"`),
-		})
-	}
-
-	t.Structs++
-
-	return reflect.StructOf(fields)
-}
-
-// namesEveryKey reports whether every key of m can be written in a struct tag
-// and matched back to one field.
-func namesEveryKey(m Map) bool {
-	keys := make([]string, 0, len(m.Pairs))
-	for _, p := range m.Pairs {
-		keys = append(keys, KeyText(p.Key))
-	}
-
-	return nameable(keys)
 }
 
 // nameable reports whether every key can be written in a struct tag and matched

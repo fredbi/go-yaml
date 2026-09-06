@@ -36,10 +36,16 @@ func Emit(v Value, st Style) string {
 func (e *emitter) emit(v Value) string {
 	st := e.st
 
-	// A %TAG directive applies to the document the directives end marker opens,
-	// so writing one forces the "---" whatever the style asked for. It is
-	// written only when the document has a tag to route through the handle:
-	// declaring a handle nothing uses is legal and says nothing.
+	// A directive applies to the document the directives end marker opens, so
+	// writing one forces the "---" whatever the style asked for.
+	if st.Version != "" {
+		e.feat.add(FeatureYAMLDirective)
+		e.buf.WriteString("%YAML " + st.Version + "\n")
+	}
+
+	// The %TAG line is written only when the document has a tag to route
+	// through the handle: declaring a handle nothing uses is legal and says
+	// nothing.
 	if st.TagSpelling == SpellHandle && holdsSecondaryTag(v) {
 		e.feat.add(FeatureTagDirective)
 		e.buf.WriteString("%TAG !" + st.TagHandle + "! " + secondaryPrefix + "\n")
@@ -757,7 +763,11 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 		// Style.NumberForm is not applied. The value was built from its own
 		// text and parsed back at prec 64, and re-spelling it risks a rounding
 		// the generator would then blame the library for.
-		return n.V.Text('g', -1)
+		//
+		// It still goes through number, because the text decides what YAML 1.1
+		// makes of it whatever form asked for it: "1e+330" is an exponent with
+		// no '.' before it, which 1.1 reads as a string.
+		return e.number(bigFloatText(n.V), NumberPlain)
 	case Float:
 		e.feat.add(FeaturePlain)
 
@@ -875,7 +885,7 @@ func (e *emitter) number(text string, form NumberForm) string {
 	case NumberPlain:
 	}
 
-	e.reads.sawNumber(text, form)
+	e.reads.sawNumber(text)
 
 	return text
 }
@@ -945,6 +955,10 @@ func floatText(v float64, st Style) (string, NumberForm) {
 
 	return plainFloat(v), NumberPlain
 }
+
+// bigFloatText is the shortest text that reads back as the same value at the
+// precision a big.Float carries, which is what the library parses it into.
+func bigFloatText(v *big.Float) string { return v.Text('g', -1) }
 
 // plainFloat is the decimal spelling, which always carries a point.
 func plainFloat(v float64) string {

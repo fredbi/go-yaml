@@ -77,4 +77,49 @@ var Strict = []Strictness{
 			"collection under it.",
 		Error: "[4:2] value is not allowed in this context",
 	},
+	{
+		Name: "a flow mapping key spanning two lines",
+		Src:  "{[a\nb]: 1}\n",
+		Rule: "7.4.2: a flow mapping's key is under neither of the implicit-key restrictions -- it " +
+			"may span lines, and a break before the ':' is ordinary separation. Only a flow " +
+			"*sequence* entry has to keep its key and its ':' on one line, which is 7.4.1 and which " +
+			"parser/token.go enforces for both.\n\n" +
+			"`{[a, b]: 1}` parses here, so it is the break and nothing else. Written the long way, " +
+			"`{? [a\nb]\n: 1}`, it is refused too and with a different message -- " +
+			"`',' or ']' must be specified` -- so there are two paths into it.\n\n" +
+			"The reference parser reads both. libfyaml 1.0.0b1 refuses all three, `{[a, b]: 1}` " +
+			"included, but that is its loader declining a sequence as a mapping key rather than a " +
+			"statement about the syntax.",
+		Error: "[2:3] map key definition includes an implicit line break",
+	},
+	{
+		Name: "a version directive over a root scalar under an unknown secondary tag",
+		Src:  "%YAML 1.1\n---\n!!nulll Null\n",
+		Rule: "6.8.1 and 6.9.1: a \"%YAML\" directive states a version, and a tag names a type. " +
+			"Whether tag:yaml.org,2002:nulll names anything is a question for resolution, which is " +
+			"the application's, and the parse has no business refusing it -- least of all only under " +
+			"a directive.\n\n" +
+			"The same document without the directive parses. So do `!!str Null`, `!foo Null`, " +
+			"`&a Null` and a bare `Null` under the directive, and so does `!!nulll x`. It takes all " +
+			"three: the directive, an unknown secondary tag, and content that resolves.\n\n" +
+			"The version does not matter -- `%YAML 1.2` refuses it too. Sits beside " +
+			"yamlgen.Ledger's parse/a-version-directive-resolves-the-root-block-scalar-it-opens, " +
+			"which is the same directive over a root block scalar. Found on 2026-09-07 by a mutation " +
+			"of a `!!null` tag.\n\n" +
+			"libfyaml 1.0.0b1 reads it as null and the reference parser passes it.",
+		Error: "[3:8] value is not allowed in this context",
+	},
+	{
+		Name: "a secondary tag on its own line over a block scalar",
+		Src:  "!!null\n>\n",
+		Rule: "6.9.1 and 8.1: a node's properties may be written on a line of their own, and the node " +
+			"under them may be a block scalar. `!!null` over `>` is a folded scalar carrying the null " +
+			"tag, and the parse stops with `value is not allowed in this context`.\n\n" +
+			"The tag decides, and the other way round from the comment entry above: `!foo` over `>-` " +
+			"over ` x` **reads**, where the `!!` shorthand does not. So is the line break: " +
+			"`!!null >` on one line reads.\n\n" +
+			"libfyaml 1.0.0b1 reads it as null and the reference parser passes it. Found on " +
+			"2026-09-07 by a mutation that put a %TAG handle over the same shape.",
+		Error: "[2:1] value is not allowed in this context",
+	},
 }

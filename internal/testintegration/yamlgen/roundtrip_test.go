@@ -117,7 +117,14 @@ func TestRenderPreservesValue(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
-		src := yamlgen.Emit(value, style)
+		// Write rather than Emit: Style.Version declares which schema reads the
+		// document, and Written.Means is what it means under the one it names.
+		w := yamlgen.Write(value, style)
+		if w.MeansUnclear {
+			return
+		}
+
+		src := w.Text
 
 		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
 		if err != nil {
@@ -129,7 +136,7 @@ func TestRenderPreservesValue(t *testing.T) {
 
 		var got any
 		err = yaml.Unmarshal([]byte(rendered), &got)
-		diverged := err != nil || !sameValue(value.Decoded(), got)
+		diverged := err != nil || !sameValue(w.Means, got)
 
 		if known := yamlgen.Known(yamlgen.Render, value, style); known != nil {
 			tally.record(known.Name, diverged)

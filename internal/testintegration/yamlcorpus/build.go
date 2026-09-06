@@ -22,7 +22,7 @@ import (
 
 // Generator names what produced a corpus, so a change here is as visible in an
 // artifact's header as a change to the grammar.
-const Generator = "yamlcorpus/23"
+const Generator = "yamlcorpus/24"
 
 // Build is the recipe for a corpus: how much to draw, and how much to keep.
 type Build struct {
@@ -192,6 +192,19 @@ func (b Build) cases() []suite.Case {
 // carries none -- whatever the mutation left behind is exactly what nobody
 // knows.
 func meaningOfEntry(e Entry, wellFormed bool) *suite.Meaning {
+	// Entry.Means rather than Entry.Value.Decoded(), because a document may
+	// declare which schema reads it: yamlgen.Style.Version writes a
+	// "%YAML 1.1" line, and "yes" is the boolean true under it. Nil where the
+	// generator will not say what the document means.
+	if e.Means != nil && wellFormed {
+		encoded, err := json.Marshal(e.Means)
+		if err != nil {
+			return nil
+		}
+
+		return &suite.Meaning{Under: Reading, JSON: encoded}
+	}
+
 	if e.Value == nil || !wellFormed {
 		return nil
 	}

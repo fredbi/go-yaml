@@ -200,7 +200,14 @@ func TestTheParserVocabularyGapIsMeasured(t *testing.T) {
 	// Against those three, Style.ExplicitKeys reached `map key definition
 	// includes an implicit line break`, which nothing had provoked before: a
 	// mapping key written the long way is the only key that may hold one.
-	const ceiling = 26
+	// Style.Version took it to 24 by reaching two more: `unexpected format YAML
+	// directive`, from a mutation of the "%YAML" line the axis writes, and
+	// `unexpected token. required string token`, which is the one document that
+	// provokes it and is a bug -- see yamlgen.Ledger's
+	// parse/a-version-directive-resolves-the-root-block-scalar-it-opens. So one
+	// of the two is coverage and the other is a defect that happens to reach a
+	// message, the same way `unexpected scalar value` would.
+	const ceiling = 24
 
 	if len(unreached) > ceiling {
 		t.Errorf("%d templates unreached, and the ceiling is %d: either a new message arrived with no "+

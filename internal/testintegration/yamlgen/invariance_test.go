@@ -29,10 +29,21 @@ func TestPresentationInvariance(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		styles := yamlgen.DistinctStyles(rt, 4)
-		expected := value.Decoded()
 
 		for _, style := range styles {
-			src := yamlgen.Emit(value, style)
+			// Write rather than Emit, because one style changes what the
+			// document means: Style.Version writes a "%YAML 1.1" directive,
+			// and a document that says which schema reads it means what that
+			// schema makes of it. Written.Means is that answer, and
+			// Value.Decoded() for every style that declares nothing.
+			w := yamlgen.Write(value, style)
+			if w.MeansUnclear {
+				// The generator will not say what this document means, so
+				// there is nothing to hold the library to. See Written.
+				continue
+			}
+
+			src, expected := w.Text, w.Means
 			known := yamlgen.Known(yamlgen.Decode, value, style)
 
 			var got any

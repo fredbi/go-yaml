@@ -606,6 +606,16 @@ func keyFamily(v Value) string {
 		return strings.ToLower(s.V)
 	}
 
+	// YAML 1.1's boolean words belong with the boolean they spell there.
+	// Style.Version may write "%YAML 1.1" over any document, and under it
+	// "no:" is the key false -- so "no" beside Bool{false} is one key and the
+	// library refuses the document as a duplicate. The style is drawn after
+	// the value and the two are independent on purpose, so the dedupe has to
+	// hold for every style rather than for the one that was drawn.
+	if b, legacy := legacyBooleans[s.V]; legacy {
+		return strconv.FormatBool(b)
+	}
+
 	// A string's own text, which is also the name this library gives it: a
 	// quoted key is a string and a string is named by what it spells. So
 	// Str{"1.0"} lands with Float{1}, whose canonical name is "1.0", and

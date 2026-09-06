@@ -117,7 +117,7 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 
 		// A number's form is the style's, so the value alone cannot say
 		// whether one was written -- only that there is a number to write.
-		if divergentForm(st) && holdsNumber(v) {
+		if divergentForm(st, v) && holdsNumber(v) {
 			return
 		}
 
@@ -135,8 +135,39 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 //
 // "0o37" is a string there, and so is a float whose exponent carries no sign.
 // The decimal and "+" forms it reads exactly as core does, and hex too.
-func divergentForm(st yamlgen.Style) bool {
-	return st.NumberForm == yamlgen.NumberOctal || st.NumberForm == yamlgen.NumberExponent
+//
+// A BigFloat diverges under every form: its text comes from
+// big.Float.Text('g', -1), which writes an exponent with no '.' before it.
+func divergentForm(st yamlgen.Style, v yamlgen.Value) bool {
+	if st.NumberForm == yamlgen.NumberOctal || st.NumberForm == yamlgen.NumberExponent {
+		return true
+	}
+
+	return holdsBigFloat(v)
+}
+
+// holdsBigFloat reports whether v has a float past what a float64 holds in it.
+func holdsBigFloat(v yamlgen.Value) bool {
+	switch n := v.(type) {
+	case yamlgen.BigFloat:
+		return true
+	case yamlgen.Seq:
+		return slices.ContainsFunc(n.Items, holdsBigFloat)
+	case yamlgen.Map:
+		for _, p := range n.Pairs {
+			if holdsBigFloat(p.Key) || holdsBigFloat(p.Val) {
+				return true
+			}
+		}
+	case yamlgen.Anchored:
+		return holdsBigFloat(n.V)
+	case yamlgen.Alias:
+		return holdsBigFloat(n.V)
+	case yamlgen.Tagged:
+		return holdsBigFloat(n.V)
+	}
+
+	return false
 }
 
 // holdsNumber reports whether v has a number in it anywhere.

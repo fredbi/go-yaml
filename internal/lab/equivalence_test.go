@@ -130,38 +130,63 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 // shipped parser is wrong and names where the finding is written down. Neither
 // list should ever quietly become the other.
 //
-// One entry. A comment written between a node's properties on their own line
-// and a plain scalar underneath refuses the document, where the same document
-// without the comment reads: "a:" over " !" over " # c" over " 1". Only a local
-// or non-specific tag does it -- "!!str" in the same place reads -- and only a
-// plain scalar, since a flow collection after the comment reads too. The
-// recognizer accepts every one of them, libfyaml 1.0.0b1 gives {"a": "1"} and
-// the reference parser emits =VAL <!> :1. Recorded as yamlgen.Strict, "a
-// comment between a tag on its own line and a plain scalar".
+// Two entries, both in yamlgen.Strict, both refusals of documents the
+// recognizer accepts and libfyaml 1.0.0b1 and the reference parser read.
+//
+// A tag written at the end of its line, with the node it decorates below.
+// yamlgen.Strict holds two of these -- a comment before a plain scalar,
+// "a:" over " !" over " # c" over " 1", and a block scalar under a tag line,
+// "!!null" over ">" -- and which tags fail differs between them, so the gate is
+// the shape they share rather than either message.
+//
+// A "%YAML" directive over a root scalar carrying an unknown secondary tag:
+// "%YAML 1.1" over "---" over "!!nulll Null". It takes the directive, the
+// unknown tag and content that resolves -- drop any one and it parses.
 func divergesByDefect(err error, text string) (string, bool) {
-	if err == nil || !strings.Contains(err.Error(), "value is not allowed in this context") {
+	if err == nil {
 		return "", false
 	}
 
-	if !commentsBetweenATagLineAndItsValue(text) {
-		return "", false
+	msg := err.Error()
+
+	if strings.Contains(msg, "value is not allowed in this context") && tagEndsItsLine(text) {
+		return "a tag written at the end of its line, with its node below (yamlgen.Strict)", true
 	}
 
-	return "a comment between a tag on its own line and a plain scalar (yamlgen.Strict)", true
+	// Both of the directive refusals, which share a trigger and not a message:
+	// a "%YAML" line over a root scalar the parse then resolves. An unknown
+	// secondary tag over it reports "value is not allowed in this context"; a
+	// block scalar reports "unexpected token. required string token".
+	if strings.HasPrefix(text, "%YAML ") &&
+		(strings.Contains(msg, "value is not allowed in this context") ||
+			strings.Contains(msg, "unexpected token. required string token")) {
+		return "a version directive resolves the root scalar it opens (yamlgen.Strict, yamlgen.Ledger)", true
+	}
+
+	return "", false
 }
 
-// commentsBetweenATagLineAndItsValue reports whether text writes a line holding
-// nothing but a tag and then a comment line.
-func commentsBetweenATagLineAndItsValue(text string) bool {
+// tagEndsItsLine reports whether text writes a tag as the last thing on its
+// line, with the node it decorates below.
+//
+// One shape covers the family yamlgen.Strict and yamlcorpus.Departures record
+// between them: a comment before a plain scalar under a tag line, a block
+// scalar under one, and a collection under a tag that ends an entry's line.
+// What they share is the tag being separated from its node by a line break,
+// which is where this parser stops reading it as a property.
+//
+// A trailing comment does not count as content, since the tag is still the last
+// thing the line says.
+func tagEndsItsLine(text string) bool {
 	lines := strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == '\r' })
 
 	for i := range len(lines) - 1 {
-		tag := strings.TrimSpace(lines[i])
-		if !strings.HasPrefix(tag, "!") || strings.ContainsAny(tag, " \t") {
-			continue
+		line := strings.TrimSpace(lines[i])
+		if hash := strings.Index(line, " #"); hash >= 0 {
+			line = strings.TrimSpace(line[:hash])
 		}
 
-		if strings.HasPrefix(strings.TrimSpace(lines[i+1]), "#") {
+		if fields := strings.Fields(line); len(fields) > 0 && strings.HasPrefix(fields[len(fields)-1], "!") {
 			return true
 		}
 	}
@@ -528,11 +553,17 @@ func blockCollectionColumn(n ast.Node) (int, bool) {
 // the shipped parser reads it again against the declared schema, so "%YAML 1.1"
 // over "---" over "N" is a String there and a Bool here.
 //
+// Any "%YAML" line does it, not only one naming 1.1. The re-reading is what
+// differs, and it happens whatever version was declared -- "%YAML 1.2" over a
+// root "+0.17" is a String in refparser and a Float here. The guard was written
+// against 1.1 because that was the only version any document carried until
+// yamlgen.Style.Version began writing both.
+//
 // Both halves are required: the document has to declare a version, and the two
 // dumps have to agree everywhere except on node types. A tree that differs in a
 // position or in a value is a different tree and not a different schema.
 func resolvesDifferentlyOnPurpose(text, want, got string) (string, bool) {
-	if !strings.Contains(text, "%YAML 1.1") && !strings.Contains(text, "%YAML 1.0") {
+	if !strings.Contains(text, "%YAML ") {
 		return "", false
 	}
 

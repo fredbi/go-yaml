@@ -14,7 +14,7 @@ import (
 )
 
 // TestDecodingIntoAGoTypeGivesTheSameValue reads each document twice, once into
-// an `any` and once into a Go type built from the value it was written from.
+// an `any` and once into a Go type built from what that read gave.
 //
 // The destination is the only variable. Reading into an `any` walks the token
 // stream; reading into a Go type gathers a tree and fills fields by reflection,
@@ -44,7 +44,7 @@ func TestDecodingIntoAGoTypeGivesTheSameValue(t *testing.T) {
 			return
 		}
 
-		target := yamlgen.TargetFor(value)
+		target := yamlgen.TargetForDecoded(loose)
 		if target.Structs == 0 {
 			// No mapping in the document could be named by struct tags, so
 			// nothing reached decodeStruct and the run says nothing.

@@ -528,49 +528,50 @@ func TestDefectABlankLineBeforeACommentDoesNotSettle(t *testing.T) {
 	})
 }
 
-// TestDefectAKeptFoldedScalarGainsABreakEveryRendering: the renderer writes a
-// blank line between a folded block scalar and the entry after it, and "+"
-// keeps every break it is given.
+// TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens: a "%YAML" line
+// over a document whose body is a block scalar makes the parse fail when the
+// scalar's content is a word the schema would resolve.
 //
-// A regression from a5e7cc5, "fix(scanner): position a block scalar's content
-// where its content begins": its parent renders this document unchanged.
-// Bisected on 2026-09-07 by rebasing onto the scanner work.
-func TestDefectAKeptFoldedScalarGainsABreakEveryRendering(t *testing.T) {
-	const src = "- >+\n  x\n\n  y\n- 1\n"
-	wellFormed(t, src)
+// A block scalar is a string under every schema, so there is nothing here to
+// resolve. internal/lab's resolvesDifferentlyOnPurpose describes the machinery:
+// the grouping reads one token past the directive to know the directive's own
+// document has ended, and for a document whose body is a bare scalar that token
+// is the body.
+func TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens(t *testing.T) {
+	t.Run("the content decides, and only when it is one whole token", func(t *testing.T) {
+		for _, text := range []string{"null", "~", "True", "yes", "5", "1.5"} {
+			src := "%YAML 1.1\n---\n>-\n " + text + "\n"
+			wellFormed(t, src)
 
-	var got any
-	require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-	assert.Equal(t, []any{"x\ny\n", uint64(1)}, got)
+			var got any
+			err := yaml.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "today: %q is refused", src)
+			assert.Contains(t, err.Error(), "unexpected token. required string token")
+		}
 
-	once := renderOnce(t, src)
-	assert.Equal(t, "- >+\n  x\n\n  y\n\n- 1\n", once, "today: a blank line is written before the next entry")
+		for _, text := range []string{"x", "x y", "null x"} {
+			src := "%YAML 1.1\n---\n>-\n " + text + "\n"
 
-	var after any
-	require.NoError(t, yaml.Unmarshal([]byte(once), &after))
-	assert.Equal(t, []any{"x\ny\n\n", uint64(1)}, after, "today: the value gained a break")
-
-	t.Run("and it compounds", func(t *testing.T) {
-		var third any
-		require.NoError(t, yaml.Unmarshal([]byte(renderOnce(t, once)), &third))
-		assert.Equal(t, []any{"x\ny\n\n\n", uint64(1)}, third)
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, text, got)
+		}
 	})
 
-	t.Run("dropping any one of the four makes it right", func(t *testing.T) {
-		for _, tc := range []struct {
-			name, src string
-			want      []any
-		}{
-			{name: "literal rather than folded", src: "- |+\n  x\n\n  y\n- 1\n", want: []any{"x\n\ny\n", uint64(1)}},
-			{name: "clip rather than keep", src: "- >\n  x\n\n  y\n- 1\n", want: []any{"x\ny\n", uint64(1)}},
-			{name: "no break inside the content", src: "- >+\n  x\n- 1\n", want: []any{"x\n", uint64(1)}},
-			{name: "nothing after it", src: "- >+\n  x\n\n  y\n", want: []any{"x\ny\n"}},
+	t.Run("the version does not, and no other directive does it", func(t *testing.T) {
+		var refused any
+		assert.Error(t, yaml.Unmarshal([]byte("%YAML 1.2\n---\n>-\n null\n"), &refused))
+
+		for _, src := range []string{
+			">-\n null\n",
+			"---\n>-\n null\n",
+			"%TAG !e! tag:yaml.org,2002:\n---\n>-\n null\n",
+			// The body has to be the root: as a mapping value it reads.
+			"%YAML 1.1\n---\nk: >-\n  null\n",
 		} {
-			var before, after any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &before), "%s", tc.name)
-			require.NoErrorf(t, yaml.Unmarshal([]byte(renderOnce(t, tc.src)), &after), "%s", tc.name)
-			assert.Equalf(t, tc.want, before, "%s", tc.name)
-			assert.Equalf(t, before, after, "with %s the rendering keeps the value", tc.name)
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.NotNil(t, got, "%q", src)
 		}
 	})
 }

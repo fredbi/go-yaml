@@ -39,6 +39,9 @@ const (
 	ReadingCore = "yaml-1.2-core"
 	// Reading11 is YAML 1.1's resolution, still widely implemented.
 	Reading11 = "yaml-1.1"
+	// Reading11Version is what a document writes in its "%YAML" directive to
+	// ask for that reading, which is the version and not the reading's name.
+	Reading11Version = "1.1"
 	// ReadingJSON is YAML 1.2's JSON schema, spec §10.2, which resolves what
 	// JSON resolves and reads everything else as a string.
 	//
@@ -123,9 +126,15 @@ func numberUnder11(text string) bool {
 	return strings.HasPrefix(rest, "+") || strings.HasPrefix(rest, "-")
 }
 
-// sawNumber records a number and the form it was written in.
-func (r *readings) sawNumber(text string, form NumberForm) {
-	if r == nil || form == NumberPlain || numberUnder11(text) {
+// sawNumber records a number whose text YAML 1.1 does not read as a number.
+//
+// The form is not consulted, and consulting it was wrong: NumberPlain looked
+// like the form the two schemas always agree on, and a BigFloat breaks that.
+// Its text comes from big.Float.Text('g', -1), which writes "1e+330" -- an
+// exponent with no '.' before it, which 1.1 reads as a string. The text is the
+// only thing that decides.
+func (r *readings) sawNumber(text string) {
+	if r == nil || numberUnder11(text) {
 		return
 	}
 
@@ -155,6 +164,25 @@ func (r *readings) sawScalar(text string, plain bool) {
 	}
 
 	r.plain[text] = true
+}
+
+// splitALegacySpelling reports whether a text the readings disagree about was
+// written plain in one place and some other way in another.
+//
+// Which occurrence resolved is then a question about nodes, and this tracks
+// spellings.
+func (r *readings) splitALegacySpelling() bool {
+	if r == nil {
+		return false
+	}
+
+	for text := range r.split {
+		if r.plain[text] {
+			return true
+		}
+	}
+
+	return false
 }
 
 // under returns what v denotes under a reading, and whether that differs from
@@ -188,22 +216,28 @@ func (r *readings) under(v Value) (any, bool) {
 // numberKey is [KeyText] under YAML 1.1 for a number written in a form 1.1
 // does not read: the key is named by the text rather than by the number.
 func (r *readings) numberKey(v Value) (string, bool) {
+	return r.numberText(v)
+}
+
+// numberText returns the text a number was written as and whether 1.1 reads it
+// back as that text rather than as the number.
+func (r *readings) numberText(v Value) (string, bool) {
+	var text string
+
 	switch n := v.(type) {
 	case Int:
-		text, form := intText(n.V, r.st)
-
-		return text, form != NumberPlain && r.numbers[text]
+		text, _ = intText(n.V, r.st)
 	case BigInt:
-		text, form := bigIntText(n.V, r.st)
-
-		return text, form != NumberPlain && r.numbers[text]
+		text, _ = bigIntText(n.V, r.st)
 	case Float:
-		text, form := floatText(n.V, r.st)
-
-		return text, form != NumberPlain && r.numbers[text]
+		text, _ = floatText(n.V, r.st)
+	case BigFloat:
+		text = bigFloatText(n.V)
 	default:
 		return "", false
 	}
+
+	return text, r.numbers[text]
 }
 
 // legacyKey is [KeyText] under YAML 1.1.
@@ -243,20 +277,8 @@ func (r *readings) legacy(v Value) any {
 		}
 
 		return n.V
-	case Int:
-		if text, form := intText(n.V, r.st); form != NumberPlain && r.numbers[text] {
-			return text
-		}
-
-		return n.Decoded()
-	case BigInt:
-		if text, form := bigIntText(n.V, r.st); form != NumberPlain && r.numbers[text] {
-			return text
-		}
-
-		return n.Decoded()
-	case Float:
-		if text, form := floatText(n.V, r.st); form != NumberPlain && r.numbers[text] {
+	case Int, BigInt, Float, BigFloat:
+		if text, diverges := r.numberText(n); diverges {
 			return text
 		}
 
@@ -280,8 +302,19 @@ func (r *readings) legacy(v Value) any {
 	case Alias:
 		return r.legacy(n.V)
 	case Tagged:
-		// A tag settles the type, so nothing under it resolves by spelling.
-		return n.Decoded()
+		// A tag settles the type of the node it stands on, and of that node
+		// only. On a scalar it means the spelling no longer decides, so the
+		// core answer stands. On a collection it says the node is a sequence
+		// or a mapping, which the scalars inside are none the wiser for --
+		// "!!map" over "k: 0o0" leaves the 0o0 resolving by spelling, and
+		// stopping here read it as the core schema does under a directive
+		// asking for 1.1.
+		switch n.V.(type) {
+		case Seq, Map:
+			return r.legacy(n.V)
+		default:
+			return n.Decoded()
+		}
 	default:
 		return v.Decoded()
 	}
