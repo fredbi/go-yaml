@@ -411,36 +411,16 @@ func keyText(node ast.Node) string {
 		return s.Value
 	}
 
-	switch t := node.(type) {
-	case *ast.InfinityNode, *ast.NanNode:
-		// appendScalarNode writes these as null, which JSON has no spelling
-		// for. As a key that would put them under the same name as a null, so
-		// the text the document wrote is used instead. codec.ToJSON refuses
-		// them before this is reached; the decoder's string keys do not.
-		if tk := node.GetToken(); tk != nil {
-			return tk.Value
-		}
-	case *ast.LiteralNode:
-		if t.Value != nil {
-			return t.Value.Value
-		}
+	switch t := jsonScalarOf(node).(type) {
+	case nil:
+		// A key left empty addresses the entry by the word JSON writes for it,
+		// which is what the value converter held it under.
+		return "null"
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
 	}
-
-	if !isScalarNode(node) {
-		// A collection standing as a key, which parser.WithJSONCompatible
-		// refuses and a decoder into map[string]any reaches.
-		if s, ok := jsonScalarOf(node).(string); ok {
-			return s
-		}
-
-		return string(appendScalarNode(nil, node))
-	}
-
-	// The text the value would be written as, so that two keys the document
-	// tells apart are told apart here: a float keeps the digits that make it
-	// one, and "1.0" is not "1". fmt.Sprint on the resolved value wrote both as
-	// "1", and a mapping holding the two came out as JSON with one name twice.
-	return unquoted(appendScalarNode(nil, node))
 }
 
 // closeTag writes what a tag stands on, once the walk has read it.
