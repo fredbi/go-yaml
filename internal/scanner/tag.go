@@ -97,7 +97,14 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			ctx.addOriginBuf(c)
 		}
 	}
+	// The source ran out while the tag was being read. It is still a tag --
+	// "k: !!str" with no closing break is a document, and the loop above only
+	// ever emits on the character that ends the tag, so falling out of it here
+	// dropped the token and the tag with it.
+	value := ctx.source(ctx.idx-1, len(ctx.src))
+	ctx.addTokenValue(token.MakeTag(value, ctx.origin(), tagPos))
 	s.progressColumn(ctx, progress)
 	ctx.clear()
+
 	return true, nil
 }

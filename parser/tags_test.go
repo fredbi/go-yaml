@@ -190,3 +190,28 @@ func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 		})
 	}
 }
+
+// TestParseKeepsATagThatEndsWhereTheDocumentDoes covers a tag with no break
+// after it.
+//
+// The scanner emits the tag token on whatever character ends the tag -- a
+// space, a break, a flow indicator. A tag running to the end of the source ends
+// on none of them, so the loop fell out and the token was never made: "k: !!str"
+// with no closing break parsed to "k:" and the tag was gone, with nothing
+// reported. The grammar reads all of these.
+func TestParseKeepsATagThatEndsWhereTheDocumentDoes(t *testing.T) {
+	for source, want := range map[string]string{
+		"k: !!str":           "k: !!str\n",
+		"k: !fred":           "k: !fred\n",
+		"k: !<tag:a,2000:b>": "k: !<tag:a,2000:b>\n",
+		"k: !":               "k: !\n",
+		"!!str":              "!!str\n",
+		"- !!int":            "- !!int\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(source))
+			require.NoError(t, err)
+			assert.Equal(t, want, f.String())
+		})
+	}
+}
