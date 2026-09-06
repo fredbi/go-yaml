@@ -123,6 +123,17 @@ type Table struct {
 	// The zero value is Parse, which is the right default: a table that says
 	// nothing is a table about a grammar.
 	At Stage
+	// Reads names the resolution of plain scalars this consumer implements:
+	// "yaml-1.2-core", "yaml-1.1". Empty means it reads whatever the corpus
+	// states its meanings under, which is the specification's own default.
+	//
+	// [Table.Expect] does not consult it, and cannot: a verdict is the same
+	// under every reading. "0777" is a valid document whichever schema is
+	// asked, and the schemas disagree only about what it denotes. So this is
+	// what a replay matches a stored meaning against, and a consumer whose
+	// reading a case does not state is left unscored on the value rather than
+	// failed against somebody else's answer.
+	Reads string
 }
 
 // Stand returns the position taken on a tag.

@@ -36,9 +36,10 @@
 //
 // So a case may also carry a [Meaning]: what the document denotes under the
 // specification's own default reading, rendered as JSON. It is optional
-// because most documents raise no such question, and it is one reading rather
-// than all of them because the disagreements are tagged -- a consumer whose
-// reading differs knows exactly which cases to skip.
+// because most documents raise no such question. Where the readings disagree,
+// [Case.Meanings] carries an answer for each of them and a consumer picks the
+// one its stance.Table.Reads names, rather than being scored against a schema
+// it never claimed to implement.
 //
 // # Reproducibility is a property of the bytes
 //
@@ -56,9 +57,11 @@ package suite
 // misunderstand a newer file -- not when a field is added, which readers are
 // expected to ignore.
 //
-// Case.Features and Header.Features arrived under that rule and did not move
-// it. A format-3 reader that skips them derives the same expectation it always
-// did, because nothing consulting them decides an outcome.
+// Case.Features, Header.Features and Case.Meanings all arrived under that rule
+// and did not move it. A format-3 reader skips the first two and derives the
+// same expectation it always did, because nothing consulting them decides an
+// outcome; it skips the third and keeps reading Case.Meaning, which still
+// carries the core reading.
 const Format = 3
 
 // Header describes an artifact and is the first line of one.
@@ -186,16 +189,29 @@ type Case struct {
 	// answer to. Present for the families where the verdict is not the
 	// interesting part.
 	Meaning *Meaning `json:"meaning,omitempty"`
+	// Meanings is what the document denotes under every reading that has an
+	// answer, including the one Meaning already carries.
+	//
+	// Present only where the readings disagree, which is the whole reason to
+	// carry more than one: "0777" is 511 under YAML 1.1 and 777 under 1.2's
+	// core schema, and a corpus storing one of those scores a conforming
+	// consumer of the other as broken. Where every reading agrees, Meaning
+	// alone says it and this stays empty.
+	//
+	// The core answer is repeated here rather than left to Meaning, so a
+	// consumer matching on stance.Table.Reads looks in one place. Meaning stays
+	// for the format-3 readers that know nothing about this field.
+	Meanings []Meaning `json:"meanings,omitempty"`
 	// Origin traces the case back to what produced it.
 	Origin Origin `json:"origin"`
 }
 
 // Meaning is what a document denotes, under one stated reading.
 //
-// One reading and not all of them, because the readings that differ are exactly
-// what the tags name: a consumer implementing a different one looks at the tags
-// and skips the cases it disagrees about, rather than needing the corpus to
-// enumerate every implementation's answer.
+// A reading is named rather than assumed, because a plain scalar's meaning is
+// decided by a resolution step outside the grammar and YAML defines four of
+// them. "0777" is a valid document under every one, and denotes 511 under YAML
+// 1.1 and 777 under 1.2's core schema.
 type Meaning struct {
 	// Under names the reading: "yaml-1.2-core", "rfc8259". It is the
 	// specification's own default, not ours.
