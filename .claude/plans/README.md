@@ -1,5 +1,5 @@
 > [!NOTE]
-> Last revision: 2026-09-12 (`conformance-fixes` closed thirteen defects -- clusters A, B and C, and both
+> Last revision: 2026-09-12 (`conformance-fixes` closed thirteen defects and narrowed a fourteenth -- clusters A, B and C, and both
 > entries that silently restructured a document; the decoder round is parked). Previous: 2026-09-11 (the generator writes a tag
 > three ways, reaches the shapes the flow axes need, and reads each document into a Go type as well as into
 > an `any`). Streaming is still paused — read
