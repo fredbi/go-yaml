@@ -923,6 +923,85 @@ loop -- which has to be a call either way, and which replaces two runtime map ca
   covers what it could not: a spilled index at a non-zero base, and two siblings opening at the same base
   one after the other, where a key the first left behind would read as a repeat in the second.
 
+## The scanner round: a bulk skip that finally held -- landed 2026-09-07 (`1e5f7a5`, `9271eb8`)
+
+**Scanner -22.3% geomean, decode -8.0%, every workload significant, memory unchanged.** The largest
+single gain of the day and the one that was least expected in the morning.
+
+### The target was the wrong token, and a measurement said so
+
+The obvious fast path is the quoted scalar: its stop set is three needles and `swar` has carried
+`DoubleQuoteStopMask` and `SingleQuoteStopMask`, unused, since the survey. `TestBytesByTokenType`
+measures how much of a document each kind of token actually spans, which a token count does not:
+
+| workload | quoted scalars | plain scalars |
+|---|---:|---:|
+| azure_swagger | 12.1% | **69.0%** |
+| twitter_status | 7.8% | **69.7%** |
+| citm_catalog | **0.8%** | 37.3% |
+| golang_source | **0.0%** | 30.5% |
+| canada_geometry | **0.0%** | 0.0% |
+
+**The easy mask is on the token that covers at most 12% of a document and nothing at all of half the
+corpus.** Plain scalars cover 30% to 70%, and they have no scanner of their own: `scan` dispatches on
+24 characters and everything else falls to a default arm that calls `addBuf`, `addOriginBuf` and
+`progressColumn` a byte at a time. Those six functions came to **32% of a scan**.
+
+### Letters and digits, not the 24
+
+A letter or a digit is none of the 24, so a run of them takes the default arm and nothing else --
+which makes the continue-set alphanumeric rather than "not one of 24", and a cheap pair of range
+tests rather than a 24-needle mask. `TestSkippableRuns` says the cheap set gives up almost nothing:
+
+| workload | ideal (not one of the 24) | alphanumeric |
+|---|---:|---:|
+| azure_swagger | 64.9% | 63.6% |
+| citm_catalog | 59.9% | 59.8% |
+| golang_source | 38.4% | 36.9% |
+| twitter_status | 76.7% | 53.4% |
+
+Within a point on five of six. Only `twitter_status` gives much up, to URLs and `_`; `_ / + = ~`
+could join the set (none is one of the 24) where `.` and `-` cannot, being `...` and `---`.
+
+**Runs average 5.1 to 8.1 bytes -- about one word.** This wins one word at a time, not by striding
+through long runs, so the per-word arithmetic has to inline. `AlnumStopMask` was written and then
+deleted: spelling the combination costs 98 against the budget of 80, so `LetterMask` and `DigitMask`
+stand apart and the caller writes `^(LetterMask(w) | DigitMask(w)) & HighBits`, as `ControlMask` and
+`AllowedControlMask` are used.
+
+### What made the fourth attempt hold
+
+Three earlier attempts at a bulk skip each broke a different piece of state that is consistent only
+because it advances one character at a time. `takeAlnumRun` names the four operations it stands in
+for and why each collapses for a run with no space, tab or break in it -- `addBuf`'s leading-space
+rule cannot apply, `addOriginBuf` moves one byte per character because the run is ASCII by
+construction, `progressColumn` likewise, and `updateIndent` sets the indent state to Keep and
+returns because the line's first character cleared `isFirstCharAtLine` before the switch handed here.
+
+⭐ **The instrument decided it.** `TestAlnumRunReadsWhatTheByteLoopReads` reads every document with
+the skip on and off -- `alnumFastPath` is a variable for exactly this -- and compares every token on
+its type, its value, **the stretch of source it was written as**, and all four numbers of its
+position. The extent is what attempt 1 lost, and no test of ordinary output caught it.
+`FuzzAlnumRunMatchesTheByteLoop` is the same comparison, **clean over 1,733,261 executions**.
+
+### Where the scanner's time went
+
+citm decode, the scanner's own time split by what it is doing:
+
+| | before | after |
+|---|---:|---:|
+| **walk the bytes** | 12.2% | **8.1%** |
+| cut a token | 11.9% | 11.4% |
+| other | 4.2% | 4.7% |
+| **scanner, total** | **28.4%** | **24.3%** |
+
+`addBuf`, `addOriginBuf` and `next` have left the scanner's top fourteen. `scan` fell 9.45% -> 2.28%,
+`currentChar` 4.14% -> 0.81%, `progress` 7.92% -> 0.65%; `alnumRun` costs 0.65% and `swar` 0.7%.
+
+**The scanner is now token-cutting rather than byte-walking** -- `NextToken` 3.25%, `bufferedToken`
+3.09%, `appendToken` 1.63%, `popValue` 1.14%. That is materialising the 56-byte token, which no
+amount of per-byte work reaches.
+
 ## The per-token round -- landed 2026-09-07 (`fe85239`)
 
 ### What a parse actually costs: a token, not a byte
@@ -1000,7 +1079,55 @@ and none of them misses. **On a struct that stays in L1, layout is free.**
 locality. Both locality bets measured nothing -- the `fieldCacheKey` struct key that boxed at every
 lookup, and the bitset above. Look for work that cannot be inlined away before looking at offsets.
 
-## Where we stand against yaml/v3, measured 2026-09-07
+## Where we stand against yaml/v3, end of 2026-09-07 (`6bd92af`)
+
+`internal/benchmarks`, both sides into `any`, interleaved in one process, n=8. Negative is us ahead.
+
+| workload | morning (`f909608`) | evening (`6bd92af`) |
+|---|---:|---:|
+| canada_geometry | -52.9% | **-58.9%** |
+| commented_swagger | -13.1% | -28.8% |
+| azure_swagger | -6.7% | -26.6% |
+| golang_source | -9.1% | -23.0% |
+| twitter_status | ~ | -19.4% |
+| citm_catalog | **+7.2%** | -8.5% |
+| **geomean** | **-15.8%** | **-29.6%** (0.70x) |
+
+Every workload significant at p=0.000. **1.42x faster than yaml/v3**, with **-78.0% bytes** (4.5x
+less) and **-90.7% allocations** (11x fewer).
+
+`BenchmarkTyped`, both sides into a Go struct, moved without being touched: **+11.3% -> +4.58%**,
+bytes -80.4%, allocations -72.3%. Reading into a struct pays the same scan, so the scanner round
+closed most of that gap as a side effect.
+
+### What moved, in order
+
+| round | decode | note |
+|---|---:|---|
+| the map round (`3dcb382`, `808f3f6`) | -7.6% | two Go maps off the hot path |
+| the per-token round (`fe85239`) | -1.5% | `tokenRef.at` under the inline budget |
+| the scanner round (`1e5f7a5`, `9271eb8`) | **-8.0%** | a bulk skip over letters and digits |
+
+### Where the decode goes now, citm_catalog
+
+| | share |
+|---|---:|
+| **parser** | **46.7%** |
+| scanner | 24.3% (swar 0.7% of it) |
+| runtime, a long flat tail | 13.5% |
+| ast / token / codec | 12.9% |
+| go maps | 1.8% |
+| GC | 0.2% |
+
+**The parser is nearly half the decode and the scanner's share has fallen three rounds running**
+(28.4% -> 24.3% while the parser rose from 39.5%). Within the parser the tape round trip is the
+largest item: ~20% walking the tape against ~12% materialising the token.
+
+⚠️ Profile shares are reliable; the absolute times in a profile header are not. Those runs are single
+and uncontrolled, and the machine was noisy through the day. The A/B figures above are n=6 or n=8,
+interleaved.
+
+## Where we stood against yaml/v3, measured 2026-09-07
 
 `internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any` on both sides, the two runs
 interleaved in one window, eight rounds each, read with benchstat. Negative is us ahead.
@@ -1678,6 +1805,22 @@ blocking; it is what a scanner nobody is racing deserves before it settles.
   0.9% of allocated bytes over building nothing, which reversed the decision.
 
 ## Achievements
+
+### The scanner round: a bulk skip that held [🏁] ⭐⭐⭐ (2026-09-07)
+
+- **Scanner -22.3%, decode -8.0%**, every workload significant, memory unchanged. The day's largest
+  gain, and the one the morning had written off: the scanner was called "evenly loaded" and
+  "hard to beat", and the per-byte cursor was the only item thought big enough to matter.
+- **A measurement picked the target, and it was not the obvious one.** The quoted-scalar mask has sat
+  written and unused since the survey; quoted scalars cover 12% of a document at most and none at all
+  of half the corpus. Plain scalars cover 30-70% and had no scanner of their own.
+- **The cheap continue-set gave up almost nothing** -- alphanumeric against "not one of the 24" is
+  within a point on five of six workloads, and needs two range tests rather than a 24-needle mask.
+- ⭐⭐⭐ **The differential test is what let a fourth attempt be tried at all.** Three had
+  failed, each on different state, none caught by a test of ordinary output. Reading every document
+  both ways and comparing every token's extent and position caught the class outright; 1.7M fuzz
+  executions found nothing.
+- **It reached the typed path for free**: +11.3% -> +4.58% against v3 without touching the decoder.
 
 ### The map round: two Go maps off the hot path [🏁] ⭐⭐ (2026-09-07)
 

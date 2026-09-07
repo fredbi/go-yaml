@@ -1,11 +1,32 @@
-> [!NOTE]
-> Surveyed 2026-09-04 against `go-openapi/core/json/lexers/default-lexer`, on Fred's pointer.
-> Read beside [parser-performance-log.md](parser-performance-log.md). The numbers below are the
-> scanner's own CPU profile over `BenchmarkScannerNextToken`, after the day's allocation work.
+> [!WARNING]
+> **Surveyed 2026-09-04 and overtaken. Do not read the numbers below as current.** Two rounds have
+> landed since and each undid a premise of this document. It cost a wrong recommendation on
+> 2026-09-07, when its "the scanner copies every byte of the document into `ctx.obuf`" was read as
+> live and a round was proposed to fix something already fixed. Kept for the four techniques and the
+> design notes, which still hold; see "What changed" for what does not.
 
 # What the JSON lexer does that the YAML scanner could
 
-## Where our time goes today
+## ⚠️ What changed since the survey
+
+- **`obuf` is a window, not a copy.** `addOriginBuf` moves `originEnd` and copies nothing; only the
+  rare `originCut` path buffers. `skipOrigin(n)` is the bulk form and already exists.
+- **`breaksIn` is gone from the scanner.** The two largest flat items this document names, and its
+  closing "worth more than any of the four", describe work that no longer happens.
+- **The per-byte core is no longer the scanner's largest cost.** After the bulk skip of 2026-09-07,
+  `scan` is 2.28% of a citm decode where it was 9.45%, `progress` 0.65% where it was 7.92%, and
+  `addBuf`, `addOriginBuf` and `next` have left the scanner's top fourteen. **Walking the bytes is
+  8.1% of a decode; cutting a token is 11.4%.**
+- **Technique 1 landed, aimed elsewhere.** The string stop mask went to *plain* scalars, not quoted
+  ones: quoted scalars cover 12% of a document at most and none at all of three workloads, where
+  plain scalars cover 30-70%. `LetterMask` and `DigitMask` are the masks that paid. The quoted stop
+  masks are still written and still unused.
+
+Techniques 2 (first-byte dispatch before `numberType`), 3 (`utf8x` for `validateStream`) and 4 are
+untouched, and the inline-budget warning under technique 1 is the most valuable paragraph here: it
+predicted the exact failure met on 2026-09-07, when spelling one combined mask cost 98 against 80.
+
+## Where our time went at the survey (2026-09-04, stale)
 
 Cumulative, over all twelve shapes: `scan` 89%, `scanMapDelim` 20%, `scanQuote` 17%,
 `scanDoubleQuote` 16%, `scanMultiLine` 6.4%, `scanComment` 2.7%, `scanFlowEntry` 2.6%.
@@ -81,7 +102,10 @@ Wiring the string stop mask in failed three times, each on a different piece of 
 is only consistent because it is advanced one character at a time. What is known, what was removed
 and what is parked is in [scanner-state.md](scanner-state.md).
 
-## What none of it addresses
+## ✅ What none of it addressed, and since has been
+
+**Done, and this paragraph is why the warning at the top exists.** `Origin` left the token, `obuf`
+became a window and `breaksIn` went with it. What follows is the reasoning as it stood.
 
 The two largest flat items are `addOriginBuf` (8.4%) and `breaksIn` (6.4%), and they are the same
 problem: the scanner copies every byte of the document into `ctx.obuf`, and then re-walks each
