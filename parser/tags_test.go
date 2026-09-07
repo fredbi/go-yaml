@@ -455,6 +455,12 @@ func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
 // mapping was left unparsed. It asks tagStandsOver now, which is
 // opensNextEntry with a carve-out for a "-".
 //
+// The order of the two properties decided it, and the parse was where that
+// showed: "&a !!str [1]: v" parsed on master and "!!str &a [1]: v" did not.
+// The key position is the cause and the order was the symptom -- only a tag
+// written first meets the map key group -- so the fix collapses the two into
+// one answer rather than settling which order is right.
+//
 // The document is a kind mismatch and the decoder still reports one, at the
 // tag: "!!str" names a scalar and the node is a mapping, which is the same
 // answer "!!str [1]: v" has always given. That is resolution and not syntax,
@@ -466,6 +472,8 @@ func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 			"!!seq &a [1]: v\n",
 			"!!str &a {a: 1}: v\n",
 			"!!map &a [1]: v\n",
+			// Read on master too, where the same document with the tag
+			// written first did not.
 			"&a !!str [1]: v\n",
 			// The same shapes with a tag on its own line over a block
 			// collection, which reported the complaint one line down.
