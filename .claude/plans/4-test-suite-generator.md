@@ -380,7 +380,7 @@ Actions below.
 
 ## Open items
 
-### 🎯 A `Value` departure is never re-measured — opened 2026-09-13
+### ✅ A `Value` departure is now run — opened and closed 2026-09-13
 
 `yamlcorpus.TestTheLibraryMatchesItsDeclaredStance` builds its `known` map from the entries whose `Kind` is
 `Verdict`, so the three verdict departures get the staleness check the register's comment promises and the
@@ -400,8 +400,18 @@ Two designs, and the second is the one to build:
   named beside it: entry count, key set, the type of one value. Narrower than a whole value and it says
   what the departure is about.
 
-Whichever lands, the test has to fail when a departure closes, since a closed departure is the good news
-this register exists to notice.
+The second landed. `Departure.Departs` reports whether the library still does what `Observed` says, given
+the decode of the pattern's document into an `any`, and `TestEveryValueDepartureStillDeparts` refuses an
+entry without one. The decode is handed in rather than done in `yamlcorpus`, so the register still does not
+import the library it measures.
+
+Two of the five entries named a pattern that did not exhibit them, which is why nothing had run: "a key
+that is a boolean" pointed at `true: a` and the +.inf entry at `~: a`, and both of those read correctly on
+their own. `KeyShapes` gains "a key written +.inf beside one written .inf" and the boolean entry now names
+"two keys alike in text and different once resolved".
+
+Checked against `conformance-fixes` at `8ee7d6a`, where `bd8b723` closed "a local tag on an empty value":
+the test fails there and prints the document, what it reads now, and the sentence that has expired.
 
 ### 🎯 The corpus never reads a document into a Go type — opened 2026-09-06
 
