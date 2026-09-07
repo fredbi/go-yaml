@@ -255,7 +255,7 @@ var Ledger = []Divergence{
 		Match:    writesABlankLineBeforeAComment,
 	},
 	{
-		Name: "render/a-comment-on-an-explicit-keys-colon-line-is-dropped",
+		Name: "parse/a-comment-on-an-explicit-keys-colon-line-is-dropped",
 		Reason: "A comment written on the `:` line of an entry written the long way, with the value " +
 			"below it, is lost. `? a` over `: # c3` over `  v` renders back as `? a` over `: v`.\n\n" +
 			"The short form keeps it: `a: # c3` over `  v` renders `a: v # c3`, moved but not lost. " +
@@ -263,6 +263,11 @@ var Ledger = []Divergence{
 			"is the `:` line of the long form and nowhere else.\n\n" +
 			"Only the comments are lost -- the value reads correctly -- which is why this claims " +
 			"CommentsKept alone. Found on 2026-09-11 by Style.ExplicitKeys.\n\n" +
+			"📌 It is lost before the tree, so it is not the renderer. Measured on 2026-09-13 with " +
+			"codec.CommentToMap: `? a` over `: # c3` over `  v` fills an empty comment map, where " +
+			"`a: # c3` over `  v` gives $.a, `? a # c3` gives $ and `: v # c3` gives $.a. Nothing " +
+			"reaches the tree to be written out, so the name of this entry moved from render/ to " +
+			"parse/.\n\n" +
 			"The shape is a `:` with nothing after it on its line, so an empty value counts as much " +
 			"as a collection: `?` over `: #c1` loses the comment too. The predicate does not work " +
 			"out whether a collection really lands below rather than in flow, since that depends on " +
