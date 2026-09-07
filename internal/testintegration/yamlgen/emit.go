@@ -818,6 +818,16 @@ func (e *emitter) flowMap(n Map) string {
 // conservative: Str{"1"} has to reach the document quoted or it resolves to the
 // integer and becomes a different key.
 func (e *emitter) keyIn(k Value, flow bool) string {
+	if _, isMerge := k.(MergeKey); isMerge {
+		// Bare, always. Quoted it would be an ordinary key and the document
+		// would no longer hold a merge, which is the one thing this construct
+		// exists to write.
+		e.feat.add(FeatureMergeKey)
+		e.reads.sawMergeKey()
+
+		return "<<"
+	}
+
 	s, ok := k.(Str)
 	if !ok {
 		// Null, Bool, Int and Float, whose spelling has no choices beyond the

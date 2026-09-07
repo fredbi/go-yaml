@@ -31,6 +31,18 @@ type Value interface {
 type (
 	// Null is the empty value.
 	Null struct{}
+	// MergeKey is the "<<" of a merge entry.
+	//
+	// A construct rather than Str{"<<"} written plain, and plainSafe is why: it
+	// requires a leading letter, deliberately, so a string spelling "<<" is
+	// always quoted -- and a quoted "<<" is an ordinary key, not a merge. So
+	// writing the merge key at all needs something that says "this is the merge
+	// key" rather than a string that happens to spell it.
+	//
+	// It has no meaning of its own and Decoded panics: a MergeKey is read by
+	// the Map that holds it, which is where the merge happens. Standing
+	// anywhere else it is a generator fault rather than a document.
+	MergeKey struct{}
 	// Bool is true or false.
 	Bool struct{ V bool }
 	// Int is an integer.
@@ -155,6 +167,12 @@ type Pair struct {
 // that; breakRules produces it on purpose.
 func KeyText(v Value) string {
 	switch n := v.(type) {
+	case MergeKey:
+		// Reached only where a merge is suppressed, since Map.Decoded takes the
+		// entry out otherwise. Nothing suppresses one today; the case is here so
+		// a future Style that quotes the key names it as the ordinary key it
+		// then is.
+		return "<<"
 	case Null:
 		return "null"
 	case Bool:
@@ -233,6 +251,14 @@ func (s Seq) Decoded() any {
 
 func (a Anchored) Decoded() any { return a.V.Decoded() }
 
+// Decoded panics: a merge key means nothing on its own.
+//
+// [Map.Decoded] reads it where it stands, so reaching this is a MergeKey put
+// somewhere a merge entry's key is not.
+func (MergeKey) Decoded() any {
+	panic("yamlgen: a MergeKey stands outside a mapping entry's key")
+}
+
 // Decoded returns what the tagged value decodes to.
 //
 // One tag changes it. An untagged non-negative integer comes back as a uint64
@@ -259,13 +285,85 @@ func (t Tagged) Decoded() any {
 // about what the document means.
 func (a Alias) Decoded() any { return a.V.Decoded() }
 
+// Decoded returns what Unmarshal into an `any` produces for this mapping, with
+// a "<<" entry merged into it.
+//
+// # The merge rule, and why it is written down rather than deferred
+//
+// The 1.1 merge type says an entry's own keys win over the ones a "<<" brings,
+// and that a sequence of mappings merges with the earlier winning. That is a
+// specified rule and not a guess -- go.yaml.in/yaml/v3 v3.0.5 agrees with this
+// library on every resolvable shape -- so modeling it here is the same kind of
+// work as modeling the 1.1 resolution table, and it is what lets a generated
+// merge document check a *value* rather than only that it parses. The defect it
+// exists to catch was a value defect: a mapping's own key lost outright when
+// the "<<" came second.
+//
+// # And why the corpus still states no meaning for one
+//
+// YAML 1.2 dropped the merge type, so a conforming 1.2 reader gives "<<" back
+// as an ordinary key and is not wrong. What this returns is what *this library*
+// does, which is what the properties compare against; [Written.MeansUnclear] is
+// set for any document holding a merge key, so the artifact ships the stance
+// tag and no answer. See yamlcorpus/merge.go.
 func (m Map) Decoded() any {
 	out := make(map[string]any, len(m.Pairs))
+
+	var merged []map[string]any
+
 	for _, p := range m.Pairs {
+		if _, isMerge := p.Key.(MergeKey); isMerge {
+			merged = append(merged, mergedMappings(p.Val)...)
+
+			continue
+		}
+
 		out[KeyText(p.Key)] = p.Val.Decoded()
 	}
 
+	// Own entries first, then each merged mapping in turn, and neither
+	// overwrites a key already standing. That is one statement of both halves
+	// of the rule: own keys win, and among the merged the earlier wins.
+	for _, from := range merged {
+		for k, v := range from {
+			if _, held := out[k]; !held {
+				out[k] = v
+			}
+		}
+	}
+
 	return out
+}
+
+// mergedMappings returns the mappings a "<<" entry's value brings in, in the
+// order they are to be merged.
+//
+// The value is a mapping, or a sequence of them, and an alias or an anchor may
+// stand in front of either -- 1.1 says what the value is and nothing about how
+// it got there.
+func mergedMappings(v Value) []map[string]any {
+	switch n := v.(type) {
+	case Anchored:
+		return mergedMappings(n.V)
+	case Alias:
+		return mergedMappings(n.V)
+	case Map:
+		one, _ := n.Decoded().(map[string]any)
+
+		return []map[string]any{one}
+	case Seq:
+		out := make([]map[string]any, 0, len(n.Items))
+		for _, item := range n.Items {
+			out = append(out, mergedMappings(item)...)
+		}
+
+		return out
+	default:
+		// "<<: 1" asks to merge a scalar, which is no operation at all. The
+		// generator does not draw one; yamlcorpus enumerates it by hand, where
+		// it carries TagMergeNonMapping and no meaning.
+		return nil
+	}
 }
 
 // awkwardStrings are the strings that have caused trouble before, or that sit
@@ -506,17 +604,119 @@ func (a *aliaser) children(v Value) Value {
 
 		return Seq{Items: items}
 	case Map:
-		pairs := make([]Pair, 0, len(n.Pairs))
+		// Snapshotted before the children are walked, and that is the whole of
+		// what makes the alias resolve. An anchor created inside this mapping
+		// is in the pool by the end of the loop but stands *after* the "<<"
+		// this prepends, and an alias naming an anchor its document has not
+		// declared yet is refused -- "{<<: *a1, b: &a1 {c: 1}}" is
+		// `could not find alias "a1"`.
+		from := a.mappings()
+
+		pairs := make([]Pair, 0, len(n.Pairs)+1)
 		for _, p := range n.Pairs {
 			pairs = append(pairs, Pair{Key: p.Key, Val: a.walk(p.Val)})
 		}
 
-		return Map{Pairs: pairs}
+		return Map{Pairs: a.merge(pairs, from)}
 	case Tagged:
 		return Tagged{Tag: n.Tag, V: a.children(n.V)}
 	default:
 		return v
 	}
+}
+
+// mergeOdds is one in N, over the mappings drawn while the pool holds a
+// mapping to merge from.
+//
+// Low, because a merge is a rare thing to write and because every one of them
+// costs the corpus a stated meaning -- yamlgen will not say what a merge
+// document denotes, so a document carrying one is scored on its shape and not
+// on its value. Frequent merges would trade away the corpus's reach.
+const mergeOdds = 11
+
+// merge gives a mapping a "<<" entry, one time in mergeOdds.
+//
+// # Why here
+//
+// A merge needs a mapping to merge *from*, anchored earlier in the same
+// document, and the aliaser is already holding exactly that: a pool of finished
+// anchors in document order. Drawing the merge anywhere else would mean
+// building the anchor and the alias separately and hoping they line up.
+//
+// # What it draws
+//
+// One "<<" and no more: two of them in a mapping repeat a key, which 3.2.1.1
+// makes an error whatever merge means, and yamlcorpus enumerates that by hand
+// with TagDuplicateKey on it. The value is an alias to a mapping, or a sequence
+// of two aliases -- 1.1 admits both, and the sequence is where the earlier-wins
+// half of the rule lives.
+//
+// A key the merged mapping and the own mapping share is not avoided. It is the
+// interesting case rather than a collision to dodge: an own key winning over a
+// merged one is the precedence rule, and reading it the other way round was a
+// real defect.
+//
+// from is the pool as it stood before this mapping's children were walked. See
+// the Map case in children for why it cannot be taken afterwards.
+func (a *aliaser) merge(pairs []Pair, from []Anchored) []Pair {
+	if len(pairs) == 0 || rapid.IntRange(0, mergeOdds).Draw(a.t, "merge") != 0 {
+		return pairs
+	}
+
+	// An anchored mapping earlier in the document if there is one, and a
+	// mapping written where it stands otherwise. The inline form is not a
+	// fallback for its own sake: 1.1 says the value is a mapping and nothing
+	// about how it got there, so "<<: {a: 1}" asks for the same merge that
+	// "<<: *b" does, and an implementation that resolves the alias may still
+	// have no path for a mapping that was never anchored. It is also what makes
+	// a merge reachable at all on a document whose anchors all came later.
+	val := a.mergeFrom(from)
+
+	if rapid.Bool().Draw(a.t, "mergeseq") {
+		// A sequence of two, which is where the earlier-wins half of the rule
+		// lives. Drawn independently, so an alias and an inline mapping can
+		// stand side by side -- the shape codec.ToJSON writes invalid JSON for.
+		val = Seq{Items: []Value{a.mergeFrom(from), a.mergeFrom(from)}}
+	}
+
+	// In front of the mapping's own entries, which is where a "<<" is usually
+	// written and the order that makes the precedence rule visible: the own
+	// keys come after and still win.
+	return append([]Pair{{Key: MergeKey{}, Val: val}}, pairs...)
+}
+
+// mergeFrom draws one mapping for a "<<" to merge: an alias to an anchored one
+// where the pool has any, and a small mapping written in place otherwise.
+func (a *aliaser) mergeFrom(from []Anchored) Value {
+	if len(from) > 0 && rapid.Bool().Draw(a.t, "mergealias") {
+		return Alias(rapid.SampledFrom(from).Draw(a.t, "mergefrom"))
+	}
+
+	return Map{Pairs: []Pair{{
+		Key: Str{V: "merged" + strconv.Itoa(rapid.IntRange(0, 3).Draw(a.t, "mergedkey"))},
+		Val: Int{V: rapid.IntRange(-9, 9).Draw(a.t, "mergedvalue")},
+	}}}
+}
+
+// mappings returns the pooled anchors standing on a mapping, which are the ones
+// a "<<" may merge from.
+func (a *aliaser) mappings() []Anchored {
+	var out []Anchored
+
+	for _, anchored := range a.pool {
+		// Non-empty, and that is not fussiness. An empty mapping writes nothing
+		// at all in block context, so "<<: *a" pointing at one comes out as
+		// "<<:" with no value -- a merge of null, which is not a merge. It is
+		// also a shape the two decode paths disagree about, held by
+		// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree, so drawing
+		// it here would put a document in the corpus whose meaning this package
+		// cannot state.
+		if m, isMap := anchored.V.(Map); isMap && len(m.Pairs) > 0 {
+			out = append(out, anchored)
+		}
+	}
+
+	return out
 }
 
 const maxDepth = 3

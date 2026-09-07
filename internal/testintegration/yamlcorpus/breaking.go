@@ -123,6 +123,25 @@ func renameAnAlias(v yamlgen.Value) (yamlgen.Value, bool) {
 	return out, done
 }
 
+// holdsAMergeKey reports whether a mapping's first entry is a "<<".
+//
+// duplicateAKey skips such a mapping, and not to keep the corpus green.
+// Duplicating a "<<" writes a document whose break is a different rule than the
+// tag claims: the entry says TagDuplicateKey, and what comes out is a merge key
+// alone in flow, which this library reads where it refuses `{a: 1, a}`. That
+// shape is held by
+// yamlgen_test.TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck rather
+// than by a corpus document whose label would be wrong.
+func holdsAMergeKey(m yamlgen.Map) bool {
+	for _, p := range m.Pairs {
+		if _, isMerge := p.Key.(yamlgen.MergeKey); isMerge {
+			return true
+		}
+	}
+
+	return false
+}
+
 // duplicateAKey gives the second entry of the first mapping it finds the first
 // entry's key.
 //
@@ -150,7 +169,7 @@ func duplicateAKey(v yamlgen.Value) (yamlgen.Value, bool) {
 
 			return yamlgen.Seq{Items: items}
 		case yamlgen.Map:
-			if len(t.Pairs) >= 2 && !done {
+			if len(t.Pairs) >= 2 && !done && !holdsAMergeKey(t) {
 				done = true
 
 				pairs := make([]yamlgen.Pair, len(t.Pairs))

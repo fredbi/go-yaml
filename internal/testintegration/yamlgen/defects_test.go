@@ -270,3 +270,175 @@ func readTheStream(t *testing.T, src string) []any {
 		out = append(out, v)
 	}
 }
+
+// TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge pins the two spellings apart.
+//
+// The 1.1 merge type names the key `<<` and says nothing about how it is
+// written, so `? <<` over `: *a` is the same key node as `<<: *a` and should
+// merge the same way. It does not: the long form comes back as an ordinary key
+// named "<<".
+//
+// go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow, and is the oracle
+// that answers here -- libfyaml 1.0.0b1 resolves no merge at all and hands "<<"
+// back as a member name, so it cannot say which spelling is right.
+func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
+	const base = "b: &a {x: 1}\n"
+
+	t.Run("the plain spelling merges", func(t *testing.T) {
+		for _, src := range []string{
+			base + "d:\n  <<: *a\n  y: 2\n",
+			// A tag on the mapping changes nothing, which is what makes this
+			// the key's presentation rather than the node's type.
+			base + "d: !foo\n  <<: *a\n  y: 2\n",
+			base + "d: !!map\n  <<: *a\n  y: 2\n",
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"x": uint64(1), "y": uint64(2)}, got["d"], "%q", src)
+		}
+	})
+
+	t.Run("today the long spelling does not", func(t *testing.T) {
+		for _, src := range []string{
+			base + "d:\n  ? <<\n  : *a\n  y: 2\n",
+			base + "d: {? <<\n  : *a, y: 2}\n",
+			base + "d: !foo\n  ? <<\n  : *a\n  y: 2\n",
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t,
+				map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)},
+				got["d"], "today: the long spelling is an ordinary key: %q", src)
+		}
+	})
+
+	// The worse half: the answer depends on the destination. Written in flow
+	// with the mapping in place, the walk hands "<<" back and the tree merges
+	// it, so two callers reading the same document into different destinations
+	// get different values.
+	t.Run("today the two decode paths disagree in flow", func(t *testing.T) {
+		const src = "{? <<: {x: 1}, y: 2}\n"
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t,
+			map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)},
+			walked, "today: the walk does not merge it")
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t,
+			map[string]any{"x": uint64(1), "y": uint64(2)},
+			typed, "today: the tree does merge it")
+	})
+
+	t.Run("in block the two paths agree, and neither merges", func(t *testing.T) {
+		const src = "d:\n  ? <<\n  : {x: 1}\n  y: 2\n"
+
+		want := map[string]any{"d": map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)}}
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, want, walked)
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t, want, typed)
+	})
+}
+
+// TestDefectAMergeSequenceSharingAKeyIsRefusedByATypedMap pins the split.
+//
+// Two mappings in a merge sequence are expected to share keys -- that is what
+// the earlier-wins rule of the 1.1 merge type is for, and the sequence has no
+// other purpose. The walk applies it and a typed map refuses the document,
+// applying 3.2.1.1's uniqueness across mappings that are not one mapping.
+//
+// Filed by the peer session as defect 40 from hand-written shapes; reached by
+// the merge axis on 2026-09-07.
+func TestDefectAMergeSequenceSharingAKeyIsRefusedByATypedMap(t *testing.T) {
+	t.Run("today a shared key is refused into a typed map and read into an any", func(t *testing.T) {
+		const src = "<<: [{x: 1}, {x: 2}]\ny: 3\n"
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, map[string]any{"x": uint64(1), "y": uint64(3)}, walked,
+			"the walk merges it, earlier winning, which is the 1.1 rule")
+
+		var typed map[any]any
+		err := codec.Unmarshal([]byte(src), &typed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `duplicate key "x"`)
+	})
+
+	t.Run("sharing no key, every destination reads it", func(t *testing.T) {
+		const src = "<<: [{x: 1}, {z: 2}]\ny: 3\n"
+
+		want := map[string]any{"x": uint64(1), "y": uint64(3), "z": uint64(2)}
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, want, walked)
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t, want, typed)
+	})
+}
+
+// TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck pins the inconsistency.
+//
+// 3.2.1.1 makes two keys that resolve alike one key, and a flow entry written
+// as a key alone is an entry like any other: `{a: 1, a}` is refused, and so is
+// `{<<: {x: 1}, <<: {y: 2}}`. `{<<: {x: 1}, <<}` is read.
+//
+// What comes back is stranger than the acceptance: the first "<<" merges and
+// the second becomes a literal key, so the mapping holds both the merged entry
+// and a "<<" named nothing.
+//
+// Found on 2026-09-07 when yamlcorpus's duplicateAKey landed on a merge key --
+// the merge axis made that reachable for the first time.
+func TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck(t *testing.T) {
+	t.Run("an ordinary key alone is refused, and so are two merge keys with values", func(t *testing.T) {
+		for _, src := range []string{
+			"{a: 1, a}\n",
+			"{<<: {x: 1}, <<: {y: 2}}\n",
+			"b: &r {x: 1}\nd:\n  <<: *r\n  <<: *r\n",
+		} {
+			var got any
+			assert.Errorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+		}
+	})
+
+	t.Run("today a merge key alone is read", func(t *testing.T) {
+		const src = "{<<: {x: 1}, <<}\n"
+
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, map[string]any{"<<": nil, "x": uint64(1)}, got,
+			"today: the first merges and the second is a literal key")
+	})
+}
+
+// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree pins the split.
+//
+// `<<:` with no value asks to merge null, which is not a mapping and so not a
+// merge at all. The two decode paths answer differently: the walk drops the
+// entry and hands back an empty mapping, the tree refuses the document with
+// "null was used where mapping is expected".
+//
+// Whichever answer is right, one document should not have two. yamlcorpus's
+// MergeShapes holds "a merge key with no alias at all" under TagMergeNonMapping
+// for the stance question of what merging a non-mapping means; this is the
+// narrower fault of the two paths disagreeing about it.
+func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
+	for _, src := range []string{"<<:\n", "<<: null\n", "a:\n  <<:\n"} {
+		var walked any
+		assert.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "today: the walk reads it: %q", src)
+
+		var typed map[string]any
+		err := codec.Unmarshal([]byte(src), &typed)
+		require.Errorf(t, err, "today: the tree refuses it: %q", src)
+		assert.Contains(t, err.Error(), "null was used where mapping is expected")
+	}
+}

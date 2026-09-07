@@ -134,6 +134,12 @@ const (
 	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
 	// FeatureChompKeep is a block scalar written "|+" where clip would do.
 	FeatureChompKeep stance.Feature = "presentation/chomp-keep"
+	// FeatureMergeKey is a "<<" entry, written bare so that it merges.
+	//
+	// A value feature rather than a presentation one: "<<" is a YAML 1.1 type
+	// and what the document denotes turns on whether the reader implements it,
+	// where every presentation feature leaves the meaning alone.
+	FeatureMergeKey stance.Feature = "value/merge-key"
 	// FeatureChompPadded is a block scalar followed by blank lines its
 	// chomping indicator discards.
 	FeatureChompPadded stance.Feature = "presentation/chomp-padded"
@@ -233,7 +239,18 @@ func Write(v Value, st Style) Written {
 		}
 	}
 
-	w.MeansUnclear = st.Version == Reading11Version && e.reads.splitALegacySpelling()
+	// Two shapes leave the meaning unstated, for two reasons.
+	//
+	// A merge: what this package says the document denotes is the 1.1 merge
+	// this library performs, and a conforming 1.2 reader hands "<<" back as an
+	// ordinary key. Both are right, so the corpus states neither and carries
+	// the stance tag instead.
+	//
+	// A legacy spelling split between a plain and a quoted occurrence under
+	// "%YAML 1.1": readings tracks a spelling rather than a node, so it cannot
+	// say which occurrence resolved.
+	w.MeansUnclear = e.reads.mergedAMapping() ||
+		(st.Version == Reading11Version && e.reads.splitALegacySpelling())
 
 	return w
 }

@@ -71,6 +71,16 @@ type Entry struct {
 	// Value.Decoded() for one that declares none. Nil where the generator will
 	// not say -- see yamlgen.Written.MeansUnclear.
 	Means any
+	// MeansUnclear says the generator declined to state a meaning, as opposed
+	// to an entry that simply carries none.
+	//
+	// The two have to be told apart, and telling them apart is a fix rather
+	// than a nicety: meaningOfEntry falls back to Value.Decoded() for an entry
+	// with no Means, which is right for an enumerated shape and wrong here --
+	// it put the declined answer back. Nothing noticed until the merge axis,
+	// because the only other shape that declines is a legacy spelling split
+	// under "%YAML 1.1" and the corpus has few of those.
+	MeansUnclear bool
 	// Tags are the rules this document breaks, where it was broken on purpose
 	// and the break is therefore known.
 	//
@@ -116,12 +126,13 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 		src := []byte(written.Text)
 
 		out = append(out, Entry{
-			Name:     "generated/" + digits(i),
-			Src:      src,
-			Value:    value,
-			Features: written.Features,
-			Readings: written.Readings,
-			Means:    meansOf(written),
+			Name:         "generated/" + digits(i),
+			Src:          src,
+			Value:        value,
+			Features:     written.Features,
+			Readings:     written.Readings,
+			Means:        meansOf(written),
+			MeansUnclear: written.MeansUnclear,
 		})
 
 		// One document in eight also yields a stream, which is the only way

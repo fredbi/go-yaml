@@ -102,6 +102,32 @@ func directiveNamedLikeAnAnchor(src string) bool {
 	return false
 }
 
+// mergesNothing reports whether the document writes a "<<" entry with nothing
+// after the colon on its line.
+//
+// The value may still arrive on a following line, so this over-matches -- and
+// deliberately: what it guards is a disagreement between two decode paths, and
+// a document wrongly held out here is one the rest of the suite still scores.
+// A predicate that under-matched would let the disagreement through.
+func mergesNothing(src string) bool {
+	for line := range strings.FieldsFuncSeq(src, isBreak) {
+		// A byte order mark ahead of it and a comment after it, both of which
+		// this missed on the first try: "\ufeff<<:" and "<<: # c2" are the same
+		// entry as "<<:". A leading mark has now broken three line predicates
+		// in this suite -- see directiveNamedLikeAnAnchor for the second.
+		line = strings.TrimPrefix(line, "\ufeff")
+		if cut := strings.IndexByte(line, '#'); cut >= 0 {
+			line = line[:cut]
+		}
+
+		if strings.TrimRight(strings.TrimLeft(line, " \t-"), " \t") == "<<:" {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isBreak reports the characters 5.4 makes a line break.
 func isBreak(r rune) bool { return r == '\n' || r == '\r' }
 
@@ -111,6 +137,25 @@ func TestWalkMatchesTheStream(t *testing.T) {
 	var same, differ, bothErr, oneErr, skipped int
 	for _, src := range srcs {
 		if strings.Contains(src.text, "&!") {
+			skipped++
+
+			continue
+		}
+		if strings.Contains(src.text, "? <<") {
+			// A merge key written the long way. In flow the tree merges it and
+			// the walk hands "<<" back, so the two paths give different values.
+			// yamlgen_test.TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge
+			// pins both spellings and both paths. Held out until they agree.
+			skipped++
+
+			continue
+		}
+		if mergesNothing(src.text) {
+			// "<<:" with no value asks to merge null. The walk drops the entry
+			// and hands back the mapping without it; the tree refuses the
+			// document with "null was used where mapping is expected".
+			// yamlgen_test.TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree
+			// pins both. Held out here until the two paths agree.
 			skipped++
 
 			continue

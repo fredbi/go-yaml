@@ -87,6 +87,9 @@ type readings struct {
 	// what 1.1 makes of it. The booleans above need no style; a number's
 	// spelling is the whole question here.
 	st Style
+	// merged records a "<<" entry, which makes the meaning unclear rather than
+	// changing it. See sawMergeKey.
+	merged bool
 }
 
 // numberUnder11 reports whether YAML 1.1 reads this text as the number the core
@@ -221,6 +224,23 @@ func (r *readings) sawNumber(text string) {
 }
 
 // sawScalar records how one scalar was written.
+// sawMergeKey records that the document writes a "<<" entry.
+//
+// It makes the meaning unclear rather than changing it. What this package says
+// a merge document denotes is what this library reads -- the 1.1 merge, see
+// [Map.Decoded] -- and a conforming 1.2 reader gives "<<" back as an ordinary
+// key instead. Both are right, so the corpus states neither.
+func (r *readings) sawMergeKey() {
+	if r == nil {
+		return
+	}
+
+	r.merged = true
+}
+
+// mergedAMapping reports whether a "<<" entry was written.
+func (r *readings) mergedAMapping() bool { return r != nil && r.merged }
+
 func (r *readings) sawScalar(text string, plain bool) {
 	if r == nil {
 		return
