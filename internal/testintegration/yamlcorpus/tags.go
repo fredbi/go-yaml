@@ -219,7 +219,9 @@ func TagShapes() []stance.Shape {
 		// carrying on underneath. The generator cannot write these: TagFor
 		// offers a local tag and the non-specific tag on a Str, a Seq and a Map
 		// and never on a Null, so the one tag it puts on an empty node is
-		// "!!null" -- which is the spelling that behaves.
+		// "!!null". These three took every entry below them into a collection
+		// under the tag until 2026-09-11, and "!!null" was the spelling that
+		// did not.
 		{
 			Name:   "a local tag on an empty value, with the mapping carrying on",
 			Src:    []byte("a: !foo\nb: 1\nc: 2\n"),

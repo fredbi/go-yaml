@@ -1105,3 +1105,89 @@ func TestFixedAKeyAfterALongTagOnAnEmptyValueResolves(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": nil, "false": uint64(1)}, got, "%q", src)
 	}
 }
+
+// TestFixedAPropertyAloneAfterAColonNamesTheEmptyNode: a tag or an anchor
+// written with nothing after it stands on the empty node, and the entries below
+// it stay where the document put them.
+//
+// 8.2.2 needs a nested block mapping indented further than the key it belongs
+// to, and 8.2.1 the same for a sequence, so a token back at the entry's own
+// column opens the next entry rather than continuing this one. The parser said
+// that for a bare anchor after "k:" and for the tags the core schema resolves,
+// and nowhere else. Two shapes went the other way and restructured the
+// document without reporting anything:
+//
+//   - "a: !foo" over "b: 1" over "c: 2" came back as {"a": {"b": 1, "c": 2}},
+//     and "- !foo" over "- 1" as [[1]]. "!!null" and "!!str" on the same empty
+//     value read flat, so it was the tags naming no known type.
+//   - "? a" over ": &a1" over "? b" over ": &a2" came back as
+//     {"a": {"b": nil}}. The short form "a: &a1" over "b: &a2" read flat, so it
+//     was the anchor and the explicit key together: an explicit key's value is
+//     read through parseMapKeyValue, which recorded no entry column for the
+//     property to measure itself against.
+func TestFixedAPropertyAloneAfterAColonNamesTheEmptyNode(t *testing.T) {
+	t.Run("the entries below stay flat", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"a: !foo\nb: 1\nc: 2\n":    map[string]any{"a": nil, "b": uint64(1), "c": uint64(2)},
+			"a: !\nb: 1\n":             map[string]any{"a": nil, "b": uint64(1)},
+			"- !foo\n- b\n":            []any{nil, "b"},
+			"? a\n: &a1\n? b\n: &a2\n": map[string]any{"a": nil, "b": nil},
+			"? a\n: !foo\n? b\n: 1\n":  map[string]any{"a": nil, "b": uint64(1)},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+			assert.Equal(t, src, renderOnce(t, src), "%q: the nesting is written back out", src)
+		}
+	})
+
+	t.Run("an alias to the anchor reads it", func(t *testing.T) {
+		// It used to report `alias "a1" names an anchor that is not resolved
+		// yet`, because the anchor was inside the node still being built.
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("? a\n: &a1\n? b\n: *a1\n"), &got))
+		assert.Equal(t, map[string]any{"a": nil, "b": nil}, got)
+	})
+
+	t.Run("and a value written further in is still the property's node", func(t *testing.T) {
+		for src, want := range map[string]any{
+			// Indented past the key, so it is nested and always was.
+			"a: !foo\n  b: 1\n":    map[string]any{"a": map[string]any{"b": uint64(1)}},
+			"? a\n: &a1\n  b: 1\n": map[string]any{"a": map[string]any{"b": uint64(1)}},
+			"- !foo\n  - 1\n":      []any{[]any{uint64(1)}},
+			// 8.2.1 lets a block sequence stand at its key's own column, so
+			// this is the value and not the next entry.
+			"a: !foo\n- 1\n": map[string]any{"a": []any{uint64(1)}},
+			"k: &a\n- 1\n":   map[string]any{"k": []any{uint64(1)}},
+			// Written beside the property, so it is what the property names.
+			"? a\n: &a1 x\n? b\n: *a1\n": map[string]any{"a": "x", "b": "x"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}
+
+// TestFixedAScalarUnderAnUnresolvedTagIsRead: two documents the generator found
+// refused, both a scalar standing under a tag that names no type this library
+// reads.
+//
+// Such a scalar keeps the text it was written with, and parseTagValue built
+// that string without stepping past the token it had just read. The next reader
+// found a token where the entry had already ended and reported "value is not
+// allowed in this context". The two shapes look unrelated and are one fault: a
+// tag written on its own line with a comment under it, and an unknown secondary
+// tag on a root scalar under a "%YAML" directive.
+func TestFixedAScalarUnderAnUnresolvedTagIsRead(t *testing.T) {
+	for src, want := range map[string]any{
+		"a:\n !\n # c\n 1\n":             map[string]any{"a": "1"},
+		"a:\n !\n 1\n":                   map[string]any{"a": "1"},
+		"%YAML 1.1\n---\n!!nulll Null\n": "Null",
+		"!!nulll Null\n":                 "Null",
+	} {
+		var got any
+		require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equal(t, want, got, "%q", src)
+	}
+}

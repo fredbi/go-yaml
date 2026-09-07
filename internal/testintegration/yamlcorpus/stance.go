@@ -270,29 +270,6 @@ var Departures = []Departure{
 		},
 	},
 	{
-		Pattern: "a local tag on an empty value, with the mapping carrying on",
-		Kind:    Value,
-		Observed: `"a: !foo" over "b: 1" over "c: 2" comes back as {"a": {"b": 1, "c": 2}}: every entry ` +
-			`after the tagged one is swallowed into a mapping under it`,
-		Because: "the tag stands on the empty node that follows \"a:\", and \"b\" and \"c\" are entries " +
-			"of the same mapping written at the same indentation. 8.2.2 needs a nested block mapping " +
-			"indented further than the key it belongs to, and there is no such indentation here, so " +
-			"the document is one flat mapping of three entries. The value is not merely wrong -- the " +
-			"document's shape is. `- !foo` over `- b` goes the same way, coming back as [[\"b\"]]. " +
-			"`!!null` and `!!str` on the same empty value are read flat, so it is the tags naming no " +
-			"known type that do this",
-		Corroborated: "all three, at both layers. libfyaml 1.0.0b1 gives {\"a\": \"\", \"b\": 1, \"c\": 2} " +
-			"and go.yaml.in/yaml/v3 v3.0.5 gives the same; the reference parser emits one +MAP with " +
-			"three entries and no nesting at all",
-		Departs: func(got any, err error) bool {
-			return departsMapping(got, err, func(m map[string]any) bool {
-				_, nested := m["a"].(map[string]any)
-
-				return nested
-			})
-		},
-	},
-	{
 		Pattern: "a key tagged !!timestamp",
 		Kind:    Value,
 		Observed: `"!!timestamp 2001-12-14: x" comes back keyed ` +

@@ -301,51 +301,6 @@ func TestDefectAQuotedExplicitKeyRefusesABlockScalarValue(t *testing.T) {
 	})
 }
 
-// TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows: `: &a1` with
-// nothing after it takes the entries below into the node it anchors.
-//
-// The same shape as a tag on an empty value, one property over -- see
-// yamlcorpus.Departures, "a local tag on an empty value, with the mapping
-// carrying on".
-func TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows(t *testing.T) {
-	const src = "? a\n: &a1\n? b\n: &a2\n"
-	wellFormed(t, src)
-
-	var got any
-	require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-	assert.Equal(t, map[string]any{"a": map[string]any{"b": nil}}, got,
-		"today: b is swallowed into the node a's anchor names")
-
-	t.Run("the renderer writes the nesting back out", func(t *testing.T) {
-		assert.Equal(t, "? a\n: &a1\n  ? b\n  : &a2\n", renderOnce(t, src))
-	})
-
-	t.Run("an alias to the anchor stops the parse instead", func(t *testing.T) {
-		const aliased = "? a\n: &a1\n? b\n: *a1\n"
-		wellFormed(t, aliased)
-
-		var v any
-		err := yaml.Unmarshal([]byte(aliased), &v)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `alias "a1" names an anchor that is not resolved yet`)
-	})
-
-	t.Run("the short form, the long form without anchors, and a value all read", func(t *testing.T) {
-		for _, tc := range []struct {
-			src  string
-			want map[string]any
-		}{
-			{src: "a: &a1\nb: &a2\n", want: map[string]any{"a": nil, "b": nil}},
-			{src: "? a\n:\n? b\n:\n", want: map[string]any{"a": nil, "b": nil}},
-			{src: "? a\n: &a1 x\n? b\n: *a1\n", want: map[string]any{"a": "x", "b": "x"}},
-		} {
-			var v any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &v), "%q", tc.src)
-			assert.Equal(t, tc.want, v, "%q", tc.src)
-		}
-	})
-}
-
 // TestDefectACommentOnAnExplicitKeysColonLineIsDropped: a comment on the ":"
 // line of the long form, with the value below it, is lost by the renderer.
 func TestDefectACommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
@@ -400,6 +355,37 @@ func TestDefectABlankLineBeforeACommentDoesNotSettle(t *testing.T) {
 
 	t.Run("the value survives every rendering", func(t *testing.T) {
 		want := map[string]any{"a": []any{"x"}, "b": uint64(1)}
+
+		text := src
+		for range 3 {
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(text), &got))
+			assert.Equal(t, want, got)
+			text = renderOnce(t, text)
+		}
+	})
+}
+
+// TestDefectABlankLineBeforeASequenceEntryDoesNotSettle is the same wobble with
+// no comment in it, which is what widens the entry above.
+//
+// ": &1" over a blank line over "-" over "? \"\"" renders to ": &1" over "- "
+// over a blank over "? \"\"" over ":", moving the blank line past the "-", and
+// renders again without it. yamlgen.Ledger's predicate for this asks for
+// Style.Chomping's padding and a comment, and reaches neither shape here, so
+// the property test met it as a plain failure. Found on 2026-09-11 at 30,000
+// draws; 200,000 draws of TestRenderReachesAFixedPoint alone did not draw it
+// again.
+func TestDefectABlankLineBeforeASequenceEntryDoesNotSettle(t *testing.T) {
+	const src = ": &1\n\n-\n? \"\"\n"
+	wellFormed(t, src)
+
+	once := renderOnce(t, src)
+	assert.Equal(t, ": &1\n- \n\n? \"\"\n:\n", once, "the first rendering moves the blank line past the \"-\"")
+	assert.Equal(t, ": &1\n- \n? \"\"\n:\n", renderOnce(t, once), "and the second drops it")
+
+	t.Run("the value survives every rendering", func(t *testing.T) {
+		want := map[string]any{"": nil, "null": []any{nil}}
 
 		text := src
 		for range 3 {

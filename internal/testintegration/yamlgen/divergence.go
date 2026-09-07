@@ -267,28 +267,6 @@ var Ledger = []Divergence{
 		Match:    writesACommentOnAnExplicitColonLine,
 	},
 	{
-		Name: "parse/an-anchor-alone-after-an-explicit-key-swallows-what-follows",
-		Pin:  "TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows",
-		Reason: "An entry written the long way whose value is an anchor and nothing else takes the " +
-			"entries after it into itself. `? a` over `: &a1` over `? b` over `: &a2` reads " +
-			"{\"a\": {\"b\": null}}, and the renderer writes the nesting back out indented.\n\n" +
-			"Where the swallowed entry aliases the anchor the parse stops instead: `? a` over `: &a1` " +
-			"over `? b` over `: *a1` reports `alias \"a1\" names an anchor that is not resolved yet`, " +
-			"because the anchor is inside the node that is still being built.\n\n" +
-			"Three things make it the anchor and the long form together. The short form reads: " +
-			"`a: &a1` over `b: &a2` gives two entries. The long form without anchors reads: `? a` " +
-			"over `:` over `? b` over `:` gives two entries. And giving the value content reads, " +
-			"`: &a1 x`.\n\n" +
-			"This is the same shape as decode/a-tag-on-an-empty-value, one property over: a node " +
-			"property standing alone after a `:` makes the parser expect a block collection under " +
-			"it. libfyaml 1.0.0b1 gives the flat mapping, the reference parser passes it, and " +
-			"grammar.NewRecognizer accepts it. Found on 2026-09-11 by Style.ExplicitKeys.\n\n" +
-			"The predicate does not ask whether anything follows the anchored entry, so it reports " +
-			"more draws than divergences.",
-		Property: Parses | Decode | DecodeTyped | Render | Settle | CommentsKept,
-		Match:    writesAnAnchorAloneAfterAnExplicitKey,
-	},
-	{
 		Name: "parse/a-quoted-explicit-key-refuses-a-block-scalar-value",
 		Pin:  "TestDefectAQuotedExplicitKeyRefusesABlockScalarValue",
 		Reason: "A mapping entry written the long way -- `? key` over `: value` -- is refused when the " +
@@ -536,53 +514,6 @@ func goesOnItsOwnLine(v Value, st Style) bool {
 	default:
 		return false
 	}
-}
-
-// writesAnAnchorAloneAfterAnExplicitKey reports whether st writes an entry the
-// long way whose value reaches the document as an anchor and nothing else.
-//
-// Only a bare Null does, and only when the style spells null as nothing.
-func writesAnAnchorAloneAfterAnExplicitKey(v Value, st Style) bool {
-	if !st.ExplicitKeys || st.NullSpelling != "" {
-		return false
-	}
-
-	return holdsAnAnchoredNullValue(v)
-}
-
-func holdsAnAnchoredNullValue(v Value) bool {
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			if anchoredNull(p.Val) || holdsAnAnchoredNullValue(p.Val) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsAnAnchoredNullValue)
-	case Anchored:
-		return holdsAnAnchoredNullValue(n.V)
-	case Alias:
-		return holdsAnAnchoredNullValue(n.V)
-	case Tagged:
-		return holdsAnAnchoredNullValue(n.V)
-	}
-
-	return false
-}
-
-// anchoredNull reports an anchor standing directly on a node that writes
-// nothing. A tag between the two writes itself, so the anchor is no longer
-// alone.
-func anchoredNull(v Value) bool {
-	n, anchored := v.(Anchored)
-	if !anchored {
-		return false
-	}
-
-	_, empty := n.V.(Null)
-
-	return empty
 }
 
 // writesAQuotedExplicitKeyOverABlockScalar reports whether v holds a mapping

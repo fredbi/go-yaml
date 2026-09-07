@@ -80,21 +80,6 @@ var Strict = []Strictness{
 		Error: "[1:6] value is not allowed in this context",
 	},
 	{
-		Name: "a comment between a tag on its own line and a plain scalar",
-		Src:  "a:\n !\n # c\n 1\n",
-		Rule: "6.9.1 and 8.2.1: a node's properties may be written on a line of their own, and " +
-			"s-l-comments after them may hold comment lines. Without the comment, `a:` over ` !` " +
-			"over ` 1` reads here; with it the parse stops. `!!str` in the same place reads with " +
-			"the comment, and so does a flow collection under it -- so it is a local or " +
-			"non-specific tag over a plain scalar and nothing else.\n\n" +
-			"The same shape refuses at a sequence entry and at the document root. libfyaml 1.0.0b1 " +
-			"reads {\"a\": \"1\"} and the reference parser emits =VAL <!> :1.\n\n" +
-			"Likely the same assumption as the departure \"a local tag on an empty value, with the " +
-			"mapping carrying on\": a tag that names no known type makes the parser expect a block " +
-			"collection under it.",
-		Error: "[4:2] value is not allowed in this context",
-	},
-	{
 		Name: "a flow mapping key spanning two lines",
 		Src:  "{[a\nb]: 1}\n",
 		Rule: "7.4.2: a flow mapping's key is under neither of the implicit-key restrictions -- it " +
@@ -123,23 +108,6 @@ var Strict = []Strictness{
 			"kept for the measurement rather than as an accusation. Whoever settles it should " +
 			"decide whether the published grammar is lax here before anyone changes the parser.",
 		Error: "[2:3] map key definition includes an implicit line break",
-	},
-	{
-		Name: "a version directive over a root scalar under an unknown secondary tag",
-		Src:  "%YAML 1.1\n---\n!!nulll Null\n",
-		Rule: "6.8.1 and 6.9.1: a \"%YAML\" directive states a version, and a tag names a type. " +
-			"Whether tag:yaml.org,2002:nulll names anything is a question for resolution, which is " +
-			"the application's, and the parse has no business refusing it -- least of all only under " +
-			"a directive.\n\n" +
-			"The same document without the directive parses. So do `!!str Null`, `!foo Null`, " +
-			"`&a Null` and a bare `Null` under the directive, and so does `!!nulll x`. It takes all " +
-			"three: the directive, an unknown secondary tag, and content that resolves.\n\n" +
-			"The version does not matter -- `%YAML 1.2` refuses it too. Sits beside " +
-			"yamlgen.Ledger's parse/a-version-directive-resolves-the-root-block-scalar-it-opens, " +
-			"which is the same directive over a root block scalar. Found on 2026-09-07 by a mutation " +
-			"of a `!!null` tag.\n\n" +
-			"libfyaml 1.0.0b1 reads it as null and the reference parser passes it.",
-		Error: "[3:8] value is not allowed in this context",
 	},
 	{
 		Name: "a secondary tag on its own line over a block scalar",

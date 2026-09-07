@@ -1143,6 +1143,12 @@ func (p *Parser) parseMapKeyValue(ctx context, g *tokenGroup, entryTk *tapeToken
 	p.handKey(ctx, key)
 
 	c := p.valueContext(ctx, key)
+	// The entry the value is written in, so a property standing alone at the
+	// end of a line knows what indentation its node has to be past. parseMapValue
+	// records this for the "k: v" shape; without it here, "? a" over ": &a1"
+	// took the "? b" below it as the node the anchor names.
+	defer p.enterEntry(int(key.GetToken().Position.Column), true)()
+
 	value, err := p.parseToken(c, g.Last())
 	if err != nil {
 		return nil, err
@@ -1684,6 +1690,20 @@ func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node,
 		// null, and putting one in the stream would leave it to be read again.
 		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(anchor.GetToken())))
 	}
+	// A comment may stand between the anchor and the next token. It belongs to
+	// what comes after and says nothing about where this node ends.
+	after := ctx.currentToken()
+	if ctx.isComment() {
+		after = ctx.nextNotCommentToken()
+	}
+	if after != nil && p.opensNextEntry(after, int(anchor.GetToken().Position.Line)) {
+		// The anchor was the last thing on its line and what follows opens the
+		// next entry of the collection around it, so the anchor names the empty
+		// node. parseMapValue and parseSequenceValue say this for the entries
+		// they read; an explicit key's value is read here and nowhere else, so
+		// "? a" over ": &a1" over "? b" came back as {a: {b: nil}}.
+		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(anchor.GetToken())))
+	}
 
 	value, err := p.parseToken(ctx, ctx.currentToken())
 	if err != nil {
@@ -2096,6 +2116,16 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		// the empty node takes the tag's own default rather than null.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 	}
+	if p.opensNextEntry(tk, int(tagRawTk.Position.Line)) {
+		// A tag written with nothing after it, and what follows opens the next
+		// entry of the collection around it: the tag stands on the empty node.
+		// The tags the core schema resolves reach the same answer through
+		// startsEntry above; one it does not resolve went straight to
+		// parseToken and read the next entry as its own value, so "a: !foo"
+		// over "b: 1" over "c: 2" came back as {a: {b: 1, c: 2}} and "- !foo"
+		// over "- 1" as [[1]].
+		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
+	}
 	if tk.Group == nil && resolvedBySchema(tk) {
 		// A tag the core schema does not resolve leaves its scalar as text,
 		// digits and all: "!thing 12" is the string "12". Only the parser can
@@ -2155,7 +2185,7 @@ func (p *Parser) anchorEndsTheLine(ctx context, tk *tapeToken) (*tokenGroup, boo
 		return nil, false
 	}
 
-	if next := ctx.nextNotCommentToken(); next != nil && !p.opensNextEntry(next, tk) {
+	if next := ctx.nextNotCommentToken(); next != nil && !p.opensNextEntry(next, tk.Line()) {
 		return nil, false
 	}
 
@@ -2163,10 +2193,10 @@ func (p *Parser) anchorEndsTheLine(ctx context, tk *tapeToken) (*tokenGroup, boo
 }
 
 // opensNextEntry reports whether next belongs to the collection around the entry
-// the anchor was written in, rather than to the anchor.
-func (p *Parser) opensNextEntry(next, anchor *tapeToken) bool {
-	if next.Line() == anchor.Line() {
-		// Written beside the anchor, so it is what the anchor names.
+// the property on line was written in, rather than to the property.
+func (p *Parser) opensNextEntry(next *tapeToken, line int) bool {
+	if next.Line() == line {
+		// Written beside the property, so it is what the property names.
 		return false
 	}
 	if p.entryCol <= 0 || int(next.Column()) > p.entryCol {
