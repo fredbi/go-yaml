@@ -4,7 +4,6 @@
 package yamlgen
 
 import (
-	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -179,30 +178,6 @@ var Ledger = []Divergence{
 		Match:    writesFloatTaggedWideNumber,
 	},
 	{
-		Name: "parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar",
-		Pin:  "TestDefectATagNotWrittenAsAShorthandDoesNotTypeItsScalar",
-		Reason: "The scanner types the scalar under a `!!` tag and leaves the one under the same tag " +
-			"written any other way as a string. `!!float 7` parses to an ast.IntegerNode under its " +
-			"ast.TagNode and `!!float 1e3` to an ast.FloatNode; `!<tag:yaml.org,2002:float> 7` and " +
-			"`!e!float 1e3` both parse to an ast.StringNode. The tag's URI is the same in every case, " +
-			"so the tree a consumer walks depends on how the tag was spelled.\n\n" +
-			"For most values nothing further goes wrong -- the string is read against the tag " +
-			"afterwards and `7`, `0x1f`, `1e3`, `true` and `null` all come back right. The exception is " +
-			"the three specials: `!<tag:yaml.org,2002:float> .inf` decodes to the float64 **zero** with " +
-			"nothing reported, where `!!float .inf` decodes to +Inf. `-.inf` and `.nan` go the same way.\n\n" +
-			"codec.ToJSON loses the same value and loses a refusal with it. `!!float .inf` is refused " +
-			"with `JSON has no number for .inf`, which is right -- JSON has no infinity -- while the " +
-			"verbatim spelling writes `0.0` and reports nothing.\n\n" +
-			"A collection tag is unaffected: `!<tag:yaml.org,2002:seq> [1, .inf]` reads +Inf, because " +
-			"the scalar inside it carries no tag of its own.\n\n" +
-			"The predicate matches only the shape that loses a value, so a document merely carrying a " +
-			"tag written out in full is still held to every property.\n\n" +
-			"Decode and Render, and Render because the value is already wrong when it is first read: " +
-			"the rendering is byte-identical to the document that went in.",
-		Property: Decode | Render,
-		Match:    writesASpecialFloatUnderALongTag,
-	},
-	{
 		Name: "parse/a-local-tag-before-an-anchor-does-not-type-its-scalar",
 		Pin:  "TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar",
 		Reason: "A local or non-specific tag written *before* an anchor stops typing its scalar, and " +
@@ -374,48 +349,6 @@ var Ledger = []Divergence{
 			"Found on 2026-09-13, on the first deep run of the Binary value kind.",
 		Property: DecodeTyped,
 		Match:    writesABinaryTag,
-	},
-	{
-		Name: "decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved",
-		Pin:  "TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved",
-		Reason: "An entry whose value is a tag written in full with nothing after it stops the key on " +
-			"the next line from resolving. `a: !<tag:yaml.org,2002:null>` over `False: 1` reads the " +
-			"key \"False\"; `a: !!null` over the same line reads \"false\".\n\n" +
-			"Four things narrow it. Only the key immediately after -- `NULL: 2` and `0x10: 4` further " +
-			"down the same mapping resolve correctly. Only in block context: " +
-			"`{a: !<tag:yaml.org,2002:null>, False: 1}` resolves it. Only with nothing after the tag: " +
-			"`a: !<tag:yaml.org,2002:null> null` resolves it. And only the long spellings, the handle " +
-			"form `!e!null` included -- which is what makes this the same root cause as " +
-			"parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar.\n\n" +
-			"libfyaml 1.0.0b1, go.yaml.in/yaml/v3 v3.0.5 and the reference parser all read the key as " +
-			"the boolean's name.\n\n" +
-			"The predicate asks only whether a long-spelled tag stands on a node written with nothing " +
-			"after it, so it reports more draws than divergences: the same tag on the last entry of a " +
-			"mapping has no next key to lose.",
-		Property: Decode | Render,
-		Match:    writesALongTagOnAnEmptyNode,
-	},
-	{
-		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
-		Pin:  "TestDefectATaggedBlockMappingDoesNotResolveItsKeys",
-		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
-			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
-			"`False: 1` reads the key \"False\"; without the tag it reads \"false\".\n\n" +
-			"Three things narrow it, and each is what makes this a defect rather than a rule " +
-			"about tagged nodes. `!!map` over the same mapping resolves the keys, so it is not " +
-			"that a tag suppresses resolution -- one spelling of the same tag behaves and the " +
-			"others do not. A flow mapping resolves them under any tag, `!foo {False: 1}` " +
-			"reading \"false\". And an anchor makes no difference either way.\n\n" +
-			"That first sentence holds for the `!!map` shorthand alone. Written in full as " +
-			"`!<tag:yaml.org,2002:map>`, or through a declared handle as `!e!map`, the same tag " +
-			"leaves the keys as text like any other -- which is the same root cause as " +
-			"parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar, seen on a mapping " +
-			"instead of on a scalar. The predicate takes Style.TagSpelling for that reason.\n\n" +
-			"Only visible where a key's text and its canonical name differ, which since the " +
-			"naming rule landed means the booleans and the nulls: `!foo` over `1.0: a` reads " +
-			"\"1.0\" correctly, because that is the text as well as the name.",
-		Property: Decode | Render,
-		Match:    writesTaggedBlockMappingKeys,
 	},
 }
 
@@ -812,161 +745,6 @@ func writesABinaryTag(v Value, _ Style) bool {
 	case Map:
 		for _, p := range n.Pairs {
 			if writesABinaryTag(p.Key, Style{}) || writesABinaryTag(p.Val, Style{}) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// writesALongTagOnAnEmptyNode reports whether v writes a mapping entry whose
-// value is a tag in one of the long spellings over nothing, with the *next*
-// entry keyed by a text that resolves.
-//
-// All three parts are needed and the last one is what this predicate used to
-// leave out. It matched any tagged Null anywhere in the tree, which the
-// generator draws constantly: 1,077 documents were excused across the property
-// tests in one 40,000-draw run on 2026-09-13 and not one of them diverged, so
-// the entry was suppressing coverage rather than recording a defect. The
-// defect needs a key on the following line for the unresolved tag to reach.
-func writesALongTagOnAnEmptyNode(v Value, st Style) bool {
-	if st.TagSpelling == SpellShorthand || st.NullSpelling != "" {
-		return false
-	}
-
-	return holdsALongTaggedNullBeforeAResolvingKey(v)
-}
-
-// holdsALongTaggedNullBeforeAResolvingKey walks v for a mapping where one
-// entry's value is a tagged Null and the entry after it is keyed by a spelling
-// the schema resolves -- "False", "NULL", "0x10" and the rest of [resolving].
-func holdsALongTaggedNullBeforeAResolvingKey(v Value) bool {
-	switch n := v.(type) {
-	case Map:
-		for i, p := range n.Pairs {
-			if taggedNull(p.Val) && i+1 < len(n.Pairs) && resolvingKey(n.Pairs[i+1].Key) {
-				return true
-			}
-
-			if holdsALongTaggedNullBeforeAResolvingKey(p.Key) ||
-				holdsALongTaggedNullBeforeAResolvingKey(p.Val) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsALongTaggedNullBeforeAResolvingKey)
-	case Anchored:
-		return holdsALongTaggedNullBeforeAResolvingKey(n.V)
-	case Tagged:
-		return holdsALongTaggedNullBeforeAResolvingKey(n.V)
-	}
-
-	return false
-}
-
-// taggedNull reports whether v is a Null carrying a tag, which is the node that
-// reaches the document as nothing after its tag.
-func taggedNull(v Value) bool {
-	t, tagged := v.(Tagged)
-	if !tagged {
-		return false
-	}
-
-	if _, empty := t.V.(Null); empty {
-		return true
-	}
-
-	return taggedNull(t.V)
-}
-
-// resolvingKey reports whether a key's name comes from resolution rather than
-// from the characters written down, which is what the unresolved tag above it
-// costs.
-//
-// Two kinds. A Str holding one of the [resolving] spellings -- "False", "NULL",
-// "0x10" -- is read as another type when the resolution reaches it. And any key
-// that is not a Str at all is named by [KeyText] from its type, so Style.BoolCase
-// writing Bool{false} as "False" makes the same difference without the value
-// being a string. The second kind is what the first draft of this predicate
-// missed, and TestPresentationInvariance found it in under 5,000 draws.
-func resolvingKey(k Value) bool {
-	s, text := k.(Str)
-	if !text {
-		_, alias := k.(Alias)
-
-		return !alias
-	}
-
-	_, resolves := resolving[s.V]
-
-	return resolves
-}
-
-// writesASpecialFloatUnderALongTag reports whether v writes an infinity or a
-// NaN under a float tag that st does not spell as a `!!` shorthand.
-func writesASpecialFloatUnderALongTag(v Value, st Style) bool {
-	if st.TagSpelling == SpellShorthand {
-		return false
-	}
-
-	return holdsASpecialFloatUnderAFloatTag(v)
-}
-
-func holdsASpecialFloatUnderAFloatTag(v Value) bool {
-	switch n := v.(type) {
-	case Tagged:
-		if f, number := n.V.(Float); number && n.Tag == TagFloat && isSpecial(f.V) {
-			return true
-		}
-
-		return holdsASpecialFloatUnderAFloatTag(n.V)
-	case Anchored:
-		return holdsASpecialFloatUnderAFloatTag(n.V)
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsASpecialFloatUnderAFloatTag)
-	case Map:
-		for _, p := range n.Pairs {
-			if holdsASpecialFloatUnderAFloatTag(p.Key) || holdsASpecialFloatUnderAFloatTag(p.Val) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// isSpecial reports the three floats YAML spells with a leading '.'.
-func isSpecial(f float64) bool { return math.IsInf(f, 0) || math.IsNaN(f) }
-
-// writesTaggedBlockMappingKeys reports whether emitting v writes a mapping that
-// carries a tag other than `!!map`.
-//
-// Wider than the defect twice over, and both are the usual trade. It does not
-// ask whether any key's text differs from its canonical name, so a mapping
-// keyed by ordinary words matches and reads back correctly. And it does not ask
-// whether the mapping lands in block context, because that depends on its depth
-// and on Style.FlowFrom.
-//
-// The one tag that behaves is `!!map`, and only while it is written as that
-// shorthand: st decides, so the same tag written out in full matches here.
-func writesTaggedBlockMappingKeys(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Tagged:
-		if _, keyed := n.V.(Map); keyed && (n.Tag != TagMap || st.TagSpelling != SpellShorthand) {
-			return true
-		}
-
-		return writesTaggedBlockMappingKeys(n.V, st)
-	case Anchored:
-		return writesTaggedBlockMappingKeys(n.V, st)
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesTaggedBlockMappingKeys(item, st)
-		})
-	case Map:
-		for _, p := range n.Pairs {
-			if writesTaggedBlockMappingKeys(p.Val, st) {
 				return true
 			}
 		}

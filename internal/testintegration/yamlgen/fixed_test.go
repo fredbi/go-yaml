@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -983,4 +986,122 @@ func TestFixedANonStringKeyNoLongerZeroesAWholeStruct(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal([]byte("name: x\n"), &got))
 		assert.Equal(t, named{Name: "x"}, got)
 	})
+}
+
+// TestFixedATagTypesItsScalarWhateverItsSpelling: one tag gives one tree, in
+// all three spellings.
+//
+// "!!float 7", "!<tag:yaml.org,2002:float> 7" and "!e!float 7" under a
+// "%TAG !e! tag:yaml.org,2002:" line name the same tag, and each now puts an
+// *ast.IntegerNode under its *ast.TagNode. Only the shorthand did: the scanner
+// forced every other spelling to a string, because it matched the text the tag
+// was written with against the reserved keywords instead of the URI it expands
+// to -- and the URI is what only the parser knows, since a "%TAG" line can
+// repoint a handle.
+//
+// Three values were lost by it rather than merely retyped. A string is read
+// back against its tag afterwards, so "7", "0x1f" and "true" survived the
+// detour; ".inf", "-.inf" and ".nan" decoded to the float64 zero and converted
+// to the JSON "0.0", each reporting nothing.
+func TestFixedATagTypesItsScalarWhateverItsSpelling(t *testing.T) {
+	t.Run("the tree is the same in every spelling", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			node ast.Node
+		}{
+			{src: "!!float 7\n", node: &ast.IntegerNode{}},
+			{src: "!!float 1e3\n", node: &ast.FloatNode{}},
+			{src: "!!float .inf\n", node: &ast.InfinityNode{}},
+			{src: "!<tag:yaml.org,2002:float> 7\n", node: &ast.IntegerNode{}},
+			{src: "!<tag:yaml.org,2002:float> 1e3\n", node: &ast.FloatNode{}},
+			{src: "!<tag:yaml.org,2002:float> .inf\n", node: &ast.InfinityNode{}},
+			{src: "%TAG !e! tag:yaml.org,2002:\n---\n!e!float 1e3\n", node: &ast.FloatNode{}},
+		} {
+			file, err := parser.ParseBytes([]byte(tc.src), parser.WithComments())
+			require.NoError(t, err, "%q", tc.src)
+
+			tag, ok := file.Docs[len(file.Docs)-1].Body.(*ast.TagNode)
+			require.True(t, ok, "%q: the body is not a tag node", tc.src)
+			assert.Equal(t, "tag:yaml.org,2002:float", tag.URI, "%q", tc.src)
+			assert.IsType(t, tc.node, tag.Value, "%q", tc.src)
+		}
+	})
+
+	t.Run("the three specials keep their value in every spelling", func(t *testing.T) {
+		for text, want := range map[string]float64{
+			".inf":  math.Inf(1),
+			"-.inf": math.Inf(-1),
+			".nan":  math.NaN(),
+		} {
+			for _, src := range []string{
+				"!!float " + text + "\n",
+				"!<tag:yaml.org,2002:float> " + text + "\n",
+			} {
+				var got any
+				require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+				assert.InDelta(t, want, got, 0, "%q", src)
+
+				_, err := codec.ToJSON([]byte(src))
+				require.Error(t, err, "JSON has no infinity or NaN, so refusing is right: %q", src)
+			}
+		}
+	})
+
+	t.Run("a tag that resolves to nothing still leaves its scalar as text", func(t *testing.T) {
+		for _, src := range []string{
+			"!foo 12\n",
+			"! 12\n",
+			"!<x:y> 12\n",
+			// "%TAG !!" repoints the secondary handle, so "!!int" names
+			// !local-int here and resolves to nothing. This is the spelling the
+			// scanner could never have judged.
+			"%TAG !! !local-\n---\n!!int 12\n",
+		} {
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, "12", got, "%q", src)
+		}
+	})
+}
+
+// TestFixedATaggedBlockMappingResolvesItsKeys: a tag on a block mapping types
+// the keys inside it, as an untagged mapping does.
+//
+// The tag stands on the mapping; each key is a node of its own and resolves on
+// its own, so "!foo" over "False: 1" is keyed by "false" -- the canonical
+// spelling of the boolean -- and not by the text "False". The scanner used to
+// force the token after a tag it did not recognize to a string, and the token
+// after a tag that opens a block mapping is that mapping's first key.
+func TestFixedATaggedBlockMappingResolvesItsKeys(t *testing.T) {
+	for _, src := range []string{
+		"!foo\nFalse: 1\n",
+		"!\nFalse: 1\n",
+		"!<tag:yaml.org,2002:map>\nFalse: 1\n",
+		"!!map\nFalse: 1\n",
+		"!foo {False: 1}\n",
+		"False: 1\n",
+	} {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equal(t, map[string]any{"false": uint64(1)}, got, "%q", src)
+	}
+}
+
+// TestFixedAKeyAfterALongTagOnAnEmptyValueResolves: an entry whose value is a
+// tag with nothing after it no longer stops the next key from resolving.
+//
+// "a: !<tag:yaml.org,2002:null>" over "False: 1" is keyed by "false", as
+// "a: !!null" over the same line always was. The scanner's rule reached past
+// the tag's own node to whatever token came next, and where the tag stood alone
+// at the end of a line that token was the following key.
+func TestFixedAKeyAfterALongTagOnAnEmptyValueResolves(t *testing.T) {
+	for _, src := range []string{
+		"a: !<tag:yaml.org,2002:null>\nFalse: 1\n",
+		"a: !!null\nFalse: 1\n",
+		"%TAG !e! tag:yaml.org,2002:\n---\na: !e!null\nFalse: 1\n",
+	} {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equal(t, map[string]any{"a": nil, "false": uint64(1)}, got, "%q", src)
+	}
 }

@@ -470,6 +470,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 		t.Skipf("nested on purpose: %s", why)
 	}
 
+	if why, ok := readsATaggedScalarAsText(wantTree, gotTree); ok {
+		t.Skipf("resolved on purpose: %s", why)
+	}
+
 	require.Equal(t, wantTree, gotTree, "the two parsers build different trees")
 }
 
@@ -627,6 +631,69 @@ func resolvesDifferentlyOnPurpose(text, want, got string) (string, bool) {
 	}
 
 	return "a %YAML directive reaches the root scalar (6.8.1)", true
+}
+
+// readsATaggedScalarAsText reports whether every difference is the shipped
+// parser reading a scalar under an unresolved tag as the text it was written
+// with.
+//
+// A tag the core schema does not resolve leaves its scalar alone, digits and
+// all, so "- ! 12" holds the string "12" -- which is what
+// spec-example-6-28-non-specific-tags asks for. The shipped parser applies that
+// in parseTagValue, matching the URI the tag expands to. refparser takes the
+// type off the token, and until 2026-09-11 the scanner set it there: it read
+// the shorthand the tag was written with, so "!<tag:yaml.org,2002:float> 7"
+// and "!e!float 7" lost their type while "!!float 7" kept it, and a "%TAG !!"
+// line repointing the handle was invisible to it. The scanner no longer types a
+// scalar by the token before it, so the frozen parser now keeps the number.
+//
+// The two trees have to agree on everything else: same shape, same positions,
+// same text, and the node above each difference is the tag itself.
+func readsATaggedScalarAsText(want, got string) (string, bool) {
+	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
+	if len(wantLines) != len(gotLines) {
+		return "", false
+	}
+
+	var differ int
+	for i := range wantLines {
+		if wantLines[i] == gotLines[i] {
+			continue
+		}
+		if pastNodeType(wantLines[i]) != pastNodeType(gotLines[i]) {
+			return "", false
+		}
+		if nodeType(gotLines[i]) != "String" || !typedBySchema(nodeType(wantLines[i])) {
+			return "", false
+		}
+		if i == 0 || nodeType(wantLines[i-1]) != "Tag" {
+			return "", false
+		}
+		differ++
+	}
+	if differ == 0 {
+		return "", false
+	}
+
+	return "a tag that resolves to nothing leaves its scalar as text (6.9.1)", true
+}
+
+// nodeType returns the node type a dump line opens with.
+func nodeType(line string) string {
+	typ, _, _ := strings.Cut(strings.TrimLeft(line, " "), " ")
+
+	return typ
+}
+
+// typedBySchema reports whether a node type is one the core schema gives a
+// plain scalar, which is what an unresolved tag takes back.
+func typedBySchema(typ string) bool {
+	switch typ {
+	case "Bool", "Integer", "Float", "Infinity", "Nan", "Null":
+		return true
+	default:
+		return false
+	}
 }
 
 // pastNodeType returns a dump line without the node type that opens it, which
