@@ -2101,7 +2101,18 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		return p.parseMap(ctx)
 	case token.IntegerTag, token.FloatTag, token.StringTag, token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
 		if tk.GroupType() == TokenGroupLiteral || tk.GroupType() == TokenGroupFolded {
-			return p.parseLiteral(ctx.withGroup(p, tk.Group))
+			// A block scalar written under the tag rather than beside it. The
+			// grouping joins a tag only to what stands on its own line, so
+			// "!!null >" arrives here as one scalar-tag group and "!!null" over
+			// ">" as a tag and a folded group -- and the cursor has to step
+			// past the second, as parseToken does for the same group.
+			literal, err := p.parseLiteral(ctx.withGroup(p, tk.Group))
+			if err != nil {
+				return nil, err
+			}
+			ctx.goNext()
+
+			return literal, nil
 		}
 		if endsValue(tk) || (startsEntry(tk) && !p.tagStandsOver(tk, tagRawTk)) {
 			// Nothing here is the tag's value: either punctuation closes what

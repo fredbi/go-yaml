@@ -1597,3 +1597,71 @@ func TestFixedAVersionDirectiveLeavesTheRootBlockScalarAlone(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedATagOnItsOwnLineTakesTheBlockScalarUnderIt: a tag written on a line
+// of its own, over a block scalar, reads.
+//
+// 6.9.1 and 8.1 allow both: a node's properties may stand on a line of their
+// own, and the node under them may be a block scalar. "!!null" over ">" was
+// refused with "value is not allowed in this context", where "!!null >" on one
+// line read and so did "!foo" over ">".
+//
+// The tag was what decided it, because of where the grouping puts the two. A
+// tag is joined only to what stands on its own line, so "!!null >" arrives at
+// parseTagValue as one scalar-tag group and "!!null" over ">" as a tag and a
+// folded group. The branch that reads the second returned the literal without
+// stepping past it, and the document then held a token nothing had read --
+// the same fault as the scalar under an unresolved tag, one branch over.
+func TestFixedATagOnItsOwnLineTakesTheBlockScalarUnderIt(t *testing.T) {
+	t.Run("the shapes that were refused", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"!!null\n>\n":           nil,
+			"!!str\n>-\n x\n":       "x",
+			"!!int\n>-\n 5\n":       5,
+			"!!bool\n>-\n true\n":   true,
+			"!!null\n|\n":           nil,
+			"k: !!null\n  >\n":      map[string]any{"k": nil},
+			"- !!str\n  >-\n   x\n": []any{"x"},
+			// The version directive reaches the scalar under the tag as it
+			// reaches any other, and a block scalar is a string either way.
+			"%YAML 1.1\n---\n!!str\n>-\n null\n": "null",
+		} {
+			wellFormed(t, src)
+
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("the spellings that read before still read", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"!!null >\n":     nil,
+			"!foo\n>\n":      "",
+			"&a\n>\n":        "",
+			"!!seq\n>\n":     "",
+			"!!str >-\n x\n": "x",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("and what the tag cannot hold is still refused, at the tag", func(t *testing.T) {
+		// A value the tag names a type for and cannot read, and a node of the
+		// wrong kind entirely. Both parse; the refusal is resolution's.
+		for src, says := range map[string]string{
+			"!!null\n>-\n x\n": `cannot read "x" as !!null`,
+			"!!null\n[1]\n":    "!!null names a kind this node is not",
+		} {
+			_, perr := parser.ParseBytes([]byte(src), parser.WithComments())
+			require.NoErrorf(t, perr, "%q parses", src)
+
+			var got any
+			err := yaml.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Contains(t, err.Error(), says, "%q", src)
+		}
+	})
+}

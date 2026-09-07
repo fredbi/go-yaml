@@ -82,17 +82,4 @@ var Strict = []Strictness{
 			"decide whether the published grammar is lax here before anyone changes the parser.",
 		Error: "[2:3] map key definition includes an implicit line break",
 	},
-	{
-		Name: "a secondary tag on its own line over a block scalar",
-		Src:  "!!null\n>\n",
-		Rule: "6.9.1 and 8.1: a node's properties may be written on a line of their own, and the node " +
-			"under them may be a block scalar. `!!null` over `>` is a folded scalar carrying the null " +
-			"tag, and the parse stops with `value is not allowed in this context`.\n\n" +
-			"The tag decides, and the other way round from the comment entry above: `!foo` over `>-` " +
-			"over ` x` **reads**, where the `!!` shorthand does not. So is the line break: " +
-			"`!!null >` on one line reads.\n\n" +
-			"libfyaml 1.0.0b1 reads it as null and the reference parser passes it. Found on " +
-			"2026-09-07 by a mutation that put a %TAG handle over the same shape.",
-		Error: "[2:1] value is not allowed in this context",
-	},
 }
