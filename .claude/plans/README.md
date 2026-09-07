@@ -26,7 +26,7 @@ records live in [`reference/`](reference/), superseded plans in [`archives/`](ar
 |---|---|---|
 | 0. Fork posture | [`0-fork-posture.md`](0-fork-posture.md) | ✅ settled — hard fork, no way back |
 | 1. A low-level YAML library | [`1-library-api.md`](1-library-api.md) | ⏳ surface cut; the parser owns anchors (2026-09-07); the progressive AST is the open design, and `ToJSONTokens` is named |
-| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ decoder **372/372 scoreable**, `ToJSON` 272/274, oracle 393/393; **eighteen open, all pinned** — 5 parser/scanner, 4 decoder, 4 `ToJSON`, 2 walk, 3 renderer; all three clusters closed and `yamlgen.Strict` is down to one entry, which is a ruling rather than a defect |
+| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ decoder **372/372 scoreable**, `ToJSON` 272/274, oracle 393/393; **sixteen open, all pinned** — 4 parser/scanner, 4 decoder, 4 `ToJSON`, 2 walk, 2 renderer; all three clusters closed, `yamlgen.Strict` is empty of defects and the 🔥 marks are gone from the parser |
 | 3. Performance, memory, streaming | [`3-performance.md`](3-performance.md) | ⏳ scanner and parser rounds closed (2026-09-04, 2026-09-05); `ToJSON` amplification 89.2x → 1.49x; anchor table priced 2026-09-07; **the decoder is the whole of what is left** |
 | 4. Test suite generator & oracle | [`4-test-suite-generator.md`](4-test-suite-generator.md) | ⏳ 605/605 buckets, 546 matched, 12,581 cases; tags, numbers, Go destinations, `? key` and chomping all became axes, opening **twelve defects** |
 | 5. Ecosystem adoption | [`5-adoption.md`](5-adoption.md) | 📝 four consumers named; `yaml-lexer` reuses `ToJSON`; **no release gate — free rein on the API** |
