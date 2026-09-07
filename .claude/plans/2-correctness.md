@@ -289,7 +289,7 @@ record it and decide deliberately rather than picking whichever is convenient.
 | the grammar oracle, against the suite | **393 of 393** |
 | the generated corpus | 605 of 605 buckets entered, 12,507 cases, 60 distinct parser complaints |
 
-**Twenty defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
+**Twenty-two defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
 2026-09-10; 8 and 9 were opened when the generator first drew numbers past what Go holds; **11 to 18 and 21
 to 23 on 2026-09-11**, as the generator learned to write a tag three ways, to reach the shapes the flow axes
 need, to write a number in three bases, to read a document into a Go type, and to write a mapping entry the
@@ -298,14 +298,18 @@ and to declare the version a document is read under; 10, 19 and 20 on 2026-09-06
 defects beside them. 10 was closed the same day it was opened, by `7dc4075`. None is old: the fourteen
 before them were fixed and merged.
 
-✅ **Six left on 2026-09-12, on the `conformance-fixes` branch, and 15 and 27 shed a document each.**
-Clusters B and C are closed and 29 was opened in their place:
+✅ **Ten left on 2026-09-12, on the `conformance-fixes` branch, and 15 and 27 shed a document each.**
+All three clusters are closed; 29 and 36 were opened in their place.
 
 | # | closed by | what the fix was |
 |---|---|---|
 | 2, 13, 14 | `f1adc59` | `Context.setTokenTypeByPrevTag` matched the text a tag was written with against the reserved keywords, so `!!float 7` typed its scalar and `!<tag:yaml.org,2002:float> 7` did not. The scanner cannot judge this -- only the parser holds the `%TAG` lines -- and `parseTagValue` already applies the rule by URI, so the scanner's pass is gone |
 | 11, 22 | `bd8b723` | a tag or an anchor written alone at the end of its line now asks `opensNextEntry`, so a token back at the entry's own column opens the next entry (8.2.1, 8.2.2) instead of becoming the property's node |
 | half of 15, one of 27's three | `06c014f` | `parseTagValue` built the string for a scalar under an unresolved tag and left the cursor on it, so the next reader found a token past the end of the entry |
+| 17 | `97a69f2` | `castToInteger` hands back a plain `int` for a number that fits one, and `Decoder.decodeValue` read a `uint64`, an `int64`, a `float64` and a `string` into an integer field and had no case for an `int` |
+| 8, 9 | `06fd2a1` | `ast.readsAsFloat` took `strconv.ParseFloat`'s `ErrRange` for "not a float", and `castToFloatValue` and `taggedInteger` narrowed what the node held. Both read `token.ParseBigFloat` and `token.ParseBigInteger` now, which is what the untagged spellings already build |
+| 31 | `ef173e0` | `decodeSlice` read a `!!binary` node as a YAML sequence. It asks `binaryBytes` first, which reads the base64 `ast.TagNode.Resolve` has already checked |
+| 34 | `77c8a3d` | the demotion for a tag that resolves to nothing reached the tag's own next token, and an anchor may stand there. `anchoredScalar` reaches the scalar the anchor names |
 
 Two more faults were found on the way and fixed with them: `%TAG !! !local-` over `v: !!seq 1` was refused
 (the same missing `ctx.goNext`), and `{a: !}` rendered as `{a: ! null}`, which read back as the **string**
@@ -338,29 +342,30 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 23 | parser | a comment on an explicit key's `:` line is dropped | `? a` / `: # c3` / `  v` renders `? a` / `: v` | `yamlgen.Ledger` |
 | 24 | renderer | a blank line before a comment survives one rendering and not the next | `a:` / ` - x` / blank / `# c` / `b: 1` | `yamlgen.Ledger` |
 | 29 | renderer | 24 again with no comment in it: a blank line before a block sequence entry | `: &1` / blank / `-` / `? ""` renders the blank after the `-`, then drops it | `yamlgen.defects_test.go` |
+| 36 | renderer 🔥 | a block scalar in a sequence with an empty key after it **renders text the parser refuses** | `a:` / ` - \|1-` / `   ` / `:` renders `a:` / `- \|2-    :` — `invalid header option` | `yamlgen.Ledger` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
 | 27 | parser | two more valid documents refused | `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
-| 34 | parser | a local or non-specific tag before an anchor does not type its scalar | `!foo &a1 true` → `true`, where `!foo true` and `&a1 !foo true` both give `"true"` | `yamlgen.Ledger` |
 | 35 | parser | a secondary tag before an anchor on an empty flow value loses the collection's end | `{a: !!str &x}` → refused, where `{a: &x !!str}` reads | `yamlgen.Strict` |
 | 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
-| 8 | decoder | `!!float` on a number past float64 is refused large, **zero** small | `!!float 1e+310`, `!!float 1e-400` | `yamlgen.Ledger` |
-| 17 | decoder | `!!int` cannot be read into any Go integer | `n: !!int 5` into an `int64` field → refused | `yamlgen.Ledger` |
 | 30 | decoder | a key tagged `!!timestamp` or `!!binary` is named by Go's `%v` | `!!timestamp 2001-12-14: x` → key `"2001-12-14 00:00:00 +0000 UTC"` | `Departures` |
-| 31 | decoder | `!!binary` cannot be read into a Go `[]byte` | `a: !!binary aGVsbG8=` into a `[]byte` field → refused, where a `string` field gives `"hello"` | `yamlgen.Ledger` |
-| 9 | ToJSON | `!!int` on a wide integer writes `MinInt64` | `!!int 123456789012345678901` → `-9223372036854775808` | `codec/zz_bigexp_test.go` |
 | 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
 | 32 | ToJSON | a `!!timestamp` is written as the text it was spelled with | `!!timestamp 2001-12-14t21:59:43.1Z` → `"2001-12-14t21:59:43.1Z"`, where the value converter writes `"2001-12-14T21:59:43.1Z"` | `codec/zz_timestampjson_test.go` |
 | 33 | ToJSON | a float key written the long way keeps its source text | `? 1e3` / `: x` → `{"1e3":"x"}`, where `1e3: x` → `{"1000.0":"x"}` | `codec/zz_floatkey_test.go` |
 | 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
 | 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Eleven in the parser and scanner, seven in the decoder, four in `ToJSON`, two in the walking reader, two
-in the renderer.** Cluster A is now the largest thing left and the only cluster still whole: 8, 9 and 17 are
-one fault at three layers. Clusters B and C closed on 2026-09-12, which took six entries and both 🔥
-marks off this table; 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary` draw and by the
-reshuffle it caused.
+**Ten in the parser and scanner, four in the decoder, three in `ToJSON`, two in the walking reader, three in
+the renderer.** All three clusters closed on 2026-09-12: A, B and C took ten entries and both 🔥 marks
+off this table, and 36 put one back. 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary`
+draw and by the reshuffle it caused, and 31 and 34 were closed the same day they were filed -- 31 was
+cluster A's fourth symptom and 34 was one line of the tag fix.
+
+📌 **What is left has no cluster in it.** The parser's nine and the scanner's one are separate shapes; the decoder's four split as
+the key-naming pair (3, 4), the exponent cap (5) and the tagged-key naming (30). The renderer's three are
+the closest thing to a group: 24, 29 and 36 are all a block construct and the line after it, and 24's own
+entry asks for its predicate to be widened.
 
 ⚠️ **18 and 28 were filed against `ToJSON` and both are the walk's.** The first framing of 18 said the
 decoder read `{!!null &a1 null, k: *a1}` and only `ToJSON` lost the anchor, and its pin asserted that in a
@@ -386,14 +391,21 @@ it. Its pin is retired into `fixed_test.go`.
 of that line — `%&AML` — so the axis paid twice: once for what it writes and once for what the mutation hunt
 makes of it.
 
-### 📌 One cluster left, for whoever picks it up
+### 📌 The three clusters, all closed, and what each fix was
 
-**A. The tag path does not know about the wide types** — 8, 9 and 17. Number 17 is the same shape one
-layer over: `Tagged.Decoded` records that an untagged non-negative integer comes back as a `uint64` and a
-negative one as an `int64`, and `!!int` overrides both with a plain `int` — which the reflection path has
-no case for. `!!int` on a value. Untagged, `1e+310` and `1e-400` come back
-as a `*big.Float` and a 21-digit integer as a `*big.Int`, and untagged `ToJSON` writes the number out in
-full. The types are built and reached; the route through `!!int` and `!!float` is what is missing.
+✅ **A. The tag path did not know about the wide types, nor about the Go types the tags name** — 8, 9, 17
+and 31, closed 2026-09-12. The wide types were built and reached everywhere except through the tags:
+untagged, `1e+310` and `1e-400` come back as a `*big.Float` and a 21-digit integer as a `*big.Int`, and
+`ToJSON` writes both out in full. `ast.readsAsFloat` took `strconv.ParseFloat`'s `ErrRange` for "not a
+float", so `!!float 1e+310` was refused outright; `castToFloatValue` and `taggedInteger` narrowed what the
+node held, so `!!float 1e-400` decoded to zero and `!!int 123456789012345678901` converted to
+`math.MinInt64`. Underflow needed telling from nought by hand: `strconv.ParseFloat` reports `ErrRange` and
+an infinity for an overflow and a plain zero with no error at all for an underflow.
+
+The other half was the destination rather than the value. `!!int 5` hands back a plain `int`, which
+`Decoder.decodeValue` had no case for, and `!!binary` hands back a `[]byte`, which `decodeSlice` read as a
+YAML sequence -- so each tag could not reach the Go type it names, while the same document into an `any`
+read correctly.
 
 ✅ **B. A node property standing alone after a `:` made the parser expect a block collection** — 11, 22 and
 half of 15, closed 2026-09-12. `a: !foo` over `b: 1` nested the `b` under the tag and `? a` over `: &a1`
