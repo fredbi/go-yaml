@@ -4,6 +4,7 @@
 package codec_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -12,22 +13,23 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// The two converters write a `!!timestamp` two ways, and ToJSON's answer
-// depends on how the document was spelled.
+// A "!!timestamp" is written as the instant it names, by both converters.
 //
-// ToJSON writes the scalar's source text: "2001-12-14t21:59:43.1Z" goes out
-// with its lowercase "t", and "2001-12-14 21:59:43.1" goes out with its space.
-// Neither is RFC 3339, so a JSON consumer reading dates gets a string it cannot
-// parse -- and two documents denoting the same instant convert to two different
-// JSON documents. The value converter goes through the decoder, which resolves
-// the tag to a time.Time, and writes "2001-12-14T21:59:43.1Z" for all of them.
+// ToJSON wrote the scalar's source text until 2026-09-12, so
+// "2001-12-14t21:59:43.1Z" went out with its lowercase "t" and
+// "2001-12-14 21:59:43.1" with its space -- neither RFC 3339, and two documents
+// denoting one instant converting to two JSON documents. The value converter
+// goes through the decoder, which resolves the tag to a time.Time, and wrote
+// "2001-12-14T21:59:43.1Z" for all of them.
 //
-// The field is split on which answer is right. libfyaml 1.0.0b1 writes the
-// source text and go.yaml.in/yaml/v3 v3.0.5 writes the normalized instant. The
-// defect here is that one library gives both, and that the answer moves with
-// the presentation.
+// The field is split on which answer is right: libfyaml 1.0.0b1 writes the
+// source text and go.yaml.in/yaml/v3 v3.0.5 writes the normalized instant. What
+// settled it was inside this library rather than outside -- tagZeroJSON already
+// wrote RFC 3339 for a "!!timestamp" standing on no value, so the text was the
+// odd one out among ToJSON's own answers before it was a question about the
+// field.
 //
-// `!!binary` has no such split: both converters write the decoded bytes as a
+// "!!binary" has no such split: both converters write the decoded bytes as a
 // JSON array of numbers. That differs from encoding/json, which writes a []byte
 // as its base64 string, and from libfyaml, which writes "aGVsbG8=" -- recorded
 // rather than pinned, since the two paths in this library agree.
@@ -35,35 +37,26 @@ import (
 // Found on 2026-09-13, once yamlgen drew a Timestamp and the corpus carried one
 // into TestToJSONMatchesTheValueConverter.
 
-// TestDefectToJSONWritesATimestampAsItWasSpelled pins both converters.
-func TestDefectToJSONWritesATimestampAsItWasSpelled(t *testing.T) {
-	t.Run("today ToJSON writes the source text", func(t *testing.T) {
-		for _, tc := range []struct{ src, folds, values string }{
-			{
-				src:    "a: !!timestamp 2001-12-14\n",
-				folds:  `{"a":"2001-12-14"}`,
-				values: `{"a": "2001-12-14T00:00:00Z"}`,
-			},
-			{
-				src:    "a: !!timestamp 2001-12-14t21:59:43.1Z\n",
-				folds:  `{"a":"2001-12-14t21:59:43.1Z"}`,
-				values: `{"a": "2001-12-14T21:59:43.1Z"}`,
-			},
-			{
-				src:    "a: !!timestamp 2001-12-14 21:59:43.1\n",
-				folds:  `{"a":"2001-12-14 21:59:43.1"}`,
-				values: `{"a": "2001-12-14T21:59:43.1Z"}`,
-			},
+// TestToJSONWritesATimestampAsTheInstantItNames holds the two converters to one
+// answer.
+func TestToJSONWritesATimestampAsTheInstantItNames(t *testing.T) {
+	t.Run("every spelling converts to the instant", func(t *testing.T) {
+		for _, tc := range []struct{ src, writes string }{
+			{src: "a: !!timestamp 2001-12-14\n", writes: `{"a":"2001-12-14T00:00:00Z"}`},
+			{src: "a: !!timestamp 2001-12-14t21:59:43.1Z\n", writes: `{"a":"2001-12-14T21:59:43.1Z"}`},
+			{src: "a: !!timestamp 2001-12-14T21:59:43.1Z\n", writes: `{"a":"2001-12-14T21:59:43.1Z"}`},
+			{src: "a: !!timestamp 2001-12-14 21:59:43.1\n", writes: `{"a":"2001-12-14T21:59:43.1Z"}`},
 		} {
 			out, err := codec.ToJSON([]byte(tc.src))
 			require.NoErrorf(t, err, "%q", tc.src)
-			assert.Equal(t, tc.folds, string(out), "today: %q", tc.src)
+			assert.Equal(t, tc.writes, string(out), "%q", tc.src)
 
 			var v any
 			require.NoErrorf(t, codec.UnmarshalWithOptions([]byte(tc.src), &v, codec.UseOrderedMap()), "%q", tc.src)
 			through, err := codec.MarshalWithOptions(v, codec.JSON())
 			require.NoErrorf(t, err, "%q", tc.src)
-			assert.Equal(t, tc.values+"\n", string(through), "%q", tc.src)
+			assert.Equal(t, strings.ReplaceAll(tc.writes, `":"`, `": "`)+"\n", string(through),
+				"%q: the value converter agrees", tc.src)
 		}
 	})
 
@@ -81,11 +74,15 @@ func TestDefectToJSONWritesATimestampAsItWasSpelled(t *testing.T) {
 		assert.Equal(t, `{"a": [104, 101, 108, 108, 111]}`+"\n", string(through))
 	})
 
-	t.Run("as a key, both tags make the converters disagree", func(t *testing.T) {
+	t.Run("as a key the two still part company, which is defect 30", func(t *testing.T) {
+		// The decoder names a key carrying either tag by Go's %v, so the
+		// disagreement moved rather than closing: ToJSON writes an instant a
+		// JSON consumer can parse and the decoder writes a Go string. The
+		// decoder's side is the one recorded.
 		for _, tc := range []struct{ src, folds, values string }{
 			{
 				src:    "!!timestamp 2001-12-14: x\n",
-				folds:  `{"2001-12-14":"x"}`,
+				folds:  `{"2001-12-14T00:00:00Z":"x"}`,
 				values: `{"2001-12-14 00:00:00 +0000 UTC": "x"}`,
 			},
 			{
@@ -96,7 +93,7 @@ func TestDefectToJSONWritesATimestampAsItWasSpelled(t *testing.T) {
 		} {
 			out, err := codec.ToJSON([]byte(tc.src))
 			require.NoErrorf(t, err, "%q", tc.src)
-			assert.Equal(t, tc.folds, string(out), "today: %q", tc.src)
+			assert.Equal(t, tc.folds, string(out), "%q", tc.src)
 
 			var v any
 			require.NoErrorf(t, codec.UnmarshalWithOptions([]byte(tc.src), &v, codec.UseOrderedMap()), "%q", tc.src)

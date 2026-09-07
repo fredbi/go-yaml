@@ -540,9 +540,20 @@ func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	case token.BinaryTag:
 		written = appendJSONBinary(nil, res.Text)
 	case token.TimestampTag:
-		// JSON has no date, so the timestamp is written as the document wrote
-		// it. Resolve has already refused one no format reads.
-		written = appendJSONString(nil, res.Text)
+		// JSON has no date, so a timestamp is written as a string -- and as the
+		// instant it names rather than as the text that spelled it.
+		//
+		// yaml.org/type/timestamp.html admits a "t" for the "T", a space for
+		// it, a date with no time at all and a zone as short as "-5", none of
+		// which RFC 3339 spells, so one instant written two ways converted two
+		// ways. The value converter writes the time.Time the decoder builds,
+		// which is RFC 3339, and tagZeroJSON already writes that for a
+		// "!!timestamp" standing on no value -- so the text was the odd one
+		// out inside this library before it was a question about the field.
+		//
+		// Resolve has read it already, so this cannot fail.
+		stamp, _ := ast.ParseTimestamp(res.Text)
+		written = appendJSONString(nil, stamp.Format(time.RFC3339Nano))
 	default:
 		// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The node
 		// writes itself.

@@ -34,7 +34,11 @@ func TestToJSONReadsTheTagsItKnows(t *testing.T) {
 		{"map", "a: !!map {x: 1}\n", `{"a":{"x":1}}`},
 		{"set", "a: !!set {x, y}\n", `{"a":{"x":null,"y":null}}`},
 		{"omap", "a: !!omap [{x: 1},{y: 2}]\n", `{"a":[{"x":1},{"y":2}]}`},
-		{"timestamp", "a: !!timestamp 2001-12-14\n", `{"a":"2001-12-14"}`},
+
+		// A timestamp is written as the instant it names, in RFC 3339, which is
+		// what the value converter writes for the time.Time the decoder builds.
+		// yaml.org/type/timestamp.html spells one several ways this does not.
+		{"timestamp", "a: !!timestamp 2001-12-14\n", `{"a":"2001-12-14T00:00:00Z"}`},
 		// ⚠️ A tag the core schema does not resolve leaves its scalar as text,
 		// digits and all. The scanner types a scalar by its own grammar and a
 		// tag it cannot resolve is not that grammar, so "!thing 12" is the
