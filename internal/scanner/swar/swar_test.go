@@ -118,6 +118,7 @@ func TestInlinable(t *testing.T) {
 	for _, fn := range []string{
 		"FirstByte", "LanesBelow", "DoubleQuoteStopMask", "SingleQuoteStopMask", "SpaceMask",
 		"Broadcast", "LanesZero", "MaskEqual", "ControlMask", "AllowedControlMask",
+		"LetterMask", "DigitMask", "atLeast",
 	} {
 		assert.Containsf(t, text, "can inline "+fn,
 			"%s no longer inlines, so its callers pay a call for eight bytes of work:\n%s", fn, text)
@@ -181,5 +182,37 @@ func TestControlMaskHasNoBorrow(t *testing.T) {
 		w := binary.LittleEndian.Uint64([]byte(text))
 		assert.Zerof(t, ControlMask(w)&^AllowedControlMask(w),
 			"%q holds nothing a stream may not, and the mask flagged a lane", text)
+	}
+}
+
+// TestLetterAndDigitMasksMatchTheByteRule holds the two masks to the rule they stand for, over every ASCII byte in
+// every lane.
+//
+// The masks are exact rather than [FirstByte]-only, because a caller combines them before reading anything off the
+// result: a lane flagged because a lower one borrowed would be read as a letter, and the scan would step over a
+// character it has a case for.
+func TestLetterAndDigitMasksMatchTheByteRule(t *testing.T) {
+	isLetter := func(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+
+	for lane := range 8 {
+		for b := range 128 {
+			// The other lanes hold the neighbors most likely to borrow into this one.
+			for _, filler := range []byte{0x00, 0x2F, 0x39, 0x40, 0x5A, 0x5B, 0x60, 0x7A, 0x7B, 0x7F} {
+				var word [8]byte
+				for i := range word {
+					word[i] = filler
+				}
+				word[lane] = byte(b)
+				w := binary.LittleEndian.Uint64(word[:])
+
+				gotLetter := LetterMask(w)&(uint64(0x80)<<(8*lane)) != 0
+				gotDigit := DigitMask(w)&(uint64(0x80)<<(8*lane)) != 0
+				require.Equalf(t, isLetter(byte(b)), gotLetter,
+					"LetterMask: byte %#02x in lane %d beside %#02x", b, lane, filler)
+				require.Equalf(t, isDigit(byte(b)), gotDigit,
+					"DigitMask: byte %#02x in lane %d beside %#02x", b, lane, filler)
+			}
+		}
 	}
 }

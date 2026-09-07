@@ -131,3 +131,42 @@ func SpaceMask(w uint64) uint64 {
 
 	return y & high
 }
+
+// atLeast flags the lanes holding a byte of n or more.
+//
+// Every lane of w must hold a byte under 0x80, and n must be under 0x80 too, which is what makes it exact: setting
+// every high bit puts each lane at 0x80+c, and 0x80+c-n cannot borrow out of its lane because it never goes below 1.
+// The high bit is then left standing exactly where c >= n.
+//
+// The stop masks' cheaper "(q-lo)&^q" form borrows across lanes and survives it only because [FirstByte] reads the
+// lowest flagged lane. This one is combined with others before anything is read off it, so it has to be exact.
+func atLeast(w uint64, n byte) uint64 { return ((w | high) - Broadcast(n)) & high }
+
+// LetterMask flags the lanes holding an ASCII letter, upper or lower case.
+//
+// Every lane of w must hold a byte under 0x80, which a caller establishes with w&[HighBits] == 0.
+//
+// Letters and digits are the continue-set a plain scalar can be stepped over with: none of the 24 characters the scan
+// has a case for is one, so a run of them is a run the character loop would have appended byte by byte and nothing
+// else. Over the workload corpus that covers 37% to 64% of the document in runs averaging 5.1 to 8.1 bytes -- about
+// one word apiece, which is why this has to inline. A caller after the bytes that end such a run writes
+//
+//	^(LetterMask(w) | DigitMask(w)) & HighBits
+//
+// and keeps its own loop. The two are apart, and no function here spells that combination, for the reason
+// [ControlMask] and [AllowedControlMask] are apart: together they come to 98 against the budget of 80.
+//
+// Folding with 0x20 maps A-Z onto a-z and lands nothing else in that range: only 0x41-0x5A and 0x61-0x7A give a byte
+// in 0x61-0x7A, since 0x40 folds to 0x60 and 0x5B to 0x7B.
+func LetterMask(w uint64) uint64 {
+	folded := w | (lo * 0x20)
+
+	return atLeast(folded, 'a') &^ atLeast(folded, 'z'+1)
+}
+
+// DigitMask flags the lanes holding an ASCII digit.
+//
+// Every lane of w must hold a byte under 0x80, which a caller establishes with w&[HighBits] == 0.
+func DigitMask(w uint64) uint64 {
+	return atLeast(w, '0') &^ atLeast(w, '9'+1)
+}
