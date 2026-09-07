@@ -306,8 +306,27 @@ Actions below.
 
     Action 11 is closed.
 
-12. 📝 **Multi-document streams.** `Emit` takes one `Value` and writes at most one `---`. Cross-document
-    aliases and a `%TAG` handle going out of scope both land with them.
+12. ✅ **Multi-document streams** (2026-09-13). `Streams` draws a slice, `EmitStream` and `WriteStream`
+    write one, and `TestAStreamReadsBackAsItsDocuments` is the property — one rather than the six a
+    single document gets, since what a stream adds is the separator, the scope of what a document
+    declares, and the count. `Style.DocumentSuffix` picks between `---` and `...`, which 9.1.1 and 9.1.2
+    make different productions. Matched buckets **564 → 567**.
+    - **Two rules the emitter had to learn**, both from the syntax oracles rather than from reading:
+      a directive may only follow a `...` suffix, so a document opened by `---` alone declares nothing
+      and cannot use a `%TAG` handle; and a document with no text at all is not a document, so a bare
+      null under the empty spelling needs the marker forced or the stream reads one document fewer.
+    - **One defect**, under a `StreamDecode` property of its own so a stream-only shape excuses nothing
+      elsewhere: a `...` suffix mishandles a propertied block scalar — a column of content goes missing
+      with an indentation indicator, and a valid stream is refused without one.
+    - 📌 **Cross-document aliases and `%TAG` scope are already right**, which is why they are not drawn:
+      an alias naming an earlier document's anchor and a handle used outside the document that declares
+      it are both refused, and refused by all four sources.
+    - 🔍 **`%YAML` spans and `%TAG` does not**, and that is a ruling rather than a defect. This library
+      and libfyaml 1.0.0b1 both apply a version directive to *every* document of a stream; all four
+      sources scope a `%TAG` handle to one. So the library scopes one directive and not the other, two
+      implementations agree, and `WriteStream` sets `MeansUnclear` rather than stating a meaning.
+    - 📌 **`codec.ToJSON` skips an empty first document** where the decoder keeps it — found once the
+      corpus carried a suffix into the equivalence sweep. Pinned in `codec/zz_emptyfirstdoc_test.go`.
 
 13. ✅ **Escapes in flow context** (2026-09-13). `Style.Escaping` writes a double-quoted scalar five ways:
     the minimum, every character 5.7 names as that name (`\0`, `\a`, `\/`, `\_`, `\L`, and the space as
