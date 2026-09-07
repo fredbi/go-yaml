@@ -147,6 +147,16 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 		// Broken on purpose, on the value, so the break is labeled rather
 		// than guessed at. These are the only generated documents that violate
 		// a rule the grammar cannot see.
+		//
+		// They state no meaning either, and for a sharper reason than the
+		// stream above. The break is on the value, so meansOf would answer
+		// from the rewritten tree -- and that tree has already resolved the
+		// question the break opens. A repeated key collapses in a Go map, so
+		// the meaning would record last-write-wins as settled; an alias
+		// pointing at no anchor still carries the node it was copied from, so
+		// the meaning would record a reference nothing defines. TagDuplicateKey
+		// and TagAliasUndefined are on the case to let a consumer say what it
+		// does about the rule. A stated meaning would answer for it.
 		for _, b := range breakRules(value) {
 			broken := yamlgen.Write(b.Value, style)
 
@@ -155,8 +165,6 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 				Src:      []byte(broken.Text),
 				Mutation: b.How,
 				Features: broken.Features,
-				Readings: broken.Readings,
-				Means:    meansOf(broken),
 				Tags:     b.Tags,
 			})
 		}
