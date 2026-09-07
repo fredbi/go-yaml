@@ -134,6 +134,9 @@ const (
 	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
 	// FeatureChompKeep is a block scalar written "|+" where clip would do.
 	FeatureChompKeep stance.Feature = "presentation/chomp-keep"
+	// FeatureKeyBelowTheIndicator is an explicit key whose content is written
+	// on the line below its "?", which is where a collection key has to go.
+	FeatureKeyBelowTheIndicator stance.Feature = "presentation/key-below-the-indicator"
 	// FeatureTabSeparation is a tab standing where a space would separate an
 	// indicator from what follows it.
 	FeatureTabSeparation stance.Feature = "presentation/tab-separation"

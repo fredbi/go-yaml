@@ -488,3 +488,124 @@ func TestDefectATabAfterANodesPropertiesIsMishandled(t *testing.T) {
 		assert.Equal(t, []any{"x"}, s)
 	})
 }
+
+// TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused pins the nesting.
+//
+// 8.2.2 puts an explicit entry's key at s-l+block-indented(n, block-out), which
+// is any block node -- a mapping written the long way included. Nesting the two
+// "?" is refused.
+//
+// The same key written any other way reads, which is what makes this the nesting
+// and not the collection key.
+//
+// Reached on 2026-09-07, when Keys began drawing a collection. No generated
+// document held a collection key before that, and the census reports the YAML
+// Test Suite holds no nested explicit key either, so nothing on either side had
+// provoked it.
+func TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused(t *testing.T) {
+	t.Run("today the nesting is refused", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte("?\n  ? a\n  : 0\n: v\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unexpected scalar value type")
+	})
+
+	t.Run("the same key written any other way reads", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{"?\n  a: 0\n: v\n", "map[a:0]"},
+			{"? {a: 0}\n: v\n", "map[a:0]"},
+			{"?\n  - a\n  - b\n: v\n", "[a b]"},
+		} {
+			// Into an `any`, which names the key by walking it. A typed map
+			// cannot hold one: `cannot use map[string]interface {} as a map
+			// key: Go cannot hash it`.
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "v"}, got, "%q", tc.src)
+		}
+	})
+}
+
+// TestDefectAKeyBelowItsIndicatorLosesItsIndentation pins the render.
+//
+// A collection key cannot go on its "?"s own line -- 8.2.2 puts it at
+// s-l+block-indented(n, block-out) and a block collection has nowhere to be
+// indented against there -- so it is written below. Rendering brings it back at
+// column 1, where it is no longer the key.
+//
+// The blank line is the trigger, and a head comment is what puts one there.
+// Without it the renderer moves the key up onto the "?"s line, which is a
+// different spelling of the same document and settles.
+//
+// Reached on 2026-09-07, when Keys began drawing a collection.
+func TestDefectAKeyBelowItsIndicatorLosesItsIndentation(t *testing.T) {
+	t.Run("today a blank line above the key loses its indentation", func(t *testing.T) {
+		const src = "?\n\n \"\": 0\n: v\n"
+
+		f, err := parser.ParseBytes([]byte(src), parser.WithComments())
+		require.NoError(t, err)
+		assert.Equal(t, "? \n\"\": 0\n: v\n", f.String(),
+			"today: the key comes back at column 1")
+	})
+
+	t.Run("without the blank line the render settles", func(t *testing.T) {
+		for _, src := range []string{"?\n a: 0\n: v\n", "?\n - a\n: v\n"} {
+			f, err := parser.ParseBytes([]byte(src), parser.WithComments())
+			require.NoErrorf(t, err, "%q", src)
+
+			once := f.String()
+			g, err := parser.ParseBytes([]byte(once), parser.WithComments())
+			require.NoErrorf(t, err, "%q", once)
+			assert.Equalf(t, once, g.String(), "%q renders to %q and then moves", src, once)
+		}
+	})
+}
+
+// TestDefectACollectionKeyWrittenAloneInFlowIsRefused pins it.
+//
+// 7.4.2 lets a flow mapping entry be a key with no value, and lets that key be
+// any flow node. `{{"": 0}}` is one entry whose key is the mapping {"": 0}.
+//
+// The same key with a value parses, so it is the missing value and not the
+// collection key. The whole measurement, including why libfyaml cannot answer,
+// is on yamlgen.Strict's entry of the same name.
+func TestDefectACollectionKeyWrittenAloneInFlowIsRefused(t *testing.T) {
+	t.Run("today a collection key alone is refused", func(t *testing.T) {
+		for _, src := range []string{"{{\"\": 0}}\n", "{[a]}\n"} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "could not find flow map content", "%q", src)
+		}
+	})
+
+	t.Run("the same key with a value parses", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte("{{a: 0}: v}\n"), &got))
+		assert.Equal(t, map[string]any{"map[a:0]": "v"}, got)
+	})
+}
+
+// TestDefectTwoCollectionKeysInOneMappingCollide pins it.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
+// different mappings do not. The duplicate check names a collection key by its
+// opening character, so every collection key in a mapping is the same key as
+// every other.
+//
+// The name is the tell: "{" is one character of the document rather than
+// anything the key denotes, and KeyText names the same key "map[:0]".
+func TestDefectTwoCollectionKeysInOneMappingCollide(t *testing.T) {
+	t.Run("today two collection keys collide", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte(`{{"": 0}: a, {"": 1}: b}`+"\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `mapping key "{" already defined`)
+	})
+
+	t.Run("one alone reads", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte(`{{"": 0}: a}`+"\n"), &got))
+		assert.Equal(t, map[string]any{"map[:0]": "a"}, got)
+	})
+}

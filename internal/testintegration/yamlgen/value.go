@@ -955,6 +955,27 @@ func Keys() *rapid.Generator[Value] {
 			return Str{V: Strings().Draw(t, "key")}
 		}
 
+		// ⚠️ A collection key is NOT drawn yet, and drawKeyCollection below is
+		// what would draw one. The emitter writes one correctly -- explicitKey
+		// takes the long form for it whatever Style.ExplicitKeys says and puts
+		// it below the "?", which is the census gap this was for -- and the
+		// defects it reaches are filed and pinned:
+		//
+		//	an explicit key inside an explicit key is refused
+		//	a key written below its indicator loses its indentation on render
+		//	a collection key written alone in flow is refused
+		//	two collection keys in one mapping collide, both named "{"
+		//
+		// What is left is this package's own model rather than the library's.
+		// KeyText names a collection key from Decoded(), which is the core
+		// answer, so under "%YAML 1.1" a key holding "08" is named wrongly --
+		// readings.legacyKey answers for a scalar key and has no case for a
+		// collection. Rendering a collection key also drops a comment and
+		// changes a value in ways not yet reduced.
+		//
+		// Turning the draw on is a round of work rather than a line. The
+		// yamlcorpus census keeps the gap open and says why.
+
 		switch rapid.IntRange(0, 3).Draw(t, "scalar") {
 		case 0:
 			return Null{}
@@ -966,6 +987,27 @@ func Keys() *rapid.Generator[Value] {
 			return Float{V: rapid.Float64Range(-1000, 1000).Draw(t, "float")}
 		}
 	})
+}
+
+// drawKeyCollection draws the small collections a key may be.
+//
+// Small on purpose and never nested: a key is written twice in the document the
+// property tests render -- once as itself and once in every message naming it --
+// and KeyText renders a collection with Go's %v, which grows fast. Two entries
+// is enough to be a collection.
+//
+//nolint:unused // Parked, not dead: Keys() names it in the note above and turning the draw on is one line.
+func drawKeyCollection(t *rapid.T) Value {
+	items := []Value{
+		Str{V: Strings().Draw(t, "keyitem")},
+		Int{V: rapid.IntRange(-99, 99).Draw(t, "keyint")},
+	}
+
+	if rapid.Bool().Draw(t, "keyseq") {
+		return Seq{Items: items[:1+rapid.IntRange(0, 1).Draw(t, "keyitems")]}
+	}
+
+	return Map{Pairs: []Pair{{Key: items[0], Val: items[1]}}}
 }
 
 // Streams generates a sequence of documents, one to three of them.

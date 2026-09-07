@@ -50,10 +50,12 @@ import (
 // argument for having it: the grammar coverage number was at 605 of 605 and
 // said nothing about either.
 var knownGaps = map[string]string{
-	"an explicit key whose content is on the line below the '?'": "emit.go's explicitKey writes keyIn(k, false), " +
-		"which returns a single-line scalar, so the key always lands on the '?'s own line; and Keys() draws only " +
-		"scalars, so a collection key -- which is what the suite's two documents put below the '?' -- has no value " +
-		"to draw from. Two changes, neither small.",
+	"an explicit key whose content is on the line below the '?'": "half done as of 2026-09-07. The emitter " +
+		"writes one now -- explicitKey takes the long form for a collection key whatever Style.ExplicitKeys says " +
+		"and puts it below the '?' -- and Keys() still does not draw one, so nothing reaches it. Four defects " +
+		"were filed from the shapes it makes reachable before the draw was parked; what is left is this package's " +
+		"own model, where KeyText names a collection key from the core reading and readings.legacyKey has no case " +
+		"for one. See the note in Keys().",
 }
 
 func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {

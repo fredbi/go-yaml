@@ -551,8 +551,14 @@ func (e *emitter) block(v Value, indent, depth int) {
 			e.headComment(indent)
 			e.pad(indent)
 
-			if e.st.ExplicitKeys {
-				e.explicitKey(p.Key, indent)
+			// A collection key takes the explicit form whatever the style
+			// says. 8.2.2 puts an implicit key at c-l-block-map-implicit-key,
+			// which is ns-s-implicit-yaml-key -- one line, and a block
+			// collection is not one line. So the presentation serves the value
+			// here rather than the other way round, as it does for a null
+			// written with the empty spelling.
+			if e.st.ExplicitKeys || isCollection(p.Key) {
+				e.explicitKey(p.Key, indent, depth)
 			} else {
 				e.buf.WriteString(e.keyIn(p.Key, false))
 			}
@@ -583,9 +589,26 @@ func (e *emitter) block(v Value, indent, depth int) {
 // A key that writes nothing -- a Null under the empty spelling -- takes the "?"
 // alone. Writing "? " with nothing after it would leave a trailing space, which
 // is not what the document means and not what a renderer writes back.
-func (e *emitter) explicitKey(k Value, indent int) {
+func (e *emitter) explicitKey(k Value, indent, depth int) {
 	e.feat.add(FeatureExplicitKey)
 	e.buf.WriteString("?")
+
+	// A collection goes below the "?" and one level in. 8.2.2 puts the key at
+	// s-l+block-indented(n, block-out), which is where a block collection
+	// begins, and it cannot begin on the "?"s own line -- there is nothing for
+	// its entries to be indented against.
+	//
+	// This is the branch 56 of the YAML Test Suite's documents use and no
+	// generated document reached before 2026-09-07, because keyIn returns a
+	// single-line scalar and Keys drew nothing but scalars.
+	if isCollection(k) {
+		e.feat.add(FeatureKeyBelowTheIndicator)
+		e.buf.WriteString("\n")
+		e.block(k, indent+e.st.Indent, depth+1)
+		e.pad(indent)
+
+		return
+	}
 
 	if key := e.keyIn(k, false); key != "" {
 		e.sep()
@@ -594,6 +617,24 @@ func (e *emitter) explicitKey(k Value, indent int) {
 
 	e.buf.WriteString("\n")
 	e.pad(indent)
+}
+
+// isCollection reports whether v writes as a block collection, looking through
+// the properties that may stand in front of one.
+func isCollection(v Value) bool {
+	switch n := v.(type) {
+	case Seq:
+		return len(n.Items) > 0
+	case Map:
+		return len(n.Pairs) > 0
+	case Anchored:
+		return isCollection(n.V)
+	case Tagged:
+		return isCollection(n.V)
+	}
+
+	// An Alias is written "*name" and is one line whatever it stands for.
+	return false
 }
 
 // child writes the value of a mapping pair or a sequence entry, having already
@@ -826,6 +867,19 @@ func (e *emitter) keyIn(k Value, flow bool) string {
 		e.reads.sawMergeKey()
 
 		return "<<"
+	}
+
+	if isCollection(k) {
+		// A collection key inside a flow collection, which is written where it
+		// stands: "{[a, b]: v}". 7.4.2 lets a ':' follow a JSON-like key
+		// adjacently, and a flow collection is JSON-like, so the key needs no
+		// "?" here -- unlike in block, where explicitKey puts it below the
+		// indicator.
+		//
+		// inline rather than simpleScalar, which knows the scalars only.
+		out, _ := e.inline(k, true)
+
+		return out
 	}
 
 	s, ok := k.(Str)

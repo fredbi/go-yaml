@@ -278,7 +278,12 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureEscapeUnicode: st.Escaping == yamlgen.EscapeUnicode,
 			yamlgen.FeatureEscapeLong:    st.Escaping == yamlgen.EscapeLong,
 			yamlgen.FeatureByteOrderMark: st.ByteOrderMark,
-			yamlgen.FeatureExplicitKey:   st.ExplicitKeys,
+			// A collection key takes the explicit form whatever the style says
+			// -- 8.2.2 makes an implicit key one line, and a block collection is
+			// not one line -- so the style is not the only thing that can write
+			// a "?". This is the second entry here where the presentation
+			// serves the value rather than the other way round.
+			yamlgen.FeatureExplicitKey:   st.ExplicitKeys || holdsACollectionKey(v),
 			yamlgen.FeatureChompKeep:     st.Chomping == yamlgen.ChompKeep,
 			yamlgen.FeatureChompPadded:   st.Chomping == yamlgen.ChompPadded,
 			yamlgen.FeatureYAMLDirective: st.Version != "",
@@ -510,4 +515,38 @@ func scalarFree(v yamlgen.Value, chars string) bool {
 	}
 
 	return true
+}
+
+// holdsACollectionKey reports whether a mapping's key is a collection anywhere
+// in v.
+func holdsACollectionKey(v yamlgen.Value) bool {
+	switch n := v.(type) {
+	case yamlgen.Map:
+		for _, p := range n.Pairs {
+			switch k := p.Key.(type) {
+			case yamlgen.Seq:
+				if len(k.Items) > 0 {
+					return true
+				}
+			case yamlgen.Map:
+				if len(k.Pairs) > 0 {
+					return true
+				}
+			}
+
+			if holdsACollectionKey(p.Key) || holdsACollectionKey(p.Val) {
+				return true
+			}
+		}
+	case yamlgen.Seq:
+		return slices.ContainsFunc(n.Items, holdsACollectionKey)
+	case yamlgen.Anchored:
+		return holdsACollectionKey(n.V)
+	case yamlgen.Alias:
+		return holdsACollectionKey(n.V)
+	case yamlgen.Tagged:
+		return holdsACollectionKey(n.V)
+	}
+
+	return false
 }

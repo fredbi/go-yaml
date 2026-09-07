@@ -151,6 +151,75 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
+		Name: "parse/two-collection-keys-in-one-mapping-collide",
+		Pin:  "TestDefectTwoCollectionKeysInOneMappingCollide",
+		Reason: "`{{\"\": 0}: a, {\"\": 1}: b}` is refused as `mapping key \"{\" already defined`. " +
+			"The two keys are different mappings and 3.2.1.1 makes them two keys; the duplicate " +
+			"check names a collection key by its opening character, so every collection key in a " +
+			"mapping is the same key as every other.\n\n" +
+			"One collection key alone reads: `{{\"\": 0}: a}` gives {\"map[:0]\": \"a\"}. So it is " +
+			"the second one and nothing about the first.\n\n" +
+			"The name is the tell. `\"{\"` is one character of the document rather than anything the " +
+			"key denotes -- KeyText names the same key `map[:0]`, which is what the decoder uses " +
+			"once the parse is through.\n\n" +
+			"Found on 2026-09-07, when Keys began drawing a collection. No generated document had " +
+			"held one before, and two in a mapping is what it takes.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesTwoCollectionKeysInOneMapping,
+	},
+	{
+		Name: "parse/a-collection-key-written-alone-in-flow-is-refused",
+		Pin:  "TestDefectACollectionKeyWrittenAloneInFlowIsRefused",
+		Reason: "`{{\"\": 0}}` is refused with `could not find flow map content`. 7.4.2 lets a flow " +
+			"mapping entry be a key with no value, and lets that key be any flow node -- a mapping " +
+			"or a sequence included.\n\n" +
+			"`{{a: 0}: v}`, the same key with a value, parses here and reads {map[a:0]: v}, so it " +
+			"is the missing value and nothing else.\n\n" +
+			"⚠️ libfyaml 1.0.0b1 cannot answer: it refuses all three of `{{\"\": 0}}`, `{[a]}` and " +
+			"`{{a: 0}: v}` with a Python traceback, and the last is a document this library reads " +
+			"correctly -- the binding cannot hash a collection as a dict key. A traceback after a " +
+			"parse is a construction refusal, not a verdict on the syntax. So the two " +
+			"grammar-derived oracles answer and both accept.\n\n" +
+			"The one-document record with the whole measurement is yamlgen.Strict's entry of the " +
+			"same name; this is what excuses the drawn documents.\n\n" +
+			"Found on 2026-09-07, when Keys began drawing a collection: Style.FlowEmpty writes an " +
+			"entry with no value and a collection key under it is this document.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesACollectionKeyAloneInFlow,
+	},
+	{
+		Name: "render/a-key-written-below-its-indicator-loses-its-indentation",
+		Pin:  "TestDefectAKeyBelowItsIndicatorLosesItsIndentation",
+		Reason: "A collection key written below its `?` comes back at column 1, where it is no longer " +
+			"the key. `?` over a blank line over ` \"\": 0` over `: v` renders to `? ` over " +
+			"`\"\": 0` over `: v` -- three entries where there was one, and the value changes with " +
+			"the shape.\n\n" +
+			"A head comment is what puts the blank line there, and the blank line is the whole " +
+			"trigger: `?` over ` a: 0` over `: v` renders to `? a: 0` over `: v`, which is a " +
+			"different spelling of the same document and settles.\n\n" +
+			"It claims Settle and RenderValid rather than Decode: the first read is right, and it is " +
+			"the text written back that stops being the document.\n\n" +
+			"Reached on 2026-09-07, when Keys began drawing a collection -- the key had to be one " +
+			"that cannot go on the `?`s own line before anything could be written below it.",
+		Property: Settle | RenderValid,
+		Match:    writesACollectionKeyUnderAHeadComment,
+	},
+	{
+		Name: "parse/an-explicit-key-inside-an-explicit-key-is-refused",
+		Pin:  "TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused",
+		Reason: "`?` over `  ? a` over `  : 0` over `: v` is refused with `unexpected scalar value " +
+			"type`. The key of an explicit entry is s-l+block-indented(n, block-out), which is any " +
+			"block node -- a mapping written the long way included.\n\n" +
+			"The same key written any other way reads: `?` over `  a: 0` over `: v` gives " +
+			"{\"map[a:0]\": \"v\"}, and so do `? {a: 0}` and a sequence below the indicator. So it is " +
+			"the nesting of the two `?` and nothing else.\n\n" +
+			"Reached on 2026-09-07, when Keys began drawing a collection. Before that no generated " +
+			"document held a collection key at all, and yamlcorpus's census reports the YAML Test " +
+			"Suite holds no nested explicit key either -- so nothing on either side had provoked it.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesAnExplicitKeyInsideAnExplicitKey,
+	},
+	{
 		Name: "parse/a-tab-after-a-tag-is-refused",
 		Pin:  "TestDefectATabAfterANodesPropertiesIsMishandled",
 		Reason: "`a: !!str\tx` is refused with `found invalid tag character \"\\t\"`. 6.1 makes a tab " +
@@ -549,6 +618,128 @@ func holdsA[T Value](v Value) bool {
 		return holdsA[T](n.V)
 	case Tagged:
 		return holdsA[T](n.V)
+	}
+
+	return false
+}
+
+// writesAnExplicitKeyInsideAnExplicitKey reports whether a mapping stands as a
+// key while the style writes every entry the long way.
+//
+// Both halves are needed. A collection key takes the explicit form whatever the
+// style says, so the outer "?" is always there; the inner one is
+// Style.ExplicitKeys, which decides how the mapping *inside* the key is written.
+// A sequence key nests no "?" and reads correctly.
+func writesAnExplicitKeyInsideAnExplicitKey(v Value, st Style) bool {
+	return st.ExplicitKeys && holdsAMappingAsAKey(v)
+}
+
+// holdsAMappingAsAKey reports whether a mapping stands as a mapping's key.
+func holdsAMappingAsAKey(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if _, isMap := p.Key.(Map); isMap {
+				return true
+			}
+
+			if holdsAMappingAsAKey(p.Key) || holdsAMappingAsAKey(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsAMappingAsAKey)
+	case Anchored:
+		return holdsAMappingAsAKey(n.V)
+	case Alias:
+		return holdsAMappingAsAKey(n.V)
+	case Tagged:
+		return holdsAMappingAsAKey(n.V)
+	}
+
+	return false
+}
+
+// writesACollectionKeyUnderAHeadComment reports whether a collection key is
+// written below its "?" with a head comment above it.
+//
+// Both halves: the key has to be a collection, or it goes on the "?"s own line
+// and there is nothing below the indicator; and the head comment is what puts a
+// blank line between the two, which is what the renderer loses the indentation
+// over.
+func writesACollectionKeyUnderAHeadComment(v Value, st Style) bool {
+	return st.Comments.head() && holdsACollectionKey(v)
+}
+
+// holdsACollectionKey reports whether a mapping's key is a collection anywhere
+// in v.
+func holdsACollectionKey(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if isCollection(p.Key) {
+				return true
+			}
+
+			if holdsACollectionKey(p.Key) || holdsACollectionKey(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsACollectionKey)
+	case Anchored:
+		return holdsACollectionKey(n.V)
+	case Alias:
+		return holdsACollectionKey(n.V)
+	case Tagged:
+		return holdsACollectionKey(n.V)
+	}
+
+	return false
+}
+
+// writesACollectionKeyAloneInFlow reports whether a flow entry with no value
+// carries a collection as its key.
+//
+// Three halves, and all three are needed: the style has to write a flow
+// collection at all, it has to spell an empty value as the key alone, and the
+// value has to hold a collection key for there to be one.
+func writesACollectionKeyAloneInFlow(v Value, st Style) bool {
+	return st.Flow && st.FlowEmpty == FlowNullKeyAlone && holdsACollectionKey(v)
+}
+
+// writesTwoCollectionKeysInOneMapping reports whether one mapping has two
+// collection keys.
+//
+// Keyed on the pair rather than on a collection key at all, because one alone
+// reads correctly: it is the duplicate check naming both by their opening
+// character that refuses the document, and that needs two to happen.
+func writesTwoCollectionKeysInOneMapping(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Map:
+		seen := 0
+		for _, p := range n.Pairs {
+			if isCollection(p.Key) {
+				seen++
+			}
+
+			if writesTwoCollectionKeysInOneMapping(p.Key, Style{}) ||
+				writesTwoCollectionKeysInOneMapping(p.Val, Style{}) {
+				return true
+			}
+		}
+
+		return seen > 1
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesTwoCollectionKeysInOneMapping(item, Style{})
+		})
+	case Anchored:
+		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
+	case Alias:
+		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
+	case Tagged:
+		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
 	}
 
 	return false

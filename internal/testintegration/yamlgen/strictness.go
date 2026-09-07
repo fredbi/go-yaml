@@ -53,6 +53,26 @@ type Strictness struct {
 // should settle the value against another parser and record it then.
 var Strict = []Strictness{
 	{
+		Name: "a collection written as a flow entry's key alone",
+		Src:  "{{\"\": 0}}\n",
+		Rule: "7.4.2: a flow mapping entry may be a key with no value, and its key may be any flow " +
+			"node -- a flow mapping or sequence included. `{{\"\": 0}}` is one entry whose key is " +
+			"the mapping {\"\": 0} and whose value is empty.\n\n" +
+			"`{{a: 0}: v}` -- the same key with a value -- parses here and reads " +
+			"{map[a:0]: v}, so it is the missing value and not the collection key.\n\n" +
+			"⚠️ **libfyaml cannot answer this one**, which is worth stating rather than counting it " +
+			"as corroboration. It refuses all three of `{{\"\": 0}}`, `{[a]}` and `{{a: 0}: v}` with " +
+			"a Python traceback -- the binding cannot hash a collection as a dict key -- and the " +
+			"last of those is a document this library reads correctly. A traceback after a parse is " +
+			"the construction refusal this register warns about, not a verdict on the syntax.\n\n" +
+			"So two sources answer: grammar.NewRecognizer accepts it and the reference parser passes " +
+			"it, both generated from the specification's grammar. This library is the only one " +
+			"refusing it at a position.\n\n" +
+			"Found on 2026-09-07, when Keys began drawing a collection: Style.FlowEmpty writes an " +
+			"entry with no value, and a collection key under it is this document.",
+		Error: "[1:2] could not find flow map content",
+	},
+	{
 		Name: "a flow mapping key spanning two lines",
 		Src:  "{[a\nb]: 1}\n",
 		Rule: "7.4.2: a flow mapping's key is under neither of the implicit-key restrictions -- it " +
