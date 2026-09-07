@@ -1,5 +1,7 @@
 > [!NOTE]
-> Last revision: 2026-09-07 (a document can declare the version it is read under; five more defects, and the
+> Last revision: 2026-09-12 (the conformance-fixes branch closed **clusters B and C**: seven entries gone,
+> two of them the ones that silently restructured a document. One new finding, a widening of 24).
+> Previous: 2026-09-07 (a document can declare the version it is read under; five more defects, and the
 > regression opened earlier the same day is already fixed by `e9fbcee`). Previous: 2026-09-11, fourth pass (a mapping entry written the long way; **eleven
 > defects**, six of them one root cause — a property standing alone after a `:`)
 > Previous revision: 2026-09-06 (nothing in the corpus decodes into a Go type; three defects were living
@@ -287,7 +289,7 @@ record it and decide deliberately rather than picking whichever is convenient.
 | the grammar oracle, against the suite | **393 of 393** |
 | the generated corpus | 605 of 605 buckets entered, 12,507 cases, 60 distinct parser complaints |
 
-**Twenty-six defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
+**Twenty defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
 2026-09-10; 8 and 9 were opened when the generator first drew numbers past what Go holds; **11 to 18 and 21
 to 23 on 2026-09-11**, as the generator learned to write a tag three ways, to reach the shapes the flow axes
 need, to write a number in three bases, to read a document into a Go type, and to write a mapping entry the
@@ -295,6 +297,20 @@ long way; 24 to 28 on 2026-09-07, when it learned to write a block scalar's trai
 and to declare the version a document is read under; 10, 19 and 20 on 2026-09-06, reading `decodeStruct` for the performance round, with two merge
 defects beside them. 10 was closed the same day it was opened, by `7dc4075`. None is old: the fourteen
 before them were fixed and merged.
+
+✅ **Six left on 2026-09-12, on the `conformance-fixes` branch, and 15 and 27 shed a document each.**
+Clusters B and C are closed and 29 was opened in their place:
+
+| # | closed by | what the fix was |
+|---|---|---|
+| 2, 13, 14 | `f1adc59` | `Context.setTokenTypeByPrevTag` matched the text a tag was written with against the reserved keywords, so `!!float 7` typed its scalar and `!<tag:yaml.org,2002:float> 7` did not. The scanner cannot judge this -- only the parser holds the `%TAG` lines -- and `parseTagValue` already applies the rule by URI, so the scanner's pass is gone |
+| 11, 22 | `bd8b723` | a tag or an anchor written alone at the end of its line now asks `opensNextEntry`, so a token back at the entry's own column opens the next entry (8.2.1, 8.2.2) instead of becoming the property's node |
+| half of 15, one of 27's three | `06c014f` | `parseTagValue` built the string for a scalar under an unresolved tag and left the cursor on it, so the next reader found a token past the end of the entry |
+
+Two more faults were found on the way and fixed with them: `%TAG !! !local-` over `v: !!seq 1` was refused
+(the same missing `ctx.goNext`), and `{a: !}` rendered as `{a: ! null}`, which read back as the **string**
+`"null"` -- so the empty node an unresolved tag stands on is now a `token.ImplicitNullType` and the renderer
+writes nothing for it (`ac6502b`).
 
 ⚠️ **Numbers are handed out here and nowhere else.** Two sessions added rows on 2026-09-11 and both reached
 for 19 and 20; the parser round moved to 21-23. Take the next free number from the bottom of the table.
@@ -309,20 +325,16 @@ parse is right and the Go value is not, and `ToJSON`'s when the parse is right a
 | # | layer | defect | reproducer | register |
 |---|---|---|---|---|
 | 1 | parser | an empty key after an entry with no value | `a:` then `: 2` | `yamlgen.Ledger` |
-| 2 | parser | a tag names no known type and the key stays an `ast.StringNode` | `!foo` over `False: 1` → key `"False"`, where `!!map` gives an `ast.BoolNode` | `yamlgen.Ledger` |
 | 6 | parser | an explicit key nested inside an explicit key | `? ? a` / `  : 1` / `: 2` | this plan, action 1 |
 | 7 | scanner | an anchor name holding an indicator | `a: &@ 1` → `'@' is a reserved character` | this plan, action 2 |
-| 11 | parser 🔥 | a tag on an empty value **swallows every entry after it** | `a: !foo` / `b: 1` / `c: 2` → `{a: {b: 1, c: 2}}` | `Departures` |
-| 13 | parser | a tag not written as a `!!` shorthand does not type its scalar | `!<tag:yaml.org,2002:float> 7` is an `ast.StringNode`, `!!float 7` an `ast.IntegerNode` | `yamlgen.Ledger` |
-| 14 | parser | a key after a long tag on an empty value is not resolved | `a: !<…:null>` / `False: 1` → key `"False"` | `yamlgen.Ledger` |
-| 15 | parser | two valid documents refused | `a:` / ` !` / ` # c` / ` 1` — `!!str &a [1]: v` | `yamlgen.Strict` |
+| 15 | parser | one valid document refused | `!!str &a [1]: v` — a tag before an anchor on a flow sequence used as a key | `yamlgen.Strict` |
 | 16 | parser | a block sequence on the same line as its tag is read | `!foo - 1` → `[1]` | `yamlgen.Lax` |
 | 21 | parser | a quoted explicit key refuses a block scalar value | `? "a"` / `: >-` / `  x` → refused | `yamlgen.Ledger` |
-| 22 | parser 🔥 | an anchor alone after an explicit `:` **swallows what follows** | `? a` / `: &a1` / `? b` / `: &a2` → `{a: {b: nil}}` | `yamlgen.Ledger` |
 | 23 | parser | a comment on an explicit key's `:` line is dropped | `? a` / `: # c3` / `  v` renders `? a` / `: v` | `yamlgen.Ledger` |
 | 24 | renderer | a blank line before a comment survives one rendering and not the next | `a:` / ` - x` / blank / `# c` / `b: 1` | `yamlgen.Ledger` |
+| 29 | renderer | 24 again with no comment in it: a blank line before a block sequence entry | `: &1` / blank / `-` / `? ""` renders the blank after the `-`, then drops it | `yamlgen.defects_test.go` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
-| 27 | parser | three more valid documents refused | `!!nulll Null` under a directive — `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
+| 27 | parser | two more valid documents refused | `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
 | 28 | ToJSON 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2` | `codec/zz_directive_test.go` |
 | 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
@@ -334,14 +346,12 @@ parse is right and the Go value is not, and `ToJSON`'s when the parse is right a
 | 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
 | 18 | ToJSON | an anchor is lost on a tagged flow key written alone | `{!!null &a1 null, k: *a1}` → `could not find alias` | `codec/zz_anchor_test.go` |
 
-**Fifteen in the parser and scanner, seven in the decoder, four in `ToJSON`, one in the renderer.** The parser holds both the
-largest share and the worst entries, and clusters B and C are entirely inside it: 2, 11, 13, 14, 22 and half
-of 15 are six symptoms of two assumptions, so two fixes close more than a quarter of the list. The decoder's
-seven split as cleanly: 3, 4 and 17 are the key-naming and reflection paths, 5 and 8 the wide-number one,
-19 and 20 the alias one.
+**Nine in the parser and scanner, five in the decoder, three in `ToJSON`, two in the renderer.** Cluster A is
+now the largest thing left and the only cluster still whole: 8, 9 and 17 are one fault at three layers.
+Clusters B and C closed on 2026-09-12, which took six entries and both 🔥 marks off this table.
 
-Eight of them lose a value or a shape **silently** — 3, 4, 5, 8, 9, 11, 16 and 22 — which is the class a
-verdict corpus is blind to and the reason the generated suite carries meanings at all.
+Four of the rest lose a value or a shape **silently** — 3, 4, 5 and 16 — which is the class a verdict corpus
+is blind to and the reason the generated suite carries meanings at all.
 
 📌 **10 was not found by the corpus and could not have been: no corpus document is decoded into a Go
 type.** Neither were the two merge defects closed in action 6. See that action for what to extend.
@@ -357,7 +367,7 @@ it. Its pin is retired into `fixed_test.go`.
 of that line — `%&AML` — so the axis paid twice: once for what it writes and once for what the mutation hunt
 makes of it.
 
-### 📌 Three clusters, for whoever picks these up
+### 📌 One cluster left, for whoever picks it up
 
 **A. The tag path does not know about the wide types** — 8, 9 and 17. Number 17 is the same shape one
 layer over: `Tagged.Decoded` records that an untagged non-negative integer comes back as a `uint64` and a
@@ -366,21 +376,20 @@ no case for. `!!int` on a value. Untagged, `1e+310` and `1e-400` come back
 as a `*big.Float` and a 21-digit integer as a `*big.Int`, and untagged `ToJSON` writes the number out in
 full. The types are built and reached; the route through `!!int` and `!!float` is what is missing.
 
-**B. A node property standing alone after a `:` makes the parser expect a block collection** — 11, 22,
-half of 15, and probably the other half. `a: !foo` over `b: 1` nests the `b` under the tag; `? a` over
-`: &a1` over `? b` nests the same way with an *anchor* rather than a tag, which is what widened this from
-tags to properties; `a:` over ` !` over ` # c` over ` 1` refuses outright. `!!str` and `!!null` in the same
-places behave, and so does a flow collection after the comment. One assumption, four symptoms, and **11 and
-22 silently restructure a document** — the worst entries here.
+✅ **B. A node property standing alone after a `:` made the parser expect a block collection** — 11, 22 and
+half of 15, closed 2026-09-12. `a: !foo` over `b: 1` nested the `b` under the tag and `? a` over `: &a1`
+over `? b` nested the same way with an anchor. Both now ask `Parser.opensNextEntry`, which the anchor path
+inside `parseTagValue` already used: a token back at the entry's own column opens the next entry, and one
+further in is the property's node. See `TestFixedAPropertyAloneAfterAColonNamesTheEmptyNode`.
 
-**C. The scanner types a scalar after a `!!` shorthand and not after any other spelling** — 13 and 14.
-`!!float 7` parses to an `ast.IntegerNode` under its `ast.TagNode`; `!<tag:yaml.org,2002:float> 7` and
-`!e!float 7` parse to an `ast.StringNode`, though `TagNode.URI` is identical in all three. The string is
-read back against the tag afterwards, so most values survive — `.inf`, `-.inf` and `.nan` do not, and
-neither does the key on the next line. **Defect 2 belongs here**: `!!map` resolves a block mapping's keys
-only while written as that shorthand.
+✅ **C. The scanner typed a scalar after a `!!` shorthand and after no other spelling** — 13, 14 and 2,
+closed 2026-09-12 by deleting `Context.setTokenTypeByPrevTag`. `!!float 7` gave an `ast.IntegerNode` and
+`!<tag:yaml.org,2002:float> 7` an `ast.StringNode`, though `TagNode.URI` is identical; `.inf`, `-.inf` and
+`.nan` lost their value that way, and so did the key on the line after a tag standing alone. The parser
+applies the same rule by URI in `parseTagValue`, and it is the only layer that can: a `%TAG !!` line
+repoints the secondary handle, and the scanner never sees it.
 
-Every claim in B and C was checked against libfyaml 1.0.0b1, `go.yaml.in/yaml/v3` v3.0.5 and the reference
+Every claim in A, B and C was checked against libfyaml 1.0.0b1, `go.yaml.in/yaml/v3` v3.0.5 and the reference
 parser, each asked at its own layer. All three agree with the specification and not with this library.
 Reproducers are in `yamlgen/defects_test.go`, `yamlgen/strictness.go`, `yamlgen/laxity.go`,
 `yamlcorpus/stance.go` and `codec/zz_merge_test.go`.
@@ -466,6 +475,17 @@ mystery to whoever meets it first.
   `1: a` beside `"1": b`, an integer and a string — collapse into one entry because naming a key by its
   type's canonical spelling puts both under `"1"`. The duplicate check never fires, because there is no
   duplicate; the map simply cannot hold two.
+
+- ⚠️ **A `Value`-kind departure is never re-measured, so a fixed one sits in the register.** Found
+  2026-09-12 while closing 11. `yamlcorpus.TestTheLibraryMatchesItsDeclaredStance` builds its `known` map
+  from the departures whose `Kind` is `Verdict` and skips every `Value` one, and
+  `TestEveryDepartureNamesAShape` only checks that the pattern exists. So an entry saying a document reads
+  as the wrong *value* is prose: nothing runs it, and nothing says when it stops departing. The three
+  `Verdict` entries get the staleness check the comment promises and the six `Value` ones do not.
+
+  The fix wants a `Departure.Reads` field or an `Observed` the test can compare against, which is
+  [stream 4](4-test-suite-generator.md)'s to design. Told to the `conformance-3` session on 2026-09-12.
+
 ### Settled, recorded so nobody "fixes" them
 
 - ⛔ **`!!binary` decoding to `[]byte` is correct.** The suite compares against raw text.
