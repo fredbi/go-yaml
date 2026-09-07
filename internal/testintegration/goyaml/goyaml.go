@@ -39,9 +39,16 @@
 // Asked as "{a: !!str &x}" both read it, and the document had been valid all
 // along.
 //
+// It cuts the other way too. yaml.v3 separates the two in its own messages --
+// "did not find expected ',' or '}'" comes from the parser and
+// "invalid map key: []interface {}" from the loader after a clean parse -- so a
+// refusal here is evidence when the message is the first kind. Reading the
+// first kind as construction would have dismissed a real disagreement about
+// 7.4.2. Quote the message into the entry that rests on it.
+//
 // Ask [github.com/go-openapi/go-yaml/internal/testintegration/perlref] when the
 // question is whether a document is YAML at all. It emits events, resolves
-// nothing and builds nothing, so it cannot make this mistake.
+// nothing and builds nothing, so it cannot make either mistake.
 package goyaml
 
 import (

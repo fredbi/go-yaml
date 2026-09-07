@@ -31,6 +31,26 @@
 // And loads builds a value, so a refusal may be the binding declining to hold
 // something rather than the parser refusing the document. Cycles are where that
 // matters.
+//
+// # Read the error, not the failure
+//
+// That second limit cuts both ways, and both directions have cost a register
+// entry, so the discriminator is worth stating: **a position and a parser
+// message is a syntax verdict; a Python traceback is not.**
+//
+//	{[a\nb]: 1}    missing comma in flow mapping at 2:3   -- the C parser
+//	{[a, b]: 1}    TypeError: unhashable type: 'sequence' -- the binding, after a clean parse
+//
+// Taking the first for the binding put a wrong ruling in yamlgen.Strict; taking
+// the second for the parser would have put a wrong defect in the ledger. When a
+// refusal decides a claim, quote the message into the entry so the next reader
+// can tell which one it was.
+//
+// The other tell is a tag whose type cannot be built from its content:
+// "{a: !!bool &x}" is refused here because no boolean comes from an empty node,
+// and "{a: !!str &x}" reads. Ask with `!!str` when the question is syntax, or
+// ask [github.com/go-openapi/go-yaml/internal/testintegration/perlref], which
+// builds nothing and so cannot make either mistake.
 package libfyaml
 
 import (
