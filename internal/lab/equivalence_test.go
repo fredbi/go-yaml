@@ -647,8 +647,14 @@ func resolvesDifferentlyOnPurpose(text, want, got string) (string, bool) {
 // line repointing the handle was invisible to it. The scanner no longer types a
 // scalar by the token before it, so the frozen parser now keeps the number.
 //
+// An anchor may be written between the tag and the scalar, and until 2026-09-12
+// the order of the two decided the type: "!foo &a1 true" read the boolean where
+// "!foo true" and "&a1 !foo true" read the string. The demotion reaches through
+// the anchor now, and refparser keeps the number there too.
+//
 // The two trees have to agree on everything else: same shape, same positions,
-// same text, and the node above each difference is the tag itself.
+// same text, and each difference stands under the tag, with nothing but an
+// anchor between.
 func readsATaggedScalarAsText(want, got string) (string, bool) {
 	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
 	if len(wantLines) != len(gotLines) {
@@ -666,7 +672,7 @@ func readsATaggedScalarAsText(want, got string) (string, bool) {
 		if nodeType(gotLines[i]) != "String" || !typedBySchema(nodeType(wantLines[i])) {
 			return "", false
 		}
-		if i == 0 || nodeType(wantLines[i-1]) != "Tag" {
+		if !underATag(wantLines, i) {
 			return "", false
 		}
 		differ++
@@ -676,6 +682,42 @@ func readsATaggedScalarAsText(want, got string) (string, bool) {
 	}
 
 	return "a tag that resolves to nothing leaves its scalar as text (6.9.1)", true
+}
+
+// underATag reports whether the node on line at stands under a Tag, with
+// nothing but an Anchor between the two.
+//
+// An anchor may be written between a tag and the scalar it types, and
+// "!foo &a1 true" is the string "true" for the same reason "!foo true" is: the
+// tag resolves to nothing and the scalar keeps the text it was written with.
+// The parent of a line is the nearest line above it at a smaller indent.
+func underATag(lines []string, at int) bool {
+	depth := indentOf(lines[at])
+
+	for i := at - 1; i >= 0; i-- {
+		d := indentOf(lines[i])
+		if d >= depth {
+			continue
+		}
+		depth = d
+
+		switch nodeType(lines[i]) {
+		case "Tag":
+			return true
+		case "Anchor":
+			continue
+		default:
+			return false
+		}
+	}
+
+	return false
+}
+
+// indentOf counts the spaces a dump line opens with, which is the node's depth
+// in the tree.
+func indentOf(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " "))
 }
 
 // nodeType returns the node type a dump line opens with.

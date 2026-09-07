@@ -2140,8 +2140,31 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 
 		return node, nil
 	}
+	if scalar := anchoredScalar(tk); scalar != nil && resolvedBySchema(scalar) {
+		// The same rule, with an anchor standing between the tag and the
+		// scalar. "!foo &a1 true" read the boolean true where "!foo true" and
+		// "&a1 !foo true" both read the string "true", so the order the two
+		// properties were written in decided the type. The token is retyped
+		// before the node is built, as retypeAhead does for a schema arriving
+		// late.
+		scalar.RawToken().Type = token.StringType
+	}
 
 	return p.parseToken(ctx, tk)
+}
+
+// anchoredScalar returns the plain scalar an anchor group names, or nil where
+// tk is not an anchor or names something other than one.
+func anchoredScalar(tk *tapeToken) *tapeToken {
+	if tk.GroupType() != TokenGroupAnchor {
+		return nil
+	}
+	value := tk.Group.Last()
+	if value == nil || value.Group != nil {
+		return nil
+	}
+
+	return value
 }
 
 // enterEntry records the entry being read and returns what puts the enclosing

@@ -1293,3 +1293,52 @@ func TestFixedAFloatTagOnAWideNumberKeepsItsWidth(t *testing.T) {
 		assert.IsType(t, new(big.Int), got.(map[string]any)["a"])
 	})
 }
+
+// TestFixedAnAnchorBetweenATagAndItsScalarKeepsTheText: an anchor written
+// between a tag and the scalar it types no longer changes the type.
+//
+// A tag that resolves to nothing leaves its scalar as the text it was written
+// with, so "!foo true" is the string "true". parseTagValue applied that to the
+// tag's own next token and an anchor may stand there, so "!foo &a1 true" read
+// the boolean where "&a1 !foo true" -- the same two properties the other way
+// round -- read the string. Only the tags naming no known type did it: "!!str"
+// in the same place was unaffected.
+func TestFixedAnAnchorBetweenATagAndItsScalarKeepsTheText(t *testing.T) {
+	t.Run("the order of the two properties no longer decides", func(t *testing.T) {
+		for _, src := range []string{
+			"!foo true\n", "!foo &a1 true\n", "&a1 !foo true\n",
+			"!<!foo> &a1 true\n", "! &a1 true\n", "!!str &a1 true\n",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, "true", got, "%q", src)
+		}
+	})
+
+	t.Run("in a mapping, a sequence, a flow collection and through an alias", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"a: !foo &a1 12\n":         map[string]any{"a": "12"},
+			"- !foo &a1 12\n":          []any{"12"},
+			"{a: !foo &a1 12}\n":       map[string]any{"a": "12"},
+			"a: !foo &a1 12\nb: *a1\n": map[string]any{"a": "12", "b": "12"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("and a tag that does resolve still types its scalar", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"!!int &a1 12\n":     12, // "!!int" hands back a plain int for a number that fits one.
+			"!!float &a1 12\n":   float64(12),
+			"!!seq &a1 [1, 2]\n": []any{uint64(1), uint64(2)},
+			"!foo &a1 [1, 2]\n":  []any{uint64(1), uint64(2)},
+			"!foo &a1 |\n  x\n":  "x\n",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}
