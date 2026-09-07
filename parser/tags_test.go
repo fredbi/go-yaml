@@ -346,3 +346,38 @@ func TestParseKeepsTheTagOnAnEmptyCollection(t *testing.T) {
 		})
 	}
 }
+
+// TestParseReadsAScalarUnderATagThatResolvesToNothing: a document whose tag
+// names no type this library reads is a document, not an error.
+//
+// The scalar under such a tag keeps the text it was written with, so "!thing 1"
+// holds the string "1". parseTagValue builds that string and used to leave the
+// cursor on the scalar it had just read, so the next thing to look at the
+// stream found a token where the entry had already ended and refused the
+// document with "value is not allowed in this context".
+//
+// Only a "%TAG !!" line reached it before 2026-09-11: repointing the secondary
+// handle takes "!!seq" out of tag:yaml.org,2002: and leaves it naming
+// !local-seq, which resolves to nothing while still being spelled like a tag
+// the grouping joins to its scalar.
+func TestParseReadsAScalarUnderATagThatResolvesToNothing(t *testing.T) {
+	for _, source := range []string{
+		"v: !!foo 1\n",
+		"v: !!foo 1\nw: 2\n",
+		"- !!foo 1\n",
+		"[!!foo 1]\n",
+		"!!foo 1\n",
+		"%TAG !! !local-\n---\nv: !!seq 1\n",
+		"%TAG !! !local-\n---\nv: !!map 1\n",
+		"%TAG !e! tag:example.com,2026:\n---\nv: !e!thing 1\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(source))
+			require.NoError(t, err)
+			assert.Equal(t, source, f.String())
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(source), &got))
+		})
+	}
+}

@@ -2098,11 +2098,17 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 	}
 	if tk.Group == nil && resolvedBySchema(tk) {
 		// A tag the core schema does not resolve leaves its scalar as text,
-		// digits and all. Context.setTokenTypeByPrevTag does this in the
-		// scanner for the tags it reads as local ones, and it cannot do it
-		// here: it goes by the spelling, and only the parser knows what a
-		// "%TAG !!" line made of the handle.
-		return newStringNode(ctx, tk)
+		// digits and all: "!thing 12" is the string "12". Only the parser can
+		// say so, because it holds the "%TAG" lines and the scanner does not --
+		// "!!int" under a "%TAG !! !local-" line names !local-int and resolves
+		// to nothing.
+		node, err := newStringNode(ctx, tk)
+		if err != nil {
+			return nil, err
+		}
+		ctx.goNext()
+
+		return node, nil
 	}
 
 	return p.parseToken(ctx, tk)
