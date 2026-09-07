@@ -346,13 +346,30 @@ func (w *jsonWriter) separate(at parser.Step) {
 
 // scalar writes one value, as a string where it stands as a mapping's key.
 func (w *jsonWriter) scalar(node ast.Node, at parser.Step) {
-	if at.Key {
+	if at.Key || w.writingKey() {
 		w.out = appendJSONString(w.out, keyText(node))
 
 		return
 	}
 
 	w.out = appendScalarNode(w.out, node)
+}
+
+// writingKey reports whether a mapping key written with "?" is open.
+//
+// The scalar under a "?" arrives with at.Key false -- the "?" is the key and
+// the scalar is what it stands around -- so it was written as a value and
+// closeKey then quoted whatever that produced. A value keeps the digits the
+// document wrote where JSON spells the number the same way, and a key takes the
+// canonical spelling of its type, so "? 1e3" was written "1e3" where "1e3: x"
+// was written "1000.0". Only a float showed it: an integer, a null and a
+// boolean have no source-text path to take, and 1.5 spells itself either way.
+//
+// w.keys holds a mark for a collection used as a key too, and ToJSON refuses
+// one before the walk begins -- "a sequence cannot be a JSON key" -- so nothing
+// reaches here through that push.
+func (w *jsonWriter) writingKey() bool {
+	return len(w.keys) > 0
 }
 
 // appendScalarNode writes a scalar node as JSON, reading the node's own fields
