@@ -311,6 +311,23 @@ const (
 	TagLocal = "!foo"
 	TagNone  = "!"
 
+	// TagSet, TagOMap and TagPairs name collection types the 2005 type
+	// repository defines. Each is an annotation and nothing more here: a `!!set`
+	// mapping decodes to the same map[string]any as an untagged one, and an
+	// `!!omap` sequence to the same []any.
+	//
+	// Offered on the kind the type is written over -- `!!set` on a mapping,
+	// `!!omap` and `!!pairs` on a sequence -- and not on the shapes *inside*
+	// it, which the type definitions constrain and no implementation enforces.
+	// Measured on 2026-09-13: `a: !!set` over `x: 1` and `a: !!omap` over `- 1`
+	// are read by this library, by libfyaml 1.0.0b1 and by
+	// go.yaml.in/yaml/v3 v3.0.5, and grammar.NewRecognizer accepts both. So
+	// requiring null values under a set, or single-pair mappings under an omap,
+	// would narrow the draw for a rule nobody applies.
+	TagSet   = "!!set"
+	TagOMap  = "!!omap"
+	TagPairs = "!!pairs"
+
 	// TagTimestamp and TagBinary name types the 2005 type repository defines
 	// rather than types a schema resolves, so they carry a value no untagged
 	// scalar can spell. [TagFor] offers each on its own kind and on nothing
@@ -340,9 +357,9 @@ func TagFor(v Value) []string {
 	case Str:
 		return []string{TagStr, TagLocal, TagNone}
 	case Seq:
-		return []string{TagSeq, TagLocal, TagNone}
+		return []string{TagSeq, TagOMap, TagPairs, TagLocal, TagNone}
 	case Map:
-		return []string{TagMap, TagLocal, TagNone}
+		return []string{TagMap, TagSet, TagLocal, TagNone}
 	default:
 		// Nothing else takes a tag. Tagging runs before anchors and aliases
 		// exist, so the only way here is a node that already carries one, and
