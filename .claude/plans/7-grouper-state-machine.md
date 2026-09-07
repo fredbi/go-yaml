@@ -1,5 +1,6 @@
 > [!NOTE]
-> Last revision: 2026-09-03 (opened; nesting measured at 1, and only because deeper is refused)
+> Last revision: 2026-09-06 (**closed — built**; one revisit is scheduled, with flow grouping)
+> Previous revision: 2026-09-03 (opened; nesting measured at 1, and only because deeper is refused)
 
 # Reforming the grouper into a state machine
 
@@ -133,7 +134,23 @@ allocate per entry.
 
 ## Achievements
 
-Nothing built. What is settled:
+✅ **Built and shipped — `parser/grouping.go`.** Fred's ruling, 2026-09-06: *"grouper is now a state
+machine. It is done."* A token walks the stages one at a time instead of eight passes each walking every
+token of every run: a stage with no interest in a token's type hands it straight on, which costs a type
+test rather than a copy, and a stage holding one keeps it until the token that settles it arrives. The
+count this replaced is written into the file's own comment -- **4,318,536 visits for the 539,817 tokens of
+the workloads, only 46.2% of them meaning anything to any pass.**
+
+📝 **One revisit is scheduled, and only one: flow grouping.** Action 2's second half is still open -- a flow
+collection is reported as a single group, so `keyWindow.keepFrom` reaches back to the start of any flow
+collection still open, `flow_wide` holds 60,001 tokens and recycles none of its 235 chunks, and a
+JSON-shaped document amplifies 59.85x against a block document's 1.49x. The machine does not fix that on
+its own, but it is what makes the fix expressible: **a collection written as a value cannot be a key, and a
+machine that knows which it is reading can release at the ':'**. That work is item 0 of
+[stream 3](3-performance.md)'s AST-window list, and it goes with `FromJSON`
+([stream 1](1-library-api.md), action 5).
+
+What was settled before the build:
 
 - ✅ **An explicit stack, not recursion** (2026-09-03). Bounded, and the depth is 1 today.
 - ✅ **The justification is architectural, not wall-clock** (Fred, 2026-09-03): "I don't think this will

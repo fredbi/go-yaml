@@ -1,6 +1,20 @@
 > [!NOTE]
-> Last revision: 2026-08-27 (streaming investigation paused — read
-> [`reference/streaming-puzzle.md`](reference/streaming-puzzle.md) first when resuming)
+> Last revision: 2026-09-11 (the generator writes a tag three ways, reaches the shapes the flow axes need,
+> and reads each document into a Go type as well as into an `any`; seven defects, one of which silently
+> restructures a document). Previous: 2026-09-06 (nothing in the
+> corpus decodes into a Go type). Streaming is still paused — read
+> [`reference/streaming-puzzle.md`](reference/streaming-puzzle.md) first when resuming.
+
+> 📌 **Next.** The **decoder rework** is the large piece: 2400 lines in `codec/decode.go`, unclear options,
+> reflection wanting panic guards, and the whole of what is left performance-wise. Three quirks are still
+> queued and none is large: `-0x1F` resolving to a string
+> ([stream 3](3-performance.md)), `scanner.InvalidTokenError` living outside the `errors` package, and
+> `Marshal(v interface{})` rather than `any` (both [stream 1](1-library-api.md)).
+>
+> One thing found on 2026-09-07 and not fixed: `DecodeFromNode` with `ReferenceFiles` now needs the caller
+> to pass `parser.WithAnchors` to their own parse, since the parser refuses an alias naming no anchor. The
+> decoder holds those anchors and does not publish them. Worth revisiting in the decoder rework — see the
+> test in `decode_test.go`.
 
 # go-yaml — the plans
 
@@ -11,13 +25,14 @@ records live in [`reference/`](reference/), superseded plans in [`archives/`](ar
 | stream | document | where it stands |
 |---|---|---|
 | 0. Fork posture | [`0-fork-posture.md`](0-fork-posture.md) | ✅ settled — hard fork, no way back |
-| 1. A low-level YAML library | [`1-library-api.md`](1-library-api.md) | ⏳ API surface cut; the progressively revealed AST is the next design |
-| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ parser 100% / decoder 100% of scoreable; ~14 known refusals of valid YAML |
-| 3. Performance, memory, streaming | [`3-performance.md`](3-performance.md) | ⏳ scanner round closed 2026-09-04 at 63 MB/s, -16% geomean, no `strconv` left in it; polishing phase and `io.Reader` written down; the parser is next |
-| 4. Test suite generator & oracle | [`4-test-suite-generator.md`](4-test-suite-generator.md) | ⏳ oracle closed at 393/393; 🔥 eight defects in 2026-09-03 the generator could not reach |
-| 5. Ecosystem adoption | [`5-adoption.md`](5-adoption.md) | 📝 four consumers named; opens once 1 and 3 settle |
-| 7. Grouper as a state machine | [`7-grouper-state-machine.md`](7-grouper-state-machine.md) | 📝 opened 2026-09-03 — 8 passes x every token is 4.3M visits; dispatching is 6.8% of that |
+| 1. A low-level YAML library | [`1-library-api.md`](1-library-api.md) | ⏳ surface cut; the parser owns anchors (2026-09-07); the progressive AST is the open design, and `ToJSONTokens` is named |
+| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ decoder **372/372 scoreable**, `ToJSON` 272/274, oracle 393/393; **twenty-six open, all pinned** — 15 parser/scanner, 7 decoder, 4 `ToJSON`, 1 renderer; one assumption about node properties explains six of the parser's |
+| 3. Performance, memory, streaming | [`3-performance.md`](3-performance.md) | ⏳ scanner and parser rounds closed (2026-09-04, 2026-09-05); `ToJSON` amplification 89.2x → 1.49x; anchor table priced 2026-09-07; **the decoder is the whole of what is left** |
+| 4. Test suite generator & oracle | [`4-test-suite-generator.md`](4-test-suite-generator.md) | ⏳ 605/605 buckets, 546 matched, 12,581 cases; tags, numbers, Go destinations, `? key` and chomping all became axes, opening **twelve defects** |
+| 5. Ecosystem adoption | [`5-adoption.md`](5-adoption.md) | 📝 four consumers named; `yaml-lexer` reuses `ToJSON`; **no release gate — free rein on the API** |
+| 7. Grouper as a state machine | [`7-grouper-state-machine.md`](7-grouper-state-machine.md) | ✅ built — `parser/grouping.go`; one revisit scheduled, with flow grouping |
 | 6. Promoting the lab parser | [`6-parser-promotion.md`](6-parser-promotion.md) | ⏳ opened 2026-09-02 — the lab ships; the parity oracle is what needs replacing |
+| 8. Parser diagnostics | [`8-parser-diagnostics.md`](8-parser-diagnostics.md) | ⏳ opened 2026-09-10 — 68 of the parser's 79 error messages are reachable; **27 have no path**, and some look dead rather than untested |
 
 > 📌 **Decided 2026-08-27 — verbatim YAML is no longer out of scope.** The 2026-08-02 ruling was scoped
 > against `core/json/lexers/yaml-lexer` and taken before the fork; the AST's accuracy has since made
@@ -51,6 +66,7 @@ internally, reproduction recipes. Those go to `reference/` and get linked.
 | [`reference/decoder-quirks.md`](reference/decoder-quirks.md) | the decoder ledger measured case by case, with reproductions |
 | [`reference/upstream-issues.md`](reference/upstream-issues.md) | the 142 upstream issues at the fork point, and which this fork closed |
 | [`reference/comment-model.md`](reference/comment-model.md) | the parked AST comment-model design |
+| [`reference/tag-resolution-model.md`](reference/tag-resolution-model.md) | **what a tag does when the node does not match it — the measured matrix, the mismatch table, and four calls open for Fred** |
 
 Repository-level documents, outside this directory:
 

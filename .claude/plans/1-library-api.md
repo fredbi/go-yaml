@@ -1,5 +1,6 @@
 > [!NOTE]
-> Last revision: 2026-08-27 (the progressive AST design is settled; the parser work is paused)
+> Last revision: 2026-09-07 (the parser owns the anchors and every alias carries its target; the progressive
+> AST is still the open design, with `printer` and the colorizer to be rewritten)
 
 # Stream 1 — A low-level library to work with YAML documents
 
@@ -24,6 +25,9 @@ it points at a feature wired to the wrong place.
 2. ✅ **Thin the root** — 133 exported entries to 4
 3. ⏳ 🔍 **`ast`** — 304 rendered entries, and the only package never surveyed
 4. 🔍 **What the AST has to expose for a verbatim reconstruction** — see [stream 5](5-adoption.md)
+   - 🔍 **And whether it is a workable API for building a document programmatically.** Upstream seemed to
+     intend one; Fred's reading, 2026-09-06, is that it was never practical. Deprioritized, and named here
+     so the redesign does not close the door by accident.
 5. 🔥 **The progressively revealed AST** — four layers, each with its own memory horizon; the `ast.File`
    build becomes a client of the API
 6. 📝 **The AST comment model** — parked; see [`reference/comment-model.md`](reference/comment-model.md)
@@ -92,11 +96,20 @@ it points at a feature wired to the wrong place.
    a single line."* `internal/testintegration/grammar` already enforces it — `state.limit`, set by `(max)`.
    So the one place a parser must look ahead without knowing how far is capped by the grammar itself.
 
-   **Anchors — the parser takes them over** (Fred, 2026-08-27, correcting an earlier suggestion of mine).
-   The decoder memoizes anchors and checks aliases today, and **every consumer has to repeat that dance**.
-   It moves into the parser:
-   - An anchor is walked like any other node and entered in the parser's books **only once that node is
-     fully resolved**. Until then an alias naming it is an error — "unresolved".
+   ✅ **Anchors — the parser takes them over.** (Fred, 2026-08-27, correcting an earlier suggestion of
+   mine.) **Built 2026-09-07** — `parser/anchors.go`, `ast.AliasNode.Target`, `ast.DocumentNode.Anchors`,
+   `parser.WithAnchors`. The design below held with one correction: a recursive alias resolves rather than
+   erroring, since YAML's representation is a graph and only a consumer that has to write a tree refuses
+   the cycle. See achievement 0 of [stream 2](2-correctness.md).
+
+   The decoder memoized anchors and checked aliases, and **every consumer had to repeat that dance**.
+   It moved into the parser:
+   - An anchor is entered in the parser's books **only once that node is read** — ⚠️ **corrected
+     2026-09-07**: an anchor names its node from where the node *starts*, so an alias inside it resolves and
+     the tree holds a cycle. `yamlcorpus.TagAliasRecursive` says refusing it is a defect, and
+     `gopkg.in/yaml.v3` agrees — its `Node` tree takes `&x [ *x ]`. The target is filled at the document's
+     end, the first moment the anchored collection exists. What *is* an error is an alias naming an anchor
+     the document never declares, declares later, or declared in an earlier document.
    - The parser **does not expand** an alias. It checks the anchor exists. The table lives for **one
      document** and is dropped at each boundary, along with the subtrees it pins — settled 2026-08-27 by
      refusing cross-document aliasing, which is what keeps this among the short-memory layers rather than
@@ -104,8 +117,10 @@ it points at a feature wired to the wrong place.
    - ⛔ **Not a goal: making life easy for a caller that wants to inject anchors.** The current AST leaves
      that door open because anchors and aliases are treated as an external concern. We are not widening it.
      A caller walking the tree can still mutate an anchor, and that is not something we can prevent.
-   - ⚠️ The cost **cannot be measured on the current corpus**: all five workloads have zero anchors and zero
-     aliases. A workload with anchors is needed before pricing the table.
+   - ✅ **Priced 2026-09-07** with `BenchmarkAnchorTable`, over the two stress workloads that have anchors:
+     `anchors_many` +5.09% B/op, `anchors_nested` +7.22%, both +0.4% allocs and within noise on time. The
+     control pays +0.00% and allocates exactly as often — the map is built lazily. The five real workloads
+     still hold no anchor between them, which is why the stress set had to be benchmarked instead.
    - ✅ **Both rules already hold in the decoder** as of 2026-08-27 — anchors scoped to their document, and
      an alias inside its own anchor refused. So the parser taking them over is a move, not a change of
      behaviour, and the tests are already written. See [stream 2](2-correctness.md).
@@ -221,13 +236,30 @@ it points at a feature wired to the wrong place.
      **cheap scan that locates nodes by JSON pointer** without building the tree, and `go-swagger` needs an
      **on-the-fly transformer a spec loader wraps** — rewriting nodes as they arrive rather than
      materializing the document and editing it.
-4. 📝 **Settle the scanner entry points.** `scanner.Init(string)` against the planned `[]byte` and
+4. 📝 **A token iterator over `codec.ToJSON`.** Fred, 2026-09-06. `ToJSON` writes one buffer; a
+   `ToJSONTokens` handing over small JSON tokens as the walk reaches them -- the shape `encoding/json/v2`
+   takes -- costs the converter nothing it does not already do, since it is already a `parser.Visitor` that
+   holds only the output and the anchors named so far.
+
+   The consumer that decides the shape is `go-openapi/core/json/lexers/yaml-lexer`, which produces JSON
+   document tokens of its own type. With this it reduces to a token-type conversion and an error report,
+   and stops carrying a second reading of merge keys, aliases and tag resolution. See
+   [stream 5](5-adoption.md).
+
+5. 📝 **`FromJSON`, rewritten on the parser.** Fred, 2026-09-06 -- named as missing from the status recap
+   and it does not stand alone: **it is one piece of work with the flow-grouping change**, item 0 of
+   [stream 3](3-performance.md)'s AST-window list. A JSON document read as YAML is entirely flow, which is
+   exactly the shape the grouper puts in a single group and the token window therefore never releases --
+   59.85x amplification against a block document's 1.49x. Writing `FromJSON` on today's grouper would ship
+   that cliff rather than fix it.
+
+6. 📝 **Settle the scanner entry points.** `scanner.Init(string)` against the planned `[]byte` and
    `io.Reader` pair. Blocked behind the tokenizer redesign in [stream 3](3-performance.md), which will
    change them anyway.
 
 ## Open items
 
-- ⚠️ **`scanner.InvalidTokenError` is a second error family.** It sits outside the `errors` package, and
+- 🔥 **`scanner.InvalidTokenError` is a second error family.** Fred, 2026-09-06: fix tomorrow. It sits outside the `errors` package, and
   `parser.asSyntaxError` converts it at the boundary. Either fold it into `errors` or write down why the
   scanner keeps its own.
 - 🔍 **`codec` is 42 index entries / 88 with methods** — second largest after `ast`, and it took everything
@@ -243,18 +275,55 @@ it points at a feature wired to the wrong place.
   step 2.2: `ValueToNode(map[string]any{...})` gives a node whose `GetPath()` is `""`, because the encoder
   builds its tree rather than parsing one, so `CommentMap` keys cannot be matched against node paths.
   `BaseNode` is 24 bytes and embedded in every node, so a three-slot comment model takes it to 40.
-- 🔍 **`Marshal(v interface{})` rather than `any`.** Inherited spelling, never revisited.
+- 🔥 **`Marshal(v interface{})` rather than `any`.** Inherited spelling. Fred, 2026-09-06: fix tomorrow,
+  with the other three quirks below.
+- 🔍 **`codec` forwards two of the parser's six options.** `Decoder.parse` passes `WithComments` and
+  `WithAllowDuplicateMapKey`; `WithYAMLVersion`, `WithJSONCompatible`, `WithOmitNodePaths` and
+  `WithChunkSize` cannot be reached from `Unmarshal` at all, so a document's YAML version can only be
+  chosen with a `%YAML` directive. Whether `codec` grows a passthrough or names each one is the first
+  decision the decoder rework opens with. **Fred, 2026-09-06: reflecting on it** -- it is bound up with the
+  `Decode` / `Unmarshal` split, which is where an option belongs in the first place.
+- 📝 **`printer` and the colorizer are to be rewritten from the ground up.** Fred, 2026-09-06. They join the
+  rendering arc -- controlling output style, formatting consistently, colorizing -- which is the same design
+  question as the encoder, since an encoder is an AST renderer driven by reflection. Design the two
+  together or the library ships two output paths. See [stream 5](5-adoption.md).
+- ⏸ **Reading a tag is `codec`-private, and two of the three pieces belong on `ast`.** ✅ **Direction agreed,
+  Fred 2026-09-06: `ast` should carry more helpers of this sort.** Which ones is open — moving tag
+  processing out of the decoder is the one candidate identified so far, and the rest will come from the
+  clients as they are written. Parked on 2026-09-05 for the AST redesign — item 6 of [stream 3](3-performance.md), the pointer-free node and tree view — since
+  both candidates add exported methods to types that redesign moves.
+
+  Tag resolution landed split three ways and only the first two are reusable: `token.ReservedTagOf(uri)` maps
+  a URI to a `token.ReservedTagKeyword`, `parser.resolveTag` expands the shorthand against the `%TAG` handles,
+  and `ast.TagNode.URI` holds the result as a plain string field with no method on it. The reading — what value
+  a tagged node stands for — is `taggedText` in `codec/tojson.go`, unexported, 25 lines, shared by `decode.go`
+  and `ToJSON`. That sharing is why the `!!str` fix landed in both readers at once, and it is also the whole
+  of the reuse: a colorizer or a formatter walking the tree gets the right `URI` and then reimplements the
+  rest — reach through an `AnchorNode`, take `LiteralNode.Value.Value`, and tell an implicit-null token from a
+  written `null`, which is the distinction that makes `!!str null` the four letters and `a: !!str` the empty
+  string.
+
+  Two candidates when the redesign opens the types:
+  - `func (n *TagNode) Reserved() (token.ReservedTagKeyword, bool)` — one line over `URI`, and it stops every
+    client re-deriving the prefix cut.
+  - a text accessor for the tagged scalar, wherever it ends up living. It is the one carrying the null rule.
+
+  And one wart it would clear: `isScalarNode` in `codec/tojson.go` names the six node types holding a single
+  value, because `ast.ScalarNode` is wider than that — `AnchorNode` and `AliasNode` satisfy it by answering
+  `GetValue` with their own name. That is an `ast` type question answered downstream.
 
 ## Open items — behaviour, not shape
 
-- ⚠️ **`Path.Read` cannot resolve an alias whose anchor stands outside the node it finds.** `ReadNode`
-  returns the node alone and the decoder's anchor map is built from the whole file. Pre-existing; the old
-  text round-trip failed the same way. The error now points at the alias in the source rather than at
-  column 2 of a one-line fragment, which is an improvement and not a fix.
-  - ✅ **The progressive design fixes this by construction.** Once the parser owns the anchor table, an
-    alias is checked where it is read rather than by whoever holds the file afterwards, so a node handed to
-    `Path.Read` arrives already knowing its alias resolves. Do not patch it separately. The scoping rules
-    it needs landed on 2026-08-27; see [stream 2](2-correctness.md).
+- ✅ **`Path.Read` resolves an alias whose anchor stands outside the node it finds.** Closed 2026-09-07 by
+  the parser's anchor round, which is what the prediction below said would happen — recorded because the
+  prediction was worth making and it held. Reading `$.elsewhere.here` out of
+  `anchored: &x {a: 1}\nelsewhere: {here: *x}` reported `could not find alias "x"`; it now reads `{a: 1}`.
+  `ReadNode` returns the node alone, and the decoder's map was built from the whole file. `DecodeFromNode`
+  and `ast.Renderer` failed the same way and took the same fix.
+  - ✅ **The progressive design fixed it by construction**, as predicted 2026-09-06: the parser resolves an
+    alias where it is read, so the node arrives carrying `ast.AliasNode.Target`. Nothing was patched
+    separately; three call sites in `codec/decode.go` and two in `ast/render.go` read the field and keep the
+    caller's map as the fallback for a tree built by hand.
 - 📝 **Upstream #659** — `Path` skips commented content. Untouched.
 
 ## Achievements

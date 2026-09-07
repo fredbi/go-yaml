@@ -1,5 +1,10 @@
 > [!NOTE]
-> Last revision: 2026-09-02 (profiles attributed by layer; the AST arena and the scanner are the next two targets)
+> Last revision: 2026-09-07 (rebased on the new corpus and the scanner round; the decoder is 2.0% of
+> its own benchmark's CPU and parked -- what is left of the 1.21x is parser and scanner)
+> Previous revision: 2026-09-06 (the struct path walks -- a fifth of yaml/v3's bytes at 1.17x its time;
+> the alias semantics and their amplification guard now gate the rest)
+> Earlier that day: 2026-09-06 (the decoder walks into an `any`; the struct path is driven the wrong way)
+> Previous revision: 2026-09-07 (the anchor table is priced; the decoder is next)
 
 # Stream 3 — High performance, low memory, stream support
 
@@ -308,8 +313,15 @@ point**, and none of it is CPU work yet. The 2.53x is what falls out of allocati
 Reproduce with a detached worktree at `edee2f9` -- the module is still `github.com/goccy/go-yaml` there
 and the corpus has to be copied in, since `internal/analysis/workloads` postdates the fork.
 
-❌ Still open: anchors. `Walk` refuses an alias -- it names a subtree that has to outlive the tail, which
-wants `Save`, and nothing calls it from the walk yet.
+✅ Closed 2026-09-07: anchors. The walk pins the tape an anchor covers -- `openAnchor` / `closeAnchor` /
+`releaseDocument` in `parser/walk.go` -- and the parser now keeps the nodes too, in a table dropped at each
+document boundary.
+
+`BenchmarkAnchorTable` prices it, because the five real workloads hold no anchor between them and the cost
+could not be measured when the table was designed: `anchors_many` **+5.09% B/op** and +0.38% allocs/op,
+`anchors_nested` **+7.22%** and +0.41%, both within noise on time. `canada_geometry` and `citm_catalog`
+declare none and pay **+0.00% with exactly the same number of allocations** -- the map is built lazily, so
+a document without anchors never sees it.
 
 ## ✅ The parser was quadratic in nesting depth, fixed 2026-09-03 (`d9fa550`)
 
@@ -812,7 +824,31 @@ What is left holding tokens behind the head: the level's accumulated children (`
    `default-lexer` decides a number's shape from its first bytes; the prize here is smaller than the
    `mayBeNumber` guard's was, so it rides along rather than leading.
 
-## Where we stand against yaml/v3, measured 2026-09-04
+## Where we stand against yaml/v3, measured 2026-09-05
+
+`internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any`. Ratios are go-openapi over
+go.yaml.in/yaml/v3, so under 1 is better.
+
+| workload | time | bytes | allocs |
+|---|---:|---:|---:|
+| canada_geometry | **0.68x** | **0.71x** | 0.35x |
+| golang_source | 1.12x | 1.29x | 0.45x |
+| commented_swagger | 1.17x | 1.28x | 0.49x |
+| azure_swagger | 1.23x | 1.39x | 0.50x |
+| twitter_status | 1.29x | 1.26x | 0.44x |
+| citm_catalog | 1.38x | 1.61x | 0.57x |
+
+⚠️ **Almost unmoved by the parser round, and that is the finding.** Against 2026-09-04 the time
+ratios went 1.36 -> 1.23 on azure_swagger and 1.31 -> 1.12 on golang_source; the bytes did not move
+at all. `Unmarshal` calls `parser.ParseBytes`, which gathers a tree and pins the tape, so the token
+window, the node arena and the grouper arena all sit idle for it. Everything the round won is on the
+walking path, and `codec.ToJSON` is the only thing that walks.
+
+**So the decoder round is not one of three stages left, it is the stage.** Its first question is
+whether `Unmarshal` should walk rather than gather -- which is the same question `ToJSON` answered,
+and which brings the three open `Walk` contract questions with it.
+
+## Where we stood against yaml/v3, measured 2026-09-04
 
 `internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any`, which is the comparison both
 libraries answer the same way. Ratios are go-openapi over go.yaml.in/yaml/v3, so under 1 is better.
@@ -856,21 +892,363 @@ not the default.
 
 Fred, 2026-09-04. Each stage is measured before the next is started.
 
-1. **Scanner, marginal.** 10-15% left, and the whitespace fast-scan is the best-shaped candidate.
-   Blocked on two measured unknowns rather than anything vague -- see
-   [reference/scanner-state.md](reference/scanner-state.md). The scanner is ~48% of the parser's
-   CPU, so 15% of it is ~7% overall.
-2. **Parser: stop materializing the nodes a consumer never reads.** The bigger prize, and where the
-   bytes above say to look.
-3. **Decoder: a round of its own.** Not a parser problem -- it is reflection, and the techniques for
-   getting rid of it are what `github.com/goccy/go-json` is worth reading for (on disk at
-   `~/src/github.com/goccy/go-json`). After the parser.
+1. ✅ **Scanner.** Landed 2026-09-04: -36.9% time and -98.3% bytes against the fork point, scanner
+   alone. What is left is written up under "The scanner's polishing phase" below; none of it blocks.
+2. ✅ **Parser: stop materializing the nodes a consumer never reads.** Landed 2026-09-05. `ToJSON`
+   amplifies **1.49x** against the source where it amplified 89.2x, and the AST layer no longer
+   appears in the attribution. See "Windowing the AST" below.
+3. ⚡ **Decoder: a round of its own.** Opened 2026-09-06, see "The decoder" below. The first question
+   -- whether the decoder should walk rather than gather -- is answered for `Unmarshal` into an `any`,
+   which now walks and allocates 0.11x to 0.31x of yaml/v3's bytes. Reading into a struct still gathers,
+   and reflection turned out not to be its cost: `reflect` is 5.8% of that path's CPU and the runtime
+   42.2%, collecting the tree. `github.com/goccy/go-json` is still worth reading for the reflection
+   techniques (on disk at `~/src/github.com/goccy/go-json`).
 
 ### The target
 
 Against yaml/v3: from 2x slower to **2x faster**, and better where the document favours us. Memory
 **5 to 10x less**, which on today's numbers means the bytes have to come down by an order of
 magnitude, not a little -- the count is already halved and that is not what is costing.
+
+## Windowing the AST -- opened 2026-09-05
+
+> The AST arena never reuses a block, so a walk allocates a node for every node in the document and
+> keeps 8 to 33 of them alive. Everything below follows from that one measurement.
+
+Measurements, the layer attribution and the two settled design questions are in
+[reference/ast-window.md](reference/ast-window.md).
+
+### What was measured first
+
+- ✅ ⚡ **The node frontier is 8 to 33 nodes** across the workload corpus, against 22k-192k handed
+  over. citm_catalog allocates 253 blocks of 512 and needs one.
+- ✅ ⚡ **The anchor stash is bounded**: 1.13x to 1.70x the bytes of the same document unanchored,
+  and 1.23x for one anchor written over half the document. No cap needed.
+- ✅ ⚡ **No container keeps its children under a walk, and no node holds a parent.** The invariant a
+  recycling arena needs already holds; a tree view is not required to collect the frontier.
+- ⚠️ **The fold-during-parse `ToJSON` does not get the token window.** `OnComplete` runs under
+  `ParseBytes`, which pins the tape: 7.25 MB against the walk's 0.09.
+
+### Trajectory
+
+0. 📝 ⚡ **A flow collection is one group -- unparked 2026-09-06, tied to `FromJSON`.** A document written
+   entirely in flow -- which is what a JSON document is, read as YAML -- releases nothing, and amplifies
+   59.85x against a block document's 1.49x. Deeply entrenched in the grouping design; written up in
+   [reference/ast-window.md](reference/ast-window.md).
+
+   **Fred, 2026-09-06:** `FromJSON` is the feature that attracts the change, and the change is load-bearing
+   for it -- a JSON document read through this parser is exactly the shape that defeats the window, so
+   writing `FromJSON` on top of today's grouper would ship the cliff rather than fix it. The two are one
+   piece of work. It is also the round that revisits the grouper's state machine
+   ([stream 7](7-grouper-state-machine.md), closed 2026-09-06).
+1. ✅ ⚡ **Recycle `ast.Arena`'s blocks behind the walk's tail.** No AST change, no new API.
+2. ✅ ⚡ **`codec.ToJSON` runs on `Walk`.** One converter, not two -- Fred, 2026-09-05.
+3. ✅ ⚡ **Remove `io.Reader` from `ast.Node`.**
+4. ✅ ⚡ **The grouper, which did not recycle either.**
+5. ⏸ 🔍 ⚡ **A pointer-free node and a tree view**, for `Parse`. Aimed at the collector, not at
+   bytes, and the collector is now 1.5% of `ToJSON`'s CPU. Parked until the decoder round says
+   whether `Parse` is still the path that matters.
+
+### Actions
+
+1. ✅ ⚡ **Reuse the arena's node blocks.** Done (`62be3f2`, `89c84b8`). The ordering probe was
+   worth running and the premise was wrong in a useful direction: allocation is **pre-order** for
+   containers -- `parseMap` makes the node before its entries, so a walk is handed the mapping while
+   its token is still on the tape -- which makes the arena a stack rather than a tape. `Mark` records
+   where every block stands and `Rewind` hands out everything since, at the sibling loops.
+   `ToJSONWalk` -17.8% time and -46.9% bytes.
+   Superseded plan: `ast.Arena` hands out from per-type blocks and never looks
+   back. Give each node a sequence in allocation order, let the walk advance a tail, and hand out
+   again from a block whose nodes are all behind it. Per-type blocks fill in allocation order within
+   a type, so a block covers a contiguous range and a chunk-drop policy carries over from
+   `tokenarena`.
+   Expected: `ToJSONWalk` from 14.8 to about 7.3 MB/op on citm_catalog.
+   - 🔍 **Verify the ordering before building on it.** Allocation is post-order -- `newMappingNode`
+     runs after its entries, `fillSequence` after the sequence's children -- so a subtree ends at its
+     root rather than starting there. Probe it over the fuzz corpus rather than assume it: the
+     origin-tiling design died on exactly this kind of assumption, holding for every document looked
+     at and failing on 797 of 10,379 seeds.
+
+2. ✅ ⚡ **Move `codec.ToJSON` onto `Walk`** (`f78f45f`). It found four defects in the walk contract
+   before the converter would run at all, every one of them the same shape -- a node that stands
+   around another was handed over afterwards, beside it, at the same depth, which
+   `parseAnchorValue`'s comment had described for anchors and nobody had applied elsewhere:
+   - `fix(parser): stop Walk panicking on a mapping's foot comment` (`4640eef`) -- `Walk` with
+     `Comments()` crashed on any mapping followed by a comment.
+   - `fix(parser): hand a tag over around the node it types` (`0df0fa2`) -- a tagged collection went
+     over twice, 302 documents of 6,862.
+   - `fix(parser): hand a mapping key over once, as whatever opens it` (`926beea`) -- "? a" arrived
+     as three values, and an anchored or tagged key twice.
+   - `fix(parser): keep reading a node the visitor refused to enter` (`4864bb2`) -- returning false
+     from `Enter` left the subtree unparsed, not merely unvisited.
+   Superseded plan, and the three open `Walk` questions it forced:
+   - `ast.Walk` never reaches `SequenceEntryNode`, `FootComment` or `ValueHeadComments`.
+   - `parseFootComment` writes into an entry the parse had already finished, so the last entry of a
+     block cannot be handed over until the next non-comment token settles it.
+   - Where comments belong in the tree.
+
+3. ✅ **Remove `io.Reader` from `ast.Node`** (`5a9d12f`). `*ast.File` keeps it -- a parsed file is
+   handed to `codec.NewDecoder` and `yamlpath.Path.Read` that way -- and now renders once at the
+   first Read with a cursor of its own, which also fixes `File.Read` returning only the first
+   document of a stream.
+   Superseded plan: Agreed with Fred 2026-09-05: the library is `[]byte`
+   throughout and a reader is far off. `BaseNode.read` costs 8 bytes on every node -- 900K on
+   citm_catalog, 4.6% of a parse -- and `readNode` re-renders `String()` on every call, so `Read` is
+   quadratic in the node's text. Dropping it takes `BaseNode` from 24 bytes to 16 and leaves padding
+   for the sequence action 1 needs.
+
+4. ✅ **Shrink what a comment-free parse builds** (`8d4ec1e`). `ast.SequenceEntryNode` is built only
+   where comments were asked for: 767K of citm_catalog's 6,392K tree, and -8.68% bytes and -18.98%
+   allocations on a gathering parse. ⚠️ One error message moves -- `codec.missingFieldToken` points
+   at the entry's first key rather than at its "-", on the same line, since the sequence keeps no
+   "-" to point at.
+   Superseded plan: `SequenceNode` is 128 bytes and carries
+   `Entries []*SequenceEntryNode` beside `Values []Node` -- two lists of one sequence. `Entries` is
+   read by the renderer only with comments on, and by `sequenceEntryNode` for a `-` position in an
+   error message, with a nil fallback. On citm_catalog that is 11,908 nodes at 64 bytes plus the
+   slices: **~1.5 MB of the AST layer's 7.44**. `ValueHeadComments` and `FootComment` are nil
+   throughout and still cost 32 bytes on every mapping and sequence.
+   Note a `SkipComments` option would be a no-op: `newReader` already drops comment tokens as they
+   arrive when `Comments()` was not passed.
+
+5. ✅ ⚡ **The grouper's cells go back once nothing reads them.** Done 2026-09-05
+   (`8204499`, `7cc13cd`). runArena hands them out of chunks and takes a chunk back
+   when every token its cells stand for is finished with, asking the tape, which is
+   what knows. Three keying rules were tried; the probe under `-tags yamlprobe` is
+   what told them apart. `TokenArena.chunkOf` became an index rather than a walk,
+   which paid for the asking.
+   Superseded description: **Put the grouper's displaced leaf on the tape.** Corrected 2026-09-05 after Fred pointed
+   out that a grouped token is a value inside an AST node, not a thing of its own. The grouper groups
+   **in place** on tape tokens; the only token it allocates is the cell `keyBefore` moves the
+   displaced key into -- one per mapping entry, exactly, and it is what the key's AST node then points
+   at. That is the single place an AST node points outside the token arena. Taking it from
+   `arena.Add` instead of `g.tokens` puts every node on one arena and windows it with the rest.
+   The `tokenGroup` structs are the other half and the opposite case: no node references one, since
+   `RawToken()` delegates past it, so they belong to the descent frontier and recycle behind the same
+   tail as the nodes. Together 19.5% of the walk's bytes on citm_catalog -- 12.4% the leaves, 6.7% the
+   groups.
+
+6. ⏸ **Parked: a pointer-free node and a separate tree view.** Fred's design, 2026-09-05, sharpened
+   to a contiguous-subtree encoding: `{subtreeStart int32; depth int32}` per node, children found by
+   scanning a flat array rather than chasing pointers. It buys nothing on the walk path, where
+   containers already store nothing, and no bytes on the `Parse` path, where nothing is released. Its
+   prize is the collector: 112k nodes hold roughly 400k traced pointer slots, and blocks go `noscan`
+   only when `Token`, the child interfaces, the comments **and** `StringNode.Value` have all become
+   indices or offsets -- the last of which waits on the escaping decision in
+   [reference/origin-and-escaping.md](reference/origin-and-escaping.md).
+   Two constraints it would impose, worth keeping written down: comments must stay off the tree view,
+   since `parseFootComment` writes out of sequence; and the parser must not substitute aliases, since
+   no contiguous range can put one subtree in two places.
+   Two API items wait on this one, both parked in [stream 1](1-library-api.md)'s open items on
+   2026-09-05: a `TagNode.Reserved()` and a text accessor for a tagged scalar, which today live as
+   `taggedText` unexported in `codec/tojson.go`. Decide them when the redesign opens the types rather
+   than exporting methods it would move.
+
+7. ⏸ **Parked: the parser resolving aliases.** If the caller may ask for substitution, replay the
+   saved token span rather than stashing the anchored nodes -- it keeps the frontier flat and costs
+   work instead of memory. The unknown is whether the descent can be re-entered mid-parse.
+
+## The decoder -- opened 2026-09-06
+
+> `Unmarshal` into an `any` no longer builds a tree: the parse hands nodes over and the value is folded
+> as they arrive. Reading into a struct still gathers the whole tree, and pays 16.6 MB of the 26.6 it
+> allocates for a representation it walks once and throws away.
+
+Base camp: `.worktrees/perf/decoder`, branch `decoder`.
+
+### What landed
+
+| commit | what |
+|---|---|
+| `3b3fa3b` | stop folding every document into a value just to see whether it holds one |
+| `41eec95` | `codec.WalkValues` -- fold a document into Go values as the parse reads it |
+| `d9bd703` | `Unmarshal` into an `any` takes it, through `Decoder.canWalk` |
+| `d6ab23e` | `codec/arena.go` -- decoded strings are copied out of the document, and boxed in bulk |
+| `fb9026d` | `BenchmarkTyped` -- the struct path had no benchmark at all |
+| `b849a8b` | `structFieldMap` is read once per type, not once per value |
+| `6c10f40` | two merge-key defects the struct path had and the `any` path did not ([stream 2](2-correctness.md), action 6) |
+| `7dc4075` | `decodeStruct` walks the document and looks the field up, not the reverse |
+
+### Unmarshal into an `any`, measured 2026-09-06
+
+Against `master` at `9d5e4b5`, the whole round:
+
+| workload | time | bytes/op | allocs/op |
+|---|---|---|---|
+| azure_swagger | 34.8 -> 26.6 ms | 14.06 -> 3.09 MB | 99939 -> 12489 |
+| canada_geometry | 27.1 -> 19.8 ms | 7.48 -> 1.15 MB | 98246 -> 37979 |
+| citm_catalog | 75.8 -> 59.3 ms | 33.29 -> 5.92 MB | 237344 -> 54429 |
+| commented_swagger | 35.5 -> 27.6 ms | 14.06 -> 3.09 MB | 99939 -> 12489 |
+| golang_source | 208.5 -> 172.7 ms | 76.69 -> 9.45 MB | 607579 -> 92571 |
+| twitter_status | 35.8 -> 28.0 ms | 11.90 -> 2.71 MB | 75792 -> 8150 |
+
+Against yaml/v3: **0.49x to 1.09x the time, 0.11x to 0.31x the bytes, 0.047x to 0.13x the allocations.**
+The memory target is met on this path; the time target is not.
+
+On citm_catalog, 99% of what is left to allocate is the Go value itself -- 19530 map inserts and slice
+appends, 12020 `map[string]any`, 10923 `[]any` boxes, 6881 int64 boxes -- and **164** allocations per
+document own every string in it. The parser contributes ~950.
+
+### Unmarshal into a struct, measured 2026-09-06
+
+citm_catalog read into the Go types it describes, which `BenchmarkTyped` added because nothing measured
+this path:
+
+| | time | bytes/op | allocs/op | vs v3 time | vs v3 bytes |
+|---|---|---|---|---|---|
+| where the round found it | 95.8 ms | 32.35 MB | 243679 | 1.70x | 2.04x |
+| the field map read once per type (`b849a8b`) | 86.1 ms | 26.63 MB | 143636 | 1.49x | 1.68x |
+| the loop inverted (`7dc4075`) | **73.7 ms** | **22.34 MB** | **109391** | **1.32x** | **1.41x** |
+| `go.yaml.in/yaml/v3` | 55.9 ms | 15.86 MB | 335022 | | |
+
+-23% time, -31% bytes and -55% allocations over the two, and a third of v3's allocations. Reflection was
+never the cost: `reflect` was 5.8% of CPU flat where the runtime was 42.2%, collecting what the tree
+allocates.
+
+Where the 26.63 MB and 143636 allocations go:
+
+| what | allocs/op | bytes/op |
+|---|---|---|
+| the tree -- `tokenarena` 6.87, ast blocks 6.42, `runArena` 1.98, `newPathNode` 1.37 | | 16.6 MB |
+| `Decoder.keyToNodeMap` | 27325 | 5.19 MB |
+| `ast.MappingNode.MapRange`, `SequenceNode.ArrayRange` | 33097 | |
+| `reflect.unsafe_New`, `MakeSlice`, `extendSlice` -- the Go value | ~64000 | |
+
+`decodeStruct` built up to **three** key-to-node maps for every struct value -- `keyToValueNodeMap`
+always, `keyToKeyNodeMap` under `disallowUnknownField`, a third under a validator. `7dc4075` removed all
+three from the common path; `keyToValueNodeMap` survives for an embedded field, which is handed the whole
+mapping, and the validator's entries are read only when validation fails.
+
+After the inversion, per document:
+
+| what | allocs/op |
+|---|---|
+| `reflect.unsafe_New` | 42412 |
+| `reflect.MakeSlice`, `extendSlice` | 25340 |
+| `ast.MappingNode.MapRange`, `SequenceNode.ArrayRange` | 19662 |
+| the tree, and everything under the cutoff | the rest of 109391 |
+
+Reflection building the Go value is 62% of what is left and is not reducible: those are the maps, slices
+and structs the caller asked for.
+
+### Fred's ruling: drive the walk from the destination, 2026-09-06
+
+> "The walk is driven the wrong way: what needs to be in memory at a given time is not accumulated
+> nodes, but all the fields in the struct. You then walk the doc and each node checks for a candidate in
+> the already known list of fields."
+
+`decodeStruct` iterates the struct's fields and looks each one up by key, which is why it needs the
+whole mapping in memory before it starts. Inverted -- walk the document's entries and look the field up
+-- the resident set becomes the destination's shape: a field list bounded by the Go type, the same for
+every value of that type, and already built once and shared as of `b849a8b`. The walk's frame stack then
+holds one pointer to a cached field list per open collection, O(nesting depth) and independent of
+document size.
+
+What still has to be held, and only these:
+
+- **an anchored subtree**, because an alias may decode into a destination of another type. The parser
+  already retains them in `p.anchors` under a walking parse, so this costs nothing new.
+- **the mapping a merge key names**, which is an anchored subtree. `<<` is applied when the mapping
+  closes, since a local key wins over a merged one.
+- **a subtree the destination asks for**: a field of type `ast.Node`, or a type implementing
+  `UnmarshalYAML`. Both are visible from the destination type before the walk starts, so the horizon is
+  "retain this subtree", not "retain everything".
+
+Estimate: ~5 MB and ~70000 allocations, against v3's 15.86 MB and 335022.
+
+### Actions
+
+1. ✅ ⚡ **Invert `decodeStruct`** (`7dc4075`). It walks the mapping's entries and looks the field up.
+   `rangeMapEntries` hands them over in the order that carries the precedence -- the mapping's own
+   first, then each `"<<"` from the earliest -- so nothing is collected to get a merge right, and
+   `writtenFields` records what is already set in a `uint64` for a struct of 64 fields or fewer.
+   `StructField.Index` replaced `FieldByName`, which compared names down the type for every field of
+   every value. It closed defect 10 of [stream 2](2-correctness.md) on the way: a key no field can be
+   named after is now a key no field claims, where the whole struct used to come back at its zero.
+
+2. ⚡ **The walk for structs** -- spiked and landed as `9030c93`: 3.11 MB against the tree path's
+   22.34, a fifth of yaml/v3's bytes at 1.17x its time. `walkableType` decides on the destination's Go
+   type before the parse and caches the answer, which is what keeps a refusal from costing a parse.
+   ✅ ⚡ **An `any` and an embedded field, `faeaae3`.** Both were refusals, and refusing either sends
+   the whole struct to the tree -- every shape go-openapi decodes has one, so nothing it reads took
+   the walk at all. An `any` is now a cursor state: `typedBuilder` forwards that subtree to a
+   `valueBuilder`, the same one `Unmarshal` into an `any` uses, so the two agree by construction. An
+   embedded field is a path in `readFields.flat`, built once per type beside the field map.
+
+   ⏸ **Parked 2026-09-07, and tomorrow is a correctness-first round -- Fred.** The decoder has
+   converged as a performance problem: on its own benchmark it is **2.0% of CPU**, against 44.4% for
+   the parser and the tape, 24.5% for the scanner, 17.0% for the runtime and 2.6% for `reflect`. Of
+   what it still allocates, **86% is `reflect` building the destination** -- `unsafe_New` 52.6%,
+   `MakeSlice` 15.3%, `extendSlice` 11.9%, `growslice` 6.5% -- which is the maps, slices and structs
+   the caller asked for. The only decoder item left in the profile is `token.ParseInteger` boxing at
+   3.7% of allocations.
+
+   So the remaining 1.21x against yaml/v3 is **69% parser and scanner**, and no further decoder speed
+   work reaches it. What is left below is coverage and correctness: it buys a decode whose cost does
+   not depend on whether the document happens to hold an alias, and one path instead of
+   two-with-a-trapdoor.
+
+   📌 It is more pressing than when the fallback was written. Widening the gate to accept an `any`
+   and an embedded field means far more documents reach the walk, so more of them can meet an alias
+   and pay two parses.
+
+   What is left is the `errNeedsTheTree` sites, none of them algorithmic:
+   - ~11 should raise a type mismatch with a position instead of handing the tree a document that
+     does not fit, so that a wrong document does not cost two parses to report;
+   - the rest need anchors, aliases, merge keys and tags written into the walk. Aliases now have to
+     rebuild from the anchored subtree rather than copy a Go value ([stream 2](2-correctness.md),
+     action 7), so the parser accessor is on the critical path rather than an optimization.
+
+   ⚠️ **An alias must not hand out the decoded Go value.** Fred, 2026-09-06: a struct of pointers
+   copied that way shares mutable state between the alias and what it names, and a caller mutating one
+   would not expect the other to change. Measuring found the library already does this into an `any`
+   and not into a Go type, and that materializing each alias -- the right answer -- is unguarded
+   against amplification. Both are defects 19 and 20 of [stream 2](2-correctness.md), and **the ruling
+   there gates this action**: the cheap implementation picks sharing by accident and would spread it
+   to the one path that is currently clean.
+
+3. 📝 ⚡ **The two collection iterators.** `ast.MappingNode.MapRange` and `SequenceNode.ArrayRange`
+   return `*MapNodeIter` and `*ArrayNodeIter`, so each is one heap allocation per collection: 19662
+   per citm_catalog, 18% of what the struct path still allocates. Returning them by value is a
+   one-line change in `ast` and a breaking one -- both are exported. Decide it with
+   [stream 1](1-library-api.md).
+
+4. 📝 ⚡ **Box `[]any` and int64 in bulk on the `any` path.** `arena.box` already does it for strings;
+   `Leave`'s 10923 slice boxes and `token.ParseInteger`'s 6881 int boxes are the same machinery and a
+   third of what that path still allocates. `ParseInteger` returns `any` and would need a variant
+   returning `int64`.
+
+5. 🔍 **Size hints for `map[string]any` and `[]any`.** 19530 growth allocations per document on the
+   `any` path, the largest single item left there. The walk does not know an entry count at `Enter`
+   and the grouper would have to count ahead, against forget-as-you-go. Priced, not planned.
+
+6. 🔍 **`UnmarshalYAML([]byte)` hands the caller document bytes.** Whether a custom unmarshaler
+   keeping them should pin the document is the caller's call or ours; undecided.
+
+### ⏸ Parked: read libyaml, as a retrospective -- Fred, 2026-09-06
+
+> "Surprisingly, I don't see any advanced magic in their code. The C library backported to go that
+> powers go-yaml will be interesting to analyze as a retrospective (later)."
+
+`go.yaml.in/yaml/v3` is a hand transliteration of **libyaml** (Kirill Simonov, 2006), not a Go design
+that grew: `scannerc.go`, `parserc.go` and `emitterc.go` are the C files with Go syntax, down to the
+`yaml_parser_t` struct and the `//` comments. So the yardstick this stream measures against is a
+twenty-year-old C parser's shape, and what it is fast at is what a single-pass event parser is fast at:
+one pass, a fixed buffer, events rather than a tree, and no intermediate representation to build or
+walk. There is nothing to copy at the instruction level -- the win is structural, and it is the same
+one Fred named for `decodeStruct`.
+
+Worth reading for, when the round is over and not before:
+- **What the event API costs it.** libyaml cannot round-trip a document, keep a comment, or say where a
+  construct was written. Those are the three things this library's AST exists for, and the tape and the
+  node paths are what they cost. The walk is how a caller who wants none of them stops paying.
+- **Where it still allocates.** v3 allocates 335022 times for citm_catalog into a struct against our
+  109391, and 418530 against our 54429 into an `any` -- an event parser transliterated into Go allocates
+  per event, and Go's collector charges for it. That is the whole of our memory lead and none of it is
+  cleverness.
+- **Its scanner is byte-at-a-time too**, which is where our own 15-25% of CPU goes. If there is a
+  technique to take, it is there rather than in the parser.
+
 
 ## Open items
 
@@ -928,7 +1306,7 @@ blocking; it is what a scanner nobody is racing deserves before it settles.
 
 ### Needs a ruling
 
-- ⚠️ **`-0x1F` resolves to a string.** The 1.2 core schema's table is `0x [0-9a-fA-F]+` with no sign
+- 🔥 **`-0x1F` resolves to a string.** Fred, 2026-09-06: settle tomorrow with the other quirks. The 1.2 core schema's table is `0x [0-9a-fA-F]+` with no sign
   in front of the prefix, so a strict reading makes a signed hex literal a string (`881e76f`,
   written into `token/zz_schema_test.go`). Flagged when it landed and never ruled on. One line
   either way.
@@ -1006,6 +1384,31 @@ blocking; it is what a scanner nobody is racing deserves before it settles.
   0.9% of allocated bytes over building nothing, which reversed the decision.
 
 ## Achievements
+
+### The parser round: windowing the AST [🏁] ⭐⭐⭐ (2026-09-05)
+
+- **`ToJSON` amplifies 1.49x against the source where it amplified 89.2x**, measured back to back
+  against `daa9584`: -57.7% time, -97.3% bytes, -99.7% allocations over the six workloads.
+  citm_catalog 51,267K and 648,070 allocations to 875K and 457; golang_source 256.8 MiB and
+  1,887,720 allocations to 4.3 MiB and 198.
+- **The AST layer is gone from the attribution** -- 24.3% of the bytes in the morning, 0.01x of
+  the source by the evening -- and the collector with it: 18.8% of CPU to 1.5%.
+- **Everything followed from one measurement.** The node frontier under a walk is 8 to 33 nodes
+  against 22k-192k handed over, so the arena needed one block where it was taking 253. The same
+  question asked of the grouper answered 1 or 2 cells against 25,869 minted.
+- ⭐⭐⭐ **The probe earned the round.** Three keying rules for the grouper's arena looked right
+  and were not; each failed on one document in thousands, as a syntax error on valid YAML hundreds
+  of lines from the cause. Stamping a reclaimed cell and reporting the read named the violation in
+  one pass -- and reported clean twice more until it was pointed at the workloads rather than the
+  conformance corpus, whose documents are too small for the grouper to fill a second chunk.
+- **Five defects found on the way**, four of them in `Walk`'s contract and pre-existing: the
+  foot-comment crash, tagged collections handed over twice, explicit and anchored keys handed over
+  twice, `Enter` returning false leaving a subtree unparsed, and a float losing its fractional part
+  in the converter rewrite -- which the value gate could not see, since JSON has one number type.
+- ⚠️ **It does not reach `Unmarshal`.** That path gathers a tree, so the ratios against yaml/v3
+  barely moved. The decoder round is where they will.
+
+### Earlier
 
 0. ✅ **The scanner's typing and validation rounds** [🏁] ⭐⭐⭐ (2026-09-04)
    - **Geomean 13.04 -> 10.95 ms over the six workloads, -16%**, and from ~50 to **63 MB/s**.

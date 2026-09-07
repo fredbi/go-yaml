@@ -1,5 +1,6 @@
 > [!NOTE]
-> Last revision: 2026-08-27 (filled in from Fred's roadmap; verbatim YAML is back in scope as a future prospect)
+> Last revision: 2026-09-06 (yaml-lexer's route named: reuse ToJSON through a token iterator; no release
+> gate — free rein on the API)
 
 # Stream 5 — Adoption by the go-openapi ecosystem
 
@@ -49,6 +50,13 @@ build becomes a client of the API rather than the parser itself.
 It also stops re-implementing the decoder's anchor dance: the parser will own the anchor table and refuse an
 alias whose anchor is not yet resolved, so every consumer gets that check for free. See
 [stream 1](1-library-api.md).
+
+📝 **And Fred's route to it, 2026-09-06: reuse `codec.ToJSON` rather than re-derive it.** `ToJSON` is
+already a `parser.Visitor` that writes JSON as the walk reaches each node, holding only the output and the
+anchors named so far. Handing over small JSON tokens instead of one buffer -- `ToJSONTokens`, action 4 of
+[stream 1](1-library-api.md) -- leaves `yaml-lexer` a token-type conversion and an error report. What it
+stops carrying is the second reading of merge keys, aliases, tag resolution and the number spellings, which
+is where a projection layer drifts from the library it projects.
 
 The consumer-side conformance ledger lives at `go-openapi/core/json/lexers/yaml-lexer/CONFORMANCE.md`. It has
 **not been re-run against this fork** since the parser reached 100% acceptance, so nobody knows what the
@@ -108,6 +116,12 @@ Optional YAML runtime serializers. The smallest of the four and the least demand
   ✅ **The good news: the cheapest memory win and the verbatim requirement are the same change.**
   [Stream 3](3-performance.md)'s action 2 — `Value` and `Origin` as slices of the source — is both the half
   that makes a token free and the thing that makes `Origin` *be* the original bytes. The two goals agree.
+
+- ✅ **Free rein until further notice — Fred, 2026-09-06.** No release gate, and none wanted yet: the API is
+  taking shape slowly, many options remain challengeable, the AST remains challengeable, and `printer` and
+  the colorizer are to be **rewritten from the ground up**. Nothing downstream is waiting on a tag, so
+  breaking changes cost nothing today and the streams should take them freely rather than design around a
+  version that does not exist. Revisit when a consumer switches for real.
 
 - 🔍 **The API is unreleased and changing weekly.** "When do we cut v0.1" is a real question rather than a
   formality: nothing above can start against a moving target.
