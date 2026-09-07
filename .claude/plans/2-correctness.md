@@ -347,17 +347,18 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 36 | renderer 🔥 | a block scalar in a sequence with an empty key after it **renders text the parser refuses** | `a:` / ` - \|1-` / `   ` / `:` renders `a:` / `- \|2-    :` — `invalid header option` | `yamlgen.Ledger` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
 | 27 | parser | a valid document refused | `!!null` / `>` — a secondary tag on its own line over a block scalar | `yamlgen.Strict` |
-| 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
+| 3 | decoder | a typed key is named into the strings' namespace, and an `any` then keeps one entry | `1: x` / `"1": y` → `{"1":"y"}`, where a `map[any]any` keeps both | `Departures`, `codec/zz_keynaming_test.go` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
 | 30 | decoder | a key tagged `!!timestamp` or `!!binary` is named by Go's `%v` | `!!timestamp 2001-12-14: x` → key `"2001-12-14 00:00:00 +0000 UTC"` | `Departures` |
 | 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
 | 32 | ToJSON | a `!!timestamp` is written as the text it was spelled with | `!!timestamp 2001-12-14t21:59:43.1Z` → `"2001-12-14t21:59:43.1Z"`, where the value converter writes `"2001-12-14T21:59:43.1Z"` | `codec/zz_timestampjson_test.go` |
 | 33 | ToJSON | a float key written the long way keeps its source text | `? 1e3` / `: x` → `{"1e3":"x"}`, where `1e3: x` → `{"1000.0":"x"}` | `codec/zz_floatkey_test.go` |
+| 37 | ToJSON | two keys named alike are written as a repeated member name | `1: x` / `"1": y` → `{"1":"x","1":"y"}` — RFC 8259 §4 makes a name SHOULD-unique, and every reader collapses it | `codec/zz_keynaming_test.go` |
 | 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
 | 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Seven in the parser and scanner, four in the decoder, three in `ToJSON`, two in the walking reader, three
+**Seven in the parser and scanner, four in the decoder, four in `ToJSON`, two in the walking reader, three
 in the renderer.** All three clusters closed on 2026-09-12: A, B and C took ten entries and both 🔥 marks
 off this table, and 36 put one back. 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary`
 draw and by the reshuffle it caused, and 31 and 34 were closed the same day they were filed -- 31 was
@@ -389,6 +390,12 @@ Python `TypeError: unhashable type` and yaml/v3 an `invalid map key`, both *afte
 So nothing corroborates the claim except the grammar, and three implementations reading §7.4.2 the other
 way is evidence about §7.4.2. The `yamlgen.Strict` entry keeps the measurement and says it is a ruling.
 **Settle whether the published grammar is lax here before anyone changes the parser.**
+
+📌 **3 is smaller than it looked, and 37 came out of measuring it.** A `map[any]any` holds both keys of
+`1: x` over `"1": y` — `uint64(1)` => `"x"` and `"1"` => `"y"` — so the library keeps the two apart
+wherever the destination can. Nothing is lost until a key is named by the canonical spelling of its type
+and both land in the strings' namespace. Five destinations give four answers and
+`codec/zz_keynaming_test.go` pins all of them, since a caller has no way to know which one they are on.
 
 Four of the rest lose a value or a shape **silently** — 3, 4, 5 and 16 — which is the class a verdict corpus
 is blind to and the reason the generated suite carries meanings at all.
