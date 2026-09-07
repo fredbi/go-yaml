@@ -41,6 +41,11 @@ var runLaxity = flag.Bool("yamlgen.laxity", false,
 // this suite's claim and has to keep holding; that the library reads it is the
 // library's business, and the day it stops is the day the entry gets deleted
 // rather than the day this test goes red.
+//
+// Asserted against grammar.Stream and against the reference parser, for the
+// reason TestValidDocumentsTheLibraryRefusesAreStillRefused gives: both are
+// generated from the specification's grammar and neither builds a value, so
+// neither can confuse a document it will not parse with a value it cannot hold.
 func TestWronglyAcceptedDocumentsAreStillWronglyAccepted(t *testing.T) {
 	var open int
 
@@ -49,6 +54,8 @@ func TestWronglyAcceptedDocumentsAreStillWronglyAccepted(t *testing.T) {
 			require.Falsef(t, grammar.Stream([]byte(l.Src)).OK,
 				"%q is valid YAML 1.2 after all, so this entry accuses the library of nothing.\nrule claimed: %s",
 				l.Src, l.Rule)
+
+			requireTheReferenceParserAgrees(t, l.Src, false, l.Rule)
 
 			var got any
 			if err := yaml.Unmarshal([]byte(l.Src), &got); err != nil {

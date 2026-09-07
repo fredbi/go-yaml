@@ -25,6 +25,23 @@
 // yaml.v3 has its own well-known departures -- it implements a good deal of
 // YAML 1.1 and it is not a conformance oracle. It is consulted the way a
 // second opinion is consulted, and a corpus entry that rests on it says so.
+//
+// # A refusal from here is not a syntax verdict
+//
+// [Load] calls yaml.Unmarshal, which constructs as it reads, so an error may be
+// the loader declining to build a value rather than the parser refusing the
+// document. libfyaml's binding has the same property and says so; this one used
+// not to.
+//
+// It cost a register entry on 2026-09-13. "{a: !!bool &x}" is refused here and
+// by libfyaml, and that was written down as both implementations refusing the
+// document -- when what they refuse is a boolean built from an empty node.
+// Asked as "{a: !!str &x}" both read it, and the document had been valid all
+// along.
+//
+// Ask [github.com/go-openapi/go-yaml/internal/testintegration/perlref] when the
+// question is whether a document is YAML at all. It emits events, resolves
+// nothing and builds nothing, so it cannot make this mistake.
 package goyaml
 
 import (
