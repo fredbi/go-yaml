@@ -93,9 +93,18 @@ func WithYAMLVersion(v YAMLVersion) Option {
 // graph -- and JSON is a tree written out in full, so there is nothing to write.
 // The conversion used to report the alias as naming a missing anchor, which
 // said nothing about the cycle.
+
+// Two keys that write one JSON member name go last. 3.2.1.1 makes "1" and
+// "\"1\"" two keys, an integer and a string, and JSON names a member with a
+// string either way -- so both write "1" and RFC 8259 4 says a name SHOULD be
+// unique. ToJSON wrote {"1":"a","1":"b"}, which every reader collapses to one
+// entry. The parse now records the pair the way it records a repeated key, and
+// the load reports it as ErrNotJSON rather than ErrDuplicateKey: they are two
+// keys, and it is JSON that cannot hold both.
 //
 // Everything else YAML holds converts and is left alone: a non-string scalar
-// key is quoted, so "1.5: a" is {"1.5":"a"}; an alias to a scalar writes what
+// key is quoted, so "1.5: a" is {"1.5":"a"}, and "1: a" beside "1.0: b" writes
+// both because a float carries its ".0"; an alias to a scalar writes what
 // its anchor wrote, so "a: &x 7" then "? *x" is {"a":7,"7":3}; a "<<" folds the
 // mapping it names into the one holding it; and a tag resolves.
 //

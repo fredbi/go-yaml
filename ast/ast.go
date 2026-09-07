@@ -1142,6 +1142,10 @@ type DuplicateKey struct {
 	// At is where the repeat stands and FirstAt where the key was first
 	// written, so a complaint can name both.
 	At, FirstAt token.Position
+	// JSONNameOnly marks two keys that YAML tells apart and JSON does not: "1"
+	// and "\"1\"" are an integer and a string, and both write the member "1".
+	// Only a parse under parser.WithJSONCompatible records one.
+	JSONNameOnly bool
 }
 
 type MappingNode struct {

@@ -38,6 +38,10 @@ type keyEntry struct {
 	at   token.Position
 }
 
+// anyKind stands in for the kind in the index ref that matches a key by name
+// alone. token.KeyKind runs from KeyOther to KeyFloat, so 255 is no key's type.
+const anyKind = token.KeyKind(255)
+
 // keySet finds a key a mapping has already used.
 //
 // The keys of every mapping open at this point in the descent sit in entries,
@@ -53,10 +57,17 @@ type keyEntry struct {
 //
 // index is for a mapping that passes spillAt, and stays nil on every document
 // in the corpus.
+//
+// jsonNames matches two keys by name as well as by node. [Parser.begin] turns
+// it on for [WithJSONCompatible], where "1: a" and "\"1\": b" are two YAML keys
+// that write one JSON member. The scan reads the name out of the filter it
+// already holds; the index takes a second entry per key, keyed on anyKind, so
+// the default path keeps the map it had.
 type keySet struct {
-	filter  []uint32
-	entries []keyEntry
-	index   map[mapKeyRef]token.Position
+	filter    []uint32
+	entries   []keyEntry
+	index     map[mapKeyRef]token.Position
+	jsonNames bool
 }
 
 // keyFilter stands in for a key in the scan, and is read in constant time: the
@@ -84,22 +95,34 @@ func (k *keySet) base() int { return len(k.entries) }
 // record records that the mapping starting at base uses text as a key, written
 // at pos.
 //
-// It returns where text was first written, and whether the mapping had already
-// used it.
-func (k *keySet) record(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool) {
+// It returns where text was first written, whether the two keys are one JSON
+// member name written as two YAML nodes, and whether the mapping had already
+// used the name.
+func (k *keySet) record(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool, bool) {
 	f := keyFilter(text, kind)
 	if len(k.entries)-base >= spillAt {
 		return k.recordIndexed(base, text, kind, pos, f)
 	}
 
-	for i := base; i < len(k.entries); i++ {
-		if k.filter[i] == f && k.entries[i].text == text {
-			return k.entries[i].at, true
+	if k.jsonNames {
+		// The kind occupies the low byte whole, so shifting it out compares the
+		// name alone, and comparing the two filters whole then says whether the
+		// keys are also one node.
+		for i := base; i < len(k.entries); i++ {
+			if k.filter[i]>>8 == f>>8 && k.entries[i].text == text {
+				return k.entries[i].at, k.filter[i] != f, true
+			}
+		}
+	} else {
+		for i := base; i < len(k.entries); i++ {
+			if k.filter[i] == f && k.entries[i].text == text {
+				return k.entries[i].at, false, true
+			}
 		}
 	}
 	k.push(text, pos, f)
 
-	return token.Position{}, false
+	return token.Position{}, false, false
 }
 
 // push adds one key to the stack.
@@ -110,19 +133,26 @@ func (k *keySet) push(text string, pos token.Position, f uint32) {
 
 // recordIndexed records a key of a mapping big enough to have earned an index,
 // and builds that index the first time one is.
-func (k *keySet) recordIndexed(base int, text string, kind token.KeyKind, pos token.Position, f uint32) (token.Position, bool) {
+func (k *keySet) recordIndexed(base int, text string, kind token.KeyKind, pos token.Position, f uint32) (token.Position, bool, bool) {
 	if len(k.entries)-base == spillAt {
 		k.spill(base)
 	}
 
 	ref := mapKeyRef{base: int32(base), kind: kind, text: text}
 	if prev, defined := k.index[ref]; defined {
-		return prev, true
+		return prev, false, true
+	}
+	if k.jsonNames {
+		name := mapKeyRef{base: int32(base), kind: anyKind, text: text}
+		if prev, defined := k.index[name]; defined {
+			return prev, true, true
+		}
+		k.index[name] = pos
 	}
 	k.index[ref] = pos
 	k.push(text, pos, f)
 
-	return token.Position{}, false
+	return token.Position{}, false, false
 }
 
 // spill moves the keys a mapping gathered under the scan into the index, once,
@@ -135,6 +165,13 @@ func (k *keySet) spill(base int) {
 		ref := mapKeyRef{base: int32(base), kind: token.KeyKind(k.filter[i]), text: k.entries[i].text}
 		if _, defined := k.index[ref]; !defined {
 			k.index[ref] = k.entries[i].at
+		}
+		if !k.jsonNames {
+			continue
+		}
+		name := mapKeyRef{base: int32(base), kind: anyKind, text: k.entries[i].text}
+		if _, defined := k.index[name]; !defined {
+			k.index[name] = k.entries[i].at
 		}
 	}
 }
@@ -152,6 +189,9 @@ func (k *keySet) close(base int) {
 				kind: token.KeyKind(k.filter[i]),
 				text: k.entries[i].text,
 			})
+			if k.jsonNames {
+				delete(k.index, mapKeyRef{base: int32(base), kind: anyKind, text: k.entries[i].text})
+			}
 		}
 	}
 	k.filter = k.filter[:base]

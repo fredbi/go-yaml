@@ -276,7 +276,7 @@ func (p *Parser) newPathNode() *ast.PathNode {
 //
 // It returns where text was first written, and whether the mapping had already
 // used it.
-func (p *Parser) recordMapKey(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool) {
+func (p *Parser) recordMapKey(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool, bool) {
 	if probe.Enabled {
 		p.checkKeyStackTail(base)
 	}
@@ -361,6 +361,7 @@ func (p *Parser) begin(src []byte) {
 		p.chunkSize = tokenarena.SizeFor(len(src))
 	}
 	p.tokens = tokenarena.New[tapeToken](p.chunkSize)
+	p.keys.jsonNames = p.jsonCompatible
 
 	// A full scan holds every token it reads. The pin says so once, here, and
 	// [Parser.Walk] is what gives it back.
@@ -1296,7 +1297,7 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 		return
 	}
 
-	pos, defined := p.recordMapKey(ctx.keyBase, name, kind, tk.Position)
+	pos, jsonOnly, defined := p.recordMapKey(ctx.keyBase, name, kind, tk.Position)
 	if !defined {
 		return
 	}
@@ -1304,7 +1305,7 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 	if n := len(p.openMaps); n > 0 {
 		open := p.openMaps[n-1]
 		open.Duplicates = append(open.Duplicates,
-			ast.DuplicateKey{Name: name, At: tk.Position, FirstAt: pos})
+			ast.DuplicateKey{Name: name, At: tk.Position, FirstAt: pos, JSONNameOnly: jsonOnly})
 	}
 }
 

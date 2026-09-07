@@ -52,6 +52,10 @@ func keyName(n ast.Node) (string, token.KeyKind) {
 //
 // parser.WithAllowDuplicateMapKey records none at all, and then the last entry
 // written wins because that is what filling a map does.
+//
+// A parse under parser.WithJSONCompatible records one more pair: two keys that
+// YAML tells apart and JSON does not, such as "1" and "\"1\"". Those are two
+// keys rather than a repeat, so the complaint is ErrNotJSON.
 func refuseDuplicateKeys(n ast.Node) error {
 	m, ok := n.(*ast.MappingNode)
 	if !ok || len(m.Duplicates) == 0 {
@@ -59,6 +63,13 @@ func refuseDuplicateKeys(n ast.Node) error {
 	}
 
 	d := m.Duplicates[0]
+	if d.JSONNameOnly {
+		return yamlerrors.NewNotJSON(
+			fmt.Sprintf("two keys write the JSON member %q, first defined at [%d:%d]",
+				d.Name, d.FirstAt.Line, d.FirstAt.Column),
+			keyTokenAt(m, d),
+		)
+	}
 
 	return yamlerrors.NewDuplicateKey(
 		fmt.Sprintf("mapping key %q already defined at [%d:%d]", d.Name, d.FirstAt.Line, d.FirstAt.Column),

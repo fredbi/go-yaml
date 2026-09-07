@@ -4,6 +4,8 @@
 package codec_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -53,10 +55,18 @@ func TestADuplicateKeyIsReportedAtTheLoad(t *testing.T) {
 
 // TestADuplicateKeyIsPerTypeAtTheLoad is the identity half, measured through
 // every path that reads a document.
+//
+// The decoder and ToJSON part company on one shape. §3.2.1.1 makes two keys the
+// same when they resolve to the same node, so "1" and "\"1\"" are an integer and
+// a string and the decoder holds both. JSON has one spelling for a member name,
+// so both write "1" and RFC 8259 §4 says a name SHOULD be unique -- ToJSON
+// refuses it as ErrNotJSON rather than writing an object with the member twice,
+// which is defect 37.
 func TestADuplicateKeyIsPerTypeAtTheLoad(t *testing.T) {
 	for name, tc := range map[string]struct {
-		src       string
-		duplicate bool
+		src          string
+		duplicate    bool
+		jsonCollides bool
 	}{
 		// One node written two ways is one key.
 		"an integer in two bases":  {src: "0x10: a\n16: b\n", duplicate: true},
@@ -67,8 +77,11 @@ func TestADuplicateKeyIsPerTypeAtTheLoad(t *testing.T) {
 
 		// Two nodes are two keys.
 		"an integer and a float": {src: "1: a\n1.0: b\n"},
-		"a number and a string":  {src: "1: a\n\"1\": b\n"},
 		"plain siblings":         {src: "a: 1\nb: 2\n"},
+
+		// Two keys to YAML, one member name to JSON.
+		"a number and a string":   {src: "1: a\n\"1\": b\n", jsonCollides: true},
+		"a null and its spelling": {src: "~: a\n\"null\": b\n", jsonCollides: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var into any
@@ -78,6 +91,17 @@ func TestADuplicateKeyIsPerTypeAtTheLoad(t *testing.T) {
 
 			if !tc.duplicate {
 				assert.NoError(t, err, "the decoder")
+				if tc.jsonCollides {
+					require.Error(t, jsonErr, "ToJSON")
+					assert.ErrorIs(t, jsonErr, yamlerrors.ErrNotJSON)
+					assert.Contains(t, jsonErr.Error(), "two keys write the JSON member")
+
+					// Tolerated, the last entry written wins.
+					_, tolerated := codec.ToJSON([]byte(tc.src), parser.WithAllowDuplicateMapKey())
+					assert.NoError(t, tolerated)
+
+					return
+				}
 				assert.NoError(t, jsonErr, "ToJSON")
 
 				return
@@ -94,4 +118,32 @@ func TestADuplicateKeyIsPerTypeAtTheLoad(t *testing.T) {
 			assert.NoError(t, tolerated)
 		})
 	}
+}
+
+// TestAJSONMemberCollisionIsFoundPastTheIndex reaches the other half of the key
+// set.
+//
+// parser.spillAt is 64: a mapping up to that size is scanned and a bigger one
+// gets a hash index, and the two find a collision by different means -- the
+// scan compares the filter with the kind shifted out, the index takes a second
+// entry per key. Only the scan is reached by the documents above.
+func TestAJSONMemberCollisionIsFoundPastTheIndex(t *testing.T) {
+	var b strings.Builder
+	for i := range 80 {
+		fmt.Fprintf(&b, "%d: v\n", i)
+	}
+	src := b.String()
+
+	out, err := codec.ToJSON([]byte(src))
+	require.NoError(t, err, "80 distinct keys convert")
+	assert.Contains(t, string(out), `"79":"v"`)
+
+	_, err = codec.ToJSON([]byte(src + "\"79\": w\n"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, yamlerrors.ErrNotJSON)
+	assert.Contains(t, err.Error(), `two keys write the JSON member "79", first defined at [80:1]`)
+
+	_, err = codec.ToJSON([]byte(src + "79: w\n"))
+	require.Error(t, err, "and a plain repeat past the index is still a duplicate")
+	assert.ErrorIs(t, err, yamlerrors.ErrDuplicateKey)
 }
