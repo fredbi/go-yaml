@@ -261,7 +261,7 @@ Actions below.
     - It also reached **three parser complaints** nothing had provoked: `unexpected format TAG directive`,
       `found unexpected document separator` and `unexpected scalar value`.
 
-11. ⏳ **Merge keys, timestamps and binary as value kinds.**
+11. ✅ **Merge keys, timestamps and binary as value kinds.**
     - ✅ **Merge keys are enumerated** (2026-09-11), and the hole was not merge itself: every shape in
       `MergeShapes` wrote its merge as an *alias*. `TagMergeInline` covers `<<: {a: 1}`, which the 1.1
       merge type allows just as much, and it found `codec.ToJSON` writing JSON that will not parse.
@@ -283,9 +283,18 @@ Actions below.
       field. And `asking` in `reading_library_test.go` prepended `%YAML 1.1` to documents that already
       declared a version, which the library refuses as two directives — latent since `Style.Version`
       landed, and reached only when the reshuffle put such a case into the scored set.
-    - 📝 What is left is **`!!set`, `!!omap` and `!!pairs`**, which are the same gap on a collection
-      rather than on a scalar: each constrains the shape under it, so `TagFor` has to ask what the value
-      is before offering one.
+    - ✅ **`!!set`, `!!omap` and `!!pairs`** (2026-09-13). `TagFor` gives a `Map` `!!set` beside `!!map`
+      and a `Seq` `!!omap` and `!!pairs` beside `!!seq`. Each is an annotation and changes no value.
+      Offered on the kind the type is written over and **not** on the shapes inside it: the type
+      definitions constrain those and nothing enforces them — `a: !!set` over `x: 1` and `a: !!omap`
+      over `- 1` are read here, by libfyaml 1.0.0b1 and by `go.yaml.in/yaml/v3` v3.0.5, and
+      `grammar.NewRecognizer` accepts both.
+      - 📌 Matched buckets 547 → **544**, and the loss is the reshuffle. A control keeping the longer
+        `TagFor` slice and mapping every new entry back to `!!seq` and `!!map` gives 544 too. This is
+        the third time an axis has been measured that way and the third time the answer was the draw
+        sequence rather than the dilution.
+
+    Action 11 is closed.
 
 12. 📝 **Multi-document streams.** `Emit` takes one `Value` and writes at most one `---`. Cross-document
     aliases and a `%TAG` handle going out of scope both land with them.
