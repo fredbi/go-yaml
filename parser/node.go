@@ -21,11 +21,27 @@ func newMappingValueNode(ctx context, colonTk, entryTk *tapeToken, key ast.MapKe
 	// entryTk is the ',' that comes *before* this entry, so a comment hanging on
 	// it was written about the entry before this one and is attached there.
 	if _, explicit := key.(*ast.MappingKeyNode); explicit {
-		// An explicit key's group ends on the key itself rather than on a ':',
-		// so colonTk is the key and a comment on it is the key's own -- already
-		// attached there. Carrying it over would write it twice, once on the
-		// "?" line and once on the ':' line, and the document would gain a
-		// comment on every cycle.
+		if colonTk.Type() != token.MappingValueType {
+			// parseMapKeyValue hands the key's own last token over as colonTk,
+			// because an explicit key written in one group ends on the key
+			// rather than on a ':'. A comment there is the key's own and is
+			// attached at the key already; carrying it over would write it
+			// twice, once on the "?" line and once on the ':' line, and the
+			// document would gain a comment on every cycle.
+			return node, nil
+		}
+
+		// A ':' of its own, so a comment on it was written on the ':' line and
+		// is the value's rather than the key's. Returning here dropped it:
+		// "? a" over ": # c3" over "  v" rendered as "? a" over ": v".
+		//
+		// It goes on the value, which is where the short form puts the same
+		// comment -- "a: # c3" over "  v" renders as "a: v # c3" -- so the two
+		// spellings normalize the same way.
+		if err := setLineComment(ctx, value, colonTk); err != nil {
+			return nil, err
+		}
+
 		return node, nil
 	}
 	if key.GetToken().Position.Line == value.GetToken().Position.Line {

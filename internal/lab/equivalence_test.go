@@ -462,6 +462,14 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	}
 
 	wantTree, gotTree := dump(want), dump(got)
+
+	// The comments the shipped parser keeps and refparser drops come out
+	// first, so that the tests below read a tree of the same shape. One
+	// document shows more than one intended difference: fuzzseed/3340 keeps a
+	// comment on an explicit key's ":" line and reads a scalar under a local
+	// tag as text, and checked one at a time neither test would pass it.
+	gotTree, kept := withoutKeptComments(wantTree, gotTree)
+
 	if why, ok := resolvesDifferentlyOnPurpose(text, wantTree, gotTree); ok {
 		t.Skipf("resolved on purpose: %s", why)
 	}
@@ -472,6 +480,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 
 	if why, ok := readsATaggedScalarAsText(wantTree, gotTree); ok {
 		t.Skipf("resolved on purpose: %s", why)
+	}
+
+	if kept > 0 && wantTree == gotTree {
+		t.Skip("kept on purpose: a comment on an explicit key's \":\" line is the value's (6.9.1)")
 	}
 
 	require.Equal(t, wantTree, gotTree, "the two parsers build different trees")
@@ -682,6 +694,49 @@ func readsATaggedScalarAsText(want, got string) (string, bool) {
 	}
 
 	return "a tag that resolves to nothing leaves its scalar as text (6.9.1)", true
+}
+
+// withoutKeptComments takes out of got the Comment nodes want does not have,
+// and reports how many it took.
+//
+// A comment written on an explicit key's ":" line -- "? - seq1" over ": # lala"
+// over "  - seq2", which is the suite's various-trailing-comments -- belongs to
+// the value, and both parsers dropped it until 2026-09-12.
+// newMappingValueNode returned early for every explicit key, on the reading
+// that a comment there was the key's own and already attached. That holds only
+// where the key's group ends on the key itself; where the ":" is a token of its
+// own, the comment stands on the ":" line and is the value's. refparser is
+// frozen and still drops it.
+//
+// The walk keeps the two trees in step: a line that matches is kept, an extra
+// Comment is dropped, and anything else is kept for the tests that follow to
+// judge.
+func withoutKeptComments(want, got string) (string, int) {
+	wantLines, gotLines := strings.Split(want, "\n"), strings.Split(got, "\n")
+
+	extra := len(gotLines) - len(wantLines)
+	if extra <= 0 {
+		return got, 0
+	}
+
+	kept := make([]string, 0, len(gotLines))
+
+	var dropped, i int
+	for j := range gotLines {
+		switch {
+		case i < len(wantLines) && wantLines[i] == gotLines[j]:
+			kept = append(kept, gotLines[j])
+			i++
+		case dropped < extra && nodeType(gotLines[j]) == "Comment" &&
+			(i >= len(wantLines) || nodeType(wantLines[i]) != "Comment"):
+			dropped++
+		default:
+			kept = append(kept, gotLines[j])
+			i++
+		}
+	}
+
+	return strings.Join(kept, "\n"), dropped
 }
 
 // underATag reports whether the node on line at stands under a Tag, with

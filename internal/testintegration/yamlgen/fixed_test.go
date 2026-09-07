@@ -1407,3 +1407,46 @@ func TestFixedAQuotedExplicitKeyTakesABlockScalarValue(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedACommentOnAnExplicitKeysColonLineIsKept: a comment on the ":" line
+// of the long form, with the value below it, survives.
+//
+// newMappingValueNode returned early for every explicit key, on the reading
+// that a comment on the token it was handed was the key's own and attached
+// there already. That holds where parseMapKeyValue hands the key's own last
+// token over, since an explicit key written in one group ends on the key rather
+// than on a ":". It does not hold where the ":" is a token of its own: the
+// comment then stands on the ":" line and belongs to the value, and returning
+// early dropped it with nothing reported.
+//
+// It goes on the value now, which is where the short form puts the same
+// comment -- "a: # c3" over "  v" renders as "a: v # c3" -- so the two
+// spellings normalize the same way.
+func TestFixedACommentOnAnExplicitKeysColonLineIsKept(t *testing.T) {
+	for src, renders := range map[string]string{
+		"? a\n: # c3\n  v\n":   "? a\n: v # c3\n",
+		"? a\n: # c3\n  - 1\n": "? a\n:\n# c3\n- 1\n",
+		"?\n: #c1\n":           "?\n: #c1\n",
+		// Every other position kept it before and still does.
+		"a: # c3\n  v\n":   "a: v # c3\n",
+		"a: # c3\n  - 1\n": "a: # c3\n- 1\n",
+		"? a\n: v # c3\n":  "? a\n: v # c3\n",
+		"? a # c3\n: v\n":  "? a # c3\n: v\n",
+	} {
+		once := renderOnce(t, src)
+		assert.Equal(t, renders, once, "%q", src)
+
+		assert.Equal(t, once, renderOnce(t, once), "%q: the rendering settles", src)
+	}
+
+	t.Run("the value is unchanged", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"? a\n: # c3\n  v\n":   map[string]any{"a": "v"},
+			"? a\n: # c3\n  - 1\n": map[string]any{"a": []any{uint64(1)}},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}

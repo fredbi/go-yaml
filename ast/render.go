@@ -613,32 +613,35 @@ func (r *Renderer) entryLineComment(n *SequenceNode, i int) string {
 }
 
 func (r *Renderer) anchor(n *AnchorNode) string {
-	return r.prefixed("&"+r.String(n.Name), n.Value)
+	return r.withOwnComment(n.Comment, r.prefixed("&"+r.String(n.Name), n.Value))
 }
 
 func (r *Renderer) tag(n *TagNode) string {
-	return r.taggedWithComment(n, r.prefixed(n.Start.Value, n.Value))
+	return r.withOwnComment(n.Comment, r.prefixed(n.Start.Value, n.Value))
 }
 
-// taggedWithComment puts a tag's own comment back at the end of the line the
-// tag ends.
+// withOwnComment puts a property's own comment back at the end of the line the
+// property ends.
 //
-// An anchor reaches its comment through the name node it renders, which carries
-// one itself. A tag holds it on the node, and rendering only n.Start.Value
-// dropped it: "!!null # c1" and "- &a2 !!seq # c2" came back without theirs,
+// An anchor and a tag both reach a comment written beside them through the node
+// they render -- the name for an anchor, the value for a tag -- and both may
+// also carry one on the property node itself. Rendering only the marker dropped
+// that one: "!!null # c1" and "- &a2 !!seq # c2" came back without theirs,
 // while "!!null null # c1" kept one because the comment had been hung on the
-// scalar instead.
+// scalar instead. An anchor lost the comment newMappingValueNode hangs there
+// for an explicit key, so "? a" over ": # c3" over "  &a2 v" wrote no comment
+// at all.
 //
-// The first line is the tag's, whatever follows: a tag ending its line has
-// either no value or a block written underneath, and one with a value beside it
-// carries no comment of its own.
-func (r *Renderer) taggedWithComment(n *TagNode, text string) string {
-	if !r.comments || n.Comment == nil {
+// The first line is the property's, whatever follows: a property ending its
+// line has either no value or a block written underneath, and one with a value
+// beside it carries no comment of its own.
+func (r *Renderer) withOwnComment(comment *CommentGroupNode, text string) string {
+	if !r.comments || comment == nil {
 		return text
 	}
 
 	head, rest, wrapped := strings.Cut(text, "\n")
-	head = addCommentString(head, n.Comment)
+	head = addCommentString(head, comment)
 	if !wrapped {
 		return head
 	}
@@ -716,9 +719,9 @@ func (r *Renderer) documentBody(n Node) string {
 	case *LiteralNode:
 		return r.literalAt(node, true)
 	case *AnchorNode:
-		return r.prefixedAt("&"+r.String(node.Name), node.Value, true)
+		return r.withOwnComment(node.Comment, r.prefixedAt("&"+r.String(node.Name), node.Value, true))
 	case *TagNode:
-		return r.taggedWithComment(node, r.prefixedAt(node.Start.Value, node.Value, true))
+		return r.withOwnComment(node.Comment, r.prefixedAt(node.Start.Value, node.Value, true))
 	default:
 		return r.String(n)
 	}

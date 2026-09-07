@@ -157,30 +157,6 @@ func TestDefectABinaryTagCannotBeReadIntoAGoByteSlice(t *testing.T) {
 // reads, libfyaml 1.0.0b1 reads every one, the reference parser passes them,
 // and grammar.NewRecognizer accepts them.
 
-// TestDefectACommentOnAnExplicitKeysColonLineIsDropped: a comment on the ":"
-// line of the long form, with the value below it, is lost by the renderer.
-func TestDefectACommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
-	for _, tc := range []struct{ src, renders string }{
-		{src: "? a\n: # c3\n  v\n", renders: "? a\n: v\n"},
-		{src: "? a\n: # c3\n  - 1\n", renders: "? a\n:\n- 1\n"},
-		{src: "?\n: #c1\n", renders: "?\n:\n"},
-	} {
-		wellFormed(t, tc.src)
-		assert.Equal(t, tc.renders, renderOnce(t, tc.src), "today: %q loses its comment", tc.src)
-	}
-
-	t.Run("every other position keeps it", func(t *testing.T) {
-		for _, tc := range []struct{ src, renders string }{
-			{src: "a: # c3\n  v\n", renders: "a: v # c3\n"},
-			{src: "a: # c3\n  - 1\n", renders: "a: # c3\n- 1\n"},
-			{src: "? a\n: v # c3\n", renders: "? a\n: v # c3\n"},
-			{src: "? a # c3\n: v\n", renders: "? a # c3\n: v\n"},
-		} {
-			assert.Equal(t, tc.renders, renderOnce(t, tc.src), "%q", tc.src)
-		}
-	})
-}
-
 // TestDefectABlankLineBeforeACommentDoesNotSettle: the first rendering keeps a
 // blank line written before a comment and the second drops it.
 //
@@ -414,5 +390,34 @@ func TestDefectABlockScalarInASequenceSwallowsAnEmptyKey(t *testing.T) {
 
 		_, err := parser.ParseBytes([]byte(once), parser.WithComments())
 		require.NoError(t, err)
+	})
+}
+
+// TestDefectASecondCommentOnAnExplicitKeysColonLineIsDropped: a comment on the
+// ":" line of the long form and a head comment under it, and only the first
+// survives.
+//
+// What is left of the entry closed on 2026-09-12. The ":" line comment goes on
+// the value now, and a head comment written under it has nowhere left to go:
+// "? a" over ": # c4" over "  # c5" over "  - 1" keeps c4 and loses c5. A
+// nested mapping keeps both, which is the shape that says the head comment can
+// be carried at all.
+func TestDefectASecondCommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
+	for src, renders := range map[string]string{
+		"? a\n: # c4\n  # c5\n  - 1\n": "? a\n:\n# c4\n- 1\n",
+		"? a\n: # c4\n  # c5\n  v\n":   "? a\n: v # c4\n",
+	} {
+		wellFormed(t, src)
+		assert.Equal(t, renders, renderOnce(t, src), "today: %q loses the second comment", src)
+	}
+
+	t.Run("a nested mapping keeps both", func(t *testing.T) {
+		const src = "? a\n: # c4\n  # c5\n  b: 1\n"
+		wellFormed(t, src)
+		assert.Equal(t, "? a\n:\n  # c4\n  # c5\n  b: 1\n", renderOnce(t, src))
+	})
+
+	t.Run("one comment on the ':' line is kept", func(t *testing.T) {
+		assert.Equal(t, "? a\n: v # c3\n", renderOnce(t, "? a\n: # c3\n  v\n"))
 	})
 }

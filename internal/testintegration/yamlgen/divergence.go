@@ -230,23 +230,27 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-comment-on-an-explicit-keys-colon-line-is-dropped",
-		Pin:  "TestDefectACommentOnAnExplicitKeysColonLineIsDropped",
+		Pin:  "TestDefectASecondCommentOnAnExplicitKeysColonLineIsDropped",
 		Reason: "A comment written on the `:` line of an entry written the long way, with the value " +
-			"below it, is lost. `? a` over `: # c3` over `  v` renders back as `? a` over `: v`.\n\n" +
-			"The short form keeps it: `a: # c3` over `  v` renders `a: v # c3`, moved but not lost. " +
-			"So does a comment after the value, `: v # c3`, and one on the `?` line, `? a # c3`. It " +
-			"is the `:` line of the long form and nowhere else.\n\n" +
-			"Only the comments are lost -- the value reads correctly -- which is why this claims " +
-			"CommentsKept alone. Found on 2026-09-11 by Style.ExplicitKeys.\n\n" +
-			"📌 It is lost before the tree, so it is not the renderer. Measured on 2026-09-13 with " +
-			"codec.CommentToMap: `? a` over `: # c3` over `  v` fills an empty comment map, where " +
-			"`a: # c3` over `  v` gives $.a, `? a # c3` gives $ and `: v # c3` gives $.a. Nothing " +
-			"reaches the tree to be written out, so the name of this entry moved from render/ to " +
-			"parse/.\n\n" +
-			"The shape is a `:` with nothing after it on its line, so an empty value counts as much " +
-			"as a collection: `?` over `: #c1` loses the comment too. The predicate does not work " +
-			"out whether a collection really lands below rather than in flow, since that depends on " +
-			"the value's depth and on Style.FlowFrom, so it reports more draws than divergences.",
+			"below it, is lost.\n\n" +
+			"Nothing reaches the tree: codec.CommentToMap comes back empty for `? a` over `: # c3` over " +
+			"`  v`, where every shape that keeps the comment fills one -- `a: # c3` gives $.a, " +
+			"`? a # c3` gives $, `: v # c3` gives $.a. So this is the parse and not the renderer, which " +
+			"is why the name says parse.\n\n" +
+			"⚠️ **Narrower since 2026-09-12, and the entry is kept for what is left.** " +
+			"newMappingValueNode returned early for every explicit key, on the reading that a comment " +
+			"on the token it was handed was the key's own. That holds where parseMapKeyValue hands the " +
+			"key's own last token over; it does not where the `:` is a token of its own. `? a` over " +
+			"`: # c3` over `  v` now renders `? a` over `: v # c3`, which is where the short form puts " +
+			"the same comment, and TestFixedACommentOnAnExplicitKeysColonLineIsKept holds it.\n\n" +
+			"What still diverges is a *second* comment: one on the `:` line and a head comment under " +
+			"it. `? a` over `: # c4` over `  # c5` over `  - 1` keeps c4 and loses c5, and so does the " +
+			"same document with a scalar value. A nested mapping keeps both. The `:` line comment goes " +
+			"on the value now and the head comment has nowhere left to go, so this is what the fix " +
+			"leaves rather than what it missed.\n\n" +
+			"TestRenderKeepsEveryComment draws it 19 times in 327, so the predicate stays as it was: " +
+			"it matched the family and one member of it is closed.\n\n" +
+			"The value reads correctly in every case, so this claims CommentsKept alone.",
 		Property: CommentsKept,
 		Match:    writesACommentOnAnExplicitColonLine,
 	},
