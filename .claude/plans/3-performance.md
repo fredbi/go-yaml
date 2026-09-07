@@ -941,6 +941,26 @@ interleaved in one window, eight rounds each, read with benchstat. Negative is u
 Bytes and allocations from the same run: **-77.6% bytes**, 4.5x less, and **-92.2% allocations**,
 12.9x fewer, on every workload. `citm_catalog` was the last document v3 read faster and no longer is.
 
+### Retaken on `1968ba5`, 30 commits later
+
+Master moved by a round of `yamlgen` and `testintegration` work between the merge and this snapshot, so
+the numbers were taken again rather than carried over. **It moved nothing: +0.11% geomean against
+`808f3f6`, no workload significant** -- which is what test-only work should read.
+
+| workload | vs yaml/v3 |
+|---|---:|
+| canada_geometry | **-52.5%** |
+| commented_swagger | -19.6% |
+| golang_source | -17.7% |
+| twitter_status | -13.9% |
+| azure_swagger | -13.3% |
+| citm_catalog | -5.5% |
+| **geomean** | **-22.2%** |
+
+Every workload significant this time, `citm_catalog` at p=0.001 where the first run had it at p=0.050.
+Bytes and allocations unchanged: -77.6% and -92.2%. The two windows agreeing to within 0.1% on a geomean
+is the reproducibility check on the -22% itself.
+
 ### ⚠️ The yardstick was wrong, and it read about 30 points against us
 
 `BenchmarkWorkloadV3Node` in `internal/analysis` unmarshals into `v3.Node`, which parses the document
