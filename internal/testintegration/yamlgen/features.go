@@ -99,6 +99,9 @@ const (
 	FeatureNumberOctal stance.Feature = "presentation/number-octal"
 	// FeatureNumberExponent is a float written "1.5e+00".
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
+	// FeatureByteOrderMark is a U+FEFF at the head of the document, which 5.2
+	// puts in l-document-prefix and which says nothing about the content.
+	FeatureByteOrderMark stance.Feature = "encoding/byte-order-mark"
 	// FeatureEscapeNamed is a double-quoted scalar spelling a character by the
 	// name 5.7 gives it -- "\0", "\/", "\_" and the rest.
 	FeatureEscapeNamed stance.Feature = "presentation/escape-named"

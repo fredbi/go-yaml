@@ -157,7 +157,11 @@ func divergesByDefect(err error, text string) (string, bool) {
 	// a "%YAML" line over a root scalar the parse then resolves. An unknown
 	// secondary tag over it reports "value is not allowed in this context"; a
 	// block scalar reports "unexpected token. required string token".
-	if strings.HasPrefix(text, "%YAML ") &&
+	//
+	// The byte order mark is taken off first: 5.2 puts it before the
+	// directives, so a document that opens with one still opens with "%YAML"
+	// as far as this rule is concerned.
+	if strings.HasPrefix(strings.TrimPrefix(text, "\ufeff"), "%YAML ") &&
 		(strings.Contains(msg, "value is not allowed in this context") ||
 			strings.Contains(msg, "unexpected token. required string token")) {
 		return "a version directive resolves the root scalar it opens (yamlgen.Strict, yamlgen.Ledger)", true

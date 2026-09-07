@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"iter"
 	"slices"
 	"strings"
 	"testing"
@@ -109,7 +110,7 @@ func marks() []mark {
 // writes them in that order.
 func directiveLine(prefix string) func(string) bool {
 	return func(s string) bool {
-		for line := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		for line := range documentLines(s) {
 			if strings.HasPrefix(line, "---") {
 				return false
 			}
@@ -122,11 +123,24 @@ func directiveLine(prefix string) func(string) bool {
 	}
 }
 
+// documentLines splits a document into lines with any leading byte order mark
+// taken off.
+//
+// 5.2 puts the mark in l-document-prefix, before the directives and the marker
+// alike, so a scan reading the first line by its prefix has to step over it.
+// Both scanners below did not, and every marked document claimed no marker and
+// no directive.
+func documentLines(s string) iter.Seq[string] {
+	trimmed := strings.TrimPrefix(s, "\ufeff")
+
+	return strings.FieldsFuncSeq(trimmed, func(r rune) bool { return r == '\n' || r == '\r' })
+}
+
 // opensTheDocument reports the "---" that FeatureDocumentMarker names. A %TAG
 // directive is written above it, so the marker is not always at byte zero.
 func opensTheDocument(s string) bool {
 	// Split on either break character, since Style.Break may be a lone "\r".
-	for line := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+	for line := range documentLines(s) {
 		if strings.HasPrefix(line, "%") {
 			continue
 		}
@@ -263,6 +277,7 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureEscapeHex:     st.Escaping == yamlgen.EscapeHex,
 			yamlgen.FeatureEscapeUnicode: st.Escaping == yamlgen.EscapeUnicode,
 			yamlgen.FeatureEscapeLong:    st.Escaping == yamlgen.EscapeLong,
+			yamlgen.FeatureByteOrderMark: st.ByteOrderMark,
 			yamlgen.FeatureExplicitKey:   st.ExplicitKeys,
 			yamlgen.FeatureChompKeep:     st.Chomping == yamlgen.ChompKeep,
 			yamlgen.FeatureChompPadded:   st.Chomping == yamlgen.ChompPadded,
@@ -295,6 +310,10 @@ func TestEveryMarkInTheBytesIsLabeled(t *testing.T) {
 		st := yamlgen.Styles().Draw(rt, "style")
 
 		w := yamlgen.Write(v, st)
+
+		if strings.HasPrefix(w.Text, "\ufeff") != slices.Contains(w.Features, yamlgen.FeatureByteOrderMark) {
+			rt.Fatalf("a byte order mark and its label disagree\n%q\n%v", w.Text, w.Features)
+		}
 
 		if strings.Contains(w.Text, "\r\n") != slices.Contains(w.Features, yamlgen.FeatureBreakCRLF) {
 			rt.Fatalf("a CRLF and its label disagree\n%q\n%v", w.Text, w.Features)

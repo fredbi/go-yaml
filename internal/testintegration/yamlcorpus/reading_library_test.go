@@ -30,17 +30,21 @@ import (
 // asking returns src rewritten so the table's reading applies to it, and
 // reports whether it could be asked at all.
 //
-// A document that declares its own version cannot: "%YAML 1.1" above a
-// "%YAML 1.2" line is two directives, which the library refuses with
-// "YAML version has already been specified". Style.Version writes such
-// documents, so the corpus holds them and they are left unscored rather than
-// counted as a failure.
+// Two kinds cannot. A document that declares its own version: "%YAML 1.1" above
+// a "%YAML 1.2" line is two directives, which the library refuses with "YAML
+// version has already been specified". And a document opening with a byte order
+// mark: 5.2 puts the mark in l-document-prefix, so prepending a directive above
+// it leaves the mark inside the document, where it is refused with "found a
+// byte order mark where no document begins".
+//
+// Style.Version and Style.ByteOrderMark write such documents, so the corpus
+// holds them and they are left unscored rather than counted as a failure.
 func asking(t stance.Table, src []byte) ([]byte, bool) {
 	if t.Reads != "yaml-1.1" {
 		return src, true
 	}
 
-	if bytes.HasPrefix(src, []byte("%YAML")) {
+	if bytes.HasPrefix(src, []byte("%YAML")) || bytes.HasPrefix(src, []byte("\ufeff")) {
 		return nil, false
 	}
 
@@ -121,7 +125,7 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 			t.Errorf("%s scored no case at all, so nothing above was exercised", table.Name)
 		}
 
-		t.Logf("%s: %d cases scored under %s, %d left to the recorded departure, %d declaring a version of their own",
+		t.Logf("%s: %d cases scored under %s, %d left to the recorded departure, %d it cannot ask",
 			table.Name, scored, table.Reads, departed, declared)
 	}
 }

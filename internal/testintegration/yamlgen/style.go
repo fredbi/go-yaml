@@ -451,6 +451,21 @@ type Style struct {
 	TimeForm TimeForm
 	// Escaping is how much of a double-quoted scalar is written as escapes.
 	Escaping Escaping
+	// ByteOrderMark writes a U+FEFF at the head of the document.
+	//
+	// 5.2 puts one in l-document-prefix, so it stands before the directives and
+	// the marker alike and says nothing about what the document means. Every
+	// generated document went without one until 2026-09-13: the two byte order
+	// marks yamlcorpus.Refusals provokes -- one inside a line, one where no
+	// document begins -- were the only ones the corpus held, and both are
+	// positions this axis deliberately does not write.
+	//
+	// Only the leading position is written. A mark after a "..." suffix is the
+	// other one l-document-prefix allows and the field does not agree about it:
+	// libfyaml 1.0.0b1 reads two documents and keeps the mark inside the second
+	// one's key, and go.yaml.in/yaml/v3 v3.0.5 refuses the stream. It is also
+	// out of reach while Emit writes one document.
+	ByteOrderMark bool
 	// Version is the YAML version the document declares, written as a "%YAML"
 	// directive. Empty declares none, which is the ordinary case.
 	//
@@ -547,7 +562,7 @@ func (s Style) String() string {
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String() +
-		s.Escaping.String()
+		s.Escaping.String() + bomLabel(s.ByteOrderMark)
 }
 
 // Styles generates a presentation.
@@ -607,6 +622,11 @@ func Styles() *rapid.Generator[Style] {
 			// evenly: each reaches grammar buckets the Test Suite never enters,
 			// and none of them is what a reader meets in the wild.
 			Escaping: Escaping(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "escaping")),
+			// One document in eight opens with a byte order mark. Weighted
+			// down because a mark is a property of a file rather than of a
+			// document, and a corpus where one document in two carried one
+			// would look like nothing anybody writes.
+			ByteOrderMark: rapid.IntRange(0, 7).Draw(t, "bom") == 0,
 			// One mapping in four is written the long way. Weighted down
 			// because "key: value" is what documents look like, and an even
 			// split would spend half the corpus's mappings on a form few
@@ -659,4 +679,14 @@ func quoteEmpty(s string) string {
 	}
 
 	return s
+}
+
+// bomLabel names the byte order mark in a style's text, so DistinctStyles tells
+// two styles apart by it.
+func bomLabel(on bool) string {
+	if on {
+		return " bom"
+	}
+
+	return ""
 }

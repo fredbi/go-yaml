@@ -131,6 +131,14 @@ func Refusals() []Refusal {
 		// written for. See TestTheParserVocabularyGapIsMeasured, which reports
 		// what is left.
 		{
+			// An anchor alone at the column of a key whose value is empty:
+			// there is no node for it to name and no entry it can open.
+			// Pinned on 2026-09-13, when the byte order mark reshuffled the
+			// draw past it.
+			Name: "an anchor alone at an empty entry's own column",
+			Src:  "a:\n&x\n", Says: "anchor is not allowed in this context",
+		},
+		{
 			// Two the yamlcorpus/28 draw stopped reaching, pinned on the same
 			// day for the same reason as the block scalar below: a complaint
 			// the generated documents happen to provoke is reachable rather

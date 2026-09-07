@@ -38,6 +38,13 @@ func Emit(v Value, st Style) string {
 func (e *emitter) emit(v Value) string {
 	st := e.st
 
+	// 5.2 puts the byte order mark in l-document-prefix, so it stands before
+	// the directives and the marker alike.
+	if st.ByteOrderMark {
+		e.feat.add(FeatureByteOrderMark)
+		e.buf.WriteRune(bom)
+	}
+
 	// A directive applies to the document the directives end marker opens, so
 	// writing one forces the "---" whatever the style asked for.
 	if st.Version != "" {
@@ -53,7 +60,11 @@ func (e *emitter) emit(v Value) string {
 		e.buf.WriteString("%TAG !" + st.TagHandle + "! " + secondaryPrefix + "\n")
 	}
 
-	if st.Markers || e.buf.Len() > 0 {
+	// A directive forces the marker; a byte order mark does not, so the buffer
+	// being non-empty is no longer the question it used to be.
+	wroteADirective := st.Version != "" || (st.TagSpelling == SpellHandle && holdsSecondaryTag(v))
+
+	if st.Markers || wroteADirective {
 		e.feat.add(FeatureDocumentMarker)
 		e.buf.WriteString("---\n")
 	}

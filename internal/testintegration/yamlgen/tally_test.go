@@ -90,13 +90,22 @@ func (c *tally) report(t *testing.T, p yamlgen.Property) {
 // suspectAfter is how many draws an entry has to reach before never diverging
 // counts against it.
 //
-// Measured rather than picked. Over a 40,000-draw run on 2026-09-13 the live
-// entries that diverge least often are drawn 102 and 141 times, and the two
-// that were suppressing coverage were drawn 1,256 and 1,077 -- so the gap is
-// wide and 200 sits in it. A short run reaches nothing here and the check stays
-// quiet, which is the point: it should fire on a real sweep and never on a
-// developer's default `go test`.
-const suspectAfter = 200
+// It was 200, chosen from the gap between the entries that were suppressing
+// coverage (drawn 1,256 and 1,077) and the live ones that diverge least often
+// (102 and 141). That ignored the rate. render/a-blank-line-before-a-comment
+// diverges 3 times in 805 draws, and at 329 draws a rate that low shows zero
+// about three runs in ten -- so the check failed a green tree on 2026-09-13,
+// and its own pin said the defect was still there.
+//
+// 1,500 is the number that makes a false alarm rare at the lowest rate any
+// entry has shown: 0.99627^1500 is under half a percent. What it gives up is
+// catching a stale entry early, and that costs nothing, because a stale entry
+// is caught by its own pin failing on a plain `go test` -- see
+// [yamlgen.Divergence.Pin]. What is left for this check is the case the pin
+// cannot see: an entry whose defect is live and whose predicate has drifted so
+// wide it never lands on it, over a sweep big enough for the distinction to
+// mean something.
+const suspectAfter = 1500
 
 // totals accumulates every tally in the package, since each property test has
 // its own and an entry claims several.
@@ -144,17 +153,16 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if suspect := totals.stale(); len(suspect) > 0 {
-		fmt.Fprintln(os.Stderr, "\nledger entries that excuse documents and record nothing:")
+		fmt.Fprintln(os.Stderr, "\nledger entries whose predicate never lands on the defect:")
 		for _, line := range suspect {
 			fmt.Fprintln(os.Stderr, "  "+line)
 		}
 		fmt.Fprintln(os.Stderr,
-			"Either the defect is fixed and the entry goes, or the predicate matches a family the\n"+
-				"defect is not in and wants narrowing. Every document matched here was excused from\n"+
-				"its property and never compared.\n"+
-				"The pin named above is what tells the two apart: it runs the one document the entry\n"+
-				"was written for. Still failing means the predicate wants narrowing; passing means the\n"+
-				"defect is fixed and the entry goes to fixed_test.go as a TestFixed.")
+			"Every document matched here was excused from its property and never compared, and none\n"+
+				"of them diverged, so the predicate is matching a family the defect is not in and\n"+
+				"wants narrowing. Run the pin named above first: it reproduces the entry with one\n"+
+				"document, so if it fails the defect is fixed and the entry goes to fixed_test.go as\n"+
+				"a TestFixed instead.")
 
 		if code == 0 {
 			code = 1
