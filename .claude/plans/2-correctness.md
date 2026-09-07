@@ -289,7 +289,7 @@ record it and decide deliberately rather than picking whichever is convenient.
 | the grammar oracle, against the suite | **393 of 393** |
 | the generated corpus | 605 of 605 buckets entered, 12,507 cases, 60 distinct parser complaints |
 
-**Fourteen defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
+**Thirteen defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
 2026-09-10; 8 and 9 were opened when the generator first drew numbers past what Go holds; **11 to 18 and 21
 to 23 on 2026-09-11**, as the generator learned to write a tag three ways, to reach the shapes the flow axes
 need, to write a number in three bases, to read a document into a Go type, and to write a mapping entry the
@@ -298,7 +298,7 @@ and to declare the version a document is read under; 10, 19 and 20 on 2026-09-06
 defects beside them. 10 was closed the same day it was opened, by `7dc4075`. None is old: the fourteen
 before them were fixed and merged.
 
-✅ **Nineteen left on 2026-09-12, on the `conformance-fixes` branch.**
+✅ **Twenty-two left on 2026-09-12, on the `conformance-fixes` branch.**
 All three clusters are closed; 29 and 36 were opened in their place.
 
 | # | closed by | what the fix was |
@@ -310,6 +310,9 @@ All three clusters are closed; 29 and 36 were opened in their place.
 | 8, 9 | `06fd2a1` | `ast.readsAsFloat` took `strconv.ParseFloat`'s `ErrRange` for "not a float", and `castToFloatValue` and `taggedInteger` narrowed what the node held. Both read `token.ParseBigFloat` and `token.ParseBigInteger` now, which is what the untagged spellings already build |
 | 31 | `ef173e0` | `decodeSlice` read a `!!binary` node as a YAML sequence. It asks `binaryBytes` first, which reads the base64 `ast.TagNode.Resolve` has already checked |
 | 34 | `77c8a3d` | the demotion for a tag that resolves to nothing reached the tag's own next token, and an anchor may stand there. `anchoredScalar` reaches the scalar the anchor names |
+| 12 | `49d366e` | a `<<` names no key, so `collectMerge` separated the mapping it brings in from a key that was never written -- the `:` stood before the mark the text is cut from and stayed behind, and where the mapping held an entry `separate` truncated to `frame.valueAt` and took the earlier value with it. The sequence form lost the flag on its first element |
+| 33 | `91c62a3` | the scalar under a `?` arrives with `at.Key` false, so it was written as a value -- which keeps the digits the document wrote -- and `closeKey` quoted the result. `jsonWriter.scalar` asks `writingKey` as well |
+| 32 | `09ece7f` | `tagZeroJSON` already wrote RFC 3339 for a `!!timestamp` on no value, so writing the source text for one with a value made ToJSON disagree with itself before it disagreed with the value converter |
 | 16 | `eba01d5` | 8.2.1 keeps a block sequence off the line a node's properties are written on, which the grouper already said for an anchor. `tagOrLetGo` says it for a tag, so `!foo - 1` and `!!int - 8` draw one message that names the rule instead of being read and refused respectively |
 | 7 | `1d4e84c` | four scan steps claimed a character before the anchor name could hold it -- `scanReservedChar` for `@` and `` ` ``, the comment rule for `#`, the quoted readers for a quote, `scanPlainFirst` for `%`. Each asks `inAnchorName` now, which is `Scanner.isAnchor` and the character together |
 | 1, 36 | `b5ca59a` | `keyWindow.hasNoKey` short-circuited on a candidate the grouping had already made something of and never reached the line test, so the entry above became the key of the `:` below it. An implicit key stands on the line its `:` does (7.4.2); a flow `:` and an explicit key are the two exceptions. It closed a laxity hole with them -- `a Null` over `: 1` was read here and refused by every oracle |
@@ -351,21 +354,18 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
 | 30 | decoder | a key tagged `!!timestamp` or `!!binary` is named by Go's `%v` | `!!timestamp 2001-12-14: x` → key `"2001-12-14 00:00:00 +0000 UTC"` | `Departures` |
-| 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
-| 32 | ToJSON | a `!!timestamp` is written as the text it was spelled with | `!!timestamp 2001-12-14t21:59:43.1Z` → `"2001-12-14t21:59:43.1Z"`, where the value converter writes `"2001-12-14T21:59:43.1Z"` | `codec/zz_timestampjson_test.go` |
-| 33 | ToJSON | a float key written the long way keeps its source text | `? 1e3` / `: x` → `{"1e3":"x"}`, where `1e3: x` → `{"1000.0":"x"}` | `codec/zz_floatkey_test.go` |
 | 39 | ToJSON | an empty first document is skipped, where the decoder keeps it | `---` / `---` / `b: 2` → `{"b":2}`, where the decoder reads `null` | `codec/zz_emptyfirstdoc_test.go` |
 | 37 | ToJSON | two keys named alike are written as a repeated member name | `1: x` / `"1": y` → `{"1":"x","1":"y"}` — RFC 8259 §4 makes a name SHOULD-unique, and every reader collapses it | `codec/zz_keynaming_test.go` |
 | 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
 | 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Three in the parser, four in the decoder, five in `ToJSON`, two in the walking reader, two in the
+**Three in the parser, four in the decoder, two in `ToJSON`, two in the walking reader, two in the
 renderer.**
 off this table, and 36 put one back. 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary`
 draw and by the reshuffle it caused, and 31 and 34 were closed the same day they were filed -- 31 was
 cluster A's fourth symptom and 34 was one line of the tag fix.
 
-📌 **What is left has no cluster in it.** The parser's two are separate shapes; the decoder's four split as
+📌 **What is left has no cluster in it.** The parser's three are separate shapes; the decoder's four split as
 the key-naming pair (3, 4), the exponent cap (5) and the tagged-key naming (30). The renderer's three are
 the closest thing to a group: 24, 29 and 36 are all a block construct and the line after it, and 24's own
 entry asks for its predicate to be widened.
