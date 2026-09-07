@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -151,6 +152,30 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
+		Name: "parse/a-version-directive-spans-the-whole-stream",
+		Pin:  "TestDefectAVersionDirectiveSpansTheWholeStream",
+		Reason: "A `%YAML` directive is applied to every document of the stream rather than to the one " +
+			"it precedes. `%YAML 1.1` over `---` over `a: yes` over `---` over `b: yes` reads true " +
+			"twice, where the second document declares nothing and should be read under the core " +
+			"schema -- which reads `yes` as the string.\n\n" +
+			"**The library disagrees with itself here.** 3.2.2.2 scopes an anchor to its own document " +
+			"and it enforces that: `a: &x 1` over `---` over `b: *x` is refused with " +
+			"`could not find alias \"x\"`. A `%TAG` handle is scoped the same way, and all four " +
+			"sources agree -- `%TAG !e!` over one document leaves `!e!str` undefined in the next. So " +
+			"one declaration is scoped and the other is not.\n\n" +
+			"⚖️ Ruled by Fred on 2026-09-13: **documents are independent**, which is the stance this " +
+			"package already takes on anchors, so this is a defect rather than a question. The field " +
+			"is split -- libfyaml 1.0.0b1 spans as this library does, and other implementations treat " +
+			"spanning as a bug -- so a laxer reading is a user option to offer later rather than the " +
+			"default to keep. 6.8's wording is the dark corner behind it.\n\n" +
+			"The predicate asks whether the value means something different under the two readings, " +
+			"since a stream whose documents mean the same either way reads correctly however the " +
+			"directive is scoped. That costs two emissions, and only on the draws that write a " +
+			"directive without a suffix.",
+		Property: StreamDecode,
+		Match:    writesAStreamUnderOneDirective,
+	},
+	{
 		Name: "parse/a-document-suffix-mishandles-a-propertied-block-scalar",
 		Pin:  "TestDefectADocumentSuffixMishandlesAPropertiedBlockScalar",
 		Reason: "A bare document after a `...` suffix, whose root is a block scalar carrying an anchor " +
@@ -296,6 +321,30 @@ var Ledger = []Divergence{
 		Property: RenderValid | Settle,
 		Match:    writesABlockScalarBesideAnEmptyKey,
 	},
+}
+
+// writesAStreamUnderOneDirective reports whether a stream writes a version
+// directive that only its first document carries, over a value the two readings
+// disagree about.
+//
+// Both halves are needed. Without a "..." suffix only the first document may
+// declare a directive -- 9.1.1 puts one in l-directive-document, which follows
+// a suffix -- so the documents after it are core documents. And a value the two
+// schemas read alike is read correctly however the directive is scoped, so
+// matching it would excuse documents that are fine.
+//
+// The second half is measured rather than approximated: it writes the value
+// twice and compares what each says it means. That is two emissions, and the
+// cheap half above keeps them off every draw that does not write a directive.
+func writesAStreamUnderOneDirective(v Value, st Style) bool {
+	if st.Version == "" || st.DocumentSuffix {
+		return false
+	}
+
+	under, core := st, st
+	core.Version = ""
+
+	return !reflect.DeepEqual(Write(v, under).Means, Write(v, core).Means)
 }
 
 // writesAPropertiedRootBlockScalarAfterASuffix reports whether the style

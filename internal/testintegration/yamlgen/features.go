@@ -247,30 +247,47 @@ func Write(v Value, st Style) Written {
 // gives it several, so stating an answer would be stating one this package has
 // not measured.
 //
-// MeansUnclear is set for a stream declaring "%YAML 1.1", and that is a ruling
-// rather than a gap. Measured on 2026-09-13: this library and libfyaml 1.0.0b1
-// both apply a version directive to *every* document of the stream, not only to
-// the one it precedes -- "%YAML 1.1" over "---" over "a: yes" over "---" over
-// "b: yes" reads true twice. A %TAG handle is scoped the other way by all four
-// sources, so the library scopes one directive per document and not the other.
-// Since two implementations agree and the specification's own wording is what
-// is in question, the generator states no meaning here rather than accusing
-// anybody.
+// A directive is scoped to the document it precedes, so a document that
+// declares none is read under the core schema whatever stood above the one
+// before it. That is Fred's ruling of 2026-09-13 and it follows the stance this
+// package already takes on anchors: **documents are independent**. 3.2.2.2
+// scopes an anchor to its own document and the library enforces that -- an
+// alias naming an earlier document's anchor is refused -- so scoping one
+// declaration and not the other is the library disagreeing with itself.
+//
+// The field is split on it. libfyaml 1.0.0b1 spans, as this library does; other
+// implementations treat spanning as a bug. So it is a defect here rather than a
+// question, and a laxer reading is a user option to offer later rather than the
+// default to keep.
 func WriteStream(docs []Value, st Style) Written {
 	e := newRecordingEmitter(st)
 	text := e.emitStream(docs)
 
 	means := make([]any, 0, len(docs))
-	for _, v := range docs {
+
+	var unclear bool
+
+	for i, v := range docs {
 		valueFeatures(v, e.feat)
-		means = append(means, v.Decoded())
+
+		// What one document denotes, under the version that document declares.
+		// Only the first carries the style's directive unless a "..." suffix
+		// let every document write its own -- see emitStream.
+		under := st
+		if i > 0 && !st.DocumentSuffix {
+			under.Version = ""
+		}
+
+		alone := Write(v, under)
+		means = append(means, alone.Means)
+		unclear = unclear || alone.MeansUnclear
 	}
 
 	return Written{
 		Text:         text,
 		Features:     e.feat.sorted(),
 		Means:        means,
-		MeansUnclear: st.Version == Reading11Version && len(docs) > 1,
+		MeansUnclear: unclear,
 	}
 }
 
