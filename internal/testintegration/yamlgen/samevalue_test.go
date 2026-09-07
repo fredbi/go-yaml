@@ -40,7 +40,10 @@ func sameValue(want, got any) bool {
 		// reflect's equality compares a big.Float's Accuracy, which records how
 		// the last rounding went rather than what the number is -- and this
 		// library parses the magnitude and negates it, so -1e+330 comes back
-		// carrying Exact where the same text parsed whole carries Above. Same
+		// carrying Exact where the same text parsed whole carries Above. An
+		// alias adds a second way to reach the same split: the walking reader
+		// copies the anchored value with big.Float.Set, which always reports
+		// Exact, so "&a1 1e+330" carries Below and "*a1" carries Exact. Same
 		// number, same precision, different bookkeeping.
 		//
 		// The precision is still compared, because a change there would be a
@@ -48,10 +51,21 @@ func sameValue(want, got any) bool {
 		g, ok := got.(*big.Float)
 
 		return ok && w.Prec() == g.Prec() && w.Cmp(g) == 0
+	case big.Float:
+		// Normalize follows a pointer to the value it names, so a comparison
+		// made after it never sees the *big.Float above and would fall through
+		// to reflect's equality, Accuracy and all.
+		g, ok := got.(big.Float)
+
+		return ok && w.Prec() == g.Prec() && w.Cmp(&g) == 0
 	case *big.Int:
 		g, ok := got.(*big.Int)
 
 		return ok && w.Cmp(g) == 0
+	case big.Int:
+		g, ok := got.(big.Int)
+
+		return ok && w.Cmp(&g) == 0
 	case map[string]any:
 		g, ok := got.(map[string]any)
 		if !ok || len(w) != len(g) {
