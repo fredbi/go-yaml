@@ -365,6 +365,23 @@ func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 		return "a repeated key is recorded and refused at the load (3.2.1.1)", true
 	}
 
+	if holdsAnAnchorNamingNothingInAFlowCollection(got) &&
+		(strings.Contains(err.Error(), "must be specified") ||
+			strings.Contains(err.Error(), "sequence end token") ||
+			strings.Contains(err.Error(), "flow mapping end token")) {
+		// An anchor with no node is a node: 7.1 lets a flow entry carry
+		// properties and nothing else, and "{a: &b}" keys "a" on the empty
+		// node &b names. refparser loses the closing bracket and complains
+		// about the separator instead. Fixed in the shipped parser on
+		// 2026-09-13; both syntax oracles accept the document.
+		//
+		// Both halves are required, since the messages are ordinary flow
+		// complaints on their own: refparser's refusal, and an anchor over an
+		// empty node inside a flow collection in the tree the shipped parser
+		// built.
+		return "an anchor with no node is a node (7.1)", true
+	}
+
 	if strings.Contains(err.Error(), "unexpected directive value") && countDirectives(got) > 1 {
 		// 6.8 puts no limit on how many directives a document may carry, and a
 		// "%YAML" beside a "%TAG" is the ordinary prelude. refparser refuses
@@ -384,6 +401,54 @@ func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 	}
 
 	return "a collection tag reads the node under it, and the load refuses a kind it does not name", true
+}
+
+// holdsAnAnchorNamingNothingInAFlowCollection reports whether f holds, inside a
+// flow collection, an anchor standing on a node that writes nothing.
+func holdsAnAnchorNamingNothingInAFlowCollection(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	for _, doc := range f.Docs {
+		if anchorsNothingInFlow(doc.Body, false) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func anchorsNothingInFlow(n ast.Node, inFlow bool) bool {
+	switch node := n.(type) {
+	case *ast.AnchorNode:
+		if inFlow && node.Value == nil {
+			return true
+		}
+		if _, empty := node.Value.(*ast.NullNode); empty && inFlow {
+			return true
+		}
+
+		return anchorsNothingInFlow(node.Value, inFlow)
+	case *ast.TagNode:
+		return anchorsNothingInFlow(node.Value, inFlow)
+	case *ast.SequenceNode:
+		for _, v := range node.Values {
+			if anchorsNothingInFlow(v, inFlow || node.IsFlowStyle) {
+				return true
+			}
+		}
+	case *ast.MappingNode:
+		for _, v := range node.Values {
+			if anchorsNothingInFlow(v, inFlow || node.IsFlowStyle) {
+				return true
+			}
+		}
+	case *ast.MappingValueNode:
+		return anchorsNothingInFlow(node.Key, inFlow) || anchorsNothingInFlow(node.Value, inFlow)
+	}
+
+	return false
 }
 
 // countDirectives returns how many directives f carries.
