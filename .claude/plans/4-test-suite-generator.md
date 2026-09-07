@@ -389,6 +389,41 @@ Actions below.
 
 ## Open items
 
+### 📌 Rebasing `conformance-3` onto `conformance-fixes` — written 2026-09-13
+
+Five register entries describe defects that branch has closed. Each was measured against
+`conformance-fixes` at `51b9485` with a clean tree, so the list is what to expect and not a guess.
+
+**Every one of them announces itself.** A `TestDefect` asserts the defect is *present*, so a fix turns it
+red on a plain `go test` — no sweep, no draw count, no threshold. That is the property to rely on at a
+rebase, and it is why the deletions below are safe to leave until then rather than guessed at in advance:
+the tree says which entries have gone stale, in the order they are hit.
+
+| what goes | defect | closed by | how it announces itself |
+|---|---|---|---|
+| `yamlgen.Strict` "a tag before an anchor on a flow collection used as a key" | 15 | `d7f86ac` | `TestValidDocumentsTheLibraryRefusesAreStillRefused` logs `NOW READ` |
+| `yamlgen.Strict` "a secondary tag before an anchor on an empty flow value" | 35 | `0b321d7` | same |
+| `floatTagOnANumberPastFloat64` in `yamlcorpus/reading_library_test.go` | 8 | `06fd2a1` | nothing — a hold-out goes quiet, so this one is the only item that has to be remembered |
+| `Ledger` `decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved`, its predicate and its pin | 14 | `f1adc59` | `TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved` fails |
+| `Ledger` `parse/a-local-tag-before-an-anchor-does-not-type-its-scalar` and its predicate | 34 | `77c8a3d` | `TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar` fails |
+
+⚠️ **The last one inverts rather than deletes.** Its pin holds all nine documents of the matrix — the two
+property orders, the four tag spellings, and the three contexts — and that matrix is what stops a later fix
+trading one spelling for another. It becomes `TestFixedALocalTagBeforeAnAnchorTypesItsScalar` in
+`fixed_test.go`. Defect 14's inverted pin already exists on the other branch as
+`TestFixedAKeyAfterALongTagOnAnEmptyValueResolves`, so mine is deleted rather than moved.
+
+📌 **The third row is the lesson.** A ledger entry and a `Strict` entry both fail loudly when their defect
+is fixed; a *hold-out* — a document skipped inside a sweep — just stops being needed and says nothing. Every
+hold-out added while waiting on another branch should be recorded here when it is added, because nothing
+else will remember it.
+
+📌 **Two entries were narrowed after they had already been fixed elsewhere.** The 1,077-draw narrowing of
+defect 14 on 2026-09-13 was correct against `master` and moot against `conformance-fixes`, which had closed
+it four commits earlier. Measuring against your own base is right; the cost is that a long-lived branch
+does work the other branch has already made unnecessary. Worth a check against the other tip before
+narrowing a predicate, not before filing one.
+
 ### ✅ A `Value` departure is now run — opened and closed 2026-09-13
 
 `yamlcorpus.TestTheLibraryMatchesItsDeclaredStance` builds its `known` map from the entries whose `Kind` is
