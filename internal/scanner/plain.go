@@ -6,6 +6,7 @@ package scanner
 import (
 	"encoding/binary"
 
+	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/internal/scanner/swar"
 )
 
@@ -65,6 +66,12 @@ func (s *Scanner) alnumRun(ctx *Context) int32 {
 //     it before the switch handed here -- sets the indent state to Keep and returns. Setting it once stands for
 //     setting it n times.
 func (s *Scanner) takeAlnumRun(ctx *Context, n int32) {
+	if probe.Enabled {
+		probe.Count("scan.alnum.runs", 1)
+		probe.Count("scan.alnum.bytes", int64(n))
+		probe.Max("scan.alnum.longest", int64(n))
+	}
+
 	ctx.buf = append(ctx.buf, ctx.raw[ctx.idx:ctx.idx+n]...)
 	ctx.notSpaceCharPos = int32(len(ctx.buf))
 	ctx.skipOrigin(n)
