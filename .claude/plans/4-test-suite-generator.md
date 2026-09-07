@@ -422,6 +422,33 @@ their own. `KeyShapes` gains "a key written +.inf beside one written .inf" and t
 Checked against `conformance-fixes` at `8ee7d6a`, where `bd8b723` closed "a local tag on an empty value":
 the test fails there and prints the document, what it reads now, and the sentence that has expired.
 
+### ✅ A ledger entry that records nothing now fails the run — 2026-09-13
+
+`tally` counted how often each entry was drawn and how often it diverged, and logged both. Nobody read the
+log. An entry drawn many times and never diverging is either fixed or matching a family it is not in, and
+both cost the same thing: **every document it matches is excused from its property and never compared.**
+
+`TestMain` aggregates every property's tally and fails past `suspectAfter` draws with no divergence. The
+threshold is 200, measured: the live entries that diverge least often are drawn 102 and 141 times over a
+40,000-draw run, and the two that were suppressing coverage were drawn 1,256 and 1,077. A default
+`go test` reaches nothing and stays quiet.
+
+Two were live when it was built, and both had been logging their zero for days:
+
+- `decode/one-non-string-key-zeroes-a-whole-struct` — closed by `7dc4075` on 2026-09-07, inverted pin
+  already in `defects_test.go`, ledger entry left behind. **1,256 documents a run.** Deleted.
+- `decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved` — still live, and matching *any*
+  tagged null anywhere in a tree. The defect needs a resolving key on the line below, so the predicate
+  asks for that: **1,077 draws became 24**, and the thousand in between are back under `Decode` and
+  `Render`.
+
+📌 The sibling register got the same treatment the same day — see the closed item above on
+`Departure.Departs`. Both registers had the same shape of hole: an entry is written once and re-read by
+nobody, so the test has to be what re-reads it.
+
+📌 The next-widest predicate is `decode/a-tagged-block-mapping-does-not-resolve-its-keys` at 62
+divergences in 5,643 draws. It closes on the `conformance-fixes` rebase, so it is not worth narrowing.
+
 ### 🎯 The corpus never reads a document into a Go type — opened 2026-09-06
 
 Every document this generator draws is read into an `any`, here and in `conformance/` and `yamlcorpus`
