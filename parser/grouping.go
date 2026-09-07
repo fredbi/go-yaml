@@ -80,7 +80,7 @@ func init() {
 // Walking the chain to learn as much costs a call and a type test at every
 // stage; the table answers it once.
 func (g *grouper) feed(tk *tapeToken, out []*tapeToken) []*tapeToken {
-	if g.settled() && !readByAStage[tk.Type()] {
+	if g.settled() && !readsByAStage(tk.Type()) {
 		// stageLineComments notes every token it hands on, a comment closing a
 		// line attaching to whatever stood before it. Taking the short way
 		// still owes it that note.
@@ -119,16 +119,27 @@ func (g *grouper) settled() bool {
 		g.explicit.key == nil && g.directive.head == nil
 }
 
-// readByAStage says which token types a stage reads. Every other type walks the
-// chain only to be handed from one stage to the next.
-var readByAStage = map[token.Type]bool{
-	token.CommentType:       true, // stageLineComments
-	token.LiteralType:       true, // stageBlockScalars
-	token.FoldedType:        true,
-	token.AnchorType:        true, // stageAnchors
-	token.AliasType:         true,
-	token.SequenceEntryType: true,
-	token.TagType:           true, // stageScalarTags
+// readByAStage says which token types a stage reads, one bit per type. Every
+// other type walks the chain only to be handed from one stage to the next.
+//
+// A map lookup here hashed a token type once per token and came to 4.2% of a
+// decode. The types are a dense uint8 range, so the set fits one word and the
+// test is a shift and an AND.
+const readByAStage = 1<<token.CommentType | // stageLineComments
+	1<<token.LiteralType | // stageBlockScalars
+	1<<token.FoldedType |
+	1<<token.AnchorType | // stageAnchors
+	1<<token.AliasType |
+	1<<token.SequenceEntryType |
+	1<<token.TagType // stageScalarTags
+
+// readByAStage addresses a token type by shifting, so a type past bit 63 would
+// drop out of the set silently. This fails to compile if one ever is.
+const _ = uint(63 - token.InvalidType)
+
+// readsByAStage reports whether any stage reads tokens of type typ.
+func readsByAStage(typ token.Type) bool {
+	return readByAStage&(uint64(1)<<typ) != 0
 }
 
 // stageAnchorsWithScalarTags reads a group type rather than a token type, and
