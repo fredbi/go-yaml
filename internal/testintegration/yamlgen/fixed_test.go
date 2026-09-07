@@ -5,6 +5,7 @@ package yamlgen_test
 
 import (
 	"math"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -1240,5 +1241,55 @@ func TestFixedAnIntTagReadsIntoAGoInteger(t *testing.T) {
 			require.Errorf(t, err, "%q", src)
 			assert.Contains(t, err.Error(), "overflow", "%q", src)
 		}
+	})
+}
+
+// TestFixedAFloatTagOnAWideNumberKeepsItsWidth: "!!float" on a number no
+// float64 holds reads as a big.Float, as the same number untagged always did.
+//
+// It failed two ways. Large, the parse stopped: ast.readsAsFloat took
+// strconv.ParseFloat's ErrRange for "not a float", so "!!float 1e+310" was a
+// tag naming a type its scalar is not and the document was refused. Small, it
+// was worse than refused: "!!float 1e-400" came back as the float64 zero with
+// nothing reported, because castToFloatValue narrowed the big.Float that the
+// node held.
+//
+// codec.ToJSON lost the same numbers, writing "0.0" for both, and now writes
+// them out in full.
+func TestFixedAFloatTagOnAWideNumberKeepsItsWidth(t *testing.T) {
+	t.Run("the decoder reads a big.Float, tagged or not", func(t *testing.T) {
+		for _, src := range []string{
+			"a: !!float 1e+310\n", "a: 1e+310\n",
+			"a: !!float 1e-400\n", "a: 1e-400\n",
+			"a: !!float -1e+310\n",
+			"a: !<tag:yaml.org,2002:float> 1e+310\n",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.IsType(t, new(big.Float), got.(map[string]any)["a"], "%q", src)
+		}
+	})
+
+	t.Run("ToJSON writes the number, tagged or not", func(t *testing.T) {
+		for _, tc := range []struct{ src, want string }{
+			{src: "!!float 1e+310\n", want: "1e+310"},
+			{src: "1e+310\n", want: "1e+310"},
+			{src: "!!float 1e-400\n", want: "1e-400"},
+			{src: "1e-400\n", want: "1e-400"},
+			{src: "!!float -1e+310\n", want: "-1e+310"},
+			// A float the machine word does hold still writes its fraction.
+			{src: "!!float 1.5\n", want: "1.5"},
+			{src: "!!float 7\n", want: "7.0"},
+		} {
+			out, err := codec.ToJSON([]byte(tc.src))
+			require.NoErrorf(t, err, "%q", tc.src)
+			assert.Equal(t, tc.want, string(out), "%q", tc.src)
+		}
+	})
+
+	t.Run("and an int tag on a wide integer still reads as a big.Int", func(t *testing.T) {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("a: !!int 123456789012345678901\n"), &got))
+		assert.IsType(t, new(big.Int), got.(map[string]any)["a"])
 	})
 }

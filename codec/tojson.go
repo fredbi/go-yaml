@@ -512,13 +512,9 @@ func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	case token.StringTag:
 		written = appendJSONString(nil, res.Text)
 	case token.IntegerTag:
-		written = strconv.AppendInt(nil, taggedInteger(res.Text), 10)
+		written = appendJSONScalar(nil, taggedInteger(res.Text))
 	case token.FloatTag:
-		f, err := strconv.ParseFloat(res.Text, 64)
-		if err != nil {
-			f = 0
-		}
-		written = appendJSONFloat(nil, f)
+		written = appendJSONFloat(nil, taggedFloat(res.Text))
 	case token.BooleanTag:
 		b, _ := token.ParseBool(strings.ToLower(res.Text))
 		written = strconv.AppendBool(nil, b)
@@ -868,15 +864,45 @@ func jsonValueEnd(text []byte, i int) int {
 // taggedInteger reads the whole number a "!!int" stands on. A text that is not
 // a number at all counts as zero, and one written as a float keeps its whole
 // part: "!!int 3.7" is 3.
-func taggedInteger(text string) int64 {
-	if n, err := strconv.ParseInt(text, 0, 64); err == nil {
+func taggedInteger(text string) any {
+	typ := token.ScalarType(text, token.Schema12)
+	if n, ok := token.ParseInteger(text, typ); ok {
 		return n
 	}
+	if b, ok := token.ParseBigInteger(text, typ); ok {
+		// A number wider than a machine word keeps its digits, as the same
+		// number untagged already does. strconv.AppendInt on an int64 wrote
+		// "!!int 123456789012345678901" out as math.MinInt64.
+		return b
+	}
 	if f, err := strconv.ParseFloat(text, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
+		// "!!int" over a float, which the decoder truncates towards zero.
 		return int64(f)
 	}
 
-	return 0
+	return int64(0)
+}
+
+// taggedFloat reads what "!!float" was written over, keeping the width the
+// number needs.
+//
+// strconv.ParseFloat reports ErrRange for a number outside float64 and hands
+// back an infinity or a zero, and writing that gave "0.0" for "!!float 1e+310"
+// and for "!!float 1e-400" alike. token.ParseBigFloat reads both, which is what
+// the untagged spellings already convert through.
+func taggedFloat(text string) any {
+	typ := token.ScalarType(text, token.Schema12)
+	if f, ok := token.ParseFloat(text, typ); ok {
+		return f
+	}
+	if b, ok := token.ParseBigFloat(text, typ); ok {
+		return b
+	}
+	if f, err := strconv.ParseFloat(text, 64); err == nil {
+		return f
+	}
+
+	return float64(0)
 }
 
 // isScalarNode reports whether n is one of the nodes holding a single value.

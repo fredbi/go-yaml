@@ -5,7 +5,6 @@ package yamlgen_test
 
 import (
 	"fmt"
-	"math/big"
 	"testing"
 	"time"
 
@@ -96,48 +95,6 @@ func TestDefectAMappingKeyWrittenEmptyIsRefused(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.says)
 		})
 	}
-}
-
-// TestDefectAFloatTagOnAWideNumberIsNotRead: `!!float` on a number no float64
-// holds fails two ways, where the same number untagged reads correctly.
-//
-// The wide types are built — untagged, both forms come back as a big.Float, and
-// `!!int` on an integer past a machine word comes back as a big.Int. It is the
-// float tag alone that does not know about them.
-func TestDefectAFloatTagOnAWideNumberIsNotRead(t *testing.T) {
-	t.Run("large, the parse stops", func(t *testing.T) {
-		const src = "a: !!float 1e+310\n"
-		wellFormed(t, src)
-
-		var got any
-		err := yaml.Unmarshal([]byte(src), &got)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `cannot read "1e+310" as !!float`)
-	})
-
-	t.Run("small, it comes back as zero", func(t *testing.T) {
-		const src = "a: !!float 1e-400\n"
-		wellFormed(t, src)
-
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-		assert.Equal(t, map[string]any{"a": float64(0)}, got,
-			"today: the value is gone and nothing reported it")
-	})
-
-	t.Run("untagged, both read as a big.Float", func(t *testing.T) {
-		for _, src := range []string{"a: 1e+310\n", "a: 1e-400\n"} {
-			var got any
-			require.NoError(t, yaml.Unmarshal([]byte(src), &got))
-			assert.IsType(t, new(big.Float), got.(map[string]any)["a"], "%q", src)
-		}
-	})
-
-	t.Run("and an int tag on a wide integer is read", func(t *testing.T) {
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("a: !!int 123456789012345678901\n"), &got))
-		assert.IsType(t, new(big.Int), got.(map[string]any)["a"])
-	})
 }
 
 // TestDefectABinaryTagCannotBeReadIntoAGoByteSlice: `!!binary` cannot be read

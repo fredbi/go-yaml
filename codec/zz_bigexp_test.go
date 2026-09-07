@@ -91,44 +91,29 @@ func typeName(v any) string {
 	}
 }
 
-// TestDefectAnIntTagOnAWideIntegerWritesMinInt64: an explicit `!!int` on an
-// integer past a machine word makes ToJSON write math.MinInt64, whatever the
-// value and whatever its sign.
+// TestFixedAnIntTagOnAWideIntegerKeepsItsDigits: `!!int` on an integer past a
+// machine word converts to the number, as the same integer untagged always did.
 //
-// The decoder reads the same document correctly as a big.Int, and untagged the
-// converter writes the number — so it is the tag path in the converter alone
-// that does not know about the wide type. Found on 2026-09-10 by the corpus
-// drawing wide integers for the first time.
-func TestDefectAnIntTagOnAWideIntegerWritesMinInt64(t *testing.T) {
-	for _, src := range []string{
-		"!!int 123456789012345678901\n",
-		"!!int -123456789012345678901\n",
-		"!!int 18446744073709551616\n",
+// taggedInteger read the text with strconv.ParseInt and the converter wrote the
+// int64 it got back, so every wide integer came out as math.MinInt64 whatever
+// its value and whatever its sign. It reads token.ParseBigInteger now, which is
+// what ast.IntegerNode.GetValue reads for the untagged spelling.
+func TestFixedAnIntTagOnAWideIntegerKeepsItsDigits(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{src: "!!int 123456789012345678901\n", want: "123456789012345678901"},
+		{src: "!!int -123456789012345678901\n", want: "-123456789012345678901"},
+		{src: "!!int 18446744073709551616\n", want: "18446744073709551616"},
+		{src: "123456789012345678901\n", want: "123456789012345678901"},
+		{src: "-123456789012345678901\n", want: "-123456789012345678901"},
+		{src: "!!int -5\n", want: "-5"},
+		{src: "!!int 0x1f\n", want: "31"},
 	} {
-		out, err := codec.ToJSON([]byte(src))
-		require.NoError(t, err, "%q", src)
-		assert.Equal(t, "-9223372036854775808", string(out),
-			"today: %q converts to MinInt64", src)
+		out, err := codec.ToJSON([]byte(tc.src))
+		require.NoErrorf(t, err, "%q", tc.src)
+		assert.Equal(t, tc.want, string(out), "%q", tc.src)
 	}
 
-	t.Run("untagged the same integers convert correctly", func(t *testing.T) {
-		for _, tc := range []struct{ src, want string }{
-			{src: "123456789012345678901\n", want: "123456789012345678901"},
-			{src: "-123456789012345678901\n", want: "-123456789012345678901"},
-		} {
-			out, err := codec.ToJSON([]byte(tc.src))
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, string(out))
-		}
-	})
-
-	t.Run("and a small one under the tag is fine", func(t *testing.T) {
-		out, err := codec.ToJSON([]byte("!!int -5\n"))
-		require.NoError(t, err)
-		assert.Equal(t, "-5", string(out))
-	})
-
-	t.Run("the decoder reads it correctly either way", func(t *testing.T) {
+	t.Run("the decoder reads it as a big.Int either way", func(t *testing.T) {
 		for _, src := range []string{"!!int 123456789012345678901\n", "123456789012345678901\n"} {
 			var v any
 			require.NoError(t, codec.NewDecoder(bytes.NewReader([]byte(src))).Decode(&v))

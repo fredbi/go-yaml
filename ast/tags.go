@@ -5,6 +5,7 @@ package ast
 
 import (
 	"encoding/base64"
+	"errors"
 	"math/big"
 	"strconv"
 	"strings"
@@ -239,6 +240,12 @@ func readsAsInteger(text string) bool {
 // and of a value that is not a number.
 func readsAsFloat(text string) bool {
 	if _, err := strconv.ParseFloat(text, 64); err == nil {
+		return true
+	} else if errors.Is(err, strconv.ErrRange) {
+		// The digits are a float and no float64 holds them: "1e+310" and
+		// "1e-400" are read into a *big.Float, which is what the same numbers
+		// come back as untagged. strconv reports the magnitude and not the
+		// spelling here, so the text is still a float.
 		return true
 	}
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimPrefix(text, "-"), "+")) {

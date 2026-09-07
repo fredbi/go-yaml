@@ -245,15 +245,62 @@ func castToFloatValue(v any) any {
 
 		return f
 	case *big.Float:
-		f, _ := vv.Float64()
+		if f, exact := floatOf(vv); exact {
+			return f
+		}
 
-		return f
+		// The number outgrew float64 in one direction or the other, so it keeps
+		// the width it was read at, as castToInteger keeps a big.Int and as the
+		// same number untagged already does. Narrowed, "!!float 1e+310" came
+		// back as +Inf and "!!float 1e-400" as zero.
+		return vv
 	case string:
-		// if error occurred, return zero value
-		f, _ := strconv.ParseFloat(vv, 64)
+		// The text came from a node "!!float" stands over, which the resolver
+		// may have left as a string: under a "%YAML 1.1" directive "1e-330" is
+		// a string, because 1.1 spells the exponent form with a "." in it.
+		f, err := strconv.ParseFloat(vv, 64)
+		if err == nil && (f != 0 || spellsZero(vv)) {
+			return f
+		}
+		// Outside float64's range in one direction or the other. strconv
+		// reports ErrRange and an infinity for an overflow, and a plain zero
+		// with no error at all for an underflow, so the two are told apart by
+		// the digits.
+		if b, ok := token.ParseBigFloat(vv, token.ScalarType(vv, token.Schema12)); ok {
+			return b
+		}
+
 		return f
 	}
 	return 0
+}
+
+// spellsZero reports whether text writes the number zero, which is what tells
+// nought from a number too small for a float64: strconv.ParseFloat returns zero
+// and no error for both.
+func spellsZero(text string) bool {
+	for _, r := range text {
+		if r >= '1' && r <= '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// floatOf narrows a big.Float, and reports false where float64 has no room for
+// it: an overflow gives an infinity and an underflow a zero, and neither is the
+// number.
+func floatOf(v *big.Float) (float64, bool) {
+	f, _ := v.Float64()
+	if math.IsInf(f, 0) && !v.IsInf() {
+		return 0, false
+	}
+	if f == 0 && v.Sign() != 0 {
+		return 0, false
+	}
+
+	return f, true
 }
 
 func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (string, error) {
