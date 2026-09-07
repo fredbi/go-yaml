@@ -73,10 +73,15 @@ type Step struct {
 	// all, and the count moves past it anyway: "---" over "---" over "b: 2"
 	// hands over one mapping, at Document 1.
 	//
-	// Each "%YAML" or "%TAG" line is a document of its own, ahead of the one it
-	// applies to, so "%YAML 1.2" over "---" over "a: 1" puts the mapping at 1.
-	// A caller that wants the first document holding a value has to step past
-	// the directives itself.
+	// ⚠️ Each "%YAML" or "%TAG" line is a document of its own, ahead of the one
+	// it applies to, so "%YAML 1.2" over "---" over "a: 1" puts the mapping at
+	// 1 and two directive lines put it at 2. Counting the documents of a stream
+	// and indexing Docs therefore part company the moment a directive appears.
+	// A caller that wants the nth document a reader would see has to step past
+	// the directives itself, one at a time, testing each node for
+	// [ast.DirectiveNode] -- which is what [codec.ToJSON] does. Reading
+	// Document == 0 as "the first document" converts the directive line and
+	// writes nothing.
 	Document int
 }
 

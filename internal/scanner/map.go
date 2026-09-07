@@ -77,13 +77,19 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		s.lastDelimColumn = s.column
 
 	default:
-		if col := ctx.keyStartColumn(); col > 0 {
-			// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty
-			// scalar carrying an anchor, an alias or a tag.
-			// The following lines are measured against the start of the key, so for "&a :" that is the '&' and not the
-			// name after it.
-			s.lastDelimColumn = col
+		col := ctx.keyStartColumn()
+		if col == 0 {
+			// The entry has no key at all: "- : x" writes the ':' straight after the '-', and the '-' is not a content
+			// token, so nothing above says where the entry sits. Left at the sequence entry's own column, the value is
+			// measured from the '-' -- and a block scalar's indentation indicator counts from there, so "- : |1" over
+			// "   x" read "  x" where every oracle reads "x", and each rendering added the entry's indentation again.
+			col = s.column
 		}
+		// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty
+		// scalar carrying an anchor, an alias or a tag.
+		// The following lines are measured against the start of the key, so for "&a :" that is the '&' and not the
+		// name after it.
+		s.lastDelimColumn = col
 	}
 
 	ctx.addTokenValue(token.MakeMappingValue(s.pos()))
