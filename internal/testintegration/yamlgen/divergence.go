@@ -28,6 +28,15 @@ type Divergence struct {
 	// the other, and conflating them would let a decode defect hide behind a
 	// render defect.
 	Property Property
+	// Pin names the test in defects_test.go that reproduces this entry with one
+	// document, deterministically.
+	//
+	// Required, and TestEveryLedgerEntryNamesItsPin holds it to a test that
+	// exists. It is what the tally's staleness check sends the reader to: an
+	// entry drawn past suspectAfter times with no divergence is either fixed or
+	// matching a family it is not in, and the count alone cannot say which --
+	// the pin can, because it runs the one document the entry was written for.
+	Pin string
 	// Match reports whether this pairing has the shape.
 	Match func(Value, Style) bool
 }
@@ -132,6 +141,7 @@ func (p Property) String() string {
 var Ledger = []Divergence{
 	{
 		Name: "parse/a-mapping-key-written-empty-is-refused",
+		Pin:  "TestDefectAMappingKeyWrittenEmptyIsRefused",
 		Reason: "A mapping entry whose key is written empty -- `: 2` rather than `k: 2` -- is " +
 			"refused in several positions. YAML 1.2 accepts every one of them and the grammar " +
 			"agrees.\n\n" +
@@ -154,6 +164,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-float-tag-on-a-number-past-float64-is-not-read",
+		Pin:  "TestDefectAFloatTagOnAWideNumberIsNotRead",
 		Reason: "`!!float` written on a number a float64 cannot hold fails two ways, where the same " +
 			"number untagged reads correctly as a big.Float.\n\n" +
 			"Large, the parse stops: `!!float 1e+310` reports `cannot read \"1e+310\" as !!float`. " +
@@ -169,6 +180,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar",
+		Pin:  "TestDefectATagNotWrittenAsAShorthandDoesNotTypeItsScalar",
 		Reason: "The scanner types the scalar under a `!!` tag and leaves the one under the same tag " +
 			"written any other way as a string. `!!float 7` parses to an ast.IntegerNode under its " +
 			"ast.TagNode and `!!float 1e3` to an ast.FloatNode; `!<tag:yaml.org,2002:float> 7` and " +
@@ -192,6 +204,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-local-tag-before-an-anchor-does-not-type-its-scalar",
+		Pin:  "TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar",
 		Reason: "A local or non-specific tag written *before* an anchor stops typing its scalar, and " +
 			"the scalar resolves by the schema as though it carried no tag. `!foo true` reads " +
 			"\"true\"; `!foo &a1 true` reads the boolean true. `!foo &a1 1` reads uint64(1) where " +
@@ -213,6 +226,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-version-directive-resolves-the-root-block-scalar-it-opens",
+		Pin:  "TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens",
 		Reason: "A `%YAML` directive over a document whose body is a block scalar makes the parse fail " +
 			"when the scalar's content is a word the schema would resolve. `%YAML 1.1` over `---` " +
 			"over `>-` over ` null` reports `unexpected token. required string token`; the same three " +
@@ -238,6 +252,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
+		Pin:  "TestDefectABlankLineBeforeACommentDoesNotSettle",
 		Reason: "A blank line written before a comment is kept by the first rendering and dropped by " +
 			"the second, so the rendering never settles. `a:` over ` - x` over a blank line over " +
 			"`# c` over `b: 1` renders to `a:` over `- x` over a blank over `# c` over `b: 1`, and " +
@@ -256,6 +271,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-comment-on-an-explicit-keys-colon-line-is-dropped",
+		Pin:  "TestDefectACommentOnAnExplicitKeysColonLineIsDropped",
 		Reason: "A comment written on the `:` line of an entry written the long way, with the value " +
 			"below it, is lost. `? a` over `: # c3` over `  v` renders back as `? a` over `: v`.\n\n" +
 			"The short form keeps it: `a: # c3` over `  v` renders `a: v # c3`, moved but not lost. " +
@@ -277,6 +293,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/an-anchor-alone-after-an-explicit-key-swallows-what-follows",
+		Pin:  "TestDefectAnAnchorAloneAfterAnExplicitKeySwallowsWhatFollows",
 		Reason: "An entry written the long way whose value is an anchor and nothing else takes the " +
 			"entries after it into itself. `? a` over `: &a1` over `? b` over `: &a2` reads " +
 			"{\"a\": {\"b\": null}}, and the renderer writes the nesting back out indented.\n\n" +
@@ -298,6 +315,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "parse/a-quoted-explicit-key-refuses-a-block-scalar-value",
+		Pin:  "TestDefectAQuotedExplicitKeyRefusesABlockScalarValue",
 		Reason: "A mapping entry written the long way -- `? key` over `: value` -- is refused when the " +
 			"key is quoted and the value is a block scalar. `? \"a\"` over `: >-` over `  x` reports " +
 			"`value is not allowed in this context`; `? a` over the same two lines reads, and so does " +
@@ -323,6 +341,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "decode/an-int-tag-cannot-be-read-into-a-go-integer",
+		Pin:  "TestDefectAnIntTagCannotBeReadIntoAGoInteger",
 		Reason: "`!!int` on a value cannot be read into any Go integer -- a struct field, a slice " +
 			"element or a map value. `n: !!int 5` into a struct with an int64 field is refused with " +
 			"`cannot unmarshal int into Go struct field box.N of type int64`, and so are int and " +
@@ -339,6 +358,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "decode/a-binary-tag-cannot-be-read-into-a-go-byte-slice",
+		Pin:  "TestDefectABinaryTagCannotBeReadIntoAGoByteSlice",
 		Reason: "`!!binary` cannot be read into a Go []byte -- a struct field, a slice element or a " +
 			"map value. `a: !!binary aGVsbG8=` into a struct with a []byte field is refused with " +
 			"`string was used where sequence is expected`, and so is a map[string][]byte.\n\n" +
@@ -357,6 +377,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved",
+		Pin:  "TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved",
 		Reason: "An entry whose value is a tag written in full with nothing after it stops the key on " +
 			"the next line from resolving. `a: !<tag:yaml.org,2002:null>` over `False: 1` reads the " +
 			"key \"False\"; `a: !!null` over the same line reads \"false\".\n\n" +
@@ -376,6 +397,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "decode/a-tagged-block-mapping-does-not-resolve-its-keys",
+		Pin:  "TestDefectATaggedBlockMappingDoesNotResolveItsKeys",
 		Reason: "A tag on a block mapping leaves every key as the text that was written, where " +
 			"an untagged one names it by the canonical spelling of its type. `!foo` over " +
 			"`False: 1` reads the key \"False\"; without the tag it reads \"false\".\n\n" +

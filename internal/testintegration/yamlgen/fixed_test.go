@@ -937,3 +937,50 @@ func TestFixedFoldedScalarGainsNoBreakWhenRendered(t *testing.T) {
 		})
 	}
 }
+
+// TestFixedANonStringKeyNoLongerZeroesAWholeStruct: a key no field can be named
+// after is skipped, and the entries around it read.
+//
+// ✅ Closed 2026-09-07 in two steps. 7dc4075 inverted decodeStruct, so the
+// decode walks the document's entries and looks each field up rather than
+// walking the fields and reading the mapping into a map first -- the map came
+// back nil at the first key that was not a string, with no error, and every
+// field kept its zero. entryName then named a key by its type's own canonical
+// spelling, so a key a field can be named after reaches it: "true: a" writes a
+// field tagged "true".
+func TestFixedANonStringKeyNoLongerZeroesAWholeStruct(t *testing.T) {
+	type named struct {
+		Name string `yaml:"name"`
+		True string `yaml:"true"`
+	}
+
+	for _, src := range []string{
+		"1: a\nname: x\n",
+		"name: x\n1: a\n",
+		"1: a\nname: x\n2: b\n",
+	} {
+		wellFormed(t, src)
+
+		var got named
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equal(t, "x", got.Name, "%q: the entries around the key that cannot be named must read", src)
+	}
+
+	t.Run("a key a field can be named after reaches it", func(t *testing.T) {
+		var got named
+		require.NoError(t, yaml.Unmarshal([]byte("true: a\nname: x\n"), &got))
+		assert.Equal(t, named{Name: "x", True: "a"}, got)
+	})
+
+	t.Run("the same documents read into an any", func(t *testing.T) {
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte("1: a\nname: x\n"), &got))
+		assert.Equal(t, map[string]any{"1": "a", "name": "x"}, got)
+	})
+
+	t.Run("and a string-keyed document reads into the struct", func(t *testing.T) {
+		var got named
+		require.NoError(t, yaml.Unmarshal([]byte("name: x\n"), &got))
+		assert.Equal(t, named{Name: "x"}, got)
+	})
+}

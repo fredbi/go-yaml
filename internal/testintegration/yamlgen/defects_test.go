@@ -4,6 +4,7 @@
 package yamlgen_test
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"testing"
@@ -375,53 +376,6 @@ func TestDefectABinaryTagCannotBeReadIntoAGoByteSlice(t *testing.T) {
 	})
 }
 
-// TestOneNonStringKeyNoLongerZeroesAWholeStruct: a key no field can be named
-// after is skipped, and the entries around it read.
-//
-// ✅ Closed 2026-09-07 in two steps. 7dc4075 inverted decodeStruct, so the
-// decode walks the document's entries and looks each field up rather than
-// walking the fields and reading the mapping into a map first -- the map came
-// back nil at the first key that was not a string, with no error, and every
-// field kept its zero. entryName then named a key by its type's own canonical
-// spelling, so a key a field can be named after reaches it: "true: a" writes a
-// field tagged "true".
-func TestOneNonStringKeyNoLongerZeroesAWholeStruct(t *testing.T) {
-	type named struct {
-		Name string `yaml:"name"`
-		True string `yaml:"true"`
-	}
-
-	for _, src := range []string{
-		"1: a\nname: x\n",
-		"name: x\n1: a\n",
-		"1: a\nname: x\n2: b\n",
-	} {
-		wellFormed(t, src)
-
-		var got named
-		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		assert.Equal(t, "x", got.Name, "%q: the entries around the key that cannot be named must read", src)
-	}
-
-	t.Run("a key a field can be named after reaches it", func(t *testing.T) {
-		var got named
-		require.NoError(t, yaml.Unmarshal([]byte("true: a\nname: x\n"), &got))
-		assert.Equal(t, named{Name: "x", True: "a"}, got)
-	})
-
-	t.Run("the same documents read into an any", func(t *testing.T) {
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("1: a\nname: x\n"), &got))
-		assert.Equal(t, map[string]any{"1": "a", "name": "x"}, got)
-	})
-
-	t.Run("and a string-keyed document reads into the struct", func(t *testing.T) {
-		var got named
-		require.NoError(t, yaml.Unmarshal([]byte("name: x\n"), &got))
-		assert.Equal(t, named{Name: "x"}, got)
-	})
-}
-
 // The three defects Style.ExplicitKeys found on its first deep run.
 //
 // A mapping entry has two spellings -- "key: value" and "? key" over
@@ -626,5 +580,75 @@ func TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens(t *testing.T) 
 			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
 			assert.NotNil(t, got, "%q", src)
 		}
+	})
+}
+
+// TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar: a local or
+// non-specific tag written before an anchor stops typing its scalar, and the
+// scalar resolves by the schema as though it carried no tag.
+//
+// The order decides, and so does the kind of tag: a `!!` shorthand is
+// unaffected. Pins the whole matrix, since a fix that traded one spelling for
+// another would otherwise look like a fix.
+func TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar(t *testing.T) {
+	t.Run("today the anchor cancels the tag", func(t *testing.T) {
+		for _, src := range []string{
+			"!foo &a1 true\n",
+			"! &a1 true\n",
+			"!<!foo> &a1 true\n",
+			"a: !foo &a1 true\n",
+			"- !foo &a1 true\n",
+			"{a: !foo &a1 true}\n",
+		} {
+			wellFormed(t, src)
+
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.NotContainsf(t, fmt.Sprintf("%#v", got), `"true"`,
+				"today: %q resolves the scalar the tag stands on", src)
+		}
+	})
+
+	t.Run("the order and the spelling each undo it", func(t *testing.T) {
+		for _, src := range []string{
+			// The anchor first.
+			"&a1 !foo true\n",
+			// A secondary tag rather than a local one.
+			"!!str &a1 true\n",
+			// No anchor at all.
+			"!foo true\n",
+			"! true\n",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, "true", got, "%q", src)
+		}
+	})
+}
+
+// TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved: an entry whose value
+// is a tag written in full with nothing after it stops the key on the next line
+// from resolving.
+//
+// Only the long spellings do it, which is what ties this to
+// TestDefectATagNotWrittenAsAShorthandDoesNotTypeItsScalar.
+func TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved(t *testing.T) {
+	t.Run("today the key keeps its text", func(t *testing.T) {
+		for _, src := range []string{
+			"a: !<tag:yaml.org,2002:null>\nFalse: 1\n",
+			"%TAG !e! tag:yaml.org,2002:\n---\na: !e!null\nFalse: 1\n",
+		} {
+			wellFormed(t, src)
+
+			var got map[string]any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Containsf(t, got, "False", "today: %q leaves the key unresolved", src)
+		}
+	})
+
+	t.Run("the shorthand resolves it", func(t *testing.T) {
+		var got map[string]any
+		require.NoError(t, yaml.Unmarshal([]byte("a: !!null\nFalse: 1\n"), &got))
+		assert.Contains(t, got, "false")
 	})
 }

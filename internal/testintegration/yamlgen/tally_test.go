@@ -122,9 +122,15 @@ func (c *tally) stale() []string {
 
 	var out []string
 
+	pins := map[string]string{}
+	for _, d := range yamlgen.Ledger {
+		pins[d.Name] = d.Pin
+	}
+
 	for name, drawn := range c.drawn {
 		if drawn >= suspectAfter && c.failed[name] == 0 {
-			out = append(out, fmt.Sprintf("%q: drawn %d times across the properties and never diverged", name, drawn))
+			out = append(out, fmt.Sprintf("%q: drawn %d times across the properties and never diverged; run %s",
+				name, drawn, pins[name]))
 		}
 	}
 
@@ -145,7 +151,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr,
 			"Either the defect is fixed and the entry goes, or the predicate matches a family the\n"+
 				"defect is not in and wants narrowing. Every document matched here was excused from\n"+
-				"its property and never compared.")
+				"its property and never compared.\n"+
+				"The pin named above is what tells the two apart: it runs the one document the entry\n"+
+				"was written for. Still failing means the predicate wants narrowing; passing means the\n"+
+				"defect is fixed and the entry goes to fixed_test.go as a TestFixed.")
 
 		if code == 0 {
 			code = 1
