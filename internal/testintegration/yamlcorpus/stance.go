@@ -257,7 +257,14 @@ var Departures = []Departure{
 			`JSON has a repeated member name, which is the same loss one step later. ` +
 			"go.yaml.in/yaml/v3 v3.0.5 refuses the document as a duplicate, so it names keys the way " +
 			"this library does and merges the two the way this library used to. Only libfyaml holds " +
-			"both, and the reading here rests on 3.2.1.1 rather than on a majority",
+			"both, and the reading here rests on 3.2.1.1 rather than on a majority.\n\n" +
+			"📌 This library already has the check and runs it on one path only, which is what " +
+			"makes the entry actionable. Measured on 2026-09-13: `1: x` over `\"1\": y` into a " +
+			"map[string]any or a map[any]any is refused with `duplicate key \"1\"`, and into an " +
+			"`any` it reads. So does the same collision reached through an alias -- `k: &a n` over " +
+			"`*a : 1` over `n: 2` loses an entry into an `any` and is refused by both maps. A " +
+			"duplicate written the same way, `a: 1` over `a: 2`, is refused on every path, so it is " +
+			"the resolution step the `any` path skips rather than the check being absent",
 		Departs: func(got any, err error) bool {
 			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 1 })
 		},

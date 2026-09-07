@@ -6,6 +6,7 @@ package yamlcorpus_test
 import (
 	"math/big"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -45,37 +46,53 @@ func TestTheEnumeratedShapesReadIntoAGoType(t *testing.T) {
 				continue
 			}
 
-			target := yamlgen.TargetForDecoded(loose)
-			if target.Structs == 0 {
-				continue
-			}
-			structs++
+			// Each shape is a destination a caller writes, and the same
+			// document read into all three has to give one answer. A struct
+			// and a map[any]any are different code in the decoder, and the
+			// pointer shape is the only one that makes it allocate before it
+			// fills.
+			for _, shape := range []yamlgen.TargetShape{
+				yamlgen.ShapePlain, yamlgen.ShapePointers, yamlgen.ShapeAnyKeyedMap,
+			} {
+				target := yamlgen.TargetForDecodedAs(loose, shape)
+				if !target.Reached() {
+					continue
+				}
+				structs++
 
-			into := reflect.New(target.Type)
-			err := yaml.Unmarshal(s.Src, into.Interface())
+				into := reflect.New(target.Type)
+				err := yaml.Unmarshal(s.Src, into.Interface())
 
-			want := yamlgen.Normalize(reflect.ValueOf(loose))
-			got := yamlgen.Normalize(into.Elem())
-			failed := err != nil || !sameNumerically(want, got)
+				want := yamlgen.Normalize(reflect.ValueOf(loose))
+				got := yamlgen.Normalize(into.Elem())
+				failed := err != nil || !sameNumerically(want, got)
 
-			why, known := typedPathDefects[s.Name]
+				if why, loose := yardstickDefects[s.Name]; loose {
+					t.Logf("yardstick unusable -- %s into %s: %s", s.Name, shape, why)
 
-			switch {
-			case failed && known:
-				t.Logf("still fails -- %s: %s", s.Name, why)
-			case failed:
-				t.Errorf("%s: %q reads into an `any` and differently into %v\n"+
-					"  as an any: %#v\n  as a type: %#v\n  error:     %v",
-					s.Name, s.Src, target.Type, want, got, err)
-			case known:
-				t.Errorf("no longer fails, so its entry is stale: %s -- %s", s.Name, why)
-			default:
-				compared++
+					continue
+				}
+
+				defect, known := typedPathDefects[s.Name]
+				known = known && defect.failsFor(shape)
+
+				switch {
+				case failed && known:
+					t.Logf("still fails -- %s into %s: %s", s.Name, shape, defect.why)
+				case failed:
+					t.Errorf("%s: %q reads into an `any` and differently into %v (%s)\n"+
+						"  as an any: %#v\n  as a type: %#v\n  error:     %v",
+						s.Name, s.Src, target.Type, shape, want, got, err)
+				case known:
+					t.Errorf("no longer fails into %s, so its entry is stale: %s -- %s", shape, s.Name, defect.why)
+				default:
+					compared++
+				}
 			}
 		}
 	}
 
-	t.Logf("%d enumerated documents built a struct, %d of them read the same both ways", structs, compared)
+	t.Logf("%d enumerated reads reached the reflection path, %d of them read the same both ways", structs, compared)
 
 	// A floor rather than a count, since a shape added to any family may or may
 	// not be a mapping. It is here so that a change which stops the enumerated
@@ -106,20 +123,68 @@ func TestTheEnumeratedShapesReadIntoAGoType(t *testing.T) {
 // rather than "<<: *b" -- as a key no field claims and dropped it. A merge
 // written as an alias gave up on the alias and fell back to the tree; one
 // written in place had nothing else to give up on. Fixed in the same branch.
-var typedPathDefects = map[string]string{
+// typedDefect is one enumerated shape whose typed read is wrong, and which
+// destinations it is wrong for.
+type typedDefect struct {
+	why string
+	// fails names the destinations. Empty means all three, which is the usual
+	// case: a defect in the reflection path rarely cares which type it is
+	// filling.
+	fails []yamlgen.TargetShape
+}
+
+func (d typedDefect) failsFor(shape yamlgen.TargetShape) bool {
+	if len(d.fails) == 0 {
+		return true
+	}
+
+	return slices.Contains(d.fails, shape)
+}
+
+var typedPathDefects = map[string]typedDefect{
 	// A tag on a key is not unwrapped before the key is named, so the key
 	// resolves to nothing a field can be named after. The same root as
 	// yamlgen.Ledger's parser entries for a tag over a key, and parked with
 	// them: see stream 2, defects 2, 13 and 14.
-	"a key tagged !!float": "a tag on a key, parked",
+	"a key tagged !!float": {why: "a tag on a key, parked"},
 	// The same root, reached by two more tags on 2026-09-13. No struct tag
 	// names the key at all: neither the name the `any` path gives it
 	// ("2001-12-14 00:00:00 +0000 UTC"), nor the text written down
 	// ("2001-12-14"), nor the decoded bytes ("hello"). The entry is dropped and
 	// nothing is reported. Departures records what the key is named; this
 	// records that the struct path cannot reach it.
-	"a key tagged !!timestamp": "a tag on a key, parked",
-	"a key tagged !!binary":    "a tag on a key, parked",
+	//
+	// A map[any]any reads the timestamp key correctly, because it keeps the
+	// key's own type instead of naming it -- so this one is the struct tag and
+	// not the tag on the key. The binary key fails there too: a []byte cannot
+	// be a Go map key at all.
+	"a key tagged !!timestamp": {
+		why:   "a tag on a key, parked",
+		fails: []yamlgen.TargetShape{yamlgen.ShapePlain, yamlgen.ShapePointers},
+	},
+	"a key tagged !!binary": {why: "a tag on a key, parked"},
+}
+
+// yardstickDefects names the enumerated shapes where the two reads differ and
+// the *typed* one is right, so this test cannot use the `any` read as its
+// yardstick.
+//
+// The inverse of typedPathDefects and worth keeping apart from it: an entry
+// here is not a reason to look at the reflection path.
+var yardstickDefects = map[string]string{
+	// A duplicate that only collides once an alias is resolved. "k: &a n" over
+	// "*a : 1" over "n: 2" reads into an `any` as {"k": "n", "n": 2}, one
+	// entry short and nothing reported, and every typed map refuses it with
+	// `duplicate key "n"`.
+	//
+	// The check exists and one path skips it, which is what makes this
+	// actionable: map[string]any and map[any]any both refuse the document, and
+	// so do the two spellings of the same collision without an alias --
+	// "1: x" over "\"1\": y". The `any` path catches a duplicate written the
+	// same way ("a: 1" over "a: 2") and misses one that only collides after
+	// resolution. See yamlcorpus.Departures, "two keys alike in text and
+	// different once resolved", which records the `any` half.
+	"a key colliding with one an alias resolves to": "the `any` read loses an entry the typed read refuses",
 }
 
 // sameNumerically compares two decodes of one document, with numbers compared

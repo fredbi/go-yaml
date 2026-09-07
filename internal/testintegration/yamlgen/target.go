@@ -4,7 +4,9 @@
 package yamlgen
 
 import (
+	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"sort"
 	"strconv"
@@ -42,27 +44,75 @@ import (
 // its own right. The fallback is reported by [TargetFor] rather than silent:
 // see [Target.Structs].
 
+// TargetShape is which destination is built, where a document has more than
+// one that fits.
+//
+// The shape is drawn rather than derived, because a document does not choose
+// its destination -- a caller does, and the three below are the three a caller
+// writes. Reading one document into all of them and comparing is what says
+// whether the reflection path agrees with itself.
+type TargetShape int
+
+const (
+	// ShapePlain fits the decoded value as closely as it can: a struct per
+	// mapping, the item type per sequence, the obvious scalar.
+	ShapePlain TargetShape = iota
+	// ShapePointers is [ShapePlain] with every struct field a pointer, which
+	// is the destination that makes the decoder allocate before it fills.
+	ShapePointers
+	// ShapeAnyKeyedMap reads every mapping into a map[any]any, the destination
+	// gopkg.in/yaml.v2 made ordinary and the one that keeps a key's own type
+	// instead of naming it.
+	ShapeAnyKeyedMap
+)
+
+func (s TargetShape) String() string {
+	switch s {
+	case ShapePointers:
+		return "pointer fields"
+	case ShapeAnyKeyedMap:
+		return "map[any]any"
+	case ShapePlain:
+		return "plain"
+	default:
+		return "plain"
+	}
+}
+
 // Target is a Go type built to hold a decoded value.
 type Target struct {
 	// Type is the destination to decode into.
 	Type reflect.Type
+	// Shape is which destination was asked for.
+	Shape TargetShape
 	// Structs counts the mappings that became a struct. Zero means the
 	// document reached none of the reflection path this axis exists for, which
 	// is worth reporting rather than counting as coverage.
 	Structs int
+	// Maps counts the mappings that became a typed map -- a map[any]any under
+	// [ShapeAnyKeyedMap]. Like Structs it is reflection reached, and the two
+	// are counted apart because they are different code.
+	Maps int
 	// Fallbacks counts the mappings that could not become a struct.
 	Fallbacks int
 }
 
+// Reached reports whether the destination puts any mapping through the
+// reflection path, which is what this axis exists to exercise.
+func (t Target) Reached() bool { return t.Structs > 0 || t.Maps > 0 }
+
 var (
-	anyType    = reflect.TypeFor[any]()
-	stringType = reflect.TypeFor[string]()
-	boolType   = reflect.TypeFor[bool]()
-	int64Type  = reflect.TypeFor[int64]()
-	floatType  = reflect.TypeFor[float64]()
-	anyMapType = reflect.TypeFor[map[string]any]()
-	timeType   = reflect.TypeFor[time.Time]()
-	bytesType  = reflect.TypeFor[[]byte]()
+	anyType      = reflect.TypeFor[any]()
+	stringType   = reflect.TypeFor[string]()
+	boolType     = reflect.TypeFor[bool]()
+	int64Type    = reflect.TypeFor[int64]()
+	floatType    = reflect.TypeFor[float64]()
+	anyMapType   = reflect.TypeFor[map[string]any]()
+	timeType     = reflect.TypeFor[time.Time]()
+	bytesType    = reflect.TypeFor[[]byte]()
+	anyKeyType   = reflect.TypeFor[map[any]any]()
+	bigIntType   = reflect.TypeFor[*big.Int]()
+	bigFloatType = reflect.TypeFor[*big.Float]()
 )
 
 // TargetForDecoded builds the Go type a decoded value fits.
@@ -79,8 +129,18 @@ var (
 // YAML and have no Value behind them -- and those are the documents the
 // reflection path most needs, since two of the three defects found on it were
 // merge keys, which the generator does not write.
-func TargetForDecoded(v any) Target {
-	var t Target
+func TargetForDecoded(v any) Target { return TargetForDecodedAs(v, ShapePlain) }
+
+// TargetForDecodedAs builds the destination the shape asks for.
+//
+// [ShapePointers] and [ShapeAnyKeyedMap] are the two destinations a document
+// cannot suggest on its own: the `any` path always gives a map[string]any with
+// the key named by [KeyText], so nothing in the read says "this caller wanted
+// pointers" or "this caller wanted the key's own type". They are drawn beside
+// the value and the style, and the property reads one document into whichever
+// came up.
+func TargetForDecodedAs(v any, shape TargetShape) Target {
+	t := Target{Shape: shape}
 	t.Type = t.typeOfDecoded(v)
 
 	return t
@@ -128,6 +188,15 @@ func (t *Target) decodedItemType(items []any) reflect.Type {
 }
 
 func (t *Target) decodedMapType(m map[string]any) reflect.Type {
+	if t.Shape == ShapeAnyKeyedMap {
+		// Every mapping, including the empty one: a map is a destination with
+		// something to fill even when the document filled nothing, which is
+		// the case nameable turns away for a struct.
+		t.Maps++
+
+		return anyKeyType
+	}
+
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -142,9 +211,14 @@ func (t *Target) decodedMapType(m map[string]any) reflect.Type {
 
 	fields := make([]reflect.StructField, 0, len(keys))
 	for i, key := range keys {
+		field := t.typeOfDecoded(m[key])
+		if t.Shape == ShapePointers {
+			field = reflect.PointerTo(field)
+		}
+
 		fields = append(fields, reflect.StructField{
 			Name: "F" + strconv.Itoa(i),
-			Type: t.typeOfDecoded(m[key]),
+			Type: field,
 			Tag:  reflect.StructTag(`yaml:"` + key + `"`),
 		})
 	}
@@ -207,12 +281,22 @@ func Normalize(v reflect.Value) any {
 			return nil
 		}
 
-		if v.Type().Elem().Name() != "" && v.Type().Elem().Kind() == reflect.Struct {
-			// A *big.Float stays a pointer. Following it lands on the named
-			// struct below, which hands back the big.Float itself -- and
-			// reflect's equality then compares its Accuracy field, which
-			// records how the last rounding went rather than what the number
-			// is. sameValue compares a *big.Float by Cmp and had no chance to.
+		if v.Type() == bigIntType || v.Type() == bigFloatType {
+			// These two stay pointers because the `any` path hands them back
+			// as pointers, and Normalize exists to make the two sides of the
+			// comparison the same shape.
+			//
+			// It matters beyond the shape for a big.Float. Following the
+			// pointer lands on the named struct below, which hands back the
+			// big.Float itself -- and reflect's equality then compares its
+			// Accuracy field, which records how the last rounding went rather
+			// than what the number is. sameValue compares a *big.Float by Cmp
+			// and had no chance to.
+			//
+			// Everything else is followed. A *time.Time field under
+			// ShapePointers holds what an `any` holds by value, and leaving it
+			// a pointer made the two compare unequal while printing alike --
+			// fmt calls time.Time's GoString through the pointer.
 			return v.Interface()
 		}
 
@@ -261,18 +345,30 @@ func keyString(v reflect.Value) string {
 		return "null"
 	}
 
-	if v.Kind() == reflect.String {
+	// The names below mirror KeyText, because a map[any]any keeps the key's own
+	// type where the `any` path names it -- so normalizing one to compare
+	// against the other has to spell the name the same way.
+	switch v.Kind() {
+	case reflect.String:
 		return v.String()
-	}
-
-	if v.Kind() == reflect.Float64 {
+	case reflect.Bool:
+		return strconv.FormatBool(v.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10)
+	case reflect.Float32, reflect.Float64:
 		return floatKeyText(v.Float())
 	}
 
 	if v.CanInterface() {
+		// A *big.Int, a *big.Float and a time.Time all name themselves, and
+		// KeyText's default names them by Go's %v, which is the same string.
 		if s, ok := reflect.TypeAssert[interface{ String() string }](v); ok {
 			return s.String()
 		}
+
+		return fmt.Sprintf("%v", v.Interface())
 	}
 
 	return strconv.FormatFloat(math.NaN(), 'g', -1, 64)

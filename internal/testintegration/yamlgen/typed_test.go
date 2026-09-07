@@ -35,6 +35,7 @@ func TestDecodingIntoAGoTypeGivesTheSameValue(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		value := yamlgen.Values().Draw(rt, "value")
 		style := yamlgen.Styles().Draw(rt, "style")
+		shape := yamlgen.TargetShape(rapid.IntRange(0, 2).Draw(rt, "shape"))
 		src := yamlgen.Emit(value, style)
 
 		// The `any` path is the yardstick, so a document it will not read has
@@ -44,10 +45,10 @@ func TestDecodingIntoAGoTypeGivesTheSameValue(t *testing.T) {
 			return
 		}
 
-		target := yamlgen.TargetForDecoded(loose)
-		if target.Structs == 0 {
-			// No mapping in the document could be named by struct tags, so
-			// nothing reached decodeStruct and the run says nothing.
+		target := yamlgen.TargetForDecodedAs(loose, shape)
+		if !target.Reached() {
+			// No mapping in the document reached decodeStruct or decodeMap, so
+			// the run says nothing about the reflection path.
 			return
 		}
 		structs++
@@ -67,16 +68,16 @@ func TestDecodingIntoAGoTypeGivesTheSameValue(t *testing.T) {
 		reached++
 
 		if err != nil {
-			rt.Fatalf("%s read into an `any` and not into %v:\n%s\n---\nerror: %v",
-				style, target.Type, src, err)
+			rt.Fatalf("%s into a %s destination read into an `any` and not into %v:\n%s\n---\nerror: %v",
+				style, shape, target.Type, src, err)
 		}
 		if diverged {
-			rt.Fatalf("%s read differently into %v:\n%s\n---\nas an any: %#v\nas a type: %#v",
-				style, target.Type, src, want, yamlgen.Normalize(into.Elem()))
+			rt.Fatalf("%s into a %s destination read differently into %v:\n%s\n---\nas an any: %#v\nas a type: %#v",
+				style, shape, target.Type, src, want, yamlgen.Normalize(into.Elem()))
 		}
 	})
 
-	t.Logf("%d documents built a struct, %d of them compared", structs, reached)
+	t.Logf("%d documents reached the reflection path, %d of them compared", structs, reached)
 	tally.report(t, yamlgen.DecodeTyped)
 }
 
