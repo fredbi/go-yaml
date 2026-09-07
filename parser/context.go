@@ -48,24 +48,62 @@ type context struct {
 // ever reads forward from idx, one token ahead at the most, so the tokens
 // before it are never asked for again.
 type tokenRef struct {
+	// idx, cur and held are what at reads on the way in, and they are first so
+	// that the three sit in one cache line. Written apart -- held landed at
+	// offset 64 -- the fast path of a call made five times per token straddled
+	// two.
+	//
+	// idx is where the parser stands, counted from the start of the run.
+	idx int
+	// cur is the token at idx, resolved once. The descent asks for the token it
+	// is standing on about three times for every token of the document -- from
+	// currentToken, isComment, goNext's lookahead and the accessors -- and
+	// walking the run again for each costs a bounds test and a pointer chase.
+	// held says whether cur has been worked out, because nil is an answer: past
+	// the end of a run the token is nil and stays nil.
+	//
+	// Every write to idx clears them, and there are three: goNext here, and the
+	// two ref resets in parser.go. Nothing else moves the position. forget does
+	// not: it shifts base and the slice together, so the token at idx keeps its
+	// place and its pointer.
+	cur  *tapeToken
+	held bool
+	// drained says the stream behind pull has ended. It sits here to fill the
+	// padding held would leave.
+	drained bool
+	// base is where tokens[0] stands, so tokens holds [base, base+len) and idx
+	// is never below base.
+	base int
+	// tokens is the run in hand, or as much of a stream as has been drawn.
 	tokens []*tapeToken
 	// pair is where a group's two members are copied to, so that reading a
 	// group needs no slice of its own. tokens points into it.
 	pair [2]*tapeToken
-	// idx is where the parser stands, counted from the start of the run. base
-	// is where tokens[0] stands, so tokens holds [base, base+len) and idx is
-	// never below base.
-	idx  int
-	base int
 	// pull draws the next token of a stream, where the run is one. It is nil
-	// for a run already in hand, and drained once the stream has ended.
-	pull    func() (*tapeToken, bool)
-	drained bool
+	// for a run already in hand.
+	pull func() (*tapeToken, bool)
 }
 
 // at returns the i'th token of the run, drawing from the stream where it has to
 // and where there is one. It returns nil past the end of the run.
+//
+// The token at idx is answered from cur, which is where about seven of every
+// ten calls land.
 func (r *tokenRef) at(i int) *tapeToken {
+	if i == r.idx && r.held {
+		return r.cur
+	}
+
+	return r.draw(i)
+}
+
+// draw returns the i'th token, reading the stream up to it where the run is one,
+// and records it where it is the one at idx.
+//
+// The recording is here and not in at because at has to stay under the inliner's
+// budget: it is called about five times for every token of the document, and a
+// call it cannot avoid costs more than the walk it saves.
+func (r *tokenRef) draw(i int) *tapeToken {
 	for r.pull != nil && !r.drained && i >= r.base+len(r.tokens) {
 		tk, ok := r.pull()
 		if !ok {
@@ -76,11 +114,15 @@ func (r *tokenRef) at(i int) *tapeToken {
 		r.tokens = append(r.tokens, tk)
 	}
 
+	var tk *tapeToken
 	if i >= r.base && i-r.base < len(r.tokens) {
-		return r.tokens[i-r.base]
+		tk = r.tokens[i-r.base]
+	}
+	if i == r.idx {
+		r.cur, r.held = tk, true
 	}
 
-	return nil
+	return tk
 }
 
 // forget drops what the run holds below idx.
@@ -267,10 +309,15 @@ func (c context) takeLineComment(tk *tapeToken) *token.Token {
 
 func (c context) goNext() {
 	ref := c.tokenRef
-	if ref.at(ref.idx+1) == nil {
-		ref.idx = ref.end()
+	// The lookahead is the token the parser is about to stand on, so it is put
+	// straight into cur rather than resolved again by the currentToken that
+	// almost always follows.
+	next := ref.at(ref.idx + 1)
+	if next == nil {
+		ref.idx, ref.cur, ref.held = ref.end(), nil, false
 	} else {
 		ref.idx++
+		ref.cur, ref.held = next, true
 	}
 	ref.forget()
 }

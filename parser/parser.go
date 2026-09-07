@@ -227,6 +227,7 @@ func (p *Parser) tokenRefAt(depth int32, g *tokenGroup) *tokenRef {
 
 	ref := p.refs[depth]
 	ref.tokens, ref.idx, ref.base = g.Members(&ref.pair), 0, 0
+	ref.cur, ref.held = nil, false
 	ref.pull, ref.drained = nil, false
 
 	return ref
@@ -245,6 +246,7 @@ func (p *Parser) tokenRefFrom(depth int32, pull func() (*tapeToken, bool)) *toke
 
 	ref := p.refs[depth]
 	ref.tokens, ref.idx, ref.base = ref.tokens[:0], 0, 0
+	ref.cur, ref.held = nil, false
 	ref.pull, ref.drained = pull, false
 
 	return ref
