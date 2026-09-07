@@ -53,7 +53,100 @@ func TestYAMLVersionResolvesScalars(t *testing.T) {
 
 // TestYAMLVersionIsScopedToItsDocument checks that a "%YAML" directive reaches
 // the whole of the document it opens and none of the next.
+//
+// A document is independent of its neighbors, which is what this package
+// already holds an anchor and a "%TAG" handle to: "a: &x 1" over "---" over
+// "b: *x" is refused, and a handle declared for one document is not defined for
+// the next. The version was the one declaration that spanned the stream.
+//
+// How far the scanner has run ahead when the scope ends depends on the marker,
+// and it is why the cases below are spelled out rather than folded into one.
+// After "---" the next document's scalars are usually still uncut and setting
+// the schema back is enough; after "..." the grouping has read the whole of the
+// next document to know the "..." closed anything, so [Parser.endVersionScope]
+// reads those tokens again. The "..." over "---" pair happened to work before
+// either was written, because the second marker leaves the scalar uncut.
 func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
+	t.Run("the next document is read under the core schema", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, src string
+			want      []any
+		}{
+			{
+				name: "a header closes the scope",
+				src:  "%YAML 1.1\n---\na: 012\n---\nb: 012\n",
+				want: []any{uint64(10), uint64(12)},
+			},
+			{
+				name: "so does a document end with no header after it",
+				src:  "%YAML 1.1\n---\na: 012\n...\nb: 012\n",
+				want: []any{uint64(10), uint64(12)},
+			},
+			{
+				name: "and the scope ends for three documents, not two",
+				src:  "%YAML 1.1\n---\na: 012\n---\nb: 012\n---\nc: 012\n",
+				want: []any{uint64(10), uint64(12), uint64(12)},
+			},
+			{
+				name: "a document declaring its own is read under it",
+				src:  "a: 012\n...\n%YAML 1.1\n---\nb: 012\n",
+				want: []any{uint64(12), uint64(10)},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				assert.Equal(t, tc.want, everyFirstValue(t, tc.src))
+			})
+		}
+	})
+
+	t.Run("a bare scalar is the next document's whole body", func(t *testing.T) {
+		// The token the descent has not taken is the body itself here, so the
+		// retyping has to reach it and not merely what follows it.
+		for _, src := range []string{
+			"%YAML 1.1\n---\na: 1\n...\nyes\n",
+			"%YAML 1.1\n---\na: 1\n---\nyes\n",
+		} {
+			f, err := parser.ParseBytes([]byte(src))
+			require.NoError(t, err, "%q", src)
+
+			last := f.Docs[len(f.Docs)-1].Body
+			s, ok := last.(*ast.StringNode)
+			require.Truef(t, ok, "%q: the body is %T and not a string", src, last)
+			assert.Equal(t, "yes", s.Value, "%q", src)
+		}
+	})
+
+	t.Run("WithYAMLVersion is the caller's and still reaches every document", func(t *testing.T) {
+		// The option says what a document means where it declares nothing, so
+		// ending a directive's scope must not end the option's.
+		assert.Equal(t, []any{uint64(10), uint64(10)},
+			everyFirstValue(t, "a: 012\n---\nb: 012\n", parser.WithYAMLVersion(parser.YAML11)))
+	})
+
+	testVersionScopeReachesALongBody(t)
+}
+
+// everyFirstValue is [firstValue] for each document of a stream that holds a
+// mapping value.
+func everyFirstValue(t *testing.T, src string, opts ...parser.Option) []any {
+	t.Helper()
+
+	f, err := parser.ParseBytes([]byte(src), opts...)
+	require.NoError(t, err, "%q", src)
+
+	var read []any
+	for _, d := range f.Docs {
+		m, ok := d.Body.(*ast.MappingNode)
+		if !ok || len(m.Values) == 0 {
+			continue
+		}
+		read = append(read, m.Values[0].Value.(ast.ScalarNode).GetValue())
+	}
+
+	return read
+}
+
+func testVersionScopeReachesALongBody(t *testing.T) {
 	// Far enough into the body that the scanner cannot have read it all before
 	// the parser reached the directive.
 	var long strings.Builder
@@ -64,16 +157,8 @@ func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
 	assert.Equal(t, uint64(10), firstValue(t, long.String()),
 		"the directive reaches a body the scanner reads long after it")
 
-	f, err := parser.ParseBytes([]byte("%YAML 1.1\n---\na: 012\n...\n---\na: 012\n"))
-	require.NoError(t, err)
-
-	var read []any
-	for _, d := range f.Docs {
-		if m, ok := d.Body.(*ast.MappingNode); ok && len(m.Values) > 0 {
-			read = append(read, m.Values[0].Value.(ast.ScalarNode).GetValue())
-		}
-	}
-	assert.Equal(t, []any{uint64(10), uint64(12)}, read,
+	assert.Equal(t, []any{uint64(10), uint64(12)},
+		everyFirstValue(t, "%YAML 1.1\n---\na: 012\n...\n---\na: 012\n"),
 		`"..." closes the directive's scope, so the next document is 1.2 again`)
 }
 

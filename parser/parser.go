@@ -483,18 +483,16 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if end != nil {
-		// A "..." closes the scope a %YAML directive opened, so the next
-		// document resolves against whatever the caller asked for.
-		p.yamlVersion = ""
-		p.scan.SetSchema(schemaFor(p.version))
-	}
-
 	// A TAG directive defines a handle for the one document that follows it,
 	// and a document holding only the directives themselves does not end their
-	// scope -- it opens it.
+	// scope -- it opens it. A "%YAML" directive is scoped the same way: a
+	// document is independent of its neighbors, which is what this package
+	// already holds an anchor and a tag handle to, and 3.2.2.2 scopes an anchor
+	// to the document that writes it. So "%YAML 1.1" over "---" over "a: yes"
+	// over "---" over "b: yes" reads true and then the string "yes".
 	if _, directives := body.(*ast.DirectiveNode); !directives {
 		p.clearTagDirectives()
+		p.endVersionScope()
 	}
 
 	node := ast.Document(start, body)
@@ -515,6 +513,36 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	}
 
 	return node, true, nil
+}
+
+// endVersionScope takes the version the document just read out of scope, so the
+// next one resolves against whatever the caller asked for.
+//
+// Setting the schema back is not enough on its own. The scanner runs ahead of
+// the descent, and how far ahead depends on the marker: after "---" the next
+// document's scalars are usually still uncut, while after "..." the grouping
+// has read the whole of the next document to know the "..." closed anything.
+// So "%YAML 1.1" over "---" over "a: yes" over "..." over "b: yes" had "yes"
+// cut as a Bool before the scope ended, and the schema went back with nothing
+// to apply it to.
+//
+// [Parser.retypeAhead] reads those tokens again, which is what it already does
+// for the tokens cut before a directive is parsed. It starts one past the
+// sequence it is given, so the first token the descent has not taken --
+// reader.out[reader.at], the first of the next document -- is passed one lower.
+func (p *Parser) endVersionScope() {
+	if p.yamlVersion == "" {
+		return
+	}
+	p.yamlVersion = ""
+	schema := schemaFor(p.version)
+	p.scan.SetSchema(schema)
+
+	from := int32(p.reader.seq) - 1
+	if p.reader.at < len(p.reader.out) && p.reader.out[p.reader.at] != nil {
+		from = p.reader.out[p.reader.at].Seq() - 1
+	}
+	p.retypeAhead(schema, from)
 }
 
 func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
