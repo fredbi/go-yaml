@@ -265,9 +265,27 @@ Actions below.
     - ✅ **Merge keys are enumerated** (2026-09-11), and the hole was not merge itself: every shape in
       `MergeShapes` wrote its merge as an *alias*. `TagMergeInline` covers `<<: {a: 1}`, which the 1.1
       merge type allows just as much, and it found `codec.ToJSON` writing JSON that will not parse.
-    - 📝 What is left is **timestamps and binary as drawn values**. Both resolve here — `!!timestamp
-      2001-12-14` gives a `time.Time`, `!!binary aGVsbG8=` gives `[]byte` — and neither is in `TagFor`.
-      `!!set`, `!!omap` and `!!pairs` are the same shape of gap.
+    - ✅ **Timestamps and byte strings are drawn** (2026-09-13). `yamlgen.Timestamp` and `yamlgen.Binary`
+      come out of `drawTextual` already inside a `Tagged`, because neither resolves: core reads null,
+      bool, int, float and str and nothing else, so `2001-12-14` written plain is the string. They share
+      one of the string's two slots at one draw in eight, which is 1 scalar in 48. `Style.TimeForm`
+      writes the instant six ways — a date alone, the ISO form, a lowercase `t`, a space in the `T`'s
+      place, the zone standing apart, and no zone — and each was read back into a `time.Time` before it
+      was offered, since the layouts the library tries are its own table and not the 2005 type's regular
+      expression. Matched buckets 545 → **547**.
+    - **Three defects and one departure.** `!!binary` cannot be read into a Go `[]byte`, which is the one
+      type the tag names; `codec.ToJSON` writes a `!!timestamp` as the text it was spelled with, so the
+      JSON moves with the presentation; and a key tagged either way is named by Go's `%v` of a
+      `time.Time` and of a `[]byte`, which `Departures` now records beside "a key tagged !!float". The
+      reshuffle the new draws cause opened three more — see stream 2, defects 30 to 35.
+    - 📌 **The generator had stored wrong answers twice more.** `Normalize` followed a pointer into a
+      named struct, so `sameValue`'s `*big.Float` case never matched and reflect compared its `Accuracy`
+      field. And `asking` in `reading_library_test.go` prepended `%YAML 1.1` to documents that already
+      declared a version, which the library refuses as two directives — latent since `Style.Version`
+      landed, and reached only when the reshuffle put such a case into the scored set.
+    - 📝 What is left is **`!!set`, `!!omap` and `!!pairs`**, which are the same gap on a collection
+      rather than on a scalar: each constrains the shape under it, so `TagFor` has to ask what the value
+      is before offering one.
 
 12. 📝 **Multi-document streams.** `Emit` takes one `Value` and writes at most one `---`. Cross-document
     aliases and a `%TAG` handle going out of scope both land with them.
@@ -361,6 +379,29 @@ Actions below.
    vocabulary freeze above.
 
 ## Open items
+
+### 🎯 A `Value` departure is never re-measured — opened 2026-09-13
+
+`yamlcorpus.TestTheLibraryMatchesItsDeclaredStance` builds its `known` map from the entries whose `Kind` is
+`Verdict`, so the three verdict departures get the staleness check the register's comment promises and the
+six `Value` ones do not. `TestEveryDepartureNamesAShape` only asserts that the pattern exists in
+`Patterns()`. A `Value` departure is therefore prose: nothing goes red when the library stops departing.
+
+That is not hypothetical. "a local tag on an empty value, with the mapping carrying on" stopped departing
+when `bd8b723` landed, and it was found by reading the code rather than by a failure.
+
+Two designs, and the second is the one to build:
+
+- **`Departure.Reads`**, a JSON or Go rendering of what the library gives today, compared by the test the
+  way `Strictness.Error` pins a message. Cheap, and it pins a whole value, which drifts on any spelling
+  change.
+- **`Departure.Observed` made runnable.** The field already holds the sentence — `"+.inf: a" beside
+  ".inf: b" comes back as two entries` — so the shape's decode could be checked against a small predicate
+  named beside it: entry count, key set, the type of one value. Narrower than a whole value and it says
+  what the departure is about.
+
+Whichever lands, the test has to fail when a departure closes, since a closed departure is the good news
+this register exists to notice.
 
 ### 🎯 The corpus never reads a document into a Go type — opened 2026-09-06
 

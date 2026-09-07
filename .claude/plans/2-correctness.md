@@ -322,6 +322,11 @@ The layer is the one that **already has it wrong**, measured rather than assumed
 when the tree it hands over is wrong or it refuses a document the grammar accepts, the decoder's when the
 parse is right and the Go value is not, and `ToJSON`'s when the parse is right and the JSON is not.
 
+Two entries sit in a fifth layer, the **walking reader** of `codec/walkvalue.go`: `Decoder.canWalk` sends a
+decode into an `any` down it, and `ToJSON` uses it too, so both read the source without the tree. A defect
+is the walk's when the tree is right and the walked value is not. Decoding the same bytes with
+`codec.UseOrderedMap()` builds the tree and is the comparison that separates the two.
+
 | # | layer | defect | reproducer | register |
 |---|---|---|---|---|
 | 1 | parser | an empty key after an entry with no value | `a:` then `: 2` | `yamlgen.Ledger` |
@@ -335,20 +340,34 @@ parse is right and the Go value is not, and `ToJSON`'s when the parse is right a
 | 29 | renderer | 24 again with no comment in it: a blank line before a block sequence entry | `: &1` / blank / `-` / `? ""` renders the blank after the `-`, then drops it | `yamlgen.defects_test.go` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
 | 27 | parser | two more valid documents refused | `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
-| 28 | ToJSON 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2` | `codec/zz_directive_test.go` |
+| 34 | parser | a local or non-specific tag before an anchor does not type its scalar | `!foo &a1 true` → `true`, where `!foo true` and `&a1 !foo true` both give `"true"` | `yamlgen.Ledger` |
+| 35 | parser | a secondary tag before an anchor on an empty flow value loses the collection's end | `{a: !!str &x}` → refused, where `{a: &x !!str}` reads | `yamlgen.Strict` |
 | 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
 | 8 | decoder | `!!float` on a number past float64 is refused large, **zero** small | `!!float 1e+310`, `!!float 1e-400` | `yamlgen.Ledger` |
 | 17 | decoder | `!!int` cannot be read into any Go integer | `n: !!int 5` into an `int64` field → refused | `yamlgen.Ledger` |
-
+| 30 | decoder | a key tagged `!!timestamp` or `!!binary` is named by Go's `%v` | `!!timestamp 2001-12-14: x` → key `"2001-12-14 00:00:00 +0000 UTC"` | `Departures` |
+| 31 | decoder | `!!binary` cannot be read into a Go `[]byte` | `a: !!binary aGVsbG8=` into a `[]byte` field → refused, where a `string` field gives `"hello"` | `yamlgen.Ledger` |
 | 9 | ToJSON | `!!int` on a wide integer writes `MinInt64` | `!!int 123456789012345678901` → `-9223372036854775808` | `codec/zz_bigexp_test.go` |
 | 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
-| 18 | ToJSON | an anchor is lost on a tagged flow key written alone | `{!!null &a1 null, k: *a1}` → `could not find alias` | `codec/zz_anchor_test.go` |
+| 32 | ToJSON | a `!!timestamp` is written as the text it was spelled with | `!!timestamp 2001-12-14t21:59:43.1Z` → `"2001-12-14t21:59:43.1Z"`, where the value converter writes `"2001-12-14T21:59:43.1Z"` | `codec/zz_timestampjson_test.go` |
+| 33 | ToJSON | a float key written the long way keeps its source text | `? 1e3` / `: x` → `{"1e3":"x"}`, where `1e3: x` → `{"1000.0":"x"}` | `codec/zz_floatkey_test.go` |
+| 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
+| 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Nine in the parser and scanner, five in the decoder, three in `ToJSON`, two in the renderer.** Cluster A is
-now the largest thing left and the only cluster still whole: 8, 9 and 17 are one fault at three layers.
-Clusters B and C closed on 2026-09-12, which took six entries and both 🔥 marks off this table.
+**Eleven in the parser and scanner, seven in the decoder, four in `ToJSON`, two in the walking reader, two
+in the renderer.** Cluster A is now the largest thing left and the only cluster still whole: 8, 9 and 17 are
+one fault at three layers. Clusters B and C closed on 2026-09-12, which took six entries and both 🔥
+marks off this table; 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary` draw and by the
+reshuffle it caused.
+
+⚠️ **18 and 28 were filed against `ToJSON` and both are the walk's.** The first framing of 18 said the
+decoder read `{!!null &a1 null, k: *a1}` and only `ToJSON` lost the anchor, and its pin asserted that in a
+subtest that never passed. `codec.Unmarshal` into an `any` walks, so it refuses the document too; the tree
+reads it. 28 was filed the same way, and its pin compared the JSON text `"1.2"` against the float `1.2`, so
+the assertion held for the wrong reason. Both pins were rewritten on 2026-09-13 to compare the walk against
+`UseOrderedMap`, and `codec.TestWalkMatchesTheStream` now holds out a `%&` directive line by name.
 
 Four of the rest lose a value or a shape **silently** — 3, 4, 5 and 16 — which is the class a verdict corpus
 is blind to and the reason the generated suite carries meanings at all.
