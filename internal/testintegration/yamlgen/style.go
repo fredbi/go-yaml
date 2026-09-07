@@ -283,6 +283,57 @@ func (f TimeForm) String() string {
 	}
 }
 
+// Escaping is how much of a double-quoted scalar is written as escapes.
+//
+// 5.7 gives every escape a meaning and this library reads all twenty-three, but
+// only a handful are ever *needed*: the quote, the backslash, a break, a tab
+// and the control characters. Everything else is a second spelling of a
+// character that could stand for itself, so "A" and "\x41" are one scalar
+// written two ways -- which is presentation, and belongs here.
+//
+// The YAML Test Suite never writes an escape inside a flow collection or a flow
+// key at all: 40 of the 44 grammar buckets it leaves open are that one
+// omission, which grammar/reach_test.go's filling had to close by hand. This is
+// the axis that closes them by generation instead.
+//
+// A form that cannot express a character falls back to the one that can, the
+// way [NumberForm] falls back on a negative integer: "\xNN" holds nothing past
+// U+00FF and "\uNNNN" nothing past U+FFFF.
+type Escaping int
+
+const (
+	// EscapeMinimal writes an escape only where the character cannot stand for
+	// itself.
+	EscapeMinimal Escaping = iota
+	// EscapeNamed writes every character 5.7 names as that name: "\0", "\a",
+	// "\b", "\v", "\f", "\e", "\/", "\N", "\_", "\L", "\P", and the
+	// space as "\ ".
+	EscapeNamed
+	// EscapeHex writes every character under U+0100 as "\xNN".
+	EscapeHex
+	// EscapeUnicode writes every character under U+10000 as "\uNNNN".
+	EscapeUnicode
+	// EscapeLong writes every character as "\UNNNNNNNN".
+	EscapeLong
+)
+
+func (e Escaping) String() string {
+	switch e {
+	case EscapeNamed:
+		return " esc=named"
+	case EscapeHex:
+		return " esc=\\x"
+	case EscapeUnicode:
+		return " esc=\\u"
+	case EscapeLong:
+		return " esc=\\U"
+	case EscapeMinimal:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // Chomping is how a block scalar's trailing line breaks are written.
 //
 // The indicator itself is not a choice: a value with no trailing break needs
@@ -398,6 +449,8 @@ type Style struct {
 	NumberForm NumberForm
 	// TimeForm is the spelling a [Timestamp] is written in.
 	TimeForm TimeForm
+	// Escaping is how much of a double-quoted scalar is written as escapes.
+	Escaping Escaping
 	// Version is the YAML version the document declares, written as a "%YAML"
 	// directive. Empty declares none, which is the ordinary case.
 	//
@@ -493,7 +546,8 @@ func (s Style) String() string {
 
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
-		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String()
+		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String() +
+		s.Escaping.String()
 }
 
 // Styles generates a presentation.
@@ -547,6 +601,12 @@ func Styles() *rapid.Generator[Style] {
 			// document that spreading the forms evenly is what gets each of
 			// them written at all.
 			TimeForm: TimeForm(rapid.IntRange(0, 5).Draw(t, "timeform")),
+			// Weighted towards the minimum, which is how a document is usually
+			// written and the only form the other quotings can fall back to.
+			// The four that spell a character a second way share the rest
+			// evenly: each reaches grammar buckets the Test Suite never enters,
+			// and none of them is what a reader meets in the wild.
+			Escaping: Escaping(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "escaping")),
 			// One mapping in four is written the long way. Weighted down
 			// because "key: value" is what documents look like, and an even
 			// split would spend half the corpus's mappings on a form few

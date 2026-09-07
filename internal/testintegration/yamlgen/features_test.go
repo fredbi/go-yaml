@@ -257,10 +257,16 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureTimeSpaced:     st.TimeForm == yamlgen.TimeSpaced,
 			yamlgen.FeatureTimeSpacedZone: st.TimeForm == yamlgen.TimeSpacedZone,
 			yamlgen.FeatureTimeNoZone:     st.TimeForm == yamlgen.TimeNoZone,
-			yamlgen.FeatureExplicitKey:    st.ExplicitKeys,
-			yamlgen.FeatureChompKeep:      st.Chomping == yamlgen.ChompKeep,
-			yamlgen.FeatureChompPadded:    st.Chomping == yamlgen.ChompPadded,
-			yamlgen.FeatureYAMLDirective:  st.Version != "",
+			// An escape form is claimed only where it reached a character, so
+			// the label appears under its own form and never otherwise.
+			yamlgen.FeatureEscapeNamed:   st.Escaping == yamlgen.EscapeNamed,
+			yamlgen.FeatureEscapeHex:     st.Escaping == yamlgen.EscapeHex,
+			yamlgen.FeatureEscapeUnicode: st.Escaping == yamlgen.EscapeUnicode,
+			yamlgen.FeatureEscapeLong:    st.Escaping == yamlgen.EscapeLong,
+			yamlgen.FeatureExplicitKey:   st.ExplicitKeys,
+			yamlgen.FeatureChompKeep:     st.Chomping == yamlgen.ChompKeep,
+			yamlgen.FeatureChompPadded:   st.Chomping == yamlgen.ChompPadded,
+			yamlgen.FeatureYAMLDirective: st.Version != "",
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,

@@ -99,6 +99,16 @@ const (
 	FeatureNumberOctal stance.Feature = "presentation/number-octal"
 	// FeatureNumberExponent is a float written "1.5e+00".
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
+	// FeatureEscapeNamed is a double-quoted scalar spelling a character by the
+	// name 5.7 gives it -- "\0", "\/", "\_" and the rest.
+	FeatureEscapeNamed stance.Feature = "presentation/escape-named"
+	// FeatureEscapeHex is a character written "\xNN".
+	FeatureEscapeHex stance.Feature = "presentation/escape-hex"
+	// FeatureEscapeUnicode is a character written "\uNNNN" because the style
+	// asked for it, rather than because it is a control the emitter must escape.
+	FeatureEscapeUnicode stance.Feature = "presentation/escape-unicode"
+	// FeatureEscapeLong is a character written "\UNNNNNNNN".
+	FeatureEscapeLong stance.Feature = "presentation/escape-long"
 	// FeatureTimeDate is a timestamp written as a date alone, "2001-12-14".
 	FeatureTimeDate stance.Feature = "presentation/time-date"
 	// FeatureTimeLowerT is a timestamp written with a lowercase "t" between the
@@ -282,6 +292,26 @@ func tagFeature(written string) stance.Feature {
 		return FeatureTagHandle
 	default:
 		return FeatureTagLocal
+	}
+}
+
+// escapingFeature names the escape form a double-quoted scalar was written in.
+// [EscapeMinimal] gets none: it is what every other quoting falls back to, and
+// the four that spell a character a second way are the coverage worth counting.
+func escapingFeature(e Escaping) stance.Feature {
+	switch e {
+	case EscapeNamed:
+		return FeatureEscapeNamed
+	case EscapeHex:
+		return FeatureEscapeHex
+	case EscapeUnicode:
+		return FeatureEscapeUnicode
+	case EscapeLong:
+		return FeatureEscapeLong
+	case EscapeMinimal:
+		return ""
+	default:
+		return ""
 	}
 }
 

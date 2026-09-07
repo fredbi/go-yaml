@@ -131,6 +131,21 @@ func Refusals() []Refusal {
 		// written for. See TestTheParserVocabularyGapIsMeasured, which reports
 		// what is left.
 		{
+			// Two the yamlcorpus/28 draw stopped reaching, pinned on the same
+			// day for the same reason as the block scalar below: a complaint
+			// the generated documents happen to provoke is reachable rather
+			// than reliable, and the escape axis reshuffled which documents
+			// reach what.
+			Name: "a block sequence entry on a mapping value's own line",
+			Src:  "a: - 1\nb: - 2\n", Says: "block sequence entries are not allowed in this context",
+		},
+		{
+			// 7.4 closes a flow collection before the ":" that keys on it, so a
+			// "]" with nothing open is not a key and not a scalar either.
+			Name: "a flow collection's closing bracket used as a mapping key",
+			Src:  "]: 1\n", Says: "found an invalid key for this map",
+		},
+		{
 			// Pinned on 2026-09-13, when the yamlcorpus/25 draw stopped
 			// reaching it. The first line of the block scalar is blank and
 			// holds four spaces where the content holds two, which §8.1.1.1

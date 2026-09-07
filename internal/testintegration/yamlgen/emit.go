@@ -856,9 +856,7 @@ func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 			return s
 		}
 
-		e.feat.add(FeatureQuotedDouble)
-
-		return doubleQuote(s)
+		return e.doubleQuoted(s)
 	case QuoteSingle:
 		if canSingle(s) {
 			e.feat.add(FeatureQuotedSingle)
@@ -866,13 +864,9 @@ func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 		}
 
-		e.feat.add(FeatureQuotedDouble)
-
-		return doubleQuote(s)
+		return e.doubleQuoted(s)
 	default:
-		e.feat.add(FeatureQuotedDouble)
-
-		return doubleQuote(s)
+		return e.doubleQuoted(s)
 	}
 }
 
@@ -1093,11 +1087,18 @@ func canLiteral(s string, indicator bool) bool {
 }
 
 // doubleQuote writes s as a double-quoted scalar, which can express any string.
-func doubleQuote(s string) string {
+func doubleQuote(s string, esc Escaping, used *bool) string {
 	var b strings.Builder
 	b.WriteByte('"')
 
 	for _, r := range s {
+		if spelt, wrote := escaped(r, esc); wrote {
+			b.WriteString(spelt)
+			*used = true
+
+			continue
+		}
+
 		switch r {
 		case '"':
 			b.WriteString(`\"`)
@@ -1122,6 +1123,78 @@ func doubleQuote(s string) string {
 	b.WriteByte('"')
 
 	return b.String()
+}
+
+// doubleQuoted writes s in double quotes and marks the escape form only where
+// the style's escapes reached a character.
+//
+// A string of ordinary letters under EscapeNamed writes no named escape at all,
+// so claiming the feature would say the document holds something it does not --
+// the asymmetry TestNoLabelOutrunsItsStyle exists for.
+func (e *emitter) doubleQuoted(s string) string {
+	var used bool
+
+	out := doubleQuote(s, e.st.Escaping, &used)
+
+	e.feat.add(FeatureQuotedDouble)
+	if used {
+		e.feat.add(escapingFeature(e.st.Escaping))
+	}
+
+	return out
+}
+
+// named are the characters 5.7 gives an escape a name for, other than the five
+// the minimal rule already writes.
+//
+// The quote, the backslash, the break, the tab and the carriage return are left
+// out because they are escaped whatever the style asks for, so writing them
+// here would claim a form the document did not choose.
+var named = map[rune]string{
+	0x00:   `\0`,
+	0x07:   `\a`,
+	0x08:   `\b`,
+	0x0B:   `\v`,
+	0x0C:   `\f`,
+	0x1B:   `\e`,
+	0x20:   `\ `,
+	0x2F:   `\/`,
+	0x85:   `\N`,
+	0xA0:   `\_`,
+	0x2028: `\L`,
+	0x2029: `\P`,
+}
+
+// escaped returns the escape the style asks for, and whether it applies.
+//
+// A form that cannot hold the character reports false and the caller falls back
+// to the minimal rule, which is what keeps every mode writing a document that
+// reads back as the same string.
+func escaped(r rune, esc Escaping) (string, bool) {
+	switch esc {
+	case EscapeNamed:
+		spelt, has := named[r]
+
+		return spelt, has
+	case EscapeHex:
+		if r > 0xFF {
+			return "", false
+		}
+
+		return fmt.Sprintf(`\x%02X`, r), true
+	case EscapeUnicode:
+		if r > 0xFFFF {
+			return "", false
+		}
+
+		return fmt.Sprintf(`\u%04X`, r), true
+	case EscapeLong:
+		return fmt.Sprintf(`\U%08X`, r), true
+	case EscapeMinimal:
+		return "", false
+	default:
+		return "", false
+	}
 }
 
 // folds reports whether s should be written as a folded block scalar.
