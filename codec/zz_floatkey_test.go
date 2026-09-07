@@ -20,7 +20,9 @@ import (
 //
 // §3.2.1.1 makes a key equal to another when they resolve to the same node, so
 // the name belongs to the value and not to the text. The decoder names both
-// "1000.0" and libfyaml 1.0.0b1 writes {"1000.0": "x"} for both.
+// "1000.0". libfyaml 1.0.0b1 writes {"1000.0": "x"} for both and
+// go.yaml.in/yaml/v3 v3.0.5 reads both as map[1000:x] -- the two spellings get
+// one name from every implementation asked, this library's decoder included.
 //
 // Floats only. "? 007", "? 0x1f", "? ~" and "? true" are named 7, 31, null and
 // true by both converters, so the resolution reaches the key -- only the

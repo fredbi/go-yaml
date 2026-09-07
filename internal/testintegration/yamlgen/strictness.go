@@ -71,7 +71,12 @@ var Strict = []Strictness{
 			"The tag-before-anchor entries this used to sit with -- yamlgen.Ledger's " +
 			"parse/a-local-tag-before-an-anchor-does-not-type-its-scalar and the flow-value entry " +
 			"below -- were both closed on 2026-09-13 and this one was not, so the shared cause is " +
-			"the property order and not the fix.",
+			"the property order and not the fix.\n\n" +
+			"Neither loader can be consulted here. libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 v3.0.5 " +
+			"refuse all four documents above, `!!str [1]: v` and `&a !!str [1]: v` included, and " +
+			"this library reads both of those -- so they are declining a flow collection as a " +
+			"mapping key for a reason of their own rather than disagreeing about this shape. The " +
+			"claim rests on the reference parser and grammar.NewRecognizer, which accept all four.",
 		Error: "[1:6] value is not allowed in this context",
 	},
 	{
@@ -150,9 +155,14 @@ var Strict = []Strictness{
 			"The reference parser emits +MAP {} =VAL :a =VAL &x <tag:yaml.org,2002:str> : -MAP, " +
 			"grammar.NewRecognizer accepts it, and internal/refparser accepts it -- which is how it " +
 			"was found, by TestLabParserMatchesProduction on 2026-09-13 over a mutant that put an " +
-			"anchor with no node after a verbatim `!!bool`. libfyaml 1.0.0b1 and " +
-			"go.yaml.in/yaml/v3 v3.0.5 refuse the tagged empty node at construction, which is a " +
-			"question about resolution rather than about the syntax.",
+			"anchor with no node after a verbatim `!!bool`.\n\n" +
+			"libfyaml 1.0.0b1 reads it as {\"a\": \"\"} and go.yaml.in/yaml/v3 v3.0.5 as " +
+			"map[a:], so both implementations read the document. An earlier draft of this entry said " +
+			"they refused it; that was measured with `!!bool`, where an empty node legitimately " +
+			"fails to construct, and says nothing about the syntax. `!!str` is the tag to ask with.\n\n" +
+			"go.yaml.in/yaml/v3 has the mirror of this bug: it reads `{a: !!str &x}` and refuses " +
+			"`{a: &x !!str}` with `did not find expected whitespace or line break`, which is the " +
+			"order this library reads.",
 		Error: "[1:1] could not find flow mapping end token '}'",
 	},
 }
