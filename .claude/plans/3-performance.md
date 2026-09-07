@@ -923,6 +923,83 @@ loop -- which has to be a call either way, and which replaces two runtime map ca
   covers what it could not: a spilled index at a non-zero base, and two siblings opening at the same base
   one after the other, where a key the first left behind would read as a repeat in the second.
 
+## The per-token round -- landed 2026-09-07 (`fe85239`)
+
+### What a parse actually costs: a token, not a byte
+
+The finding the rest of this section rests on. Decode normalised per token instead of per byte:
+
+| workload | b/tok | ours ns/tok | v3 ns/tok | ratio |
+|---|---:|---:|---:|---:|
+| citm_catalog | **6.0** | 558 | 581 | 0.96 |
+| canada_geometry | 11.0 | 546 | 1162 | 0.47 |
+| golang_source | 12.9 | 538 | 635 | 0.85 |
+| twitter_status | 12.5 | 664 | 755 | 0.88 |
+| azure_swagger | 15.3 | 695 | 802 | 0.87 |
+| commented_swagger | 16.2 | 697 | 856 | 0.81 |
+
+**Ours spreads 1.30x, v3's spreads 2.00x.** We cost the same per token whatever the token is; v3
+costs what the token is worth. `citm_catalog` reads at half the MB/s of `azure_swagger` because it
+cuts a token every 6.0 bytes rather than every 15.3, and it is where our lead is narrowest for the
+same reason from the other side: its tokens are brackets and short integers, which is v3's cheapest
+case at 581 ns.
+
+`TestTokenShape` names the density -- **17,390 of citm's 97,430 tokens are flow brackets, 18%
+against 4% anywhere else** -- and `BenchmarkShapeDecode` prices a token by subtracting the sparsest
+of five equal-size documents from the densest: **359 ns per marginal token, about 1,220 cycles.**
+
+### Where those cycles go
+
+Two profiles that agree: `flow_brackets` (the synthetic, almost pure per-token) and `citm_catalog`.
+
+| | flow_brackets | citm_catalog |
+|---|---:|---:|
+| **walk the tape** | **22.3%** | **20.5%** |
+| scan the bytes | 12.0% | 18.6% |
+| **materialise a token** | **10.7%** | **11.7%** |
+| descend the grammar | 7.0% | 8.9% |
+| group the tokens | 6.2% | 5.7% |
+| build the AST | 6.2% | 5.5% |
+| build the Go value | 2.2% | 2.7% |
+
+**Materialising a token and reading it back is ~32%, and two thirds of that is the read side.** The
+56-byte token is not the tax; walking it off the tape is. An event emitter pays neither.
+
+### What landed: `tokenRef.at`
+
+The descent asks for the token it stands on ~5 times per token of the document, 72% of those for the
+position it already holds. `tokenRef` now caches it and `goNext` hands its lookahead straight in.
+
+⚠️ **The cache alone measured nothing (-0.42%).** Those calls already took a well-predicted branch
+and one array index. **The cost was that `at` could not be inlined -- 89 against a budget of 80.**
+Splitting the drawing out brings it to 72 and `currentToken` to 79, and both now inline. Reordering
+the fields it reads first takes `tokenRef` from 88 bytes to 80.
+
+**-1.5% geomean over three windows**, every workload the same direction, memory unchanged.
+
+### ⛔ The grouper's `holding` bitset -- built, measured, reverted
+
+`settled()` reads four values on every token, and the layout put them on three cache lines
+(`blockHeader` @16, `prop` @25, `explicit.key` @72, `directive.head` @208). A two-bit `holding`
+field beside `prop` brought the test into one line, with one pair of writers per bit and a probe
+holding the bits to the pointers they copy -- **`grouper.holdingMatchesTheState`, nil over 160,288
+checks of the fuzz corpus**. It works. It is kept at `scratchpad/holding-bitset.patch`, 169 lines.
+
+**`grouper.feed` is 0.17% of a citm decode and 0.48% of the flow shape, and `settled` inlines into
+it. That is the whole ceiling.** Measured cumulatively it read -0.43% with +-12-16% spreads.
+
+⚠️ **The scanner's cursor does not generalise to the grouper, and the reason is worth keeping.** The
+cursor is touched **per byte** -- 588,395 times on citm -- and its win was in what crossed a function
+boundary each time. `settled` is touched **per token**, 97,430 times, two orders of magnitude fewer;
+and the grouper is one 480-byte struct written on every token, so all eight of its lines are resident
+and none of them misses. **On a struct that stays in L1, layout is free.**
+
+### The pattern behind both of today's wins
+
+`readByAStage` and `tokenRef.at` both paid by **removing a call or a hash**, not by improving
+locality. Both locality bets measured nothing -- the `fieldCacheKey` struct key that boxed at every
+lookup, and the bitset above. Look for work that cannot be inlined away before looking at offsets.
+
 ## Where we stand against yaml/v3, measured 2026-09-07
 
 `internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any` on both sides, the two runs
