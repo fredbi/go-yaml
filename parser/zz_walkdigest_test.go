@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -48,6 +50,84 @@ func TestWalkDigest(t *testing.T) {
 	t.Logf("digest %s over %d documents walked and %d refused",
 		hex.EncodeToString(sum.Sum(nil)), documents, refused)
 }
+
+// TestTheWalkHandsOverTheSameTree pins the digest over the sources that do not
+// move, and is what replaces TestLabParserMatchesProduction.
+//
+// That gate compared every tree the parser built against one built by a frozen
+// copy of itself, node type by node type and position by position, over 18,554
+// documents. internal/refparser is deleted, so nothing compares two trees any
+// more -- and the live checks all score an *answer*: what a document means,
+// what it renders as, which complaints the parser can make. A change that moved
+// every token's column by one, or renamed a node type, would pass all of them.
+//
+// This catches that class for 64 hex characters instead of a stored tree dump.
+// Over 417 documents, not the gate's 18,554 -- the difference is the generated
+// corpus, which cannot be in here for the reason below.
+//
+// # What it does not catch, measured rather than reasoned
+//
+// Two reverts of real fixes, run against this digest:
+//
+//   - 28f926d, which decides the node a ':' keys on: the digest MOVES. That is
+//     the uniform class, and it works.
+//   - a6cc538, which measures an entry with no key from its own colon: the
+//     digest is IDENTICAL. No document among the 417 holds an entry with no key
+//     carrying a block scalar, so there is nothing for the change to move.
+//
+// So this catches a change that alters every tree the same way and misses one
+// that alters a shape nobody wrote down. Adding documents does not fix that:
+// none of the 91 hand-written shapes in yamlcorpus holds that shape either.
+// Finding shapes nobody wrote down is what the generated corpus does, and
+// holding one once found is what a pin does -- see TestEveryLedgerEntryNamesItsPin
+// in internal/testintegration. This is the third thing, and only the third: it
+// says the tree is the same tree.
+// digestVisitor writes the node type, the walk step's depth, index and key, the
+// line and column, the byte span and the value, so the digest moves on any
+// change to the shape of the tree or to where its tokens stand.
+//
+// # Why not every source
+//
+// TestWalkDigest above runs the fuzz seeds too, which come out of the generated
+// corpus artifact: regenerating it reshuffles all 14,000 and the digest moves
+// for a reason that has nothing to do with the parser. This one takes the YAML
+// Test Suite and the synthetic generators in internal/corpus, both of which are
+// fixed, so the digest moves only when the parser does.
+//
+// # When it fails
+//
+// Read it as "the tree changed", not as "the tree is wrong" -- exactly as the
+// gate's failures were read. Run TestWalkDigest with and without -tags
+// yamlprobe to see where, then re-baseline here on the same commit as the change
+// that moved it, the way parserComplaints is re-baselined in yamlcorpus.
+func TestTheWalkHandsOverTheSameTree(t *testing.T) {
+	sum := sha256.New()
+
+	var documents, refused int
+	for _, src := range walkSources(t) {
+		if strings.HasPrefix(src.name, "fuzzseed/") {
+			continue
+		}
+
+		d := &digestVisitor{out: sum}
+		fmt.Fprintf(sum, "\n=== %s\n", src.name)
+		if _, err := parser.New(parser.WithComments()).Walk([]byte(src.text), d); err != nil {
+			fmt.Fprintf(sum, "refused: %v\n", err)
+			refused++
+
+			continue
+		}
+		documents++
+	}
+
+	t.Logf("digest over %d documents walked and %d refused", documents, refused)
+	assert.Equal(t, fixedWalkDigest, hex.EncodeToString(sum.Sum(nil)),
+		"the walk hands over a different tree than it did; see the doc comment before re-baselining")
+}
+
+// fixedWalkDigest is what the walk hands over today, over the 417 documents of
+// the YAML Test Suite and the synthetic corpus -- 323 walked and 94 refused.
+const fixedWalkDigest = "6fcea6ced43d24a0dde7ff745621d54cb9c6f83941b862cbd1fd79cb9904f7c9"
 
 // digestVisitor writes what it is handed, so that anything the walk reads out
 // of a reclaimed cell shows up as a different document.
