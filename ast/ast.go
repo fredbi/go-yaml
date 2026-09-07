@@ -303,17 +303,26 @@ func Float(tk *token.Token) *FloatNode {
 	}
 }
 
-// Infinity create node for .inf or -.inf value
+// Infinity create node for .inf or -.inf value.
+//
+// The 1.2 core schema's float production is `[-+]? ( \.inf | \.Inf | \.INF )`,
+// so a "+" spells the same value the bare form does. Reading the sign rather
+// than matching all nine spellings keeps this in step with the scanner's
+// reservedInfKeywords, which is where they are listed.
 func Infinity(tk *token.Token) *InfinityNode {
 	node := &InfinityNode{
 		Token: tk,
 	}
-	switch tk.Value {
-	case ".inf", ".Inf", ".INF":
-		node.Value = math.Inf(0)
-	case "-.inf", "-.Inf", "-.INF":
-		node.Value = math.Inf(-1)
+	if tk.Type != token.InfinityType {
+		return node
 	}
+	if strings.HasPrefix(tk.Value, "-") {
+		node.Value = math.Inf(-1)
+
+		return node
+	}
+	node.Value = math.Inf(0)
+
 	return node
 }
 

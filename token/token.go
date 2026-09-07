@@ -324,6 +324,11 @@ var (
 		"Off",
 		"OFF",
 	}
+	// reservedInfKeywords spells the 1.2 core schema's float production
+	// `[-+]? ( \.inf | \.Inf | \.INF )`, so the sign is optional and may be a
+	// "+". reservedNanKeywords carries no sign because the production for a NaN
+	// is `\.nan | \.NaN | \.NAN` and admits none: "+.nan" is a string here, in
+	// go.yaml.in/yaml/v3 and in libfyaml alike.
 	reservedInfKeywords = []string{
 		".inf",
 		".Inf",
@@ -331,6 +336,9 @@ var (
 		"-.inf",
 		"-.Inf",
 		"-.INF",
+		"+.inf",
+		"+.Inf",
+		"+.INF",
 	}
 	reservedNanKeywords = []string{
 		".nan",

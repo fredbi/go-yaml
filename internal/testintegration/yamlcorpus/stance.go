@@ -299,22 +299,6 @@ var Departures = []Departure{
 			})
 		},
 	},
-	{
-		// Anchored on the shape that writes both spellings. It used to name "a
-		// key that is null", which is `~: a` alone and reads correctly -- the
-		// pattern was decorative until Departs made it load-bearing.
-		Pattern:  "a key written +.inf beside one written .inf",
-		Kind:     Value,
-		Observed: `"+.inf: a" beside ".inf: b" comes back as two entries, keyed "+.inf" and ".inf"`,
-		Because: "the sign is normalized away for an integer, so \"+1\" and \"1\" are one key, and the " +
-			"same normalization does not reach the infinities. Both spell positive infinity, so they " +
-			"are one node and one key",
-		Corroborated: "libfyaml 1.0.0b1 names both \"Infinity\"; go.yaml.in/yaml/v3 v3.0.5 reads both " +
-			"as float64(+Inf) and holds one entry",
-		Departs: func(got any, err error) bool {
-			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 2 })
-		},
-	},
 }
 
 // GoYAMLParser is the same library asked the question it actually answers at

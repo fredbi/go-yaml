@@ -56,18 +56,39 @@ func TestDefectATypedKeyCollapsesIntoTheStringThatSpellsIt(t *testing.T) {
 	})
 }
 
-// TestDefectAPositiveInfinityKeepsItsSign is the smaller one.
+// TestFixedAPositiveInfinityIsOneKeyHoweverItIsSpelled is the smaller one, and
+// it is closed.
 //
-// "+1" and "1" are one key, because the sign is normalized away for an integer.
-// The same normalization does not reach the infinities.
-func TestDefectAPositiveInfinityKeepsItsSign(t *testing.T) {
-	got := read(t, "+.inf: a\n.inf: b\n")
+// "+.inf" and ".inf" spell one value, so 3.2.1.1 makes them one key -- as "+1"
+// and "1" already were, the sign being normalized away for an integer. They
+// came back as two entries because "+.inf" did not resolve as a float at all:
+// token.reservedInfKeywords listed the six unsigned and "-" spellings where the
+// 1.2 core schema's production is `[-+]? ( \.inf | \.Inf | \.INF )`, so the
+// scalar stayed a string and the string is a key of its own.
+//
+// The string really is a separate key, and the last case holds that apart from
+// the fix: quoted, "+.inf" is text and not an infinity.
+func TestFixedAPositiveInfinityIsOneKeyHoweverItIsSpelled(t *testing.T) {
+	assert.Contains(t, refuses(t, "+.inf: a\n.inf: b\n"), "already defined")
 
-	assert.Equal(t, map[string]any{"+.inf": "a", ".inf": "b"}, got,
-		"today: two spellings of positive infinity are two keys")
-
-	t.Run("where the same shape on an integer is one", func(t *testing.T) {
+	t.Run("as the same shape on an integer already was", func(t *testing.T) {
 		assert.Contains(t, refuses(t, "+1: a\n1: b\n"), "already defined")
+	})
+
+	t.Run("and the upper-case spelling with it", func(t *testing.T) {
+		assert.Contains(t, refuses(t, "+.INF: a\n.inf: b\n"), "already defined")
+	})
+
+	t.Run("where the quoted spelling stays a string", func(t *testing.T) {
+		assert.Equal(t, map[string]any{".inf": "b", "+.inf": "a"},
+			read(t, "\"+.inf\": a\n.inf: b\n"),
+			"a quoted +.inf is text, so it is a key of its own")
+	})
+
+	t.Run("and a NaN takes no sign at all", func(t *testing.T) {
+		assert.Equal(t, map[string]any{".nan": "b", "+.nan": "a"},
+			read(t, "+.nan: a\n.nan: b\n"),
+			"1.2 spells a NaN `\\.nan | \\.NaN | \\.NAN` with no sign, so +.nan is a string")
 	})
 }
 
