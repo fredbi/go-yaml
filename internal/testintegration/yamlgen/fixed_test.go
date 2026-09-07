@@ -1863,3 +1863,55 @@ func TestFixedAVersionDirectiveIsScopedToOneDocument(t *testing.T) {
 		assert.Equal(t, []any{map[string]any{"a": true}, map[string]any{"b": true}}, readTheStream(t, both))
 	})
 }
+
+// TestFixedAMergeSequenceSharingAKeyReadsEverywhere closes the split.
+//
+// Two mappings in a merge sequence are expected to share keys -- that is what
+// the earlier-wins rule of the 1.1 merge type is for, and the sequence has no
+// other purpose. The walk applied it and a typed map refused the document,
+// applying 3.2.1.1's uniqueness across mappings that are not one mapping.
+//
+// Decoder.decodeMap asked validateDuplicateKey for every key of the fold
+// getMapNode makes of the sequence. It skips a repeat inside a fold now, so the
+// earlier mapping wins there as it does on every other path.
+//
+// Filed by the peer session as defect 40 from hand-written shapes; reached by
+// the merge axis on 2026-09-07 and closed the same day.
+func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
+	t.Run("a shared key reads the same into a typed map and an any", func(t *testing.T) {
+		const src = "<<: [{x: 1}, {x: 2}]\ny: 3\n"
+
+		want := map[string]any{"x": uint64(1), "y": uint64(3)}
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, want, walked, "the earlier mapping wins, which is the 1.1 rule")
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t, want, typed, "and the typed map agrees now")
+	})
+
+	t.Run("sharing no key, every destination still reads it", func(t *testing.T) {
+		const src = "<<: [{x: 1}, {z: 2}]\ny: 3\n"
+
+		want := map[string]any{"x": uint64(1), "y": uint64(3), "z": uint64(2)}
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, want, walked)
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t, want, typed)
+	})
+
+	t.Run("and a key repeated in one mapping is still refused", func(t *testing.T) {
+		// The fold is what carries the earlier-wins rule. One mapping writing
+		// a key twice is 3.2.1.1's repeat and has nothing to do with it.
+		var typed map[string]any
+		err := codec.Unmarshal([]byte("<<: {x: 1, x: 2}\n"), &typed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `"x" already defined`)
+	})
+}

@@ -347,45 +347,6 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 	})
 }
 
-// TestDefectAMergeSequenceSharingAKeyIsRefusedByATypedMap pins the split.
-//
-// Two mappings in a merge sequence are expected to share keys -- that is what
-// the earlier-wins rule of the 1.1 merge type is for, and the sequence has no
-// other purpose. The walk applies it and a typed map refuses the document,
-// applying 3.2.1.1's uniqueness across mappings that are not one mapping.
-//
-// Filed by the peer session as defect 40 from hand-written shapes; reached by
-// the merge axis on 2026-09-07.
-func TestDefectAMergeSequenceSharingAKeyIsRefusedByATypedMap(t *testing.T) {
-	t.Run("today a shared key is refused into a typed map and read into an any", func(t *testing.T) {
-		const src = "<<: [{x: 1}, {x: 2}]\ny: 3\n"
-
-		var walked any
-		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
-		assert.Equal(t, map[string]any{"x": uint64(1), "y": uint64(3)}, walked,
-			"the walk merges it, earlier winning, which is the 1.1 rule")
-
-		var typed map[any]any
-		err := codec.Unmarshal([]byte(src), &typed)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `duplicate key "x"`)
-	})
-
-	t.Run("sharing no key, every destination reads it", func(t *testing.T) {
-		const src = "<<: [{x: 1}, {z: 2}]\ny: 3\n"
-
-		want := map[string]any{"x": uint64(1), "y": uint64(3), "z": uint64(2)}
-
-		var walked any
-		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
-		assert.Equal(t, want, walked)
-
-		var typed map[string]any
-		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
-		assert.Equal(t, want, typed)
-	})
-}
-
 // TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck pins the inconsistency.
 //
 // 3.2.1.1 makes two keys that resolve alike one key, and a flow entry written

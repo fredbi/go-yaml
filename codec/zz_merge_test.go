@@ -111,45 +111,85 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 	})
 }
 
-// TestDefectATypedMapMergesTheWrongWay: a "<<" read into a map[string]any is
-// wrong two ways, where the same document into an `any` and into a struct is
-// right both times.
+// TestFixedATypedMapMergesLikeEveryOtherDestination: a "<<" read into a
+// map[string]any was wrong two ways, where the same document into an `any` and
+// into a struct was right both times.
 //
-// A merge sequence whose elements share a key is refused as a duplicate --
-// "<<: [{a: 1}, {a: 9}]" reports `duplicate key "a"` -- and two mappings that
-// define one key is what a merge sequence is for. And where it does read, the
-// merge overrides the mapping's own key: "a: 1" over "<<: {a: 9, b: 2}" comes
-// back with a=9, against 1.11's rule that the mapping's own keys win and an
-// earlier "<<" beats a later one.
+// Decoder.decodeMap is the reflection path and was a **fourth** place a merge
+// is resolved, beside decode.go's nodeToValue setters, walkstruct.go and
+// tojson.go. 2fbfc95 fixed the two setters, so the precedence rule held for an
+// `any` and a MapSlice and not for a map[string]any -- and only at the root,
+// since a nested mapping reaches the setters instead. Both faults lived here:
 //
-// Three destinations and two answers, so a caller cannot know which they are
-// on. codec.ToJSON agrees with the `any` read and with the struct.
+//   - it walked the entries in document order and let a merged key overwrite
+//     one the mapping wrote itself, so "a: 1" over "<<: {a: 9, b: 2}" came back
+//     with a=9 against the merge type's "unless the key already exists in it";
+//   - it asked validateDuplicateKey for every merged key, so a merge sequence
+//     whose mappings share a key -- which is what a merge sequence is for --
+//     was refused with `duplicate key "a"`.
+//
+// mapEntriesOwnFirst orders the entries own-before-merged and the merge branch
+// writes only where nothing stands, so both rules fall out of the order. A
+// mapping read under a merge is getMapNode's fold of the sequence, so a repeat
+// inside it is the earlier mapping winning and is skipped rather than refused.
+//
+// A repeated key that is not a merge is still refused, at the root, nested, and
+// inside a single merged mapping: "<<: {a: 1, a: 2}" is one mapping with one
+// key written twice and has nothing to do with the sequence rule.
 //
 // Found on 2026-09-12 while closing the ToJSON half, by comparing the
 // converter against a decode and picking the wrong destination to compare it
 // with.
-func TestDefectATypedMapMergesTheWrongWay(t *testing.T) {
-	t.Run("a merge sequence sharing a key is refused", func(t *testing.T) {
+func TestFixedATypedMapMergesLikeEveryOtherDestination(t *testing.T) {
+	t.Run("a merge sequence sharing a key reads, and the earlier mapping wins", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"<<: [{a: 1}, {a: 9}]\n", map[string]any{"a": uint64(1)}},
+			{"<<: [{a: 1}, {a: 9, b: 2}]\n", map[string]any{"a": uint64(1), "b": uint64(2)}},
+			{"a: 5\n<<: [{a: 1}, {a: 9}]\n", map[string]any{"a": uint64(5)}},
+		} {
+			var typed map[string]any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
+			assert.Equalf(t, tc.want, typed, "%q", tc.src)
+		}
+
+		var nested map[string]any
+		require.NoError(t, yaml.Unmarshal(
+			[]byte("p: &p {a: 1}\nq: &q {a: 9}\nr:\n  <<: [*p, *q]\n"), &nested))
+		assert.Equal(t, map[string]any{"a": uint64(1)}, nested["r"])
+	})
+
+	t.Run("and the mapping's own key wins over the merge, wherever it is written", func(t *testing.T) {
 		for _, src := range []string{
-			"<<: [{a: 1}, {a: 9}]\n",
-			"<<: [{a: 1}, {a: 9, b: 2}]\n",
-			"p: &p {a: 1}\nq: &q {a: 9}\n<<: [*p, *q]\n",
+			"a: 1\n<<: {a: 9, b: 2}\n",
+			"<<: {a: 9, b: 2}\na: 1\n",
+		} {
+			var typed map[string]any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &typed), "%q", src)
+			assert.Equalf(t, map[string]any{"a": uint64(1), "b": uint64(2)}, typed, "%q", src)
+		}
+
+		var nested map[string]any
+		require.NoError(t, yaml.Unmarshal([]byte("m:\n  a: 1\n  <<: {a: 9, b: 2}\n"), &nested))
+		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2)}, nested["m"])
+	})
+
+	t.Run("a repeated key that is not a merge is still refused", func(t *testing.T) {
+		for _, src := range []string{
+			"a: 1\na: 2\n",
+			"m:\n  a: 1\n  a: 2\n",
+			"<<: {a: 1, a: 2}\n",
 		} {
 			var typed map[string]any
 			err := yaml.Unmarshal([]byte(src), &typed)
-			require.Errorf(t, err, "today: %q is refused", src)
-			assert.Contains(t, err.Error(), `duplicate key "a"`, "%q", src)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), `"a" already defined`, "%q", src)
 		}
 	})
 
-	t.Run("and where it reads, the merge beats the mapping's own key", func(t *testing.T) {
-		var typed map[string]any
-		require.NoError(t, yaml.Unmarshal([]byte("a: 1\n<<: {a: 9, b: 2}\n"), &typed))
-		assert.Equal(t, map[string]any{"a": uint64(9), "b": uint64(2)}, typed,
-			"today: the merge overrides the key the mapping writes itself")
-	})
-
-	t.Run("an `any`, a struct and ToJSON all read them correctly", func(t *testing.T) {
+	t.Run("an `any`, a struct and ToJSON read them the same way", func(t *testing.T) {
 		type box struct {
 			A int `yaml:"a"`
 			B int `yaml:"b"`

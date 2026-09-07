@@ -151,23 +151,6 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
-		Name: "decode/a-merge-sequence-sharing-a-key-is-refused-by-a-typed-map",
-		Pin:  "TestDefectAMergeSequenceSharingAKeyIsRefusedByATypedMap",
-		Reason: "`<<: [{x: 1}, {x: 2}]` over `y: 3` reads {x: 1, y: 3} into an `any` -- the earlier " +
-			"mapping winning, which is the 1.1 rule -- and is refused into a typed map as " +
-			"`duplicate key \"x\"`, pointing at the second mapping.\n\n" +
-			"Two mappings in a merge sequence are *expected* to share keys: that is what the " +
-			"earlier-wins rule is for, and the sequence has no other purpose. Where they share none, " +
-			"`<<: [{x: 1}, {z: 2}]`, every destination reads it.\n\n" +
-			"The check is 3.2.1.1's, applied to the merged mappings as though they were entries of " +
-			"one mapping. They are not: each is a mapping of its own and the merge is what brings " +
-			"them together.\n\n" +
-			"Reached on 2026-09-07 by the merge axis. Filed by the peer session as defect 40 before " +
-			"the axis existed, from hand-written shapes.",
-		Property: DecodeTyped,
-		Match:    writesAMergeSequenceSharingAKey,
-	},
-	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
 		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
 		Reason: "A `<<` entry written `? <<` over `: *a` is read as an ordinary key named `<<`, where " +
@@ -479,52 +462,6 @@ func holdsAMergeKey(v Value) bool {
 // halves are the style asking for the long form and the value holding a merge.
 func writesAMergeKeyTheLongWay(v Value, st Style) bool {
 	return st.ExplicitKeys && holdsAMergeKey(v)
-}
-
-// writesAMergeSequenceSharingAKey reports whether a "<<" is given a sequence of
-// mappings two of which name the same key.
-//
-// Keyed on the sharing rather than on the sequence, because a sequence whose
-// mappings share nothing is read by every destination -- the refusal is the
-// duplicate-key check reaching across the merge, not the sequence itself.
-func writesAMergeSequenceSharingAKey(v Value, _ Style) bool {
-	found := false
-
-	var walk func(Value)
-
-	walk = func(n Value) {
-		if found {
-			return
-		}
-
-		switch t := n.(type) {
-		case Map:
-			for _, p := range t.Pairs {
-				if _, isMerge := p.Key.(MergeKey); isMerge && sharesAKey(p.Val) {
-					found = true
-
-					return
-				}
-
-				walk(p.Key)
-				walk(p.Val)
-			}
-		case Seq:
-			for _, item := range t.Items {
-				walk(item)
-			}
-		case Anchored:
-			walk(t.V)
-		case Alias:
-			walk(t.V)
-		case Tagged:
-			walk(t.V)
-		}
-	}
-
-	walk(v)
-
-	return found
 }
 
 // sharesAKey reports whether a "<<" value is a sequence holding two mappings

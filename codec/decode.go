@@ -481,6 +481,38 @@ func eachEntryOwnFirst(n *ast.MappingNode, fn func(value ast.Node, merged bool) 
 	return nil
 }
 
+// mapEntry is one entry of a mapping: its key, its value, the node the walk
+// hands over for the pair, and whether the key is a "<<".
+type mapEntry struct {
+	key, value, keyValue ast.Node
+	merged               bool
+}
+
+// mapEntriesOwnFirst is the entries of a mapping, the ones it writes itself
+// before the ones a "<<" brings in, each group in document order.
+//
+// It is [eachEntryOwnFirst]'s rule for the reflection path, which reads an
+// [ast.MapNode] through its iterator where the other reads an *ast.MappingNode
+// through its Values. Ordering the entries is what makes precedence fall out of
+// writing only where nothing stands.
+func mapEntriesOwnFirst(n ast.MapNode) []mapEntry {
+	var own, merged []mapEntry
+
+	iter := n.MapRange()
+	for iter.Next() {
+		entry := mapEntry{key: iter.Key(), value: iter.Value(), keyValue: iter.KeyValue()}
+		if key, isKey := entry.key.(ast.MapKeyNode); isKey && key.IsMergeKey() {
+			entry.merged = true
+			merged = append(merged, entry)
+
+			continue
+		}
+		own = append(own, entry)
+	}
+
+	return append(own, merged...)
+}
+
 // eachMergedEntry calls fn for the entries a "<<" brings in.
 //
 // A mapping contributes its keys in the order it would read in on its own --
@@ -2613,23 +2645,37 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 	mapValue := reflect.MakeMap(mapType)
 	keyType := mapValue.Type().Key()
 	valueType := mapValue.Type().Elem()
-	mapIter := mapNode.MapRange()
 	keyMap := map[string]struct{}{}
+	// A mapping read under a merge is the fold getMapNode makes of "<<: [a, b]",
+	// so two entries alike in it are the sequence doing its job -- the earlier
+	// mapping wins -- and not the repeated key 3.2.1.1 refuses.
+	folded := isMerge(ctx)
 	var foundErr error
-	for mapIter.Next() {
-		key := mapIter.Key()
-		value := mapIter.Value()
-		if key.IsMergeKey() {
+	for _, entry := range mapEntriesOwnFirst(mapNode) {
+		key := entry.key
+		value := entry.value
+		if entry.merged {
+			// The merge type gives a mapping's own keys precedence over the
+			// ones a "<<" brings in, and an earlier "<<" precedence over a
+			// later one. Both fall out of writing only where nothing stands:
+			// the own entries went in above, and the merges are read in
+			// document order.
+			//
+			// Nothing here asks validateDuplicateKey. Two mappings of a merge
+			// sequence that define one key is what the sequence is for, and a
+			// merged key equal to an own key is the override the type
+			// describes -- neither is the repeated key 3.2.1.1 refuses.
 			if err := d.decodeMap(withMerge(ctx), dst, value); err != nil {
 				return err
 			}
 			iter := dst.MapRange()
 			for iter.Next() {
-				if err := d.validateDuplicateKey(keyMap, iter.Key(), value); err != nil {
-					return err
+				if mapValue.MapIndex(iter.Key()).IsValid() {
+					continue
 				}
 				mapValue.SetMapIndex(iter.Key(), iter.Value())
 			}
+
 			continue
 		}
 
@@ -2681,7 +2727,11 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 				// than reporting the document.
 				return yamlerrors.NewUnhashableKey(dynamicTypeOf(k), key.GetToken())
 			}
-			if err := d.validateDuplicateKey(keyMap, k.Interface(), key); err != nil {
+			if folded {
+				if mapValue.MapIndex(k).IsValid() {
+					continue
+				}
+			} else if err := d.validateDuplicateKey(keyMap, k.Interface(), key); err != nil {
 				return err
 			}
 		}
@@ -2690,7 +2740,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 			mapValue.SetMapIndex(k, reflect.Zero(valueType))
 			continue
 		}
-		prevEntry := d.enterEntry(mapIter.KeyValue())
+		prevEntry := d.enterEntry(entry.keyValue)
 		dstValue, err := d.createDecodedNewValue(ctx, valueType, reflect.Value{}, value)
 		d.entry = prevEntry
 		if err != nil {
