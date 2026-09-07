@@ -53,13 +53,25 @@ type Strictness struct {
 // should settle the value against another parser and record it then.
 var Strict = []Strictness{
 	{
-		Name: "a tag before an anchor on a flow sequence used as a key",
+		Name: "a tag before an anchor on a flow collection used as a key",
 		Src:  "!!str &a [1]: v\n",
 		Rule: "6.9.2 and 7.4: a node's properties may be written in either order, and a flow " +
-			"sequence may stand as a mapping key. Written the other way round, `&a !!str [1]: v`, " +
-			"the same document parses here -- so the refusal is about the order of the two " +
-			"properties and nothing else. The reference parser reads both and emits the same " +
-			"events for them: +MAP +SEQ &a <tag:yaml.org,2002:str> =VAL :1 -SEQ =VAL :v -MAP.",
+			"collection may stand as a mapping key. The reference parser reads it and emits " +
+			"+MAP +SEQ &a <tag:yaml.org,2002:str> =VAL :1 -SEQ =VAL :v -MAP.\n\n" +
+			"Four things have to be true at once, re-measured on 2026-09-13 against " +
+			"conformance-fixes at 0b321d7:\n" +
+			"  - the tag comes first: `&a !!str [1]: v` reads;\n" +
+			"  - the tag is a `!!` shorthand: `!foo &a [1]: v` reads, and `!!seq &a [1]: v` is " +
+			"refused, so it is not about the tag naming the wrong type;\n" +
+			"  - both properties are there: `!!str [1]: v` and `&a [1]: v` each read;\n" +
+			"  - the node stands as a *key*: `!!str &a [1]` on its own reads, and " +
+			"`!!str &a \"x\": v` reads, so it takes a flow collection in the key position. " +
+			"`!!str &a {a: 1}: v` is refused too, so a flow mapping does it as well as a " +
+			"sequence.\n\n" +
+			"The tag-before-anchor entries this used to sit with -- yamlgen.Ledger's " +
+			"parse/a-local-tag-before-an-anchor-does-not-type-its-scalar and the flow-value entry " +
+			"below -- were both closed on 2026-09-13 and this one was not, so the shared cause is " +
+			"the property order and not the fix.",
 		Error: "[1:6] value is not allowed in this context",
 	},
 	{
