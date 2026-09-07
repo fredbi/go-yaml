@@ -860,6 +860,50 @@ func (d *Decoder) getArrayNode(node ast.Node) (ast.ArrayNode, error) {
 	return arrayNode, nil
 }
 
+// binaryBytes returns the bytes a "!!binary" node holds, and reports false for
+// every other node.
+//
+// The tag names a sequence of bytes and the decoder builds a []byte for an
+// `any`, so a []byte destination is the one Go type the tag is for.
+// decodeSlice read the node as a sequence and reported `string was used where
+// sequence is expected`, while the same document into a string field gave the
+// decoded bytes.
+func (d *Decoder) binaryBytes(node ast.Node) ([]byte, bool) {
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		return d.binaryBytes(n.Value)
+	case *ast.AliasNode:
+		target, _ := d.aliasTarget(n)
+		if target == nil {
+			return nil, false
+		}
+
+		return d.binaryBytes(target)
+	case *ast.TagNode:
+		res := n.Resolve()
+		if res.Tag != token.BinaryTag || res.Verdict != ast.TagResolved {
+			return nil, false
+		}
+		if res.Empty {
+			// "k: !!binary" with nothing after it takes the tag's own default,
+			// which tagZero writes as an empty []byte.
+			return []byte{}, true
+		}
+		b, err := base64.StdEncoding.DecodeString(res.Text)
+
+		return b, err == nil
+	default:
+		return nil, false
+	}
+}
+
+// byteSlice reports whether t is a slice of bytes a []byte converts to. A
+// []MyByte is not one: Go converts between slice types only where the element
+// types are identical.
+func byteSlice(t reflect.Type) bool {
+	return t.Kind() == reflect.Slice && reflect.TypeFor[[]byte]().ConvertibleTo(t)
+}
+
 // isBigNumber reports whether v holds a number wider than a native type.
 func isBigNumber(v reflect.Value) bool {
 	switch v.Interface().(type) {
@@ -2323,6 +2367,12 @@ func (d *Decoder) decodeSlice(ctx context.Context, dst reflect.Value, src ast.No
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
 		return ErrExceededMaxDepth
+	}
+
+	if b, ok := d.binaryBytes(src); ok && byteSlice(dst.Type()) {
+		dst.Set(reflect.ValueOf(b).Convert(dst.Type()))
+
+		return nil
 	}
 
 	arrayNode, err := d.getArrayNode(src)
