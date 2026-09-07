@@ -386,3 +386,61 @@ func TestParseReadsAScalarUnderATagThatResolvesToNothing(t *testing.T) {
 		})
 	}
 }
+
+// TestParseReadsAnAnchorNamingNothingInAFlowCollection: an anchor with nothing
+// after it, under a tag naming a scalar type, inside a flow collection.
+//
+// "{a: !!str &x}" was refused with `could not find flow mapping end token '}'`
+// and "{a: !!str &x, b: 1}" at the comma with `',' or '}' must be specified`,
+// so whatever read the anchor read the entry separator behind it. The anchor
+// names the empty node, which takes the tag's own default, and the flow
+// collection carries on.
+//
+// The order of the two properties decided it -- "{a: &x !!str}" read -- and so
+// did the tag: "{a: !foo &x}" read, because a tag the schema does not resolve
+// leaves parseTagValue by another branch, and "{a: !!seq &x}" read as a
+// collection tag. In block context "a: !!str &x" over "b: 1" always read.
+//
+// anchorNamesNothing asks endsValue of the token after the anchor's name, which
+// is the test the tag's own next token already got.
+func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
+	for _, source := range []string{
+		"{a: !!str &x}\n",
+		"{a: !!str &x, b: 1}\n",
+		"{a: !!int &x}\n",
+		"{a: !!null &x}\n",
+		"{a: !!bool &x}\n",
+		"[!!str &x]\n",
+		"[!!str &x, 1]\n",
+		// The spellings that read before, held here so a fix cannot trade one
+		// for another.
+		"{a: &x !!str}\n",
+		"{a: !foo &x}\n",
+		"{a: !!seq &x}\n",
+		"{a: !!str &x b}\n",
+		"a: !!str &x\nb: 1\n",
+		"- !!str &x\n- 1\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.NoError(t, err)
+			assert.Equal(t, source, f.String())
+
+			var got any
+			require.NoError(t, yaml.Unmarshal([]byte(source), &got))
+		})
+	}
+
+	t.Run("the anchor names the tag's own default, and an alias reads it", func(t *testing.T) {
+		for source, want := range map[string]any{
+			"{a: !!str &x, b: *x}\n":  map[string]any{"a": "", "b": ""},
+			"{a: !!int &x, b: *x}\n":  map[string]any{"a": uint64(0), "b": uint64(0)},
+			"{a: !!bool &x, b: *x}\n": map[string]any{"a": false, "b": false},
+			"[!!str &x, *x]\n":        []any{"", ""},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(source), &got), "%q", source)
+			assert.Equal(t, want, got, "%q", source)
+		}
+	})
+}

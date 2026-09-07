@@ -2081,7 +2081,7 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 			// mapping has begun. The tag is on the empty node.
 			return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 		}
-		if group, ends := p.anchorEndsTheLine(ctx, tk); ends {
+		if group, ends := p.anchorNamesNothing(ctx, tk); ends {
 			anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 			if err != nil {
 				return nil, err
@@ -2176,8 +2176,16 @@ func (p *Parser) enterEntry(col int, inMap bool) func() {
 	return func() { p.entryCol, p.entryInMap = wasCol, wasMap }
 }
 
-// anchorEndsTheLine reports whether tk is an anchor that names nothing, and
+// anchorNamesNothing reports whether tk is an anchor with no node after it, and
 // returns the group standing it on the empty node.
+//
+// Punctuation closes it. A "}", a "]", a "," or a ":" after the anchor's name
+// belongs to the collection the anchor was written in, so the anchor names the
+// empty node -- the same test the tag's own next token gets through endsValue.
+// Without it "{a: !!str &x}" fell through to parseScalarValue, which builds the
+// null correctly and leaves the cursor on the "}"; the caller then stepped past
+// it and the flow mapping ran to the end of the stream looking for a closer it
+// had already passed.
 //
 // Whatever a property at the end of a line names has to be written inside the
 // entry holding it, which means further in than that entry's own column. A
@@ -2203,12 +2211,13 @@ func (p *Parser) enterEntry(col int, inMap bool) func() {
 //
 // A comment may stand between the anchor and the next token. It belongs to what
 // comes after and says nothing about where this node ends.
-func (p *Parser) anchorEndsTheLine(ctx context, tk *tapeToken) (*tokenGroup, bool) {
+func (p *Parser) anchorNamesNothing(ctx context, tk *tapeToken) (*tokenGroup, bool) {
 	if tk.GroupType() != TokenGroupAnchorName {
 		return nil, false
 	}
 
-	if next := ctx.nextNotCommentToken(); next != nil && !p.opensNextEntry(next, tk.Line()) {
+	next := ctx.nextNotCommentToken()
+	if next != nil && !endsValue(next) && !p.opensNextEntry(next, tk.Line()) {
 		return nil, false
 	}
 
@@ -2258,7 +2267,7 @@ func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.T
 		// document left the value out rather than writing one of another kind.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 	}
-	if group, ends := p.anchorEndsTheLine(ctx, tk); ends {
+	if group, ends := p.anchorNamesNothing(ctx, tk); ends {
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
 			return nil, err
