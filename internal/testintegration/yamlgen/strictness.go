@@ -122,4 +122,25 @@ var Strict = []Strictness{
 			"2026-09-07 by a mutation that put a %TAG handle over the same shape.",
 		Error: "[2:1] value is not allowed in this context",
 	},
+	{
+		Name: "a secondary tag before an anchor on an empty flow value",
+		Src:  "{a: !!str &x}\n",
+		Rule: "6.9.2 and 7.4: a node may carry a tag and an anchor in either order, and a flow " +
+			"mapping entry may have an empty value. The parse loses the collection's end: " +
+			"`{a: !!str &x}` is refused with `could not find flow mapping end token '}'` and " +
+			"`{a: !!str &x, b: 1}` with `',' or '}' must be specified` at the comma. " +
+			"`[!!str &x]` goes the same way.\n\n" +
+			"Three things narrow it. The order: `{a: &x !!str}` reads, and gives \"\". The tag: " +
+			"`{a: !foo &x}` reads, so it is a `!!` shorthand or a verbatim secondary tag and not a " +
+			"local one. The context: `a: !!str &x` in block reads. Sibling of the first entry in " +
+			"this list, which is the same two properties in the same order on a flow sequence used " +
+			"as a key.\n\n" +
+			"The reference parser emits +MAP {} =VAL :a =VAL &x <tag:yaml.org,2002:str> : -MAP, " +
+			"grammar.NewRecognizer accepts it, and internal/refparser accepts it -- which is how it " +
+			"was found, by TestLabParserMatchesProduction on 2026-09-13 over a mutant that put an " +
+			"anchor with no node after a verbatim `!!bool`. libfyaml 1.0.0b1 and " +
+			"go.yaml.in/yaml/v3 v3.0.5 refuse the tagged empty node at construction, which is a " +
+			"question about resolution rather than about the syntax.",
+		Error: "[1:1] could not find flow mapping end token '}'",
+	},
 }

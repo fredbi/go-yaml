@@ -171,7 +171,6 @@ var parserComplaints = []string{
 	"a _ in a tag must be followed by two hexadecimal digits",
 	"a comment must be preceded by a space, and a scalar cannot begin with _",
 	"a flow collection continues on a line that is not indented past the one it started on",
-	"a leading empty line of a block scalar holds more spaces than its first content line",
 	"a plain scalar cannot begin with _",
 	"a scalar continues on a line that is not indented past the one it started on",
 	"a tag handle takes letters, digits and _ between its _ characters",

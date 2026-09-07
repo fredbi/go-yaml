@@ -230,6 +230,59 @@ func (n NumberForm) String() string {
 	}
 }
 
+// TimeForm is how a [Timestamp] is written down.
+//
+// The 2005 timestamp type allows a date on its own, an ISO 8601 instant, and
+// several relaxations of it: a lowercase "t" between the date and the time, a
+// space in its place, and the zone written apart from the time or left out
+// altogether. Each is a different text for the same instant, and every one of
+// them is a text this library reads -- so they belong here, beside the other
+// spelling axes.
+//
+// [TimeDate] applies only at midnight, since it drops the clock. Anything else
+// falls back to [TimeISO], the way a hex [NumberForm] falls back on a negative
+// integer.
+//
+// The zone is always "Z". [drawTime] draws in UTC so that the decoded
+// time.Time compares equal to the drawn one under reflect's equality, and an
+// offset zone would decode to a time.Location the drawn value does not carry.
+type TimeForm int
+
+const (
+	// TimeISO writes "2001-12-14T21:59:43.1Z".
+	TimeISO TimeForm = iota
+	// TimeDate writes "2001-12-14", and only for a midnight instant.
+	TimeDate
+	// TimeLowerT writes "2001-12-14t21:59:43.1Z".
+	TimeLowerT
+	// TimeSpaced writes "2001-12-14 21:59:43.1Z".
+	TimeSpaced
+	// TimeSpacedZone writes "2001-12-14 21:59:43.1 Z", the zone apart from the
+	// time.
+	TimeSpacedZone
+	// TimeNoZone writes "2001-12-14 21:59:43.1", which means UTC.
+	TimeNoZone
+)
+
+func (f TimeForm) String() string {
+	switch f {
+	case TimeDate:
+		return " time=date"
+	case TimeLowerT:
+		return " time=t"
+	case TimeSpaced:
+		return " time=sp"
+	case TimeSpacedZone:
+		return " time=sp+z"
+	case TimeNoZone:
+		return " time=nozone"
+	case TimeISO:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // Chomping is how a block scalar's trailing line breaks are written.
 //
 // The indicator itself is not a choice: a value with no trailing break needs
@@ -343,6 +396,8 @@ type Style struct {
 	TagHandle string
 	// NumberForm is the base or shape a number is written in.
 	NumberForm NumberForm
+	// TimeForm is the spelling a [Timestamp] is written in.
+	TimeForm TimeForm
 	// Version is the YAML version the document declares, written as a "%YAML"
 	// directive. Empty declares none, which is the ordinary case.
 	//
@@ -438,7 +493,7 @@ func (s Style) String() string {
 
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
-		s.Break.String() + props + spelling + s.NumberForm.String()
+		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String()
 }
 
 // Styles generates a presentation.
@@ -487,6 +542,11 @@ func Styles() *rapid.Generator[Style] {
 			// written and the only form a negative integer has. The other four
 			// share the rest evenly.
 			NumberForm: NumberForm(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "numberform")),
+			// An even six-way split. Unlike NumberForm there is no ordinary
+			// spelling to weight towards: a timestamp is rare enough in a
+			// document that spreading the forms evenly is what gets each of
+			// them written at all.
+			TimeForm: TimeForm(rapid.IntRange(0, 5).Draw(t, "timeform")),
 			// One mapping in four is written the long way. Weighted down
 			// because "key: value" is what documents look like, and an even
 			// split would spend half the corpus's mappings on a form few

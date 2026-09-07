@@ -239,6 +239,24 @@ var Departures = []Departure{
 			"three entries and no nesting at all",
 	},
 	{
+		Pattern: "a key tagged !!timestamp",
+		Kind:    Value,
+		Observed: `"!!timestamp 2001-12-14: x" comes back keyed ` +
+			`"2001-12-14 00:00:00 +0000 UTC", and "!!binary aGVsbG8=: x" keyed "[104 101 108 108 111]"`,
+		Because: "a key is named by the canonical spelling of what it resolves to, and neither the " +
+			"timestamp type nor the binary type has one -- so the name falls through to Go's %v of a " +
+			"time.Time and of a []byte. Neither text is anything a document could be written with, " +
+			"and the second is not even a spelling of a byte string. The tags resolve correctly " +
+			"everywhere else: `a: !!timestamp 2001-12-14` gives a time.Time and `a: !!binary aGVsbG8=` " +
+			"gives []byte(\"hello\"). It is naming a key that has no answer for them. yamlgen.Keys " +
+			"draws neither kind for this reason",
+		Corroborated: "codec.ToJSON writes {\"2001-12-14\": 1} and {\"[104,101,108,108,111]\": 1}, so " +
+			"the two converters in this library disagree with each other -- the same crossing that " +
+			"found \"a key tagged !!float\". libfyaml 1.0.0b1 names the timestamp key \"2001-12-14\", " +
+			"go.yaml.in/yaml/v3 v3.0.5 names it \"2001-12-14T00:00:00Z\", and the reference parser " +
+			"keeps the tag on the key and names nothing",
+	},
+	{
 		Pattern:  "a key that is null",
 		Kind:     Value,
 		Observed: `"+.inf: a" beside ".inf: b" comes back as two entries, keyed "+.inf" and ".inf"`,

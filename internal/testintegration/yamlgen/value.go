@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"pgregory.net/rapid"
 )
@@ -54,6 +55,24 @@ type (
 	// big.Float carries and the properties compare the two with reflect's
 	// equality -- a wider one would be the same number and a different struct.
 	BigFloat struct{ V *big.Float }
+	// Timestamp is a point in time, which this library reads from a scalar
+	// carrying `!!timestamp`.
+	//
+	// The tag is not optional. YAML 1.2's core schema resolves null, bool, int,
+	// float and str and no timestamp, so "2001-12-14" written plain is the
+	// string "2001-12-14" under every version this library reads --
+	// codec.TestATimestampIsATextualScalar holds that down. A Timestamp is
+	// therefore always drawn inside a [Tagged], and drawTextual is the only
+	// place one is made.
+	//
+	// The time is always UTC and carries no monotonic reading, so the value the
+	// document decodes to compares equal to this one under reflect's equality.
+	Timestamp struct{ V time.Time }
+	// Binary is a byte string, which this library reads from a scalar carrying
+	// `!!binary` by decoding its base64 text.
+	//
+	// Tagged for the same reason as [Timestamp], and drawn the same way.
+	Binary struct{ V []byte }
 	// Str is a string, and the interesting one: most of the ways to write a
 	// YAML document differently are ways to write a string differently.
 	Str struct{ V string }
@@ -196,6 +215,9 @@ func (b BigInt) Decoded() any   { return b.V }
 func (b BigFloat) Decoded() any { return b.V }
 func (s Str) Decoded() any      { return s.V }
 
+func (t Timestamp) Decoded() any { return t.V }
+func (b Binary) Decoded() any    { return b.V }
+
 func (s Seq) Decoded() any {
 	if len(s.Items) == 0 {
 		return []any{}
@@ -288,6 +310,13 @@ const (
 	TagMap   = "!!map"
 	TagLocal = "!foo"
 	TagNone  = "!"
+
+	// TagTimestamp and TagBinary name types the 2005 type repository defines
+	// rather than types a schema resolves, so they carry a value no untagged
+	// scalar can spell. [TagFor] offers each on its own kind and on nothing
+	// else, and drawTextual writes the tag as it draws the value.
+	TagTimestamp = "!!timestamp"
+	TagBinary    = "!!binary"
 )
 
 // TagFor returns the tags that can be written on v without changing what it
@@ -304,6 +333,10 @@ func TagFor(v Value) []string {
 		return []string{TagFloat}
 	case BigInt:
 		return []string{TagInt}
+	case Timestamp:
+		return []string{TagTimestamp}
+	case Binary:
+		return []string{TagBinary}
 	case Str:
 		return []string{TagStr, TagLocal, TagNone}
 	case Seq:
@@ -481,7 +514,7 @@ func values(depth int) *rapid.Generator[Value] {
 			rapid.Custom(func(t *rapid.T) Value { return Str{V: Strings().Draw(t, "string")} }),
 			// Strings twice over: they carry most of the presentation choices,
 			// so they should carry most of the generated weight.
-			rapid.Custom(func(t *rapid.T) Value { return Str{V: Strings().Draw(t, "string")} }),
+			rapid.Custom(drawTextual),
 		}
 
 		if depth >= maxDepth {
@@ -493,6 +526,59 @@ func values(depth int) *rapid.Generator[Value] {
 			rapid.Custom(func(t *rapid.T) Value { return drawMap(t, depth) }),
 		)...)
 	})
+}
+
+// drawTextual draws a string, and one draw in eight a [Timestamp] or a
+// [Binary] instead.
+//
+// They share the string's slot for the reason [drawInt] gives for the wide
+// numbers: given a slot each they would be a third of every scalar drawn, and
+// awkwardStrings is what reaches the corners of the presentation axes. One in
+// eight of one slot in six puts a timestamp or a byte string on 1 scalar in 48.
+//
+// Each comes back already inside a [Tagged], because neither resolves: an
+// untagged "2001-12-14" is the string "2001-12-14" and an untagged "aGVsbG8="
+// is that text. The tagger leaves a node that carries a tag alone, so the tag
+// drawn here is the one the document is written with, and [Style.TagSpelling]
+// still chooses among "!!timestamp", "!<tag:yaml.org,2002:timestamp>" and a
+// handle the document declares.
+func drawTextual(t *rapid.T) Value {
+	switch rapid.IntRange(0, 15).Draw(t, "textual") {
+	case 0:
+		return Tagged{Tag: TagTimestamp, V: Timestamp{V: drawTime(t)}}
+	case 1:
+		return Tagged{Tag: TagBinary, V: Binary{V: rapid.SliceOfN(rapid.Byte(), 1, 12).Draw(t, "bytes")}}
+	default:
+		return Str{V: Strings().Draw(t, "string")}
+	}
+}
+
+// drawTime draws a UTC instant, half of them at midnight so that the date-only
+// spelling [TimeDate] has values to write.
+//
+// The fraction is drawn in hundredths of a second rather than in nanoseconds.
+// Go's reference layouts read as many fractional digits as are written, but the
+// timestamp type's own examples stop at two, and a nine-digit fraction would
+// test the layout table rather than the presentation axis this draw exists for.
+func drawTime(t *rapid.T) time.Time {
+	var (
+		year  = rapid.IntRange(1900, 2100).Draw(t, "year")
+		month = rapid.IntRange(1, 12).Draw(t, "month")
+		day   = rapid.IntRange(1, 28).Draw(t, "day")
+	)
+
+	if rapid.Bool().Draw(t, "midnight") {
+		return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	}
+
+	var (
+		hour     = rapid.IntRange(0, 23).Draw(t, "hour")
+		min      = rapid.IntRange(0, 59).Draw(t, "minute")
+		sec      = rapid.IntRange(0, 59).Draw(t, "second")
+		hundreds = rapid.IntRange(0, 99).Draw(t, "hundredths")
+	)
+
+	return time.Date(year, time.Month(month), day, hour, min, sec, hundreds*int(10*time.Millisecond), time.UTC)
 }
 
 func drawSeq(t *rapid.T, depth int) Value {

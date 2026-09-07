@@ -99,6 +99,19 @@ const (
 	FeatureNumberOctal stance.Feature = "presentation/number-octal"
 	// FeatureNumberExponent is a float written "1.5e+00".
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
+	// FeatureTimeDate is a timestamp written as a date alone, "2001-12-14".
+	FeatureTimeDate stance.Feature = "presentation/time-date"
+	// FeatureTimeLowerT is a timestamp written with a lowercase "t" between the
+	// date and the time.
+	FeatureTimeLowerT stance.Feature = "presentation/time-lower-t"
+	// FeatureTimeSpaced is a timestamp written with a space where ISO 8601 puts
+	// the "T".
+	FeatureTimeSpaced stance.Feature = "presentation/time-spaced"
+	// FeatureTimeSpacedZone is a timestamp whose zone stands apart from the
+	// time, "2001-12-14 21:59:43.1 Z".
+	FeatureTimeSpacedZone stance.Feature = "presentation/time-spaced-zone"
+	// FeatureTimeNoZone is a timestamp written with no zone, which means UTC.
+	FeatureTimeNoZone stance.Feature = "presentation/time-no-zone"
 	// FeatureExplicitKey is a mapping entry written "? key" over ": value".
 	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
 	// FeatureChompKeep is a block scalar written "|+" where clip would do.
@@ -131,6 +144,12 @@ const (
 	// FeatureValueBigInt is an integer past what a machine word holds, which
 	// this library reads as a *big.Int.
 	FeatureValueBigInt stance.Feature = "value/big-int"
+	// FeatureValueTimestamp is a scalar carrying `!!timestamp`, which decodes
+	// to a time.Time.
+	FeatureValueTimestamp stance.Feature = "value/timestamp"
+	// FeatureValueBinary is a scalar carrying `!!binary`, whose base64 text
+	// decodes to a []byte.
+	FeatureValueBinary stance.Feature = "value/binary"
 	// FeatureValueBigFloat is a float past what a float64 holds, read as a
 	// *big.Float. A consumer that reads numbers into a double selects on both.
 	FeatureValueBigFloat stance.Feature = "value/big-float"
@@ -215,8 +234,11 @@ func Write(v Value, st Style) Written {
 // A nil set is the off switch, and add is the only thing that touches it.
 type features map[stance.Feature]struct{}
 
+// add records a feature. The empty name is dropped, so a mapping like
+// [timeFormFeature] can answer "nothing to mark" without its callers testing
+// for it.
 func (f features) add(name stance.Feature) {
-	if f == nil {
+	if f == nil || name == "" {
 		return
 	}
 
@@ -263,6 +285,28 @@ func tagFeature(written string) stance.Feature {
 	}
 }
 
+// timeFormFeature names the form a timestamp was written in. [TimeISO] gets
+// none: it is the spelling every implementation writes, and the four
+// relaxations are the coverage worth counting.
+func timeFormFeature(f TimeForm) stance.Feature {
+	switch f {
+	case TimeDate:
+		return FeatureTimeDate
+	case TimeLowerT:
+		return FeatureTimeLowerT
+	case TimeSpaced:
+		return FeatureTimeSpaced
+	case TimeSpacedZone:
+		return FeatureTimeSpacedZone
+	case TimeNoZone:
+		return FeatureTimeNoZone
+	case TimeISO:
+		return ""
+	default:
+		return ""
+	}
+}
+
 // valueFeatures records what the document denotes, walking the Value.
 //
 // An Alias adds nothing: it stands for a node the walk already reached at its
@@ -282,6 +326,10 @@ func valueFeatures(v Value, into features) {
 		into.add(FeatureValueBigFloat)
 	case Float:
 		into.add(FeatureValueFloat)
+	case Timestamp:
+		into.add(FeatureValueTimestamp)
+	case Binary:
+		into.add(FeatureValueBinary)
 	case Str:
 		into.add(FeatureValueString)
 	case Seq:

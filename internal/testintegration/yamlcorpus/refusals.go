@@ -131,6 +131,15 @@ func Refusals() []Refusal {
 		// written for. See TestTheParserVocabularyGapIsMeasured, which reports
 		// what is left.
 		{
+			// Pinned on 2026-09-13, when the yamlcorpus/25 draw stopped
+			// reaching it. The first line of the block scalar is blank and
+			// holds four spaces where the content holds two, which §8.1.1.1
+			// refuses because the indentation would be ambiguous. One space
+			// fewer and the document reads.
+			Name: "a block scalar's leading blank line is indented past its content",
+			Src:  "a: |\n    \n  x\n", Says: "holds more spaces than its first content line",
+		},
+		{
 			Name: "a byte order mark inside a line",
 			Src:  "a: \ufeffb\n", Says: "byte order mark inside a line",
 		},

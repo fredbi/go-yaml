@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
 	"math/big"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -793,11 +795,54 @@ func (e *emitter) simpleScalar(v Value, flow bool) string {
 		}
 
 		return e.number(floatText(n.V, e.st))
+	case Timestamp:
+		e.feat.add(FeatureValueTimestamp)
+		e.feat.add(timeFormFeature(timeFormFor(n.V, e.st)))
+
+		return e.scalarString(timestampText(n.V, e.st), flow, false)
+	case Binary:
+		e.feat.add(FeatureValueBinary)
+
+		return e.scalarString(base64.StdEncoding.EncodeToString(n.V), flow, false)
 	case Str:
 		return e.scalarString(n.V, flow, false)
 	default:
 		panic(fmt.Sprintf("yamlgen: unknown value %T", v))
 	}
+}
+
+// timeLayouts is the Go reference layout for each [TimeForm].
+//
+// Each was read back through codec.Unmarshal into a time.Time before it was
+// offered, since the layouts the library tries are its own table rather than
+// the 2005 type's regular expression: "2001-12-14 21:59:43.10 -5" matches that
+// expression and no Go layout, and codec.TestTimestampFormats records it as
+// refused.
+var timeLayouts = map[TimeForm]string{
+	TimeISO:        "2006-01-02T15:04:05.99Z07:00",
+	TimeDate:       "2006-01-02",
+	TimeLowerT:     "2006-01-02t15:04:05.99Z07:00",
+	TimeSpaced:     "2006-01-02 15:04:05.99Z07:00",
+	TimeSpacedZone: "2006-01-02 15:04:05.99 Z07:00",
+	TimeNoZone:     "2006-01-02 15:04:05.99",
+}
+
+// timeFormFor returns the form the style asks for, or [TimeISO] where it does
+// not apply.
+//
+// [TimeDate] drops the clock, so it is written only for an instant that has
+// none. The emitter reports the form it used rather than the one it was asked
+// for, which is what keeps the feature marks honest.
+func timeFormFor(v time.Time, st Style) TimeForm {
+	if st.TimeForm == TimeDate && !v.Equal(v.Truncate(24*time.Hour)) {
+		return TimeISO
+	}
+
+	return st.TimeForm
+}
+
+func timestampText(v time.Time, st Style) string {
+	return v.Format(timeLayouts[timeFormFor(v, st)])
 }
 
 // scalarString writes a string in the quoting the style asks for, falling back

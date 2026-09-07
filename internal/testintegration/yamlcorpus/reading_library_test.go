@@ -27,19 +27,31 @@ import (
 // parser takes parser.WithYAMLVersion, and the decoder has no option that
 // passes one through. So the 1.1 consumer is the library reading a document
 // that asks for 1.1, which is a real consumer and worth scoring.
-func asking(t stance.Table, src []byte) []byte {
+// asking returns src rewritten so the table's reading applies to it, and
+// reports whether it could be asked at all.
+//
+// A document that declares its own version cannot: "%YAML 1.1" above a
+// "%YAML 1.2" line is two directives, which the library refuses with
+// "YAML version has already been specified". Style.Version writes such
+// documents, so the corpus holds them and they are left unscored rather than
+// counted as a failure.
+func asking(t stance.Table, src []byte) ([]byte, bool) {
 	if t.Reads != "yaml-1.1" {
-		return src
+		return src, true
+	}
+
+	if bytes.HasPrefix(src, []byte("%YAML")) {
+		return nil, false
 	}
 
 	// A document already opening with a marker takes the directive above it;
 	// anything else needs the marker too, since a directive has to be followed
 	// by one.
 	if bytes.HasPrefix(src, []byte("---")) {
-		return append([]byte("%YAML 1.1\n"), src...)
+		return append([]byte("%YAML 1.1\n"), src...), true
 	}
 
-	return append([]byte("%YAML 1.1\n---\n"), src...)
+	return append([]byte("%YAML 1.1\n---\n"), src...), true
 }
 
 // TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading replays every case that
@@ -48,7 +60,7 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 	header, cases := storedCases(t)
 
 	for _, table := range []stance.Table{yamlcorpus.GoYAML, yamlcorpus.GoYAML11} {
-		scored, departed := 0, 0
+		scored, departed, declared := 0, 0, 0
 
 		for _, c := range cases {
 			meaning, states := header.MeaningFor(c, table.Reads)
@@ -74,11 +86,18 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
+			src, askable := asking(table, c.Src)
+			if !askable {
+				declared++
+
+				continue
+			}
+
 			scored++
 
 			var got any
 
-			dec := codec.NewDecoder(bytes.NewReader(asking(table, c.Src)))
+			dec := codec.NewDecoder(bytes.NewReader(src))
 			if err := dec.Decode(&got); err != nil {
 				t.Errorf("%s: %s cannot read it: %v", c.Name, table.Name, err)
 
@@ -102,8 +121,8 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 			t.Errorf("%s scored no case at all, so nothing above was exercised", table.Name)
 		}
 
-		t.Logf("%s: %d cases scored under %s, %d left to the recorded departure",
-			table.Name, scored, table.Reads, departed)
+		t.Logf("%s: %d cases scored under %s, %d left to the recorded departure, %d declaring a version of their own",
+			table.Name, scored, table.Reads, departed, declared)
 	}
 }
 

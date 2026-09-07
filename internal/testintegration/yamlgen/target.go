@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The Go type a document is read into, built from the value the document was
@@ -60,6 +61,8 @@ var (
 	int64Type  = reflect.TypeFor[int64]()
 	floatType  = reflect.TypeFor[float64]()
 	anyMapType = reflect.TypeFor[map[string]any]()
+	timeType   = reflect.TypeFor[time.Time]()
+	bytesType  = reflect.TypeFor[[]byte]()
 )
 
 // TargetForDecoded builds the Go type a decoded value fits.
@@ -93,6 +96,13 @@ func (t *Target) typeOfDecoded(v any) reflect.Type {
 		return int64Type
 	case float64:
 		return floatType
+	case time.Time:
+		// `!!timestamp` and `!!binary` are the two tags that hand back a Go
+		// type no schema resolves, so a field typed for them is the only
+		// destination that reads one without an any.
+		return timeType
+	case []byte:
+		return bytesType
 	case []any:
 		return reflect.SliceOf(t.decodedItemType(n))
 	case map[string]any:
@@ -186,9 +196,24 @@ func Normalize(v reflect.Value) any {
 	}
 
 	switch v.Kind() {
-	case reflect.Interface, reflect.Pointer:
+	case reflect.Interface:
 		if v.IsNil() {
 			return nil
+		}
+
+		return Normalize(v.Elem())
+	case reflect.Pointer:
+		if v.IsNil() {
+			return nil
+		}
+
+		if v.Type().Elem().Name() != "" && v.Type().Elem().Kind() == reflect.Struct {
+			// A *big.Float stays a pointer. Following it lands on the named
+			// struct below, which hands back the big.Float itself -- and
+			// reflect's equality then compares its Accuracy field, which
+			// records how the last rounding went rather than what the number
+			// is. sameValue compares a *big.Float by Cmp and had no chance to.
+			return v.Interface()
 		}
 
 		return Normalize(v.Elem())

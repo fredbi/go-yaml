@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -159,6 +160,25 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 
 				continue
 			}
+
+			if carriesATimestampOrBinaryTag(src.text) {
+				// A recorded defect: ToJSON writes a !!timestamp as the
+				// scalar's source text and the value converter writes the
+				// time.Time the decoder resolved, so "2001-12-14t21:59:43.1Z"
+				// and "2001-12-14T21:59:43.1Z" convert two ways. As a key both
+				// tags diverge too -- the decoder names one by Go's %v and
+				// ToJSON by the text. Pinned in
+				// TestDefectToJSONWritesATimestampAsItWasSpelled; the key half
+				// is yamlcorpus.Departures' "a key tagged !!timestamp".
+				//
+				// Asked only once the two have disagreed, so a document
+				// carrying one of these tags that converts the same way both
+				// ways is still compared. construct-binary is one.
+				t.Logf("%s: a timestamp or a binary is written two ways", src.name)
+				skipped++
+
+				continue
+			}
 			assert.Failf(t, "converters disagree",
 				"%s\nvalue converter: %s\nfolding converter: %s", src.name, want, got)
 		}
@@ -222,6 +242,38 @@ func knownJSONDivergence(want, got any) (string, bool) {
 	}
 
 	return "", false
+}
+
+// keyNamingTheSameNumber returns the entry of g whose key spells the same
+// number as k, where the two texts are different.
+//
+// Both keys have to parse as a float for this to fire, so it never rescues a
+// pair of keys that merely look alike.
+func keyNamingTheSameNumber(g map[string]any, k string) (any, bool) {
+	want, err := strconv.ParseFloat(k, 64)
+	if err != nil {
+		return nil, false
+	}
+
+	for other, v := range g {
+		got, err := strconv.ParseFloat(other, 64)
+		if err == nil && got == want {
+			return v, true
+		}
+	}
+
+	return nil, false
+}
+
+// carriesATimestampOrBinaryTag reports whether src tags a node !!timestamp or
+// !!binary, in any of the three spellings a tag has.
+//
+// Matched on the suffix rather than on "!!timestamp", so the verbatim
+// "!<tag:yaml.org,2002:timestamp>" and a handle declared by a %TAG line are
+// caught too. It is wider than the defect -- a local tag named "!timestamp"
+// would match and resolves to nothing -- and being wider only skips documents.
+func carriesATimestampOrBinaryTag(src string) bool {
+	return strings.Contains(src, "timestamp") || strings.Contains(src, "binary")
 }
 
 // numberBeyondBigFloat is the recorded defect, and it is the decoder's rather
@@ -307,6 +359,23 @@ func sameJSON(want, got any, excused *[]string) bool {
 						"an explicit !!float on a key is named as an integer through the decoder")
 
 					if !sameJSON(v, float, excused) {
+						return false
+					}
+
+					continue
+				}
+
+				// The other way a key is named twice: a float key written the
+				// long way keeps its source text through ToJSON. "? 1e3" over
+				// ": x" converts to {"1e3":"x"} where "1e3: x" converts to
+				// {"1000.0":"x"}, and the decoder names both "1000.0".
+				// Pinned in
+				// TestDefectToJSONNamesALongFormFloatKeyByItsText.
+				if number, renamed := keyNamingTheSameNumber(g, k); renamed {
+					*excused = append(*excused,
+						"a float key written the long way keeps its source text through ToJSON")
+
+					if !sameJSON(v, number, excused) {
 						return false
 					}
 

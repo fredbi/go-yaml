@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
@@ -319,6 +320,58 @@ func TestDefectAnIntTagCannotBeReadIntoAGoInteger(t *testing.T) {
 		var got box
 		require.NoError(t, yaml.Unmarshal([]byte("s: !!str x\nb: !!bool true\nf: !!float 1.5\na: !!int 5\n"), &got))
 		assert.Equal(t, box{S: "x", B: true, F: 1.5, A: 5}, got)
+	})
+}
+
+// TestDefectABinaryTagCannotBeReadIntoAGoByteSlice: `!!binary` cannot be read
+// into a Go []byte, which is the type the tag names.
+//
+// The conversion is there -- the same document reads into an `any` as
+// []uint8{'h','e','l','l','o'} and into a string field as "hello", the decoded
+// bytes rather than the base64 text. Only []byte is refused.
+//
+// Sibling of TestDefectAnIntTagCannotBeReadIntoAGoInteger and the same shape,
+// with one difference: go.yaml.in/yaml/v3 v3.0.5 refuses it too, so this is an
+// inconsistency inside the library rather than a departure from the field.
+// encoding/json reads a base64 string into a []byte.
+func TestDefectABinaryTagCannotBeReadIntoAGoByteSlice(t *testing.T) {
+	const src = "a: !!binary aGVsbG8=\n"
+
+	wellFormed(t, src)
+
+	t.Run("today a []byte destination is refused", func(t *testing.T) {
+		var into struct {
+			A []byte `yaml:"a"`
+		}
+		err := yaml.Unmarshal([]byte(src), &into)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "string was used where sequence is expected")
+
+		var byName map[string][]byte
+		assert.Error(t, yaml.Unmarshal([]byte(src), &byName))
+
+		var items [][]byte
+		assert.Error(t, yaml.Unmarshal([]byte("- !!binary aGVsbG8=\n"), &items))
+	})
+
+	t.Run("an any and a string field read it", func(t *testing.T) {
+		var loose any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &loose))
+		assert.Equal(t, map[string]any{"a": []byte("hello")}, loose)
+
+		var into struct {
+			A string `yaml:"a"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte(src), &into))
+		assert.Equal(t, "hello", into.A)
+	})
+
+	t.Run("the timestamp tag reads into the type it names", func(t *testing.T) {
+		var into struct {
+			T time.Time `yaml:"t"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte("t: !!timestamp 2001-12-14\n"), &into))
+		assert.Equal(t, time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC), into.T)
 	})
 }
 

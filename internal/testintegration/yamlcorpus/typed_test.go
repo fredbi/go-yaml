@@ -112,6 +112,14 @@ var typedPathDefects = map[string]string{
 	// yamlgen.Ledger's parser entries for a tag over a key, and parked with
 	// them: see stream 2, defects 2, 13 and 14.
 	"a key tagged !!float": "a tag on a key, parked",
+	// The same root, reached by two more tags on 2026-09-13. No struct tag
+	// names the key at all: neither the name the `any` path gives it
+	// ("2001-12-14 00:00:00 +0000 UTC"), nor the text written down
+	// ("2001-12-14"), nor the decoded bytes ("hello"). The entry is dropped and
+	// nothing is reported. Departures records what the key is named; this
+	// records that the struct path cannot reach it.
+	"a key tagged !!timestamp": "a tag on a key, parked",
+	"a key tagged !!binary":    "a tag on a key, parked",
 }
 
 // sameNumerically compares two decodes of one document, with numbers compared

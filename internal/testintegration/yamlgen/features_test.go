@@ -249,10 +249,18 @@ func TestNoLabelOutrunsItsStyle(t *testing.T) {
 			yamlgen.FeatureNumberHex:       st.NumberForm == yamlgen.NumberHex,
 			yamlgen.FeatureNumberOctal:     st.NumberForm == yamlgen.NumberOctal,
 			yamlgen.FeatureNumberExponent:  st.NumberForm == yamlgen.NumberExponent,
-			yamlgen.FeatureExplicitKey:     st.ExplicitKeys,
-			yamlgen.FeatureChompKeep:       st.Chomping == yamlgen.ChompKeep,
-			yamlgen.FeatureChompPadded:     st.Chomping == yamlgen.ChompPadded,
-			yamlgen.FeatureYAMLDirective:   st.Version != "",
+			// TimeDate falls back to TimeISO for an instant carrying a clock,
+			// and the fallback claims nothing -- so the label still appears
+			// only under the form that asked for it.
+			yamlgen.FeatureTimeDate:       st.TimeForm == yamlgen.TimeDate,
+			yamlgen.FeatureTimeLowerT:     st.TimeForm == yamlgen.TimeLowerT,
+			yamlgen.FeatureTimeSpaced:     st.TimeForm == yamlgen.TimeSpaced,
+			yamlgen.FeatureTimeSpacedZone: st.TimeForm == yamlgen.TimeSpacedZone,
+			yamlgen.FeatureTimeNoZone:     st.TimeForm == yamlgen.TimeNoZone,
+			yamlgen.FeatureExplicitKey:    st.ExplicitKeys,
+			yamlgen.FeatureChompKeep:      st.Chomping == yamlgen.ChompKeep,
+			yamlgen.FeatureChompPadded:    st.Chomping == yamlgen.ChompPadded,
+			yamlgen.FeatureYAMLDirective:  st.Version != "",
 			// A local tag is written out in full under SpellVerbatim, as
 			// "!<!foo>", and keeps its shorthand under the other two.
 			yamlgen.FeatureTagLocal: st.TagSpelling != yamlgen.SpellVerbatim,

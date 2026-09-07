@@ -191,6 +191,27 @@ var Ledger = []Divergence{
 		Match:    writesASpecialFloatUnderALongTag,
 	},
 	{
+		Name: "parse/a-local-tag-before-an-anchor-does-not-type-its-scalar",
+		Reason: "A local or non-specific tag written *before* an anchor stops typing its scalar, and " +
+			"the scalar resolves by the schema as though it carried no tag. `!foo true` reads " +
+			"\"true\"; `!foo &a1 true` reads the boolean true. `!foo &a1 1` reads uint64(1) where " +
+			"`!foo 1` reads \"1\".\n\n" +
+			"Three things narrow it. The order: `&a1 !foo true` reads \"true\", so writing the " +
+			"anchor first keeps the tag. The tag: `!!str &a1 true` reads \"true\", so a `!!` " +
+			"shorthand is unaffected -- only a local tag, its verbatim spelling `!<!foo>`, and the " +
+			"non-specific `!` lose it. The context: a block mapping, a block sequence and a flow " +
+			"mapping all do it, and so does the document root.\n\n" +
+			"Same family as parse/a-tag-not-written-as-a-shorthand-does-not-type-its-scalar and the " +
+			"tag-before-anchor entries in yamlgen.Strict: which spelling and which order the two " +
+			"properties are written in decides whether the tag reaches the scalar.\n\n" +
+			"Found on 2026-09-13, when the yamlcorpus/25 draw put Style.PropertyOrder and a local " +
+			"tag on one anchored scalar.\n\n" +
+			"Decode and Render, and Render because the value is already wrong when it is first read: " +
+			"the parse renders the document back byte for byte.",
+		Property: Decode | DecodeTyped | Render,
+		Match:    writesALocalTagBeforeAnAnchor,
+	},
+	{
 		Name: "parse/a-version-directive-resolves-the-root-block-scalar-it-opens",
 		Reason: "A `%YAML` directive over a document whose body is a block scalar makes the parse fail " +
 			"when the scalar's content is a word the schema would resolve. `%YAML 1.1` over `---` " +
@@ -310,6 +331,24 @@ var Ledger = []Divergence{
 			"Every spelling of the tag does it, the verbatim and handle forms included.",
 		Property: DecodeTyped,
 		Match:    writesAnIntTag,
+	},
+	{
+		Name: "decode/a-binary-tag-cannot-be-read-into-a-go-byte-slice",
+		Reason: "`!!binary` cannot be read into a Go []byte -- a struct field, a slice element or a " +
+			"map value. `a: !!binary aGVsbG8=` into a struct with a []byte field is refused with " +
+			"`string was used where sequence is expected`, and so is a map[string][]byte.\n\n" +
+			"The same document into an `any` gives []uint8{'h','e','l','l','o'}, and into a *string* " +
+			"field it gives \"hello\" -- the decoded bytes, not the base64 text. So the conversion " +
+			"is there and the one Go type the tag names is the one it cannot reach.\n\n" +
+			"Sibling of decode/an-int-tag-cannot-be-read-into-a-go-integer, and the same shape: the " +
+			"`any` path has a case for the type the tag resolves to and the reflection path does " +
+			"not. Unlike that one, go.yaml.in/yaml/v3 v3.0.5 refuses it too, with " +
+			"`cannot unmarshal !!binary into []uint8` -- so this is an inconsistency inside the " +
+			"library rather than a departure from the field. encoding/json reads a base64 string " +
+			"into a []byte.\n\n" +
+			"Found on 2026-09-13, on the first deep run of the Binary value kind.",
+		Property: DecodeTyped,
+		Match:    writesABinaryTag,
 	},
 	{
 		Name: "decode/one-non-string-key-zeroes-a-whole-struct",
@@ -681,6 +720,84 @@ func writesAnIntTag(v Value, _ Style) bool {
 	case Map:
 		for _, p := range n.Pairs {
 			if writesAnIntTag(p.Key, Style{}) || writesAnIntTag(p.Val, Style{}) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writesALocalTagBeforeAnAnchor reports whether v holds a node carrying both a
+// local or non-specific tag and an anchor, with [TagFirst] writing the tag
+// first.
+//
+// Wider than the defect: a Str whose text resolves to itself reads the same
+// either way, and the shape is still matched. The tally says how often it
+// actually diverges.
+func writesALocalTagBeforeAnAnchor(v Value, st Style) bool {
+	if st.PropertyOrder != TagFirst {
+		return false
+	}
+
+	return holdsALocalTagOnAnAnchoredScalar(v, false)
+}
+
+// holdsALocalTagOnAnAnchoredScalar walks v, carrying whether an [Anchored]
+// stands above the node being looked at.
+//
+// The two properties may be written in either nesting order -- the tagger and
+// the aliaser each wrap what they are given -- and the emitter writes both on
+// one line whichever way round the tree holds them.
+func holdsALocalTagOnAnAnchoredScalar(v Value, anchored bool) bool {
+	switch n := v.(type) {
+	case Anchored:
+		return holdsALocalTagOnAnAnchoredScalar(n.V, true)
+	case Tagged:
+		if anchored && (n.Tag == TagLocal || n.Tag == TagNone) {
+			if _, scalar := n.V.(Str); scalar {
+				return true
+			}
+		}
+
+		return holdsALocalTagOnAnAnchoredScalar(n.V, anchored)
+	case Alias:
+		return false
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsALocalTagOnAnAnchoredScalar(item, false)
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsALocalTagOnAnAnchoredScalar(p.Key, false) ||
+				holdsALocalTagOnAnAnchoredScalar(p.Val, false) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// writesABinaryTag reports whether v holds a [Binary], whose decoded []byte is
+// the destination TargetForDecoded then builds.
+func writesABinaryTag(v Value, _ Style) bool {
+	switch n := v.(type) {
+	case Binary:
+		return true
+	case Tagged:
+		return writesABinaryTag(n.V, Style{})
+	case Anchored:
+		return writesABinaryTag(n.V, Style{})
+	case Alias:
+		return writesABinaryTag(n.V, Style{})
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return writesABinaryTag(item, Style{})
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if writesABinaryTag(p.Key, Style{}) || writesABinaryTag(p.Val, Style{}) {
 				return true
 			}
 		}

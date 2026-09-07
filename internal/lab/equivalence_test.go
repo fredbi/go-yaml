@@ -163,7 +163,47 @@ func divergesByDefect(err error, text string) (string, bool) {
 		return "a version directive resolves the root scalar it opens (yamlgen.Strict, yamlgen.Ledger)", true
 	}
 
+	if holdsATagBeforeAnAnchorOnAnEmptyFlowValue(text) &&
+		(strings.Contains(msg, "flow mapping end token") ||
+			strings.Contains(msg, "sequence end token") ||
+			strings.Contains(msg, "must be specified")) {
+		return "a secondary tag before an anchor on an empty flow value (yamlgen.Strict)", true
+	}
+
 	return "", false
+}
+
+// holdsATagBeforeAnAnchorOnAnEmptyFlowValue reports whether text writes a
+// secondary tag, then an anchor, then the end of a flow entry.
+//
+// "{a: !!str &x}" and "[!!str &x]" are the shape: the anchor names an empty
+// node and the parser loses the collection's end. The scan is deliberately
+// crude -- it wants a "!" and a "&" on the same line, with the "&" followed by
+// a name and then a "}", a "]" or a ",". A local tag does not do this, so the
+// two "!" characters of a shorthand or the "!<" of a verbatim tag are what it
+// looks for.
+func holdsATagBeforeAnAnchorOnAnEmptyFlowValue(text string) bool {
+	for line := range strings.SplitSeq(text, "\n") {
+		tag := strings.Index(line, "!!")
+		if tag < 0 {
+			tag = strings.Index(line, "!<")
+		}
+		if tag < 0 {
+			continue
+		}
+
+		anchor := strings.Index(line[tag:], "&")
+		if anchor < 0 {
+			continue
+		}
+
+		rest := strings.TrimRight(line[tag+anchor+1:], " \t\r")
+		if cut := strings.IndexAny(rest, "}],"); cut >= 0 && !strings.ContainsAny(rest[:cut], " \t") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // tagEndsItsLine reports whether text writes a tag as the last thing on its
