@@ -86,4 +86,56 @@ var Lax = []Laxity{
 			"is the same document written correctly, and reads the same.",
 		Reads: []any{uint64(1)},
 	},
+	{
+		Name: "an explicit key's value in the key's own column",
+		Src:  " ?\n 1\n",
+		Rule: "8.2.2: l-block-map-explicit-value(n) is `s-indent(n) \":\" s-l+block-indented(n,block-out)`, " +
+			"so an explicit entry takes a value only from a line that opens with ':'. Line 2 opens with " +
+			"`1`, which makes it a fresh ns-l-block-map-entry needing a ':' of its own -- go.yaml.in/yaml/v3 " +
+			"refuses it in those words, `could not find expected ':'`. Nor is the `1` the key's own content: " +
+			"c-l-block-map-explicit-key(n) puts that at s-l+block-indented(n), further in than the '?', and " +
+			"both sit in column 2.",
+		// We read the "1" as the explicit entry's value; libfyaml 1.0.0b1 reads
+		// it as the next entry's key and gives {"1": null}. Two lax readers,
+		// opposite answers, which is the argument for refusing rather than
+		// guessing: there is no obvious thing to read this as. libfyaml's is
+		// the more defensible of the two, since a line at the mapping's own
+		// indent starts an entry rather than continuing one.
+		Reads: map[string]any{"null": uint64(1)},
+	},
+	{
+		Name: "an explicit key's ':' indented past the mapping",
+		Src:  "? l\n :\n",
+		Rule: "8.2.2: l-block-map-explicit-value(n) opens with s-indent(n), and n here is 0 -- the '?' " +
+			"stands in column 1. The ':' is in column 2, so it is not the entry's value line. Nor is it " +
+			"content of the key `l`, which sits in column 3, further in than the ':'. libfyaml 1.0.0b1 " +
+			"names it exactly: `invalid indentation in mapping` at 2:2, and go.yaml.in/yaml/v3 refuses " +
+			"it too.",
+		// The pair with the entry above: there the value line carries no ':'
+		// and we read the scalar on it, here the ':' is in the wrong column and
+		// we read it anyway. Both say the same thing about the library -- the
+		// ':' of an explicit entry is never measured against the mapping's own
+		// indent -- so a fix for one is likely a fix for both.
+		//
+		// Kept as two entries with exact Src rather than one Match over the
+		// class, because a predicate wide enough to hold both would be wide
+		// enough to swallow the next finding, and this list is only worth
+		// having while everything in it has been looked at.
+		Reads: map[string]any{"l": nil},
+	},
+	{
+		Name: "a byte order mark behind a tab",
+		Src:  "\t\ufeff\n",
+		Rule: "5.2: l-document-prefix is `c-byte-order-mark? l-comment*`, so the mark stands before " +
+			"anything else a document may open with -- a tab in front of it puts it outside the prefix. " +
+			"It is not comment text either, which l-comment requires to open with '#'. " +
+			"go.yaml.in/yaml/v3 refuses it as `found character that cannot start any token`.",
+		// The one entry here that swallows a character. libfyaml 1.0.0b1 reads
+		// the document as the string "\ufeff" -- the mark as content, which is
+		// the reading that follows from it not being a prefix. We report no
+		// error and no content at all, so a caller cannot tell this document
+		// from an empty one. Of the three answers ours is the only one that
+		// loses the byte.
+		Reads: nil,
+	},
 }
