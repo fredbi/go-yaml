@@ -697,8 +697,21 @@ func (w *jsonWriter) collectMerge(node ast.Node, at parser.Step) bool {
 		// "<<: {a: 1}" merges a mapping written out. It is not read here --
 		// nothing has written it yet -- so the walk goes into it and what it
 		// writes is taken at its own Leave.
-		frame.mergeValue = false
-		w.separate(at)
+		//
+		// Nothing separates it. The "<<" wrote no key of its own, so there is
+		// none to separate from, and a separator written here stood before the
+		// mark closeMapping cuts the mapping's text back out from: it stayed
+		// behind, and "<<: {a: 1}" came out as {:"a":1}. Worse where the
+		// mapping already held an entry -- separate reads a second value for
+		// one key and truncates to frame.valueAt, so "a: 1" over "<<: {b: 2}"
+		// came out as {"a":,"b":2}, invalid and a value short.
+		if frame.mergeSeq < 0 {
+			// As for an alias: inside "<<: [{a: 1}, {b: 2}]" every element is a
+			// merge value, so the flag stays until the sequence closes. Cleared
+			// on the first element, the second was written where it stood and
+			// "<<: [{a: 1}, {b: 2}]" came out as {,{"b":2}"a":1}.
+			frame.mergeValue = false
+		}
 		w.maps = append(w.maps, mapFrame{at: len(w.out), valueAt: -1, mergedInto: frame.at})
 		w.out = append(w.out, '{')
 
