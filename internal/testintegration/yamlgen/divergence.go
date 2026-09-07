@@ -251,32 +251,6 @@ var Ledger = []Divergence{
 		Match:    writesACommentOnAnExplicitColonLine,
 	},
 	{
-		Name: "parse/a-quoted-explicit-key-refuses-a-block-scalar-value",
-		Pin:  "TestDefectAQuotedExplicitKeyRefusesABlockScalarValue",
-		Reason: "A mapping entry written the long way -- `? key` over `: value` -- is refused when the " +
-			"key is quoted and the value is a block scalar. `? \"a\"` over `: >-` over `  x` reports " +
-			"`value is not allowed in this context`; `? a` over the same two lines reads, and so does " +
-			"the short form `\"a\": >-`.\n\n" +
-			"Nothing else narrows it. Single quotes and double quotes both do it, `|` and `>` both do " +
-			"it, and it happens at the document root, inside a mapping and inside a sequence entry. " +
-			"An anchor or a tag on the value makes no difference. A flow collection, a quoted scalar " +
-			"and a plain scalar after the same quoted key all read.\n\n" +
-			"Where the block scalar's content begins with a `:` it is worse than refused. `? \"\"` " +
-			"over `: >-` over ` : a` reads {\"\": {\"\": \"a\"}} -- a nested mapping, where libfyaml " +
-			"1.0.0b1 gives {\"\": \": a\"} -- because the parser takes the `>-` for a plain scalar " +
-			"key rather than a block scalar header. A plain scalar cannot begin with `>`, so the tree " +
-			"holds a node no document can spell, and the renderer writes `>-: a` back out: text the " +
-			"recognizer refuses. That is why this claims RenderValid as well.\n\n" +
-			"libfyaml 1.0.0b1 reads every one of them, the reference parser passes them, and " +
-			"grammar.NewRecognizer accepts them. Found on 2026-09-11 by Style.ExplicitKeys, on its " +
-			"first deep run.\n\n" +
-			"The predicate asks the emitter's own blockScalarIn whether the value becomes one, so the " +
-			"only place it is wider than the defect is the key: Style.Quoting quotes every string, " +
-			"and not every quoted key is one the parser then cannot place.",
-		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid,
-		Match:    writesAQuotedExplicitKeyOverABlockScalar,
-	},
-	{
 		Name: "decode/a-binary-tag-cannot-be-read-into-a-go-byte-slice",
 		Pin:  "TestDefectABinaryTagCannotBeReadIntoAGoByteSlice",
 		Reason: "`!!binary` cannot be read into a Go []byte -- a struct field, a slice element or a " +
@@ -316,10 +290,6 @@ var Ledger = []Divergence{
 	},
 }
 
-// writesAQuotedExplicitKeyOverABlockScalar reports whether st writes a mapping
-// entry the long way, with a quoted key and a value the emitter may write as a
-// block scalar.
-//
 // writesAResolvingRootBlockScalarUnderADirective reports whether st writes a
 // "%YAML" line over a document whose body is a block scalar the schemas would
 // resolve if it were plain.
@@ -475,76 +445,6 @@ func goesOnItsOwnLine(v Value, st Style) bool {
 	}
 }
 
-// writesAQuotedExplicitKeyOverABlockScalar reports whether v holds a mapping
-// entry the style writes as a quoted "? key" over a ": value" that becomes a
-// block scalar.
-//
-// It asks blockScalarIn rather than approximating it, so the only place it is
-// wider than the defect is the key: a key the style quotes is not always a key
-// the defect needs, since Style.Quoting quotes every string and the defect
-// wants one the parser then cannot place.
-func writesAQuotedExplicitKeyOverABlockScalar(v Value, st Style) bool {
-	if !st.ExplicitKeys {
-		return false
-	}
-
-	return holdsAQuotedKeyOverAString(v, st)
-}
-
-func holdsAQuotedKeyOverAString(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			key, text := p.Key.(Str)
-			if text && quotedIn(key.V, st) && writesABlockScalar(p.Val, st) {
-				return true
-			}
-
-			if holdsAQuotedKeyOverAString(p.Val, st) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return holdsAQuotedKeyOverAString(item, st)
-		})
-	case Anchored:
-		return holdsAQuotedKeyOverAString(n.V, st)
-	case Alias:
-		return holdsAQuotedKeyOverAString(n.V, st)
-	case Tagged:
-		return holdsAQuotedKeyOverAString(n.V, st)
-	}
-
-	return false
-}
-
-// quotedIn reports whether a key reaches the document in quotes.
-func quotedIn(key string, st Style) bool {
-	return st.Quoting != QuotePlain || !canPlain(key, false)
-}
-
-// writesABlockScalar reports whether the emitter would write v as a block
-// scalar under this style, properties and all.
-func writesABlockScalar(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Str:
-		return blockScalarIn(n.V, st)
-	case Anchored:
-		return writesABlockScalar(n.V, st)
-	case Alias:
-		return writesABlockScalar(n.V, st)
-	case Tagged:
-		return writesABlockScalar(n.V, st)
-	default:
-		return false
-	}
-}
-
-// writesALocalTagBeforeAnAnchor reports whether v holds a node carrying both a
-// local or non-specific tag and an anchor, with [TagFirst] writing the tag
-// first.
-//
 // Wider than the defect: a Str whose text resolves to itself reads the same
 // either way, and the shape is still matched. The tally says how often it
 // actually diverges.

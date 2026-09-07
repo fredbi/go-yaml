@@ -157,47 +157,6 @@ func TestDefectABinaryTagCannotBeReadIntoAGoByteSlice(t *testing.T) {
 // reads, libfyaml 1.0.0b1 reads every one, the reference parser passes them,
 // and grammar.NewRecognizer accepts them.
 
-// TestDefectAQuotedExplicitKeyRefusesABlockScalarValue: `? "a"` over `: >-` is
-// refused where `? a` over the same two lines reads.
-func TestDefectAQuotedExplicitKeyRefusesABlockScalarValue(t *testing.T) {
-	for _, src := range []string{
-		"? \"a\"\n: >-\n  x\n",
-		"? 'a'\n: >-\n  x\n",
-		"? \"a\"\n: |\n  x\n",
-		"a:\n  ? \"b\"\n  : >-\n    x\n",
-		"- ? \"a\"\n  : >-\n    x\n",
-		"? \"a\"\n: &an >-\n  x\n",
-		"? \"a\"\n: !!str >-\n  x\n",
-	} {
-		wellFormed(t, src)
-
-		var got any
-		err := yaml.Unmarshal([]byte(src), &got)
-		require.Errorf(t, err, "today: %q is refused", src)
-		assert.Contains(t, err.Error(), "value is not allowed in this context", "%q", src)
-	}
-
-	t.Run("a plain key over the same value reads", func(t *testing.T) {
-		for _, src := range []string{"? a\n: >-\n  x\n", "? a\n: |\n  x\n", "? a\n: |3-\n   x\n"} {
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		}
-	})
-
-	t.Run("and so does the short form of the quoted one", func(t *testing.T) {
-		var got any
-		require.NoError(t, yaml.Unmarshal([]byte("\"a\": >-\n  x\n"), &got))
-		assert.Equal(t, map[string]any{"a": "x"}, got)
-	})
-
-	t.Run("a value that is not a block scalar reads under the quoted key", func(t *testing.T) {
-		for _, src := range []string{"? \"a\"\n: \"y\"\n", "? \"a\"\n: [1]\n", "? \"\"\n: x\n"} {
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		}
-	})
-}
-
 // TestDefectACommentOnAnExplicitKeysColonLineIsDropped: a comment on the ":"
 // line of the long form, with the value below it, is lost by the renderer.
 func TestDefectACommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
@@ -409,6 +368,9 @@ func TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved(t *testing.T) {
 		var got map[string]any
 		require.NoError(t, yaml.Unmarshal([]byte("a: !!null\nFalse: 1\n"), &got))
 		assert.Contains(t, got, "false")
+	})
+}
+
 // TestDefectABlockScalarInASequenceSwallowsAnEmptyKey: a block scalar written
 // as a nested sequence entry, with an empty key after it, renders to text the
 // parser refuses.

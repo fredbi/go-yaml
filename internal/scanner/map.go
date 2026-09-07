@@ -57,21 +57,33 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 
 	// mapping value
 	tk, ok := s.bufferedToken(ctx)
-	if ok {
+	last := ctx.lastContentToken()
+
+	switch {
+	case ok:
 		s.lastDelimColumn = tk.Position.Column
 		ctx.addTokenValue(tk)
-	} else if col := ctx.keyStartColumn(); col > 0 {
-		// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty scalar
-		// carrying an anchor, an alias or a tag.
-		// The following lines are measured against the start of the key, so for "&a :" that is the '&' and not the name
-		// after it.
-		s.lastDelimColumn = col
-	} else if last := ctx.lastContentToken(); last == nil || last.Position.Line != s.line {
+
+	case last == nil || last.Position.Line != s.line:
 		// Nothing precedes this ':' on its line, so the key was written above it after a '?'.
 		// The ':' is then where the entry sits, and the level its value is measured against.
 		// Left at the level of whatever the key held, most often a sequence entry, the value's own lines read as no
 		// further in than the key, and that cut a block scalar short.
+		//
+		// This goes before the key's own column below, and a quoted key is why: "? \"a\"" over ": >-" over "  x" put
+		// the level at the quote in column 3, so the block scalar's content in the same column read as the end of the
+		// scalar rather than as its first line. The key's column says nothing about where the value sits when the two
+		// are on different lines.
 		s.lastDelimColumn = s.column
+
+	default:
+		if col := ctx.keyStartColumn(); col > 0 {
+			// The buffer is empty because the key has already been cut into tokens: it is quoted, or it is an empty
+			// scalar carrying an anchor, an alias or a tag.
+			// The following lines are measured against the start of the key, so for "&a :" that is the '&' and not the
+			// name after it.
+			s.lastDelimColumn = col
+		}
 	}
 
 	ctx.addTokenValue(token.MakeMappingValue(s.pos()))

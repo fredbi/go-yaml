@@ -1342,3 +1342,68 @@ func TestFixedAnAnchorBetweenATagAndItsScalarKeepsTheText(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedAQuotedExplicitKeyTakesABlockScalarValue: `? "a"` over `: >-` reads,
+// as `? a` over the same two lines always did.
+//
+// The scanner measures the lines of a value against Scanner.lastDelimColumn,
+// and scanMapValue picked the wrong column for it. A key already cut into
+// tokens -- a quoted one, or an empty scalar carrying an anchor or a tag --
+// sets the level from the key's own start, which is right while the key and its
+// ":" stand on one line. Written the long way they do not: "? \"a\"" puts the
+// quote in column 3, the ":" is in column 1 on the next line, and the block
+// scalar's content in column 3 then read as level with its own delimiter --
+// the end of the scalar rather than its first line. The header was cut short,
+// an empty string went in as the value, and the content was left over for the
+// document to complain about.
+//
+// The ":" is where the entry sits when the key was written above it, so that
+// test goes first now and the key's own column is asked only for a key on the
+// same line.
+func TestFixedAQuotedExplicitKeyTakesABlockScalarValue(t *testing.T) {
+	t.Run("the shapes that were refused", func(t *testing.T) {
+		for _, src := range []string{
+			"? \"a\"\n: >-\n  x\n",
+			"? 'a'\n: >-\n  x\n",
+			"? \"a\"\n: |\n  x\n",
+			"a:\n  ? \"b\"\n  : >-\n    x\n",
+			"- ? \"a\"\n  : >-\n    x\n",
+			"? \"a\"\n: &an >-\n  x\n",
+			"? \"a\"\n: !!str >-\n  x\n",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		}
+	})
+
+	t.Run("the value is the block scalar and not an empty string", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"? \"a\"\n: >-\n  x\n":               map[string]any{"a": "x"},
+			"? 'a'\n: >-\n  x\n":                 map[string]any{"a": "x"},
+			"? \"a\"\n: |\n  x\n":                map[string]any{"a": "x\n"},
+			"? a\n: >-\n  x\n":                   map[string]any{"a": "x"},
+			"\"a\": >-\n  x\n":                   map[string]any{"a": "x"},
+			"? \"a\"\n: >-\n  x\n? \"b\"\n: 1\n": map[string]any{"a": "x", "b": uint64(1)},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("a key on the ':' line still measures from the key", func(t *testing.T) {
+		// The branch the fix moved: "&a :" cuts the key into tokens and the
+		// value's lines are measured from the '&', not from the name after it.
+		for src, want := range map[string]any{
+			"&a :\n":              map[string]any{"null": nil},
+			"\"a\": >-\n  x\n":    map[string]any{"a": "x"},
+			"a: >-\n  x\n":        map[string]any{"a": "x"},
+			"? \"a\"\n: [1]\n":    map[string]any{"a": []any{uint64(1)}},
+			"? &a x\n: >-\n  y\n": map[string]any{"x": "y"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}
