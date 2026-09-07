@@ -391,13 +391,28 @@ func TestEveryMarkInTheBytesIsLabeled(t *testing.T) {
 //
 // A dead constant is the quiet failure here: it looks like coverage, a consumer
 // filters on it and gets an empty run, and the empty run reports as a pass.
+//
+// # Why forty thousand
+//
+// It was four thousand, and that failed the tree twice on a change that added
+// no feature and removed none. presentation/chomp-keep is drawn 7 times in
+// 20,000 documents -- it wants a block scalar over a string ending in exactly
+// one break, with Style.Chomping asking for "+" where clip would do -- so 4,000
+// expects 1.4 of them and produces none about a quarter of the time. Every
+// change to the generator moves rapid's byte stream, so the test was a
+// one-in-four coin flip on any commit that touched an axis.
+//
+// At 40,000 the same feature is expected 14 times and the run costs about a
+// second and a half. Widening the feature to every "+" would have been the
+// other fix and a worse one: the label is for the keep that clip could have
+// done, and that shape is the one worth counting.
 func TestTheCorpusReachesEveryFeature(t *testing.T) {
 	values := yamlgen.Values()
 	styles := yamlgen.Styles()
 
 	seen := map[stance.Feature]bool{}
 
-	for i := range 4000 {
+	for i := range 40000 {
 		w := yamlgen.Write(values.Example(i), styles.Example(i))
 		for _, f := range w.Features {
 			seen[f] = true
@@ -406,7 +421,7 @@ func TestTheCorpusReachesEveryFeature(t *testing.T) {
 
 	for _, f := range everyFeature() {
 		if !seen[f] {
-			t.Errorf("%s is in the vocabulary and 4000 documents produced none", f)
+			t.Errorf("%s is in the vocabulary and 40,000 documents produced none", f)
 		}
 	}
 }
