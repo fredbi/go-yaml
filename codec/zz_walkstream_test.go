@@ -88,14 +88,22 @@ func corpusSources() []corpusSource {
 // whose name begins with "&". 6.8 puts "&" in ns-char, so the name is
 // well-formed and the directive is one an implementation ignores.
 func directiveNamedLikeAnAnchor(src string) bool {
-	for line := range strings.SplitSeq(src, "\n") {
-		if strings.HasPrefix(strings.TrimSuffix(line, "\r"), "%&") {
+	// Split on both breaks and take a byte order mark off each line. 5.4 makes
+	// a lone "\r" a line break as much as "\n" is, and 5.2 puts a mark in front
+	// of the directives -- so a split on "\n" alone read
+	// "\ufeff%&YAML 1.2\r---\r!foo \"\"\r" as a single line beginning with the
+	// mark, found no directive in it, and let the document through.
+	for line := range strings.FieldsFuncSeq(src, isBreak) {
+		if strings.HasPrefix(strings.TrimPrefix(line, "\ufeff"), "%&") {
 			return true
 		}
 	}
 
 	return false
 }
+
+// isBreak reports the characters 5.4 makes a line break.
+func isBreak(r rune) bool { return r == '\n' || r == '\r' }
 
 func TestWalkMatchesTheStream(t *testing.T) {
 	srcs := corpusSources()

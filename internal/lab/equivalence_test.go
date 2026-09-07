@@ -197,7 +197,12 @@ func divergesByDefect(err error, text string) (string, bool) {
 // two "!" characters of a shorthand or the "!<" of a verbatim tag are what it
 // looks for.
 func holdsATagBeforeAnAnchorOnAnEmptyFlowValue(text string) bool {
-	for line := range strings.SplitSeq(text, "\n") {
+	// Split on both breaks: 5.4 makes a lone "\r" a line break as much as "\n"
+	// is, and a document written with them would otherwise arrive as one line,
+	// letting the search below run a "!!" on one line up to a "&" on another.
+	for line := range strings.FieldsFuncSeq(text, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	}) {
 		tag := strings.Index(line, "!!")
 		if tag < 0 {
 			tag = strings.Index(line, "!<")
