@@ -289,7 +289,7 @@ record it and decide deliberately rather than picking whichever is convenient.
 | the grammar oracle, against the suite | **393 of 393** |
 | the generated corpus | 605 of 605 buckets entered, 12,507 cases, 60 distinct parser complaints |
 
-**Twenty-two defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
+**Twenty-one defects open, every one recorded and pinned.** Seven were re-confirmed one by one on
 2026-09-10; 8 and 9 were opened when the generator first drew numbers past what Go holds; **11 to 18 and 21
 to 23 on 2026-09-11**, as the generator learned to write a tag three ways, to reach the shapes the flow axes
 need, to write a number in three bases, to read a document into a Go type, and to write a mapping entry the
@@ -298,7 +298,7 @@ and to declare the version a document is read under; 10, 19 and 20 on 2026-09-06
 defects beside them. 10 was closed the same day it was opened, by `7dc4075`. None is old: the fourteen
 before them were fixed and merged.
 
-✅ **Ten left on 2026-09-12, on the `conformance-fixes` branch, and 15 and 27 shed a document each.**
+✅ **Eleven left on 2026-09-12, on the `conformance-fixes` branch, and 15 and 27 shed a document each.**
 All three clusters are closed; 29 and 36 were opened in their place.
 
 | # | closed by | what the fix was |
@@ -310,6 +310,7 @@ All three clusters are closed; 29 and 36 were opened in their place.
 | 8, 9 | `06fd2a1` | `ast.readsAsFloat` took `strconv.ParseFloat`'s `ErrRange` for "not a float", and `castToFloatValue` and `taggedInteger` narrowed what the node held. Both read `token.ParseBigFloat` and `token.ParseBigInteger` now, which is what the untagged spellings already build |
 | 31 | `ef173e0` | `decodeSlice` read a `!!binary` node as a YAML sequence. It asks `binaryBytes` first, which reads the base64 `ast.TagNode.Resolve` has already checked |
 | 34 | `77c8a3d` | the demotion for a tag that resolves to nothing reached the tag's own next token, and an anchor may stand there. `anchoredScalar` reaches the scalar the anchor names |
+| 35 | `0b321d7` | `anchorEndsTheLine` asked only whether the token after an anchor's name opens the next entry, which a `}` on the same line does not, so the anchor fell through to `parseScalarValue` and `parseTagValue` then stepped past the closer. It asks `endsValue` too, and is named `anchorNamesNothing` |
 
 Two more faults were found on the way and fixed with them: `%TAG !! !local-` over `v: !!seq 1` was refused
 (the same missing `ctx.goNext`), and `{a: !}` rendered as `{a: ! null}`, which read back as the **string**
@@ -345,7 +346,6 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 36 | renderer 🔥 | a block scalar in a sequence with an empty key after it **renders text the parser refuses** | `a:` / ` - \|1-` / `   ` / `:` renders `a:` / `- \|2-    :` — `invalid header option` | `yamlgen.Ledger` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
 | 27 | parser | two more valid documents refused | `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
-| 35 | parser | a secondary tag before an anchor on an empty flow value loses the collection's end | `{a: !!str &x}` → refused, where `{a: &x !!str}` reads | `yamlgen.Strict` |
 | 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
@@ -356,13 +356,13 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
 | 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Ten in the parser and scanner, four in the decoder, three in `ToJSON`, two in the walking reader, three in
-the renderer.** All three clusters closed on 2026-09-12: A, B and C took ten entries and both 🔥 marks
+**Nine in the parser and scanner, four in the decoder, three in `ToJSON`, two in the walking reader, three
+in the renderer.** All three clusters closed on 2026-09-12: A, B and C took ten entries and both 🔥 marks
 off this table, and 36 put one back. 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary`
 draw and by the reshuffle it caused, and 31 and 34 were closed the same day they were filed -- 31 was
 cluster A's fourth symptom and 34 was one line of the tag fix.
 
-📌 **What is left has no cluster in it.** The parser's nine and the scanner's one are separate shapes; the decoder's four split as
+📌 **What is left has no cluster in it.** The parser's eight and the scanner's one are separate shapes; the decoder's four split as
 the key-naming pair (3, 4), the exponent cap (5) and the tagged-key naming (30). The renderer's three are
 the closest thing to a group: 24, 29 and 36 are all a block construct and the line after it, and 24's own
 entry asks for its predicate to be widened.
