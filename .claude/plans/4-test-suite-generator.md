@@ -449,6 +449,17 @@ nobody, so the test has to be what re-reads it.
 📌 The next-widest predicate is `decode/a-tagged-block-mapping-does-not-resolve-its-keys` at 62
 divergences in 5,643 draws. It closes on the `conformance-fixes` rebase, so it is not worth narrowing.
 
+📌 **The count alone cannot tell a widened predicate from a fixed defect**, which is the limit of the
+check and was pointed out from the `conformance-fixes` side. `Divergence.Pin` closes it: every entry names
+the test in `defects_test.go` that reproduces it with one document, the staleness message prints that name,
+and running it settles which outcome this is — still failing means narrow the predicate, passing means the
+entry goes to `fixed_test.go`.
+
+`TestEveryLedgerEntryNamesItsPin` holds the field to a test that exists, read with `go/ast` rather than
+grepped. The link was convention until 2026-09-13 and **two entries had no pin at all**.
+`TestNoRetiredPinSitsWithTheLiveOnes` holds the two files to their naming rule and caught a closed pin
+sitting among the open ones, where it read as a defect still standing.
+
 ### 🎯 The corpus never reads a document into a Go type — opened 2026-09-06
 
 Every document this generator draws is read into an `any`, here and in `conformance/` and `yamlcorpus`
