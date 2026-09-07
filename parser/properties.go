@@ -145,6 +145,16 @@ func (g *grouper) property(at int, tk *tapeToken, out []*tapeToken) ([]*tapeToke
 // tagOrLetGo joins a tag with what it tags, or hands the tag on where it tags
 // nothing -- a tag on its own line, or one before a flow indicator.
 func (g *grouper) tagOrLetGo(at int, tk *tapeToken, out []*tapeToken) ([]*tapeToken, bool) {
+	if tk.Type() == token.SequenceEntryType && g.tag.Line() == tk.Line() {
+		// 8.2.1 keeps a block sequence off the line a node's properties are
+		// written on, which anchorNames says for an anchor. A tag was left to
+		// the parser instead, and only the tags the core schema resolves were
+		// caught there: "!!int - 8" was refused as `value is not allowed in
+		// this context` and "!foo - 1" was read as [1].
+		g.fail(yamlerrors.NewSyntax("sequence entries are not allowed after a tag on the same line", tk.RawToken()))
+
+		return out, false
+	}
 	if tk.Type() == token.AnchorType && g.tag.Line() == tk.Line() {
 		// "!!str &a1 foo" tags what the anchor names, so the tag waits while
 		// the anchor is read. A tag alone on its line tags nothing, whatever

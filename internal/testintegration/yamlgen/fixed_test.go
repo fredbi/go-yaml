@@ -1760,3 +1760,44 @@ func TestFixedABlockScalarInASequenceKeepsAnEmptyKeyApart(t *testing.T) {
 		assert.Equal(t, once, reread.String(), "%q: and settle", src)
 	}
 }
+
+// TestFixedABlockSequenceOnItsTagsLineIsRefused: "!foo - 1" is not a document
+// and is no longer read as one.
+//
+// 8.2.1 puts s-l-comments between a node's properties and the collection under
+// them, and s-l-comments requires a line break, so a block sequence cannot
+// begin on the line its tag was written on. The grouping has always refused one
+// on an anchor's line -- "sequence entries are not allowed after anchor on the
+// same line" -- and left a tag to the parser, which caught only the tags the
+// core schema resolves: "!!int - 8" was refused as `value is not allowed in
+// this context` and "!foo - 1" was read as [1].
+//
+// This was yamlgen.Lax's last entry, and it is the one register whose emptiness
+// says nothing: the mutation hunt is what fills it.
+func TestFixedABlockSequenceOnItsTagsLineIsRefused(t *testing.T) {
+	t.Run("every spelling of the tag, and one message", func(t *testing.T) {
+		for _, src := range []string{
+			"!foo - 1\n", "!!int - 8\n", "! - 1\n", "!<x:y> - 1\n",
+			"a: !foo - 1\n", "- !foo - 1\n", "- ! -\n",
+		} {
+			var got any
+			err := yaml.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Contains(t, err.Error(),
+				"sequence entries are not allowed after a tag on the same line", "%q", src)
+		}
+	})
+
+	t.Run("written correctly it reads, and a '-' that is not an entry still does", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"!foo\n- 1\n":    []any{uint64(1)},
+			"a: !foo\n- 1\n": map[string]any{"a": []any{uint64(1)}},
+			"!foo [1]\n":     []any{uint64(1)},
+			"!foo -1\n":      "-1",
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}

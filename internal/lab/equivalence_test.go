@@ -121,7 +121,14 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "a flow mapping entry takes a single ':' (7.4.2)", true
 	case strings.Contains(msg, "unexpected scalar value type") && holdsTaggedAlias(want):
 		return "an alias node carries no tag (7.1)", true
-	case strings.Contains(msg, "value is not allowed in this context") && holdsCollectionOnItsTagsLine(want):
+	case strings.Contains(msg, "value is not allowed in this context") && holdsCollectionOnItsTagsLine(want),
+		strings.Contains(msg, "sequence entries are not allowed after a tag on the same line"):
+		// The second is the refusal the grouper makes now, beside the one it
+		// has always made for an anchor. It names the rule, so it needs no
+		// structural check: nothing else raises it, and refparser reads the
+		// documents it refuses -- "!foo - 1", "! -" and "- ! -" are refused by
+		// grammar.NewRecognizer, by the reference parser, by libfyaml 1.0.0b1
+		// and by go.yaml.in/yaml/v3 v3.0.5.
 		return "a block collection begins on the line below its properties (8.2.1)", true
 	case strings.Contains(msg, "flow mapping end token") && holdsTwoTagsOnOneNode(want):
 		return "a node carries at most one tag (6.9)", true

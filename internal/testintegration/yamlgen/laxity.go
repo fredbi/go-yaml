@@ -96,16 +96,10 @@ func KnownlyAccepted(src string) *Laxity {
 // follow but the entry's own ':' at the mapping's indent. So a Match keyed on
 // the ':' being deeper than the '?' would swallow two valid documents, which is
 // the reason every entry here carries an exact Src and no Match at all.
+// A sixth entry left on 2026-09-12: the grouping refuses a block sequence on
+// a tag's own line where it had always refused one on an anchor's, so
+// "!foo - 1" and "!!int - 8" now draw one message between them.
 var Lax = []Laxity{
-	{
-		Name: "a block sequence on the same line as its tag",
-		Src:  "!foo - 1\n",
-		Rule: "8.2.1: s-l+block-collection puts s-l-comments between a node's properties and the " +
-			"collection under them, and s-l-comments requires a line break. So a block sequence " +
-			"cannot begin on the line its tag was written on. `!foo` over `- 1` on the next line " +
-			"is the same document written correctly, and reads the same.",
-		Reads: []any{uint64(1)},
-	},
 	{
 		Name: "an explicit key's value in the key's own column",
 		Src:  " ?\n 1\n",
