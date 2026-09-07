@@ -231,32 +231,6 @@ var Ledger = []Divergence{
 		Match:    writesAnEmptyKey,
 	},
 	{
-		Name: "parse/a-version-directive-resolves-the-root-block-scalar-it-opens",
-		Pin:  "TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens",
-		Reason: "A `%YAML` directive over a document whose body is a block scalar makes the parse fail " +
-			"when the scalar's content is a word the schema would resolve. `%YAML 1.1` over `---` " +
-			"over `>-` over ` null` reports `unexpected token. required string token`; the same three " +
-			"lines without the directive read the string \"null\".\n\n" +
-			"The content decides it, and only when it is one whole token: `null`, `~`, `True`, `yes`, " +
-			"`5` and `1.5` are all refused, where `x`, `x y` and `null x` read. The version does not: " +
-			"`%YAML 1.2` refuses it too. Nor does any other directive -- a `%TAG` line over the same " +
-			"document reads, and so does a bare `---`. And the body has to be the root: `k: >-` over " +
-			"`  null` reads under the directive.\n\n" +
-			"A block scalar is a string under every schema, so there is nothing here to resolve. " +
-			"internal/lab's resolvesDifferentlyOnPurpose describes the machinery: the grouping reads " +
-			"one token past the directive to know the directive's own document has ended, and for a " +
-			"document whose body is a bare scalar that token is the body. It is cut before the " +
-			"directive is read and typed again afterwards -- as a null or a bool or an integer, " +
-			"where a block scalar's content is none of those.\n\n" +
-			"libfyaml 1.0.0b1 reads every one of them as the string, and the reference parser passes " +
-			"them. Found on 2026-09-07 by Style.Version, on its first run.\n\n" +
-			"📌 It is the one document that provokes `unexpected token. required string token`, which " +
-			"stream 8 lists as unreached. Like `unexpected scalar value`, a Refusals entry for it " +
-			"would pin a bug rather than a rule.",
-		Property: Parses | Decode | Render | Settle | CommentsKept,
-		Match:    writesAResolvingRootBlockScalarUnderADirective,
-	},
-	{
 		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
 		Pin:  "TestDefectABlankLineBeforeACommentDoesNotSettle",
 		Reason: "A blank line written before a comment is kept by the first rendering and dropped by " +
@@ -377,19 +351,6 @@ func writesAPropertiedRootBlockScalarAfterASuffix(v Value, st Style) bool {
 	}
 }
 
-// writesAResolvingRootBlockScalarUnderADirective reports whether st writes a
-// "%YAML" line over a document whose body is a block scalar the schemas would
-// resolve if it were plain.
-func writesAResolvingRootBlockScalarUnderADirective(v Value, st Style) bool {
-	if st.Version == "" {
-		return false
-	}
-
-	s, text := peelProperties(v).(Str)
-
-	return text && blockScalarIn(s.V, st) && resolvesAlone(strings.TrimRight(s.V, "\n"))
-}
-
 // peelProperties returns the node an anchor and a tag decorate.
 func peelProperties(v Value) Value {
 	for {
@@ -402,36 +363,6 @@ func peelProperties(v Value) Value {
 			return v
 		}
 	}
-}
-
-// resolvesAlone reports whether a whole text is a token some schema reads as
-// something other than a string.
-//
-// Two rules rather than a copy of every schema's productions. A scalar that
-// resolves to a number, a date or a time begins with a digit, a sign, a dot or
-// a tilde -- 5, 1.5, -0x1f, .inf, 12:34:56, 2001-12-14 -- so the first
-// character answers for all of them without this having to know 1.1's
-// sexagesimals. Everything else that resolves is a word, and the two tables
-// hold every word both schemas read.
-//
-// Generous where it is unsure, which is the right side here: the predicate
-// excuses a document rather than accusing one.
-func resolvesAlone(text string) bool {
-	if text == "" || strings.ContainsAny(text, " \n") {
-		return false
-	}
-
-	if strings.ContainsAny(text[:1], "0123456789-+.~") {
-		return true
-	}
-
-	if _, core := resolving[text]; core {
-		return true
-	}
-
-	_, legacy := legacyBooleans[text]
-
-	return legacy
 }
 
 // writesABlankLineBeforeAComment reports whether st pads a block scalar with

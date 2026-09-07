@@ -1532,3 +1532,68 @@ func TestFixedABinaryTagReadsIntoAGoByteSlice(t *testing.T) {
 		assert.Equal(t, time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC), timed.T)
 	})
 }
+
+// TestFixedAVersionDirectiveLeavesTheRootBlockScalarAlone: a "%YAML" line over
+// a document whose body is a block scalar reads it, whatever the content
+// spells.
+//
+// A block scalar is a string under every schema, so there was nothing there to
+// resolve. Parser.retypeAhead reads the plain scalars the scan had already cut
+// past the directive and types them again against the version it names, and a
+// block scalar's content is cut as a plain String -- the one string a schema
+// must not touch. "%YAML 1.1" over "---" over ">-" over " null" had the content
+// retyped as a null, and parseLiteral then refused the document with
+// "unexpected token. required string token".
+//
+// The tape is not grouped when retypeAhead runs, so the header and its content
+// are still two tokens and the content is whatever follows the header -- which
+// is how stageBlockScalars reads it too.
+func TestFixedAVersionDirectiveLeavesTheRootBlockScalarAlone(t *testing.T) {
+	t.Run("every content the schema would have resolved", func(t *testing.T) {
+		for _, text := range []string{"null", "~", "True", "yes", "5", "1.5", "0100", "x", "x y", "null x"} {
+			for _, header := range []string{">-", "|-"} {
+				src := "%YAML 1.1\n---\n" + header + "\n " + text + "\n"
+				wellFormed(t, src)
+
+				var got any
+				require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+				assert.Equal(t, text, got, "%q", src)
+			}
+		}
+	})
+
+	t.Run("under either version, and with the body nested", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"%YAML 1.2\n---\n>-\n null\n":                   "null",
+			">-\n null\n":                                   "null",
+			"---\n>-\n null\n":                              "null",
+			"%TAG !e! tag:yaml.org,2002:\n---\n>-\n null\n": "null",
+			"%YAML 1.1\n---\nk: >-\n  null\n":               map[string]any{"k": "null"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("and the schema still reaches every plain scalar after the directive", func(t *testing.T) {
+		// The retyping is what makes a directive work at all, so the fix must
+		// not stop it: 1.1 reads "0100" as 64 where 1.2 reads 100.
+		for src, want := range map[string]any{
+			"%YAML 1.1\n---\n0100\n":    uint64(64),
+			"%YAML 1.2\n---\n0100\n":    uint64(100),
+			"%YAML 1.1\n---\nyes\n":     true,
+			"%YAML 1.2\n---\nyes\n":     "yes",
+			"%YAML 1.1\n---\nk: 0100\n": map[string]any{"k": uint64(64)},
+			// A plain scalar after a block scalar still resolves, and after two.
+			"%YAML 1.1\n---\na: >-\n  null\nb: 0100\n": map[string]any{"a": "null", "b": uint64(64)},
+			"%YAML 1.1\n---\na: >-\n  null\nb: |-\n  yes\nc: 0100\n": map[string]any{
+				"a": "null", "b": "yes", "c": uint64(64),
+			},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+}

@@ -792,6 +792,11 @@ func blockCollectionColumn(n ast.Node) (int, bool) {
 // against 1.1 because that was the only version any document carried until
 // yamlgen.Style.Version began writing both.
 //
+// A block scalar's content is not among them. It is a string under every
+// schema, so Parser.retypeAhead leaves it alone since 2026-09-12; before that
+// it was read again like any other cut String and "%YAML 1.1" over "---" over
+// ">-" over " null" was refused outright rather than diverging here.
+//
 // Both halves are required: the document has to declare a version, and the two
 // dumps have to agree everywhere except on node types. A tree that differs in a
 // position or in a value is a different tree and not a different schema.

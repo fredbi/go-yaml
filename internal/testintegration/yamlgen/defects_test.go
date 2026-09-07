@@ -179,54 +179,6 @@ func TestDefectABlankLineBeforeASequenceEntryDoesNotSettle(t *testing.T) {
 	})
 }
 
-// TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens: a "%YAML" line
-// over a document whose body is a block scalar makes the parse fail when the
-// scalar's content is a word the schema would resolve.
-//
-// A block scalar is a string under every schema, so there is nothing here to
-// resolve. internal/lab's resolvesDifferentlyOnPurpose describes the machinery:
-// the grouping reads one token past the directive to know the directive's own
-// document has ended, and for a document whose body is a bare scalar that token
-// is the body.
-func TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens(t *testing.T) {
-	t.Run("the content decides, and only when it is one whole token", func(t *testing.T) {
-		for _, text := range []string{"null", "~", "True", "yes", "5", "1.5"} {
-			src := "%YAML 1.1\n---\n>-\n " + text + "\n"
-			wellFormed(t, src)
-
-			var got any
-			err := yaml.Unmarshal([]byte(src), &got)
-			require.Errorf(t, err, "today: %q is refused", src)
-			assert.Contains(t, err.Error(), "unexpected token. required string token")
-		}
-
-		for _, text := range []string{"x", "x y", "null x"} {
-			src := "%YAML 1.1\n---\n>-\n " + text + "\n"
-
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equal(t, text, got)
-		}
-	})
-
-	t.Run("the version does not, and no other directive does it", func(t *testing.T) {
-		var refused any
-		assert.Error(t, yaml.Unmarshal([]byte("%YAML 1.2\n---\n>-\n null\n"), &refused))
-
-		for _, src := range []string{
-			">-\n null\n",
-			"---\n>-\n null\n",
-			"%TAG !e! tag:yaml.org,2002:\n---\n>-\n null\n",
-			// The body has to be the root: as a mapping value it reads.
-			"%YAML 1.1\n---\nk: >-\n  null\n",
-		} {
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-			assert.NotNil(t, got, "%q", src)
-		}
-	})
-}
-
 // TestDefectABlockScalarInASequenceSwallowsAnEmptyKey: a block scalar written
 // as a nested sequence entry, with an empty key after it, renders to text the
 // parser refuses.

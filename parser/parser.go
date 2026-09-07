@@ -1903,13 +1903,39 @@ func (p *Parser) retypeAhead(schema token.Schema, from int32) {
 		return
 	}
 
+	// content says the token about to be read is a block scalar's, because the
+	// one before it was a "|" or a ">" header.
+	var content bool
+
 	for seq := int(from) + 1; seq < p.tokens.Len(); seq++ {
 		tk := p.tokens.At(seq)
 		if tk == nil {
 			continue
 		}
 		raw := tk.RawToken()
-		if raw == nil || !resolvedByAnySchema(raw.Type) {
+		if raw == nil {
+			continue
+		}
+		if content {
+			// A block scalar is a string whatever it spells, so its content is
+			// not the schema's to read. The scan cuts that content as a plain
+			// String and it is the one string here a schema must not touch:
+			// "%YAML 1.1" over "---" over ">-" over " null" had the content
+			// retyped as a null, and parseLiteral then refused the document
+			// with "unexpected token. required string token".
+			content = false
+
+			continue
+		}
+		if raw.Type == token.LiteralType || raw.Type == token.FoldedType {
+			// Whatever follows the header is its content, which is how
+			// stageBlockScalars reads it. The tape is not grouped yet here, so
+			// the two are still separate tokens.
+			content = true
+
+			continue
+		}
+		if !resolvedByAnySchema(raw.Type) {
 			continue
 		}
 		raw.Type = token.ScalarType(raw.Value, schema)

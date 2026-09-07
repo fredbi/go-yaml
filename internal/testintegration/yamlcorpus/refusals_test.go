@@ -223,7 +223,6 @@ var parserComplaints = []string{
 	"unexpected key name",
 	"unexpected map key",
 	"unexpected scalar value type",
-	"unexpected token. required string token",
 	"unknown YAML version _",
 	"value is not allowed in this context",
 	"value is not allowed in this context. map key-value is pre-defined",
