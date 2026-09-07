@@ -345,7 +345,7 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 29 | renderer | 24 again with no comment in it: a blank line before a block sequence entry | `: &1` / blank / `-` / `? ""` renders the blank after the `-`, then drops it | `yamlgen.defects_test.go` |
 | 36 | renderer 🔥 | a block scalar in a sequence with an empty key after it **renders text the parser refuses** | `a:` / ` - \|1-` / `   ` / `:` renders `a:` / `- \|2-    :` — `invalid header option` | `yamlgen.Ledger` |
 | 26 | parser | a `%YAML` directive resolves the root block scalar it opens | `%YAML 1.1` / `---` / `>-` / ` null` → refused | `yamlgen.Ledger` |
-| 27 | parser | two more valid documents refused | `!!null` / `>` — `{[a\nb]: 1}` | `yamlgen.Strict` |
+| 27 | parser | a valid document refused | `!!null` / `>` — a secondary tag on its own line over a block scalar | `yamlgen.Strict` |
 | 3 | decoder | a typed key collapses into the string that spells it | `1: a` / `"1": b` → one entry | `Departures` |
 | 4 | decoder | `+.inf` does not normalize its sign, where `+1` does | `+.inf: a` / `.inf: b` → two entries | `Departures` |
 | 5 | decoder | a number past `big.Float`'s exponent decodes to **zero** | `a: 1e2147483647` → `0` | `codec/zz_bigexp_test.go` |
@@ -373,6 +373,21 @@ subtest that never passed. `codec.Unmarshal` into an `any` walks, so it refuses 
 reads it. 28 was filed the same way, and its pin compared the JSON text `"1.2"` against the float `1.2`, so
 the assertion held for the wrong reason. Both pins were rewritten on 2026-09-13 to compare the walk against
 `UseOrderedMap`, and `codec.TestWalkMatchesTheStream` now holds out a `%&` directive line by name.
+
+🔍 **`{[a\nb]: 1}` is out of the count: the grammar and the field disagree about it.** It was 27's
+second document. Re-measured on 2026-09-13 against all four sources, the two grammar-derived oracles accept
+it — the reference parser and `grammar.NewRecognizer`, generated from the specification's grammar by
+different toolchains — and every hand-written implementation refuses it, this library included: libfyaml
+1.0.0b1 says `missing comma in flow mapping` at 2:3 in its C parser and `go.yaml.in/yaml/v3` v3.0.5 says
+`did not find expected ',' or '}'`.
+
+Those are parse errors and not the binding declining a collection as a key. `{[a, b]: 1}` gives libfyaml a
+Python `TypeError: unhashable type` and yaml/v3 an `invalid map key`, both *after* parsing, and `[[a\nb]]`
+— the same break with no key in sight — is read by both.
+
+So nothing corroborates the claim except the grammar, and three implementations reading §7.4.2 the other
+way is evidence about §7.4.2. The `yamlgen.Strict` entry keeps the measurement and says it is a ruling.
+**Settle whether the published grammar is lax here before anyone changes the parser.**
 
 Four of the rest lose a value or a shape **silently** — 3, 4, 5 and 16 — which is the class a verdict corpus
 is blind to and the reason the generated suite carries meanings at all.
