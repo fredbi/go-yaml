@@ -1,6 +1,10 @@
 > [!NOTE]
-> Last revision: 2026-09-07, second pass (a document declares the version it is read under, and the readings
-> machinery scores at last; five defects). Previous: 2026-09-11, fourth pass (a mapping entry written the long way; **eleven defects**,
+> Last revision: 2026-09-13 (**Area 3 is closed** — timestamps and byte strings, the collection tags,
+> escapes, byte order marks, multi-document streams and the rest of the decode-target axis. Matched buckets
+> 545 → **567**. Nine defects, two rulings, and the three registers now re-measure themselves)
+> Previous: 2026-09-07, second pass (a document declares the version it is read under, and the readings
+> machinery scores at last; five defects)
+> Previous: 2026-09-11, fourth pass (a mapping entry written the long way; **eleven defects**,
 > two of them silently restructuring a document)
 > Previous revision: 2026-09-06 (the corpus reads every document into an `any` and nothing into a Go type;
 > three defects were living on the path it never crosses)
@@ -26,9 +30,10 @@ Testing tools for JSON and YAML that **supplement** the official conformance sui
 them: an oracle that decides whether an input is a document, a generator that emits valid and invalid ones
 on purpose, and a corpus with measured grammar coverage, usable as a harness or as fuzzer seed.
 
-The oracle is closed and the corpus ships. **What remains is almost entirely about the generator's reach**
-— what a document is allowed to say — and about properties nobody checks yet. The value model is Go's, so
-everything YAML says and Go cannot hold is still unreachable.
+The oracle is closed, the corpus ships, and **the generator's reach is closed too** — every axis the plan
+listed is built, from non-string keys through to multi-document streams. What remains is **the properties**:
+a fuzzing round, a visitor property, a JSON-renderability property and a rendering axis, none of which any
+tree comparison can stand in for.
 
 > ⚠️ **This stream is a temporary tenant.** It moves to **`go-openapi/conformance-suites`**, where the
 > approach gets re-iterated for other grammars — OpenAPI specifications, URIs. That repository will export
@@ -49,19 +54,20 @@ The sharpest demonstration (2026-08-04): nine commits of scanner and parser fixe
 was reading `\x00`, `\xbf`, `}`, `,`, `|--`, `& e`, `&a[]`, `\t"": a` and `" k: %"`. **Treat the suite as a
 regression net, not as a measurement.**
 
-**Where the corpus stands today** (`yamlcorpus/13`, 482KB checked in):
+**Where the corpus stands today** (`yamlcorpus/30`, 606KB checked in, measured 2026-09-13):
 
 | | |
 |---|---|
-| cases | 11,994 |
-| grammar coverage | 605 of 605 buckets entered, **548 matched** |
-| refusals | 3,939 refused, **60 distinct complaints**; 68 of the parser's 79 message templates reached |
-| labels | 1,611 cases carry a feature; 14 carry an answer per reading |
+| cases | 14,684 |
+| grammar coverage | 605 of 605 buckets entered, **567 matched** |
+| refusals | 4,956 refused, **61 distinct complaints**; 75 of the parser's 80 message templates reached |
+| labels | 1,676 cases carry a feature; 29 carry more than one meaning |
 | outside readings | three — `perlref`, `libfyaml`, `goyaml` |
 
-**What it has cost the library, cumulatively.** Between 2026-09-03 and 2026-09-10 the corpus opened
-**nineteen defects** that the YAML Test Suite scored 100% through, and every one of them is now fixed and
-merged except five. The suite moved by zero across all of it.
+**What it has cost the library, cumulatively.** Between 2026-09-03 and 2026-09-13 the corpus opened
+**thirty-nine defects** that the YAML Test Suite scored 100% through. Twenty-eight are fixed and merged;
+[stream 2](2-correctness.md) carries what is left. **The suite moved by zero across all of it** — 393/393
+before and after — which is the whole argument for this stream in one number.
 
 Five rounds of "what the generator could not say", with the defects each let through, are in
 [`reference/generator-gaps-log.md`](reference/generator-gaps-log.md). It is the evidence behind the
@@ -69,8 +75,9 @@ Actions below.
 
 ## Trajectory
 
-> Five areas. The first two are built and carry the rest — each has a tail item left, not a gap. Areas 3
-> and 4 are where the open work is, and where every defect of the last three rounds came from.
+> Five areas. The first three are built and carry the rest — each has a tail item left, not a gap. **Area 4
+> is where the open work is now**, and it is the harder half: a property has to be invented before it can
+> be checked, where an axis only has to be written.
 
 1. ✅ **The oracle and the grammar** [🏁]
    1. ✅ A recognizer compiled from `yaml-spec-1.2.json` — `internal/testintegration/grammar/`
@@ -85,37 +92,41 @@ Actions below.
    4. ✅ Three outside readings wired in and pinned (2026-09-09)
    5. 📝 Labels for the mutants, which are the bulk of the corpus and carry none
 
-3. ⏳ **The generator's reach** — what a document is allowed to say
-   > **The value model was Go's**, and it is less so than it was. `Pair.Key` is a `Value` now, and the
-   > round that made it one opened three defects on its first deep run. `Int` still holds a Go `int` and
-   > `Float` still excludes the infinities, and there is no merge key, timestamp or binary at all — so the
-   > 2026-09-05 lesson still bites where YAML says something Go does not.
+3. ✅ **The generator's reach** — what a document is allowed to say
+   > **The value model was Go's** and no longer is. `Pair.Key` is a `Value`, the infinities and the wide
+   > types are drawn, a timestamp and a byte string are values in their own right, and a stream is
+   > something the generator writes. Thirteen actions, twelve closed. What is left is one direction of
+   > one of them.
 
    1. ✅ Non-string mapping keys (2026-09-09) — collisions on purpose are what is left of it
-   2. 🔥 A decode-target axis — one panic was reachable from exactly one target
-   3. ⚠️ Numbers, spellings and the infinities
-   4. ⏳ A schema axis — the readings are stated and selectable; the documents are not
-   5. 📝 Directives, multi-document streams, byte order marks, the remaining tag shapes
+   2. ✅ A decode-target axis — a struct, pointer fields and a `map[any]any`
+   3. ⏳ Numbers and spellings — the wide types and the core forms are drawn; the 1.1-only spellings
+      (`0777`, `1_000`, `0b1010`, `1:30`) are what is left of this area
+   4. ✅ A schema axis — the readings are stated, selectable, and something a document can ask for
+   5. ✅ Directives, multi-document streams, byte order marks, escapes, the remaining tag shapes
 
 4. ⏳ **The properties** — what actually gets checked
    > **A gate that compares outcomes is blind to everything it does not compare.** Walk order, error
    > wording, offsets and the time a parse takes are all outside a tree comparison, and every defect of
    > the 2026-09-03 round lived in one of them.
 
-   1. ✅ Error wording is measured — 68 of the parser's 79 messages reached, the rest in
+   1. ✅ Error wording is measured — 75 of the parser's 80 messages reached, the rest in
       [stream 8](8-parser-diagnostics.md)
-   2. ⚠️ Fuzzing over the surfaces where the panics actually were
-   3. 📝 A visitor property, a JSON-renderability property, a rendering axis
-   4. ✅ A semantic oracle — **three of them**, and `Ledger` has never had one before: `perlref` for
+   2. ✅ The registers re-measure themselves (2026-09-13) — a departure that stops departing, a ledger
+      entry whose predicate never lands, and a pin that names neither file all fail the run now
+   3. ⚠️ Fuzzing over the surfaces where the panics actually were
+   4. 📝 A visitor property, a JSON-renderability property, a rendering axis
+   5. ✅ A semantic oracle — **three of them**, and `Ledger` has never had one before: `perlref` for
       structure, `libfyaml` and `goyaml` for meaning
 
 5. 📝 **Extraction to `go-openapi/conformance-suites`**, with the JSON side
 
 ## Actions
 
-> **Areas are ordered by what they would buy, not by their number** — 3 and 4 first, since that is where
-> the defects have been coming from. Within an area, by priority. An item naming a measured price says so;
-> the rest are argued from a defect that got through.
+> **Areas are ordered by what they would buy, not by their number.** Area 3 is kept first because it is
+> the record of what the generator can say and every entry names the defects it opened; the open work is
+> in Area 4. Within an area, by priority. An item naming a measured price says so; the rest are argued
+> from a defect that got through.
 
 ### Area 3 — the generator's reach
 
@@ -132,7 +143,7 @@ Actions below.
      family *coarser* than `KeyText` to keep them out of ordinary draws — `Str{"NULL"}` and `Null{}` are two
      keys that this library refuses as one — so `breakRules` is where they belong.
 
-2. ⏳ **A decode-target axis.**
+2. ✅ **A decode-target axis.**
    - ✅ **The struct destination** (2026-09-11). `yamlgen.TargetFor` builds a Go type from the drawn value
      — a mapping becomes a struct with a field per key, a sequence a slice of the item type where the
      items agree — and `TestDecodingIntoAGoTypeGivesTheSameValue` reads each document twice and compares.
@@ -146,8 +157,20 @@ Actions below.
      quote, a newline, `-` or nothing at all, and two keys differing only in case. Such a mapping falls
      back to `map[string]any` and `Target.Fallbacks` counts it, rather than the axis quietly claiming
      coverage it does not have.
-   - ⚠️ **What is left**: `map[any]any`, `map[float64]any` and pointer fields. The "hash of unhashable
-     type" panic was reachable from exactly one destination, and none of these is built yet.
+   - ✅ **The other destinations** (2026-09-13). `TargetShape` is drawn beside the value and the style,
+     because a document does not choose its destination — a caller does. `ShapePointers` makes the
+     decoder allocate before it fills; `ShapeAnyKeyedMap` is the `gopkg.in/yaml.v2` destination and the
+     only one that keeps a key's own type, so `keyString` now mirrors `KeyText` for every kind a key can
+     be. The enumerated shapes are read into all three.
+   - **One finding, and the typed path is the one that is right**: a duplicate that only collides after
+     resolution is refused by `map[string]any` and by `map[any]any` and read by an `any`. `1: x` over
+     `"1": y` loses an entry with nothing reported, where `a: 1` over `a: 2` is refused on every path — so
+     the check exists and the `any` path skips the resolution step. `yardstickDefects` is the register
+     for it: this test compares a typed read against the `any` read, and here the yardstick is the wrong
+     side. See stream 2's defects 3 and 37.
+   - 📝 **What is left is `map[float64]any`** — a typed map with a non-string key, which is where the
+     "hash of unhashable type" panic lived. `map[any]any` reaches the same code with a wider key type and
+     found the entry above, so this is a narrowing rather than a gap.
 
 3. ⏳ **Numbers Go cannot hold, and the spellings of the ones it can.**
    - ✅ **The wide types** (2026-09-11). `yamlgen.BigInt` and `yamlgen.BigFloat` share the integer's and
@@ -215,12 +238,17 @@ Actions below.
      and quoted in another — has two answers and `readings` tracks spellings rather than nodes, so the
      generator says it will not say. 30 stored cases carry more than one meaning; those carry none.
 
-7b. ⏳ **What is left of the schema axis.** ✅ `yamlgen` states what a document denotes under YAML 1.1, `yamlcorpus` stores an
-   answer per reading, and `parser.WithYAMLVersion` makes the reading selectable — so `GoYAML11` scores
-   rather than merely describing. ⚠️ What is left is the *document* half: `Style` gains the version,
-   written as a `%YAML` directive, so a reading is something the generator can **ask for**.
+7b. ✅ **The schema axis is whole.** `yamlgen` states what a document denotes under YAML 1.1, `yamlcorpus`
+   stores an answer per reading, `parser.WithYAMLVersion` makes the reading selectable — so `GoYAML11`
+   scores rather than merely describing — and action 7 gave `Style` the version, so a reading is now
+   something the generator can **ask for** rather than only describe.
    - ⚠️ `codec.Decoder` still has no option that passes a version through, so a directive is the only
-     route into 1.1 through the decoder.
+     route into 1.1 through the decoder. That is a library gap and belongs to stream 1's API surface, not
+     to this stream.
+   - 🔍 **A version directive spans a stream and a `%TAG` handle does not** (2026-09-13). All four sources
+     scope a handle to the document that declares it; this library and libfyaml 1.0.0b1 both apply
+     `%YAML` to *every* document. Two implementations agree, so `WriteStream` states no meaning rather
+     than accusing anybody — and somebody should settle what 6.8 requires.
 
 8. ✅ **Byte order marks** (2026-09-13). `Style.ByteOrderMark` opens one document in eight with a U+FEFF.
    5.2 puts it in `l-document-prefix`, before the directives and the marker alike, so it says nothing
@@ -238,14 +266,14 @@ Actions below.
      the discouraging half is that the same one-line assumption was written three times in three files.
      A prefix check on a document wants the mark taken off first.
 
-9. ⏳ **Directives, explicit keys and keep chomping as `Style` axes.**
+9. ✅ **Directives, explicit keys and keep chomping as `Style` axes.**
    - ✅ **Explicit keys** (2026-09-11). `Style.ExplicitKeys` writes an entry as `? key` over `: value`, in
      block and in flow, one mapping in four. **Three defects on the first deep run**, all of them the long
      form and nothing else: a quoted key refuses a block scalar value, an anchor alone after the `:`
      swallows the entries below it, and a comment on the `:` line is dropped. It also reached
      `map key definition includes an implicit line break`, which nothing had provoked — a key written the
      long way is the only key that may hold one.
-   - ✅ **Directives** came with the tag round: `%TAG` in action 10, `%YAML` still open in action 7.
+   - ✅ **Directives** came with the tag round: `%TAG` in action 10 and `%YAML` in action 7.
    - ✅ **Keep chomping** (2026-09-07). The indicator itself is not a choice — `-` for no trailing break,
      clip for one, `+` for more — and the emitter has always picked it from the value. `Style.Chomping`
      moves the two places a value has a second spelling: `+` where clip would do, and **blank lines after
@@ -415,7 +443,7 @@ Actions below.
 2. 🔍 **A stance is tied to a parser version, and forty fixes is a lot of drift.** Replaying against
    `383bbfb` will surface this at scale, and any report has to separate "the corpus found a defect" from
    "the stance describes a later parser".
-3. 📝 **Decide what a byte mutant carries.** Mutants are the bulk of 11,994 cases and carry no features,
+3. 📝 **Decide what a byte mutant carries.** Mutants are the bulk of 14,684 cases and carry no features,
    so the labelled share is about an eighth. The mutation may have deleted the bracket the document was labelled for
    and nothing can tell which mutations did — the same reasoning that caps a mutant's `VerdictAt` at
    parsing. Whether it should carry its source document's features as a best-effort hint is open.
@@ -433,24 +461,33 @@ Actions below.
 
 ## Open items
 
-### ✅ The `conformance-fixes` rebase is done — 2026-09-13
+### ⏳ The corpus reads a document into a Go type — opened 2026-09-06, mostly closed 2026-09-13
 
-Both branches are on `master` at `1968ba5`. All five register entries the table here listed were deleted or
-inverted, and the two matrices — the local-tag spellings and the binary destinations — went to
-`fixed_test.go` rather than being dropped, since each is what stops a later fix trading one case for
-another.
+Every document this generator draws is read into an `any`, here and in `conformance/` and `yamlcorpus`
+alike. The reflection half of the decoder — `decodeStruct`, `keyToNodeMap`, `decodeMap` into a typed map,
+`decodeSlice` — has never seen a corpus document, and three defects were living in it, two of them fixed
+on the day they were looked for (`6c10f40`). The measured entry is action 6 of
+[stream 2](2-correctness.md); this is the generator's side of it.
 
-📌 **What the table got right**: four of the five announced themselves by turning a test red, and
-`floatTagOnANumberPastFloat64` announced nothing, exactly as written. That asymmetry is the reason to keep
-writing hold-outs down when they are added.
+It matters more since 2026-09-06 than it did before: `Unmarshal` into an `any` now walks and reading into
+a Go type still gathers a tree ([stream 3](3-performance.md)), so the two paths no longer share the code
+that would have kept them honest.
 
-📌 **What it did not cover**: the rebase itself. Six conflicts, every one the shape "their commit deletes a
-register entry this branch had edited", with something of ours bracketed inside the hunk. Three
-resolutions went wrong and two of those reached a commit before being caught, so
-`git rebase --exec 'go build ./...'` over the whole range is the minimum check — and it is not enough on
-its own, because a dropped hunk in a register file compiles. What caught the rest was the other session
-running a probe over every defect the branch closed, 27 assertions, before merging. **A rebase of register
-files wants a second reader who did not resolve the conflicts.**
+Three axes, cheapest first:
+
+1. ✅ **A destination generated from the value** (2026-09-11). `TargetForDecoded` turns what the `any`
+   path read into a Go type — a struct with a field per key, a slice of the item type — and
+   `TestDecodingIntoAGoTypeGivesTheSameValue` reads each document twice. Built from the *read* rather
+   than from the `Value`, since a struct tagged from `KeyText` uses core key names and a `%YAML 1.1`
+   document names `yes:` as `true`.
+2. ✅ **The differential the walk has and the tree does not.** `codec.TestWalkMatchesTheStream` holds the
+   walking and gathering paths to `differ=0` over the suite and the seeds, and it is what found the walk
+   reading `%&AML` as an anchor — stream 2's defect 28.
+3. ⏳ **A destination axis in the generator** (2026-09-13). `TargetShape` draws the destination beside the
+   value and the style: plain, pointer fields, or a `map[any]any`. What is left of the list this item
+   opened with is the *struct tag options* — `disallowUnknownField`, `,inline`, `,omitempty` — and named
+   string types. Each is decoder behaviour with a ruling attached and none of them is reachable from a
+   document, so each wants a destination drawn for it.
 
 ### 📌 What separates a safe hold-out from one that swallows a regression — 2026-09-13
 
@@ -493,6 +530,25 @@ defect 14 on 2026-09-13 was correct against `master` and moot against `conforman
 it four commits earlier. Measuring against your own base is right; the cost is that a long-lived branch
 does work the other branch has already made unnecessary. Worth a check against the other tip before
 narrowing a predicate, not before filing one.
+
+### ✅ The `conformance-fixes` rebase is done — 2026-09-13
+
+Both branches are on `master` at `1968ba5`. All five register entries the table here listed were deleted or
+inverted, and the two matrices — the local-tag spellings and the binary destinations — went to
+`fixed_test.go` rather than being dropped, since each is what stops a later fix trading one case for
+another.
+
+📌 **What the table got right**: four of the five announced themselves by turning a test red, and
+`floatTagOnANumberPastFloat64` announced nothing, exactly as written. That asymmetry is the reason to keep
+writing hold-outs down when they are added.
+
+📌 **What it did not cover**: the rebase itself. Six conflicts, every one the shape "their commit deletes a
+register entry this branch had edited", with something of ours bracketed inside the hunk. Three
+resolutions went wrong and two of those reached a commit before being caught, so
+`git rebase --exec 'go build ./...'` over the whole range is the minimum check — and it is not enough on
+its own, because a dropped hunk in a register file compiles. What caught the rest was the other session
+running a probe over every defect the branch closed, 27 assertions, before merging. **A rebase of register
+files wants a second reader who did not resolve the conflicts.**
 
 ### ✅ A `Value` departure is now run — opened and closed 2026-09-13
 
@@ -572,32 +628,6 @@ entry goes to `fixed_test.go`.
 grepped. The link was convention until 2026-09-13 and **two entries had no pin at all**.
 `TestNoRetiredPinSitsWithTheLiveOnes` holds the two files to their naming rule and caught a closed pin
 sitting among the open ones, where it read as a defect still standing.
-
-### 🎯 The corpus never reads a document into a Go type — opened 2026-09-06
-
-Every document this generator draws is read into an `any`, here and in `conformance/` and `yamlcorpus`
-alike. The reflection half of the decoder — `decodeStruct`, `keyToNodeMap`, `decodeMap` into a typed map,
-`decodeSlice` — has never seen a corpus document, and three defects were living in it, two of them fixed
-on the day they were looked for (`6c10f40`). The measured entry is action 6 of
-[stream 2](2-correctness.md); this is the generator's side of it.
-
-It matters more since 2026-09-06 than it did before: `Unmarshal` into an `any` now walks and reading into
-a Go type still gathers a tree ([stream 3](3-performance.md)), so the two paths no longer share the code
-that would have kept them honest.
-
-Three axes, cheapest first:
-
-1. **A destination generated from the value.** The corpus already knows what each document denotes. Turn
-   that value into a Go type — a `map[string]any` into a struct with a field per key, a uniform `[]any`
-   into a slice of one — read the document into it, and compare against the `any` the corpus holds. No
-   new documents, and it crosses the whole reflection path.
-2. **The differential the walk has and the tree does not.** `codec.TestWalkMatchesTheStream` holds the
-   walking and gathering paths to `differ=0` over the suite and the seeds, into an `any`. The typed path
-   wants the same harness against the same answer.
-3. **A destination axis in the generator.** `Generator` draws documents; it draws no destinations. An
-   axis over the Go type a document is read into would reach `disallowUnknownField`, `,inline`,
-   `,omitempty`, pointer fields, named string types and typed map keys — none of which any document can
-   exercise on its own, and all of which are decoder behaviour with rulings attached.
 
 ### 🛠️ Tooling
 
@@ -760,6 +790,25 @@ when its source is absent — a conformance suite that cannot run without a C li
       would be stating a meaning for documents the library reads as zero — a corpus accusing a library of a
       defect already recorded in `codec/zz_bigexp_test.go`. Both minimums were measured rather than reasoned
       from the type: 21 digits and not 20, exponent 330 and not 310.
+
+16. ✅ **The generator says everything the plan asked it to** [🏁] ⭐⭐⭐ (2026-09-13)
+    - Six axes in one round, and **Area 3 closed with them**: `!!timestamp` and `!!binary` as value kinds
+      in six spellings, the collection tags, escapes five ways, byte order marks, multi-document streams,
+      and the rest of the decode-target axis. Matched buckets **545 → 567**, signatures 72 → 75, unreached
+      templates 25 → 23.
+    - **Nine defects and two rulings.** The rulings are the part worth keeping: `{[a\nb]: 1}` is a
+      disagreement about §7.4.2 between two generations of the published grammar and three hand-written
+      implementations, and a `%YAML` directive spanning a stream is a disagreement about §6.8 between
+      us-and-libfyaml and everybody's reading of the text. Neither is a defect and both were nearly filed
+      as one.
+    - 📌 **The escape axis is the one that paid in coverage** — 544 → 561 on its own. The Test Suite never
+      writes an escape inside a flow collection, and 40 of the 44 buckets it leaves open were that single
+      omission, which `grammar/reach_test.go`'s `filling` had been closing by hand.
+    - 👎 **Six one-line assumptions of the same shape**, across five files: a scanner reading a document's
+      first line by its prefix, broken by a leading byte order mark; a split on `"\n"` that missed a
+      document written with lone `"\r"` breaks; a prefix check that did not trim. Each was caught by its
+      own test, which is the encouraging half. The discouraging half is that the same assumption was
+      written six times.
 
 ### Area 4 — the properties
 
@@ -965,29 +1014,54 @@ zero** — with nothing reported. Everything below the bound is kept exactly: `1
     - **No single source made the case** for the key departure: perlref said there were two nodes, goyaml
       said they were two keys, libfyaml said the float survives being named.
 
+14. ✅ **The three registers re-measure themselves** [🏁] ⭐⭐⭐ (2026-09-13)
+    - A register is written once and re-read by nobody, so the test has to be what re-reads it. All three
+      holes were found by two people looking from different sides, and each was live when it was found.
+    - `Departure.Departs` runs each `Value` departure's own document. Nothing had, and **two of the five
+      named a pattern that did not exhibit them at all** — the anchor was decorative, which is worse than
+      the register being unrun.
+    - The tally fails a run whose ledger entry is drawn past `suspectAfter` and never diverges. It caught
+      a **stale entry excusing 1,256 documents a run for six days**, and a predicate excusing 1,077 for
+      nothing.
+    - `Divergence.Pin` names the test that reproduces an entry, checked with `go/ast`. It is what tells a
+      fixed defect from a widened predicate — the distinction the count alone cannot make — and building
+      it found **two entries with no pin and one closed pin filed among the open ones**.
+    - 👎 **`suspectAfter` was measured wrong first.** 200 came from the gap between draw *counts* and
+      ignored the *rate*: an entry that diverges 3 times in 805 draws shows zero about three runs in ten
+      at 329, so the check failed a green tree while its own pin said the defect was there. 1,500 keeps a
+      false alarm under half a percent, and costs nothing because a stale entry is caught by its pin.
+
 ### 🔥 Defects standing, and where they are recorded
 
-Six registers now, and each holds a different kind of thing. A fix moves the entry, so the test that says a
-thing was broken breaks when it stops being broken. **[Stream 2](2-correctness.md) carries the numbered
-list and the three clusters**; this table says where each one lives.
+Eight registers now, and each holds a different kind of thing. A fix moves the entry, so the test that says
+a thing was broken breaks when it stops being broken. **[Stream 2](2-correctness.md) carries the numbered
+list**; this table says where each one lives. Counted 2026-09-13.
 
 | register | file | holds |
 |---|---|---|
-| `yamlgen.Ledger` | `yamlgen/divergence.go` | 5 parser defects, as shape predicates; pinned in `defects_test.go`, retired into `fixed_test.go` |
-| `yamlgen.Strict` | `yamlgen/strictness.go` | 2 valid documents the library refuses, which nothing in the package produces |
-| `yamlgen.Lax` | `yamlgen/laxity.go` | 1 invalid document the library reads |
-| `yamlcorpus.Departures` | `yamlcorpus/stance.go` | 4 measured differences from YAML 1.2, each naming a runnable shape |
+| `yamlgen.Ledger` | `yamlgen/divergence.go` | **6** defects as shape predicates, each naming its `Pin`; pinned in `defects_test.go`, inverted into `fixed_test.go` |
+| `yamlgen.Strict` | `yamlgen/strictness.go` | **2** valid documents the library refuses |
+| `yamlgen.Lax` | `yamlgen/laxity.go` | **1** invalid document the library reads |
+| `yamlcorpus.Departures` | `yamlcorpus/stance.go` | **4** measured differences from YAML 1.2, each naming a runnable shape *and* a `Departs` that runs it |
+| `yamlcorpus.typedPathDefects` | `yamlcorpus/typed_test.go` | **3** enumerated shapes whose typed read is wrong, per destination |
+| `yamlcorpus.yardstickDefects` | `yamlcorpus/typed_test.go` | **2** where the typed read is right and the `any` read is the wrong yardstick |
 | `GoYAML.Stands` | `yamlcorpus/stance.go` | declared positions, not defects — including the six ways a tag contradicting its scalar is answered |
-| `codec/zz_*_test.go` | beside the code | 3, for defects no generated shape and no enumerated pattern reaches |
+| `codec/zz_*_test.go` | beside the code | **8** `TestDefect` files, for defects no generated shape and no enumerated pattern reaches |
 
-`yamlgen.Ledger` holds five, and two of them are on the new `DecodeTyped` property: reading a document into
-a Go type is a different path through `codec` from reading it into an `any`, so an entry says which of the
-two it is about.
+⚠️ **A `Strict` entry is not an accusation any more.** Both survivors are questions: a flow mapping key
+spanning two lines is a disagreement about §7.4.2 that the whole field reads against the grammar, and a
+secondary tag on its own line over a block scalar is the last of a family the fix branch closed. The
+register emptied, which is the job it was built for.
+
+📌 **Every `Ledger` entry says which property it is about**, and two of the six are on properties a single
+document cannot ask: `DecodeTyped` for the reflection path and `StreamDecode` for a stream. An entry on
+`StreamDecode` is consulted by the stream property and by nothing else, so a shape that only goes wrong in
+a stream excuses nothing anywhere else.
 
 `yamlgen.Strict` and `yamlgen.Lax` were both empty until 2026-09-11 and both filled from the same place:
 the lab equivalence test, which runs the shipped parser against the frozen `internal/refparser` over the
-corpus's own documents. Two of the three entries were reached that way and by nothing else, so it is
-worth running when a generator axis is added.
+corpus's own documents. It is still the thing to run when a generator axis is added — the escapes axis and
+the stream axis each reached it, and each wanted an allowance rather than an entry.
 
 ⚠️ **The two lists in `internal/lab/equivalence_test.go` must not merge.** `divergesOnPurpose` says the
 shipped parser is right and refparser is not; `divergesByDefect`, added 2026-09-11, says the shipped parser
