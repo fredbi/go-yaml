@@ -224,3 +224,61 @@ func TestDuplicateMapKeyIsPerType(t *testing.T) {
 		})
 	}
 }
+
+// TestWideMappingsAreToldApart checks that two wide mappings hold their own
+// keys, which is what the index a wide mapping spills into has to get right.
+//
+// TestDuplicateMapKeyIsFoundPastTheScanLimit covers a wide mapping on its own,
+// and every mapping in it starts its keys at the bottom of the key stack. These
+// do not: a nested one starts partway up, and two siblings start at the same
+// place one after the other, so a key the first left behind would be read as a
+// repeat in the second.
+func TestWideMappingsAreToldApart(t *testing.T) {
+	const wide = 200
+
+	entries := func(indent string) string {
+		var b strings.Builder
+		for i := range wide {
+			fmt.Fprintf(&b, "%skey%03d: %d\n", indent, i, i)
+		}
+
+		return b.String()
+	}
+
+	tests := map[string]struct {
+		src       string
+		duplicate bool
+	}{
+		"a wide mapping nested under a key": {
+			src: "outer:\n" + entries("  "),
+		},
+		"a wide mapping nested under a key repeats one of its own": {
+			src:       "outer:\n" + entries("  ") + "  key003: again\n",
+			duplicate: true,
+		},
+		"sibling wide mappings hold the same keys": {
+			src: "a:\n" + entries("  ") + "b:\n" + entries("  "),
+		},
+		"wide mappings down a sequence hold the same keys": {
+			src: "- " + strings.TrimPrefix(entries("  "), "  ") + "- " + strings.TrimPrefix(entries("  "), "  "),
+		},
+		"a wide mapping repeats the key it hangs under": {
+			src: "key003:\n" + entries("  "),
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(test.src))
+			require.NoError(t, err)
+
+			found := duplicatesOf(f)
+			if !test.duplicate {
+				assert.Empty(t, found, "the parse recorded a repeat where the mappings hold none")
+
+				return
+			}
+			assert.NotEmpty(t, found, "the parse missed a repeat")
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/nocopy"
+	"github.com/go-openapi/go-yaml/internal/probe"
 	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
 	"github.com/go-openapi/go-yaml/token"
@@ -118,19 +119,23 @@ type Parser struct {
 	// expands to.
 	tagHandles map[string]string
 
-	// keyStack holds the keys of every mapping open at this point in the
-	// descent, innermost last, and keyIndex addresses them. Both are reused
-	// for the whole parse: a mapping pushes its keys on the way in and drops
-	// them on the way out, so the two grow once to the deepest, widest point
-	// of the document and allocate nothing after that.
-	keyStack []mapKeyRef
-	// keyIndex records where each of those keys was first written. It keeps the
-	// position and not the node it came from: a node holds the token it was
-	// built from, and a token kept here outlives the entry that carried it, so
-	// every key of every open mapping would stay reachable until that mapping
-	// closed. A mapping of 5,000 keys held 5,000 tokens spread over the whole
-	// document; it now holds 5,000 positions of 16 bytes and no token at all.
-	keyIndex map[mapKeyRef]token.Position
+	// keys finds a key a mapping has already used. It is reused for the whole
+	// parse: a mapping pushes its keys on the way in and drops them on the way
+	// out, so it grows once to the deepest, widest point of the document and
+	// allocates nothing after that.
+	//
+	// It records where a key was first written and not the node it came from: a
+	// node holds the token it was built from, and a token kept here outlives
+	// the entry that carried it, so every key of every open mapping would stay
+	// reachable until that mapping closed. A mapping of 5,000 keys held 5,000
+	// tokens spread over the whole document; it now holds 5,000 positions of 16
+	// bytes and no token at all.
+	keys keySet
+
+	// probeBases shadows keys.entries with the base each key was recorded
+	// under, for the probe that holds mapKeyRef.base redundant. It is appended
+	// to only where probe.Enabled, which is a constant false in a normal build.
+	probeBases []int32
 
 	// seqEntries holds the entries of every sequence open at this point in the
 	// descent, innermost last. A sequence fills its slices from its own run
@@ -264,51 +269,68 @@ func (p *Parser) newPathNode() *ast.PathNode {
 	return n
 }
 
-// mapKeyRef addresses one key of one mapping: base is where that mapping's
-// keys start in keyStack, and text is the key as mapKeyText reads it.
-// mapKeyRef is what tells one key of a mapping from another: which mapping it
-// belongs to, the type it resolved to, and that type's own spelling of it.
-//
-// §3.2.1.1 makes two keys equal when they resolve to the same node, so the type
-// is half the identity: "7" and "007" are one integer written twice and "1" and
-// "1.0" are an integer and a float. Comparing the characters alone read the
-// first pair as two keys and the second as one, and read "1" and "\"1\"" as one
-// where they are a number and a string.
-//
-// base is an index into keyStack and never approaches 2^31, so narrowing it
-// makes room for the kind in the padding the struct already had: it was 24
-// bytes with an int and a string, and it is 24 bytes with these three.
-type mapKeyRef struct {
-	base int32
-	kind token.KeyKind
-	text string
-}
-
 // recordMapKey records that the mapping starting at base uses text as a key,
 // written at pos.
 //
 // It returns where text was first written, and whether the mapping had already
 // used it.
 func (p *Parser) recordMapKey(base int, text string, kind token.KeyKind, pos token.Position) (token.Position, bool) {
-	ref := mapKeyRef{base: int32(base), kind: kind, text: text}
-	if prev, defined := p.keyIndex[ref]; defined {
-		return prev, true
+	if probe.Enabled {
+		p.checkKeyStackTail(base)
 	}
-	p.keyIndex[ref] = pos
-	p.keyStack = append(p.keyStack, ref)
 
-	return token.Position{}, false
+	return p.keys.record(base, text, kind, pos)
+}
+
+// checkKeyStackTail records whether the keys above base all belong to the
+// mapping recording now.
+//
+// Mappings nest, so a mapping records keys only while it is the innermost one
+// open: an outer mapping's next key waits for the inner one to close. If that
+// holds, the keys above base are exactly one mapping's, and a duplicate can be
+// found by scanning that tail instead of hashing base into an index shared by
+// every open mapping.
+//
+// probeBases shadows the stack with the base each key was recorded under, which
+// the entries themselves stopped carrying once the scan made it redundant --
+// which is the very thing under test, so the probe keeps its own copy rather
+// than reading the answer off the state it is checking.
+//
+// Nothing may raise this: a disagreement means an outer mapping recorded a key
+// over an inner one's, and closeMapping would then drop a key the outer still
+// owns. keySet.record reads the tail on that promise.
+func (p *Parser) checkKeyStackTail(base int) {
+	// A repeated key records no entry, so the shadow can stand one ahead of the
+	// stack it shadows. Trim it back before reading either.
+	p.probeBases = p.probeBases[:min(len(p.probeBases), len(p.keys.entries))]
+
+	held := true
+	for i := base; i < len(p.probeBases); i++ {
+		if int(p.probeBases[i]) == base {
+			continue
+		}
+		at, was, text := i, p.probeBases[i], p.keys.entries[i].text
+		probe.Check("mapkey.stackTailIsOneMapping", false, func() string {
+			return fmt.Sprintf("key %q at %d was recorded under mapping %d, recording now for %d",
+				text, at, was, base)
+		})
+		held = false
+
+		break
+	}
+	if held {
+		probe.Check("mapkey.stackTailIsOneMapping", true, nil)
+	}
+
+	p.probeBases = append(p.probeBases, int32(base))
 }
 
 // closeMapping drops the keys of the mapping that started at base.
-//
-// Mappings close in the order they open, so the keys of the one closing are
-// always those above its base.
 func (p *Parser) closeMapping(base int) {
-	for _, ref := range p.keyStack[base:] {
-		delete(p.keyIndex, ref)
+	if probe.Enabled {
+		p.probeBases = p.probeBases[:min(base, len(p.probeBases))]
 	}
-	p.keyStack = p.keyStack[:base]
+	p.keys.close(base)
 }
 
 // New returns a parser.
@@ -317,7 +339,7 @@ func (p *Parser) closeMapping(base int) {
 // [Parser.Walk]. How a document becomes tokens is the parser's own business,
 // and a caller made to say would be tied to it.
 func New(opts ...Option) *Parser {
-	p := &Parser{keyIndex: make(map[mapKeyRef]token.Position)}
+	p := &Parser{}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -729,7 +751,7 @@ func attachTrailingComment(ctx context, entryTk *tapeToken, values []ast.Node) e
 }
 
 func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
-	base := len(p.keyStack)
+	base := p.keys.base()
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
 
@@ -968,7 +990,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	p.holdRun(runSeq)
 	defer p.releaseRun(runSeq)
 
-	base := len(p.keyStack)
+	base := p.keys.base()
 	defer p.closeMapping(base)
 	ctx = ctx.withMapping(base)
 
