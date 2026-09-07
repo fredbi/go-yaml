@@ -104,9 +104,24 @@ var Strict = []Strictness{
 			"`{[a, b]: 1}` parses here, so it is the break and nothing else. Written the long way, " +
 			"`{? [a\nb]\n: 1}`, it is refused too and with a different message -- " +
 			"`',' or ']' must be specified` -- so there are two paths into it.\n\n" +
-			"The reference parser reads both. libfyaml 1.0.0b1 refuses all three, `{[a, b]: 1}` " +
-			"included, but that is its loader declining a sequence as a mapping key rather than a " +
-			"statement about the syntax.",
+			"⚠️ **This entry is a ruling and not an ordinary refusal.** The two grammar-derived " +
+			"oracles accept the document and every hand-written implementation refuses it, this " +
+			"library included. Re-measured on 2026-09-13 against all four sources:\n" +
+			"  - the reference parser passes it and grammar.NewRecognizer accepts it -- two " +
+			"generations of the specification's own grammar, by different toolchains;\n" +
+			"  - libfyaml 1.0.0b1 refuses it in its C parser: `missing comma in flow mapping` at " +
+			"2:3;\n" +
+			"  - go.yaml.in/yaml/v3 v3.0.5 refuses it too: `did not find expected ',' or '}'`.\n\n" +
+			"Those last two are parse errors and not the binding declining to hold a collection as " +
+			"a key, which is the confound this register warns about elsewhere. The tell is the " +
+			"error itself: `{[a, b]: 1}` gives libfyaml a Python `TypeError: unhashable type` and " +
+			"gives yaml/v3 `invalid map key`, both after a successful parse, while the document " +
+			"here stops in the parser at a position. And `[[a\nb]]` -- the same break inside a " +
+			"flow sequence with no key in sight -- is read by both.\n\n" +
+			"So nothing corroborates the claim except the grammar. Three implementations reading " +
+			"7.4.2 the other way is evidence about 7.4.2, not about this library, and the entry is " +
+			"kept for the measurement rather than as an accusation. Whoever settles it should " +
+			"decide whether the published grammar is lax here before anyone changes the parser.",
 		Error: "[2:3] map key definition includes an implicit line break",
 	},
 	{
