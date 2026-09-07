@@ -1,5 +1,8 @@
 > [!NOTE]
-> Last revision: 2026-09-07 (rebased on the new corpus and the scanner round; the decoder is 2.0% of
+> Last revision: 2026-09-07, evening (the map round: two Go maps off the hot path, -7.6% on a decode.
+> The yardstick was wrong and read ~30 points against us -- `Unmarshal` into `any` is **22.3% faster**
+> than yaml/v3, not 20% behind it)
+> Previous revision: 2026-09-07 (rebased on the new corpus and the scanner round; the decoder is 2.0% of
 > its own benchmark's CPU and parked -- what is left of the 1.21x is parser and scanner)
 > Previous revision: 2026-09-06 (the struct path walks -- a fifth of yaml/v3's bytes at 1.17x its time;
 > the alias semantics and their amplification guard now gate the rest)
@@ -824,7 +827,140 @@ What is left holding tokens behind the head: the level's accumulated children (`
    `default-lexer` decides a number's shape from its first bytes; the prize here is smaller than the
    `mayBeNumber` guard's was, so it rides along rather than leading.
 
-## Where we stand against yaml/v3, measured 2026-09-05
+## The map round -- landed 2026-09-07 (`3dcb382`, `808f3f6`)
+
+Two Go maps on the hot path, neither of them the Go value being built. Together **-7.60% on a decode,
+geomean over the six workloads**, every one of them significant, with allocations unchanged and bytes
+down 0.13%.
+
+### Where the CPU actually goes, citm_catalog decode
+
+Flat time by package, no node dropped, 100% of samples accounted. Taken before the round.
+
+| | share |
+|---|---:|
+| parser | 39.5% |
+| scanner | 25.9% |
+| **Go map operations** | **11.4%** |
+| runtime, a long flat tail -- memmove, mallocgc, defer, strconv | 10.9% |
+| token / ast / codec | 10.7% |
+| **GC mark and write barriers** | **0.7%** |
+
+⚠️ **The collector is not the tax, and had been read as 15% of it.** GC marking and the write barriers
+come to 0.7%; the allocator adds 2.5%. The memory rounds did their job and there is nothing left to win
+there. What was being read as GC is Go map hashing, and that is compressible. Site by site:
+
+| site | share of decode | what it is |
+|---|---:|---|
+| `parser.recordMapKey` | 4.9% | duplicate-key lookup and insert |
+| `parser.grouper.feed` -> `readByAStage` | 4.2% | a `map[token.Type]bool`, once per token |
+| `parser.closeMapping` | 2.0% | deleting a mapping's keys on the way out |
+| `codec.valueBuilder.deliver` | 2.0% | the `map[string]any` -- the Go value, and staying |
+| `token.ScalarType` keyword map | 0.5% | still open, see below |
+
+### `readByAStage`, a seven-entry map on a one-byte key
+
+A `uint8` key has no fast path in the runtime. Every token went through the generic `mapaccess2` and
+an indirect call to `memhash8`, hashing a value that indexes a bit. `token.Type` tops out at
+`InvalidType = 33`, so the set fits one word. **-3.1% on its own**, five lines.
+
+Fred's expectation going in was that an int-keyed map would already be fast, and it would have been
+for `map[int32]` or `map[int64]`, which have `mapaccess_fast32`/`fast64`. One byte has neither.
+
+### The duplicate-key index
+
+Every key went into one `map[mapKeyRef]token.Position` shared by the whole document and came back out:
+a lookup, an insert, and a delete at close. Three hashes of the key text, 6.9% of a decode.
+
+The map being document-wide is why each entry carried the base of the mapping it belonged to. It does
+not need to. **Mappings nest, so a mapping records keys only while it is the innermost one open**, and
+the keys above its base are exactly its own -- which makes a lookup a scan of that tail. `keySet` in
+`parser/keyset.go` scans a `[]uint32` of filters, sixteen to a cache line against the 32 bytes an entry
+takes, and reads an entry only where a filter matches. `keyFilter` packs the kind, the length and the
+first and last byte into one word in constant time: it is deliberately **not** a hash of the string,
+because hashing every key is the cost being removed. A mapping closing under the scan is dropped by
+truncating two slices.
+
+⭐ **The probe settled it rather than an argument.** `mapkey.stackTailIsOneMapping` is nil over 12,704
+recordings of the fuzz corpus (`parser/probe_test.go`, in the scanner's ledger style) and 167,066 of
+the workloads (`internal/analysis/zz_keyprobe_test.go`). The probe keeps its own shadow of the bases in
+`Parser.probeBases` rather than reading them off `keySet`, since their being redundant is the thing
+under test.
+
+### How wide a mapping actually is
+
+The scan needs a bound past which a mapping gets an index instead. `spillAt = 64`, and the numbers say
+it is a guard against a document written to be slow rather than a crossover to tune:
+
+| workload | mappings | p50 | p90 | p99 | max | >64 keys | compares/key |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| azure_swagger | 5,066 | 2 | 5 | 9 | 91 | 2 | 2.0 |
+| citm_catalog | 10,937 | 2 | 3 | 9 | 184 | 1 | 1.8 |
+| golang_source | 12,807 | 7 | 7 | 7 | 7 | 0 | 3.0 |
+| twitter_status | 1,264 | 4 | 40 | 40 | 40 | 0 | 13.8 |
+| commented_swagger | 5,066 | 2 | 5 | 9 | 91 | 2 | 2.0 |
+| canada_geometry | 4 | 2 | 2 | 2 | 3 | 0 | 0.6 |
+
+**The median mapping holds two keys**, and five of the corpus's 35,144 hold more than 64. Anything from
+32 to 256 reads the same on a real document, so the threshold is not machine-dependent in any way that
+shows. The spilled path was exercised by building the whole suite and the conformance corpus at
+`spillAt = 2`.
+
+### Encapsulation cost nothing, and the compiler said so
+
+Fred asked whether hiding the indexing behind a type would kill the inlining. `-gcflags=-m`: `keyFilter`,
+`keySet.base`, `keySet.push`, `keySet.close` and `keySet.spill` all inline, `keySet.close` into
+`Parser.closeMapping` into `parseMap`. The only thing that does not is `keySet.record` itself -- the scan
+loop -- which has to be a call either way, and which replaces two runtime map calls.
+
+### Found on the way
+
+- 📝 **`TestDuplicateMapKeyIsFoundPastTheScanLimit`'s comment was stale.** It described a scan-then-index
+  design the code had not had for some time, and is true again. The earlier attempt is the one recorded
+  under "a per-mapping key set costs more": it failed because it **allocated per mapping**, where reusing
+  the stack that already existed costs nothing.
+- 📝 **Every mapping in that test starts at the bottom of the key stack.** `TestWideMappingsAreToldApart`
+  covers what it could not: a spilled index at a non-zero base, and two siblings opening at the same base
+  one after the other, where a key the first left behind would read as a repeat in the second.
+
+## Where we stand against yaml/v3, measured 2026-09-07
+
+`internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any` on both sides, the two runs
+interleaved in one window, eight rounds each, read with benchstat. Negative is us ahead.
+
+| workload | before (`f909608`) | after (`808f3f6`) |
+|---|---:|---:|
+| canada_geometry | -52.9% | **-54.9%** |
+| commented_swagger | -13.1% | -19.8% |
+| golang_source | -9.1% | -15.7% |
+| azure_swagger | -6.7% | -13.3% |
+| twitter_status | ~ (p=0.279) | -12.1% |
+| citm_catalog | **+7.2%** | -5.0% (p=0.050) |
+| **geomean** | **-15.8%** | **-22.3%** |
+
+Bytes and allocations from the same run: **-77.6% bytes**, 4.5x less, and **-92.2% allocations**,
+12.9x fewer, on every workload. `citm_catalog` was the last document v3 read faster and no longer is.
+
+### ⚠️ The yardstick was wrong, and it read about 30 points against us
+
+`BenchmarkWorkloadV3Node` in `internal/analysis` unmarshals into `v3.Node`, which parses the document
+and stops. `BenchmarkWorkloadDecode` beside it unmarshals into `any`, which parses **and** walks the
+tree into Go values. Reading one against the other charges us a stage v3 was never asked to run, and
+`v3.Node` is the cheaper job by 12 to 18%: on `azure_swagger` v3 takes 24.4 ms into `Node` and 28.8 ms
+into `any`.
+
+Measured that way this library looked **+9.6% geomean against v3** on the morning of 2026-09-07 and
+the round was opened to close a 20% gap. On `BenchmarkWorkloads`, where both sides unmarshal into
+`any`, the same commit was already **-15.8%** -- ahead, not behind.
+
+**Use `internal/benchmarks` BenchmarkWorkloads for any claim about standing against v3.**
+`BenchmarkWorkloadV3Node` is the comparison for `parser.ParseBytes`, which builds a tree and stops,
+and its doc comment says so. Nothing in `internal/analysis` compares a whole `Unmarshal`.
+
+The table under "measured 2026-09-05" below is on the right harness but predates the decoder round of
+2026-09-06, which is what moved those ratios from +23% to -13% on `azure_swagger`.
+
+## Where we stood against yaml/v3, measured 2026-09-05
 
 `internal/benchmarks` BenchmarkWorkloads, `Unmarshal` into `any`. Ratios are go-openapi over
 go.yaml.in/yaml/v3, so under 1 is better.
@@ -909,6 +1045,12 @@ Fred, 2026-09-04. Each stage is measured before the next is started.
 Against yaml/v3: from 2x slower to **2x faster**, and better where the document favours us. Memory
 **5 to 10x less**, which on today's numbers means the bytes have to come down by an order of
 magnitude, not a little -- the count is already halved and that is not what is costing.
+
+⚡ **Where that stands, 2026-09-07.** Time is **1.29x faster** on `BenchmarkWorkloads` (geomean -22.3%),
+so a little over half way from parity to the 2x. Memory is **4.5x fewer bytes and 12.9x fewer
+allocations** -- the allocation half of the objective is past its range and the bytes are just under it.
+The paragraph above was written when the bytes were 1.3x to 1.7x *v3's*; they are 0.22x now, and it was
+the decoder round rather than the AST that moved them.
 
 ## Windowing the AST -- opened 2026-09-05
 
@@ -1252,6 +1394,28 @@ Worth reading for, when the round is over and not before:
 
 ## Open items
 
+### What the map round left, and where the gap is now -- 2026-09-07
+
+The decode profile was retaken at package granularity with `-nodefraction=0`, so these are shares of the
+whole and not of an accounted fraction.
+
+- 🔍 **`citm_catalog` is where the remaining cost concentrates.** It is the densest document in the
+  corpus at **6.0 bytes per token** against 11.0 to 16.2 for the rest, and our cost tracks token count
+  rather than byte count. It is now -5.0% against v3 where the others are -12% to -55%, so nothing is
+  broken -- it is the shape that pays our per-token overhead most.
+- 🔍 **`parseMap`'s five defers are stack-allocated, not open-coded**, and `runtime.(*_panic).nextDefer`
+  is 1.2% of a decode. `parseSequence` next door, with four, **is** open-coded, so it is not the count.
+  Worth finding the disqualifier before touching it: `parseMap` has many `return nil, err` paths and
+  unrolling the defers by hand for 1.2% would be a poor trade.
+  Read it with `go build -gcflags='github.com/go-openapi/go-yaml/parser=-d=defer' ./parser/`.
+- 🔍 **`token.ScalarType`'s keyword map is 0.5%**, a `map[string]Type` behind the `isReservedLength`
+  guard that already keeps it off most scalars. A switch on the length and the first byte would close
+  it. The smallest named item left, and named only because the two above it were the same shape.
+- 📝 **The per-byte cursor is still ~21% of the scan and unchanged.** Nothing in this round touched it,
+  and it remains the only item big enough to change the order of magnitude. See "Measured and left on
+  the table, scanner" below.
+
+
 ### The scanner's polishing phase — Fred, 2026-09-04
 
 Opened when the scanner pass was called good enough and the work moved to the parser. None of it is
@@ -1371,6 +1535,19 @@ blocking; it is what a scanner nobody is racing deserves before it settles.
 
 ## Method — earned, and worth keeping
 
+- ⚠️ **Check what the reference benchmark asks the other library to do.** For a day the standing against
+  yaml/v3 was read off `BenchmarkWorkloadV3Node`, which unmarshals into `v3.Node` -- a parse, where ours
+  was a parse and a walk into Go values. The ratio was about 30 points against us and a round was opened
+  to close a gap that did not exist. `internal/benchmarks` BenchmarkWorkloads puts both sides into `any`
+  and is the only comparison that answers the question. A ratio between two libraries is worth no more
+  than the two calls under it.
+
+- **Profile at package granularity, with `-nodefraction=0`, before ranking anything.** `pprof -top`
+  drops nodes under a threshold by default and the tail is 17% of the samples; summed by package it moves
+  the ranking. Taking it that way is what turned "15% incompressible GC" into 0.7% collector and 11.4%
+  map hashing.
+
+
 - **Spike a re-architecture in `internal/lab` before touching `parser`.** Three predictions about memory
   churn have been wrong in the direction that matters, so a structural change is measured on a copy that
   cannot break a parser at 100% conformance. Only what clears both gates is backported.
@@ -1384,6 +1561,22 @@ blocking; it is what a scanner nobody is racing deserves before it settles.
   0.9% of allocated bytes over building nothing, which reversed the decision.
 
 ## Achievements
+
+### The map round: two Go maps off the hot path [🏁] ⭐⭐ (2026-09-07)
+
+- **-7.60% on a decode, geomean over the six workloads**, every one significant, allocations unchanged.
+  Against yaml/v3 on `BenchmarkWorkloads`: **-15.8% to -22.3%**, and `citm_catalog` -- the last document
+  v3 read faster -- turned over.
+- ⚠️ **The yardstick had been wrong for a day and read about 30 points against us**, comparing our
+  `Unmarshal` into `any` against v3 parsing into `v3.Node`. The round was opened to close a 20% gap that
+  was not there. The work stands on its own -7.6%; the standing did not need it.
+- ⚠️ **"Incompressible GC overhead" was 0.7%.** Marking and the write barriers come to 0.7% of a decode
+  and the allocator to 2.5%. The 11.4% read as collector pressure was Go map hashing.
+- ⭐⭐ **The probe decided the design.** `mapkey.stackTailIsOneMapping` turned "a mapping only records
+  while it is innermost" from an assumption into 180,000 checks with no disagreement, which is what makes
+  `mapKeyRef.base` removable and the lookup a scan.
+- **Two five-line-to-160-line changes, no architecture.** Both were sitting in a profile nobody had taken
+  at package granularity with `-nodefraction=0`.
 
 ### The parser round: windowing the AST [🏁] ⭐⭐⭐ (2026-09-05)
 
