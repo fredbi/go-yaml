@@ -2075,7 +2075,7 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		if tk.GroupType() == TokenGroupLiteral || tk.GroupType() == TokenGroupFolded {
 			return p.parseLiteral(ctx.withGroup(p, tk.Group))
 		}
-		if endsValue(tk) || startsEntry(tk) {
+		if endsValue(tk) || (startsEntry(tk) && !p.tagStandsOver(tk, tagRawTk)) {
 			// Nothing here is the tag's value: either punctuation closes what
 			// the tag was written in, or the next entry of the enclosing
 			// mapping has begun. The tag is on the empty node.
@@ -2262,7 +2262,7 @@ func (p *Parser) opensNextEntry(next *tapeToken, line int) bool {
 // named the tag, and each of which put the document out of reach of anything
 // that only wanted to read or reformat it.
 func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.Token, tk *tapeToken) (ast.Node, error) {
-	if endsValue(tk) || startsEntry(tk) {
+	if endsValue(tk) || (startsEntry(tk) && !p.tagStandsOver(tk, tagRawTk)) {
 		// The tag stands on the empty node, which is not a mismatch: the
 		// document left the value out rather than writing one of another kind.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
@@ -2278,6 +2278,26 @@ func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.T
 	}
 
 	return p.parseToken(ctx, tk)
+}
+
+// tagStandsOver reports whether tk opens an entry the tag is written over,
+// rather than the next entry of the collection around it.
+//
+// A mapping entry may begin on the tag's own line: "!!str &a [1]: v" is one
+// entry whose key the tag types, and the grouping hands that key over as a map
+// key group. Read as the next entry it left the whole mapping unparsed, and the
+// document was refused as `value is not allowed in this context`.
+//
+// A block sequence may not begin on that line. 8.2.1 keeps a "-" off the line a
+// node's properties are written on, so "!!int - 8" is not a document at all and
+// a "-" there belongs to neither the tag nor the collection around it. On a
+// later line a "-" is an ordinary token and opensNextEntry decides it.
+func (p *Parser) tagStandsOver(tk *tapeToken, tag *token.Token) bool {
+	if tk.Type() == token.SequenceEntryType && tk.Line() == int(tag.Position.Line) {
+		return false
+	}
+
+	return !p.opensNextEntry(tk, int(tag.Position.Line))
 }
 
 // opensCollection reports whether tk begins a flow collection or a block

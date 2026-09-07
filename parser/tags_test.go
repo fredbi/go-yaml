@@ -444,3 +444,86 @@ func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
 		}
 	})
 }
+
+// TestParseReadsATaggedMappingEntryOnTheTagsOwnLine: a mapping entry may begin
+// on the line its tag is written on, and the tag stands over that entry.
+//
+// "!!str &a [1]: v" was refused with `value is not allowed in this context`,
+// the caret on the anchor. The grouping hands "&a [1]" and its ":" over as a
+// map key, and parseTagValue read any map key as the next entry of the
+// collection around the tag -- so the tag took the empty node and the whole
+// mapping was left unparsed. It asks tagStandsOver now, which is
+// opensNextEntry with a carve-out for a "-".
+//
+// The document is a kind mismatch and the decoder still reports one, at the
+// tag: "!!str" names a scalar and the node is a mapping, which is the same
+// answer "!!str [1]: v" has always given. That is resolution and not syntax,
+// and the two are settled at their own layers.
+func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
+	t.Run("the parser reads them", func(t *testing.T) {
+		for _, source := range []string{
+			"!!str &a [1]: v\n",
+			"!!seq &a [1]: v\n",
+			"!!str &a {a: 1}: v\n",
+			"!!map &a [1]: v\n",
+			"&a !!str [1]: v\n",
+			// The same shapes with a tag on its own line over a block
+			// collection, which reported the complaint one line down.
+			"!!str\nb: 1\n",
+			"!!str\n- 1\n",
+			"a: !!str\n- 1\n",
+			"- !!str\n  - 1\n",
+			// These always read, and still do.
+			"!foo &a [1]: v\n",
+			"!!str [1]: v\n",
+			"&a [1]: v\n",
+			"!!str &a [1]\n",
+			"!!seq\n- 1\n",
+			"a: !!seq\n- 1\n",
+		} {
+			f, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.NoErrorf(t, err, "%q", source)
+			require.NotNil(t, f)
+		}
+	})
+
+	t.Run("a tag naming a kind its node is not is reported at the tag", func(t *testing.T) {
+		for _, source := range []string{
+			"!!str &a [1]: v\n", "!!str &a {a: 1}: v\n", "!!str [1]: v\n",
+			"!!str\nb: 1\n", "!!str\n- 1\n", "a: !!str\n- 1\n",
+		} {
+			var got any
+			err := yaml.Unmarshal([]byte(source), &got)
+			require.Errorf(t, err, "%q", source)
+			assert.Contains(t, err.Error(), "!!str names a kind this node is not", "%q", source)
+		}
+	})
+
+	t.Run("a tag naming the kind it stands on reads", func(t *testing.T) {
+		for source, want := range map[string]any{
+			"!!seq &a [1]: v\n":  map[string]any{"[1]": "v"},
+			"!!map &a [1]: v\n":  map[string]any{"[1]": "v"},
+			"!foo &a [1]: v\n":   map[string]any{"[1]": "v"},
+			"&a [1]: v\n":        map[string]any{"[1]": "v"},
+			"!!seq\n- 1\n":       []any{uint64(1)},
+			"a: !!seq\n- 1\n":    map[string]any{"a": []any{uint64(1)}},
+			"a: !!str\nb: 1\n":   map[string]any{"a": "", "b": uint64(1)},
+			"- !!str\n- 1\n":     []any{"", uint64(1)},
+			"{a: !!str, b: 1}\n": map[string]any{"a": "", "b": uint64(1)},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(source), &got), "%q", source)
+			assert.Equal(t, want, got, "%q", source)
+		}
+	})
+
+	t.Run("a block sequence still may not open on the tag's own line", func(t *testing.T) {
+		// 8.2.1 keeps a "-" off the line a node's properties are written on.
+		// grammar.NewRecognizer refuses these, and so do libfyaml 1.0.0b1, the
+		// reference parser and go.yaml.in/yaml/v3.
+		for _, source := range []string{"!!int - 8\n", "---\n!!int - 23\n"} {
+			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.Errorf(t, err, "%q", source)
+		}
+	})
+}
