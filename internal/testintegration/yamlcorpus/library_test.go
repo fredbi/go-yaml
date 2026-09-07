@@ -187,6 +187,63 @@ func TestEveryDepartureNamesAShape(t *testing.T) {
 	}
 }
 
+// TestEveryValueDepartureStillDeparts runs each Value departure's document and
+// holds the library to what the entry says it does.
+//
+// TestEveryDepartureNamesAShape checks that the pattern exists;
+// TestTheLibraryMatchesItsDeclaredStance re-measures the Verdict entries. Until
+// this test the Value entries fell between the two and were prose: "a local tag
+// on an empty value, with the mapping carrying on" stopped departing and
+// nothing went red.
+//
+// A failure here is usually good news. A departure that closes is a defect
+// fixed, and the entry moves out of this register rather than being left to
+// describe a library that has moved on. Read the Observed sentence before
+// deleting anything: two entries named a pattern that did not exhibit them at
+// all, and repointing those is what made this test possible.
+func TestEveryValueDepartureStillDeparts(t *testing.T) {
+	for _, d := range yamlcorpus.Departures {
+		if d.Kind != yamlcorpus.Value {
+			continue
+		}
+
+		t.Run(d.Pattern, func(t *testing.T) {
+			if d.Departs == nil {
+				t.Fatalf("a value departure with no Departs is prose: %s", d.Observed)
+			}
+
+			src := departureSource(t, d.Pattern)
+
+			var got any
+			err := codec.Unmarshal(src, &got)
+
+			if !d.Departs(got, err) {
+				t.Errorf("the library no longer does this, so the entry can go\n  document: %q\n  reads:    %#v (err %v)\n  register: %s",
+					src, got, err, d.Observed)
+			}
+		})
+	}
+}
+
+// departureSource returns the document a departure's pattern names, over the
+// same groups TestEveryDepartureNamesAShape accepts.
+func departureSource(t *testing.T, name string) []byte {
+	t.Helper()
+
+	for _, group := range [][]stance.Shape{
+		yamlcorpus.KeyShapes(), yamlcorpus.TagShapes(), yamlcorpus.SchemaShapes(),
+		yamlcorpus.MergeShapes(), yamlcorpus.DirectiveShapes(),
+	} {
+		for _, s := range group {
+			if s.Name == name {
+				return s.Src
+			}
+		}
+	}
+
+	return build(t, name)
+}
+
 func build(t *testing.T, name string) []byte {
 	t.Helper()
 

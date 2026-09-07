@@ -159,6 +159,33 @@ type Departure struct {
 	// resting only on our own reading of the prose is a weaker claim and should
 	// say so by leaving this empty.
 	Corroborated string
+	// Departs reports whether the library still does what [Departure.Observed]
+	// says, given the decode of [Departure.Pattern]'s document into an `any`.
+	//
+	// Every [Value] departure needs one, and
+	// TestEveryValueDepartureStillDeparts refuses an entry without it. Until
+	// 2026-09-13 a Value departure was prose: nothing ran it, so an entry went
+	// on describing the library after the library had changed -- "a local tag
+	// on an empty value, with the mapping carrying on" stopped departing and
+	// was found by somebody reading the code.
+	//
+	// The decode is handed in rather than done here, so this package stays
+	// free of the library it measures. A [Verdict] departure leaves it nil:
+	// TestTheLibraryMatchesItsDeclaredStance already re-measures those against
+	// the rules.
+	Departs func(got any, err error) bool
+}
+
+// departsMapping is the common shape of a [Departure.Departs]: the document
+// reads, it reads into a mapping, and the mapping is wrong in a stated way.
+func departsMapping(got any, err error, wrong func(map[string]any) bool) bool {
+	if err != nil {
+		return false
+	}
+
+	m, mapping := got.(map[string]any)
+
+	return mapping && wrong(m)
 }
 
 // Key identity is a declared position, and the one place this library overrules
@@ -205,12 +232,22 @@ var Departures = []Departure{
 			"untagged form keeps. !!int, !!str, !!bool and !!null on a key are all named correctly",
 		Corroborated: "codec.ToJSON writes \"226.0\" for both spellings, so the two converters in this " +
 			"library disagree with each other -- which is what found it",
+		Departs: func(got any, err error) bool {
+			return departsMapping(got, err, func(m map[string]any) bool {
+				_, integral := m["226"]
+
+				return integral
+			})
+		},
 	},
 	{
-		Pattern: "a key that is a boolean",
+		// Anchored on the resolution shape rather than on "a key that is a
+		// boolean", which is `true: a` alone and reads correctly. The
+		// departure needs the second key.
+		Pattern: "two keys alike in text and different once resolved",
 		Kind:    Value,
-		Observed: `"true: a" beside "\"true\": b" comes back as the single entry {"true": "b"}, ` +
-			`and so do "1: a" beside "\"1\": b" and "~: a" beside "\"null\": b"`,
+		Observed: `"1: x" beside "\"1\": y" comes back as the single entry {"1": "y"}, ` +
+			`and so do "true: a" beside "\"true\": b" and "~: a" beside "\"null\": b"`,
 		Because: "3.2.1.1: a key is equal to another when they resolve to the same node, and a boolean " +
 			"is not a string. Naming a key by the canonical spelling of its type is what makes 1 and " +
 			"1.0 two keys, and it puts every typed key in the strings' namespace at the same time -- " +
@@ -221,6 +258,9 @@ var Departures = []Departure{
 			"go.yaml.in/yaml/v3 v3.0.5 refuses the document as a duplicate, so it names keys the way " +
 			"this library does and merges the two the way this library used to. Only libfyaml holds " +
 			"both, and the reading here rests on 3.2.1.1 rather than on a majority",
+		Departs: func(got any, err error) bool {
+			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 1 })
+		},
 	},
 	{
 		Pattern: "a local tag on an empty value, with the mapping carrying on",
@@ -237,6 +277,13 @@ var Departures = []Departure{
 		Corroborated: "all three, at both layers. libfyaml 1.0.0b1 gives {\"a\": \"\", \"b\": 1, \"c\": 2} " +
 			"and go.yaml.in/yaml/v3 v3.0.5 gives the same; the reference parser emits one +MAP with " +
 			"three entries and no nesting at all",
+		Departs: func(got any, err error) bool {
+			return departsMapping(got, err, func(m map[string]any) bool {
+				_, nested := m["a"].(map[string]any)
+
+				return nested
+			})
+		},
 	},
 	{
 		Pattern: "a key tagged !!timestamp",
@@ -255,9 +302,19 @@ var Departures = []Departure{
 			"found \"a key tagged !!float\". libfyaml 1.0.0b1 names the timestamp key \"2001-12-14\", " +
 			"go.yaml.in/yaml/v3 v3.0.5 names it \"2001-12-14T00:00:00Z\", and the reference parser " +
 			"keeps the tag on the key and names nothing",
+		Departs: func(got any, err error) bool {
+			return departsMapping(got, err, func(m map[string]any) bool {
+				_, byGoFormatting := m["2001-12-14 00:00:00 +0000 UTC"]
+
+				return byGoFormatting
+			})
+		},
 	},
 	{
-		Pattern:  "a key that is null",
+		// Anchored on the shape that writes both spellings. It used to name "a
+		// key that is null", which is `~: a` alone and reads correctly -- the
+		// pattern was decorative until Departs made it load-bearing.
+		Pattern:  "a key written +.inf beside one written .inf",
 		Kind:     Value,
 		Observed: `"+.inf: a" beside ".inf: b" comes back as two entries, keyed "+.inf" and ".inf"`,
 		Because: "the sign is normalized away for an integer, so \"+1\" and \"1\" are one key, and the " +
@@ -265,6 +322,9 @@ var Departures = []Departure{
 			"are one node and one key",
 		Corroborated: "libfyaml 1.0.0b1 names both \"Infinity\"; go.yaml.in/yaml/v3 v3.0.5 reads both " +
 			"as float64(+Inf) and holds one entry",
+		Departs: func(got any, err error) bool {
+			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 2 })
+		},
 	},
 }
 

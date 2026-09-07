@@ -124,6 +124,13 @@ func KeyShapes() []stance.Shape {
 			Intent: []stance.Tag{TagKeyNotAString},
 		},
 		{
+			// Both spell positive infinity, so they are one node and one key.
+			// The pair is the shape: either spelling alone reads correctly.
+			Name:   "a key written +.inf beside one written .inf",
+			Src:    []byte("+.inf: a\n.inf: b\n"),
+			Intent: []stance.Tag{TagDuplicateAfterResolution},
+		},
+		{
 			Name:   "a key tagged !!float",
 			Src:    []byte("!!float 226.0: x\n"),
 			Intent: []stance.Tag{TagKeyIntegralFloat},
