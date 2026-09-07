@@ -1002,6 +1002,36 @@ citm decode, the scanner's own time split by what it is doing:
 3.09%, `appendToken` 1.63%, `popValue` 1.14%. That is materialising the 56-byte token, which no
 amount of per-byte work reaches.
 
+## ⛔ AVX2 for the scanner's fast path -- ruled out 2026-09-07
+
+Fred's call, and the corpus agrees with it for a reason worth writing down: **the documents have no
+runs long enough to fill a wider register.**
+
+Share of skippable bytes lying in runs of each length, alphanumeric continue-set:
+
+| workload | in runs >=8 | >=16 | >=32 | >=64 |
+|---|---:|---:|---:|---:|
+| canada_geometry | 82.0% | **0.0%** | 0.0% | 0.0% |
+| citm_catalog | 75.0% | 6.8% | **0.0%** | 0.0% |
+| azure_swagger | 62.2% | 20.1% | 4.9% | 0.0% |
+| commented_swagger | 59.7% | 18.4% | 4.6% | 0.0% |
+| golang_source | 55.7% | 16.7% | 0.1% | 0.0% |
+| twitter_status | 31.7% | 5.4% | 0.4% | 0.0% |
+
+**Between 95% and 100% of skippable bytes sit in runs shorter than one AVX2 register**, and nothing
+at all is in a run of 64. A 32-byte kernel would load 32 bytes to step over a mean of 6.5 and find
+its stop inside the first vector nearly every time. The 8-byte word is the width the data has: 56% to
+82% of the bytes are in runs that fill it.
+
+The inlining compounds it rather than causing it. An AVX2 kernel cannot inline, so it would put a
+call back per run -- a run averaging 6.5 bytes -- which is the cost `swar`'s whole design exists to
+avoid, and which `go-openapi/core`'s JSON lexer already paid once at cost 98 against 80.
+
+⚠️ **This rules out a wider register, not the scanner.** Walking the bytes is down to 8.1% of a
+decode; **cutting a token is 11.4%** and untouched -- `NextToken`, `bufferedToken`, `appendToken`,
+`popValue`. That is per-token work, it is now the larger half of the scanner, and no byte-level
+technique of any width reaches it.
+
 ## The per-token round -- landed 2026-09-07 (`fe85239`)
 
 ### What a parse actually costs: a token, not a byte
