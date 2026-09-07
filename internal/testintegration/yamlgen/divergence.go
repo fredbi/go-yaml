@@ -642,6 +642,10 @@ func anchoredNull(v Value) bool {
 	return empty
 }
 
+// writesAQuotedExplicitKeyOverABlockScalar reports whether v holds a mapping
+// entry the style writes as a quoted "? key" over a ": value" that becomes a
+// block scalar.
+//
 // It asks blockScalarIn rather than approximating it, so the only place it is
 // wider than the defect is the key: a key the style quotes is not always a key
 // the defect needs, since Style.Quoting quotes every string and the defect
