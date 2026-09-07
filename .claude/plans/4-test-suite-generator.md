@@ -429,12 +429,28 @@ is short: **a hold-out that inspects the difference is safe; one that matches th
   fiddly and needed two goes.
 - `internal/lab`'s `readsATaggedScalarAsText` excuses 548 documents, which looks worse and is not. It reads
   both trees and refuses unless **every** difference is the named shape and everything else — structure,
-  positions, text — is identical. Measured directly: the intended difference alone is skipped; the same
-  difference plus one unrelated node changing type is **not**.
+  positions, text — is identical. Measured from both sides, four cases:
+
+  | dump handed to it | skipped |
+  |---|---|
+  | the intended difference alone | yes |
+  | the intended difference plus an unrelated node changing type | no |
+  | an unrelated node changing type alone | no |
+  | the intended difference plus a node whose **position** moved | no |
+
+  The fourth is the one that makes the rule worth stating. `pastNodeType` compares everything after the
+  node type — offsets and text included — so a node of the right type at the wrong position still makes the
+  skip refuse. It resists a positions-only regression, which is the class
+  [[token-positions-drive-rendering]] is about and the class a value comparison never sees.
 
 So breadth is not the risk and never was. A hold-out keyed on what went in has to be narrowed until it
 matches only the defect; a hold-out keyed on what came out can be as broad as the defect really is, because
 anything else in the document makes it refuse. Prefer the second shape when writing one.
+
+The practical consequence: **a difference-keyed hold-out needs no narrowing pass at all.** An input-keyed
+one does, it stays fiddly because the predicate has to track the defect's shape rather than the
+difference's, and it is the work that took two goes on 2026-09-13. Where a hold-out can be written either
+way, write it against the difference.
 
 📌 Neither kind announces its own retirement, which is what the table above is for.
 
