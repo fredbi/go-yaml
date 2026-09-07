@@ -355,7 +355,16 @@ func unwrapKeyNode(n ast.Node) ast.Node {
 	}
 }
 
-func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]interface{}) error {
+// setToMapValue fills m from node.
+//
+// merged says the entries come from a "<<" rather than from the mapping
+// holding it. A mapping's own keys win over the ones it merges in, whichever
+// side of the "<<" they were written, and an earlier "<<" wins over a later one
+// -- so a merged key is written only where none stands already. That is the
+// rule keyToNodeMap applies for a struct, and this path did not: "x: 9" over
+// "<<: *a" took the merged x, and "<<: [*a, *b]" took b's where the merge spec
+// gives it to a.
+func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]any, merged bool) error {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -370,17 +379,20 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 			if err != nil {
 				return err
 			}
-			iter := value.MapRange()
-			for iter.Next() {
-				if err := d.setToMapValue(ctx, iter.KeyValue(), m); err != nil {
-					return err
-				}
+			if err := eachMergedEntry(value, func(v ast.Node) error {
+				return d.setToMapValue(ctx, v, m, true)
+			}); err != nil {
+				return err
 			}
 		} else {
 			key, err := d.mapKeyNodeToString(ctx, n.Key)
 			if err != nil {
 				return err
 			}
+			if _, stands := m[key]; stands && merged {
+				return nil
+			}
+
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
 				return err
@@ -388,11 +400,9 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 			m[key] = v
 		}
 	case *ast.MappingNode:
-		for _, value := range n.Values {
-			if err := d.setToMapValue(ctx, value, m); err != nil {
-				return err
-			}
-		}
+		return eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
+			return d.setToMapValue(ctx, value, m, merged || isMerge)
+		})
 	case *ast.AnchorNode:
 		anchorName := n.Name.GetToken().Value
 		d.anchorNodeMap[anchorName] = n.Value
@@ -400,7 +410,14 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 	return nil
 }
 
-func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *MapSlice) error {
+// setToOrderedMapValue fills m from node, reading merged as [Decoder.setToMapValue] does.
+//
+// A MapSlice keeps what a map cannot: the order the document wrote. So a key
+// already standing is overwritten where it stands rather than appended again --
+// "<<: *a" over "x: 9" is one entry holding 9, at the place the merge brought x
+// in. Appending gave a MapSlice with x twice, which no reader of one expects
+// and which json.Marshal writes as a repeated member.
+func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *MapSlice, merged bool) error {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -415,16 +432,18 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 			if err != nil {
 				return err
 			}
-			iter := value.MapRange()
-			for iter.Next() {
-				if err := d.setToOrderedMapValue(ctx, iter.KeyValue(), m); err != nil {
-					return err
-				}
+			if err := eachMergedEntry(value, func(v ast.Node) error {
+				return d.setToOrderedMapValue(ctx, v, m, true)
+			}); err != nil {
+				return err
 			}
 		} else {
 			key, err := d.mapKeyNodeToString(ctx, n.Key)
 			if err != nil {
 				return err
+			}
+			if merged && indexOfKey(*m, key) >= 0 {
+				return nil
 			}
 			value, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
@@ -433,13 +452,77 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 			*m = append(*m, MapItem{Key: key, Value: value})
 		}
 	case *ast.MappingNode:
+		return eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
+			return d.setToOrderedMapValue(ctx, value, m, merged || isMerge)
+		})
+	}
+	return nil
+}
+
+// eachEntryOwnFirst calls fn for the mapping's own entries in document order,
+// then for the ones a "<<" brings in, passing merged to say which.
+//
+// A mapping's own keys win over the ones it merges in, whichever side of the
+// "<<" they were written, so reading them in this order settles precedence by
+// position rather than by a lookup at each key. It also keeps the MapSlice scan
+// off every mapping that holds no "<<".
+func eachEntryOwnFirst(n *ast.MappingNode, fn func(value ast.Node, merged bool) error) error {
+	for _, pass := range [2]bool{false, true} {
 		for _, value := range n.Values {
-			if err := d.setToOrderedMapValue(ctx, value, m); err != nil {
+			if mergeEntry(value) != pass {
+				continue
+			}
+			if err := fn(value, pass); err != nil {
 				return err
 			}
 		}
 	}
+
 	return nil
+}
+
+// eachMergedEntry calls fn for the entries a "<<" brings in.
+//
+// A mapping contributes its keys in the order it would read in on its own --
+// its own before the ones it merges itself -- so "<<: *b" where b is
+// "<<: *a" over "y: 2" brings y before a's x, which is the order ToJSON writes
+// and the order b reads as. A "<<" naming a sequence is folded into one MapNode
+// before it gets here and is read through in the order the fold made.
+func eachMergedEntry(value ast.MapNode, fn func(ast.Node) error) error {
+	if n, ok := value.(*ast.MappingNode); ok {
+		return eachEntryOwnFirst(n, func(v ast.Node, _ bool) error { return fn(v) })
+	}
+
+	iter := value.MapRange()
+	for iter.Next() {
+		if err := fn(iter.KeyValue()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// mergeEntry reports whether a mapping's entry is a "<<".
+func mergeEntry(node ast.Node) bool {
+	n, ok := node.(*ast.MappingValueNode)
+
+	return ok && n.Key != nil && n.Key.IsMergeKey()
+}
+
+// indexOfKey is where key stands in m, or -1.
+//
+// Only a merged key is looked up, and only in a mapping that holds a "<<", so
+// a scan costs nothing on a document without one. Every key a MapSlice is
+// filled with here comes from mapKeyNodeToString and is a string.
+func indexOfKey(m MapSlice, key string) int {
+	for i := range m {
+		if k, ok := m[i].Key.(string); ok && k == key {
+			return i
+		}
+	}
+
+	return -1
 }
 
 func (d *Decoder) setPathToCommentMap(node ast.Node) {
@@ -704,7 +787,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			if d.useOrderedMap {
 				m := MapSlice{}
 				for iter.Next() {
-					if err := d.setToOrderedMapValue(ctx, iter.KeyValue(), &m); err != nil {
+					if err := d.setToOrderedMapValue(ctx, iter.KeyValue(), &m, true); err != nil {
 						return nil, err
 					}
 				}
@@ -712,7 +795,7 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			}
 			m := make(map[string]any)
 			for iter.Next() {
-				if err := d.setToMapValue(ctx, iter.KeyValue(), m); err != nil {
+				if err := d.setToMapValue(ctx, iter.KeyValue(), m, true); err != nil {
 					return nil, err
 				}
 			}
@@ -740,18 +823,18 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 		}
 		if d.useOrderedMap {
 			m := make(MapSlice, 0, len(n.Values))
-			for _, value := range n.Values {
-				if err := d.setToOrderedMapValue(ctx, value, &m); err != nil {
-					return nil, err
-				}
+			if err := eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
+				return d.setToOrderedMapValue(ctx, value, &m, isMerge)
+			}); err != nil {
+				return nil, err
 			}
 			return m, nil
 		}
 		m := make(map[string]interface{}, len(n.Values))
-		for _, value := range n.Values {
-			if err := d.setToMapValue(ctx, value, m); err != nil {
-				return nil, err
-			}
+		if err := eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
+			return d.setToMapValue(ctx, value, m, isMerge)
+		}); err != nil {
+			return nil, err
 		}
 		return m, nil
 	case *ast.SequenceNode:
