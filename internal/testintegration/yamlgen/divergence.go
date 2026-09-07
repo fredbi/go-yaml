@@ -295,6 +295,25 @@ var Ledger = []Divergence{
 		Property: DecodeTyped,
 		Match:    writesABinaryTag,
 	},
+	{
+		Name: "render/a-block-scalar-in-a-sequence-swallows-an-empty-key",
+		Reason: "A block scalar written as a nested sequence entry, with an empty key after it, " +
+			"renders to text the parser refuses. `a:` over ` - |1-` over `   ` over `:` renders to " +
+			"`a:` over `- |2-    :`, and reading that back reports " +
+			"`invalid header option: \"2-    :\"`. The scalar's content and the empty key's `:` are " +
+			"both written onto the header line, so a valid document renders to one that is not " +
+			"YAML.\n\n" +
+			"The empty key is what does it: `b: 1` in its place renders correctly, at the same " +
+			"column. Nothing else is needed -- the anchor and the whitespace-only content each drop " +
+			"out and it still happens, and `|1` chomping the break goes the same way as `|1-`.\n\n" +
+			"It claims RenderValid and Settle: the text it writes does not parse, so nothing can be " +
+			"read from it or rendered again. The first read is correct.\n\n" +
+			"Found on 2026-09-12 at 30,000 draws of TestRenderWritesValidYAML.\n\n" +
+			"The predicate is wider than the defect: it asks that the document hold an empty key " +
+			"and a block scalar inside a sequence, not that the two land in that order.",
+		Property: RenderValid | Settle,
+		Match:    writesABlockScalarBesideAnEmptyKey,
+	},
 }
 
 // writesAQuotedExplicitKeyOverABlockScalar reports whether st writes a mapping
@@ -626,6 +645,53 @@ func holdsAnEmptyKey(v Value) bool {
 	}
 
 	return false
+}
+
+// writesABlockScalarBesideAnEmptyKey reports whether st writes both an empty
+// key and a block scalar inside a sequence.
+func writesABlockScalarBesideAnEmptyKey(v Value, st Style) bool {
+	return writesAnEmptyKey(v, st) && holdsABlockScalarInASequence(v, st)
+}
+
+func holdsABlockScalarInASequence(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			if s, text := unwrapProperties(item).(Str); text && blockScalarIn(s.V, st) {
+				return true
+			}
+
+			return holdsABlockScalarInASequence(item, st)
+		})
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsABlockScalarInASequence(p.Key, st) || holdsABlockScalarInASequence(p.Val, st) {
+				return true
+			}
+		}
+	case Anchored:
+		return holdsABlockScalarInASequence(n.V, st)
+	case Tagged:
+		return holdsABlockScalarInASequence(n.V, st)
+	case Alias:
+		return holdsABlockScalarInASequence(n.V, st)
+	}
+
+	return false
+}
+
+// unwrapProperties reaches the node an anchor or a tag stands on.
+func unwrapProperties(v Value) Value {
+	for {
+		switch n := v.(type) {
+		case Anchored:
+			v = n.V
+		case Tagged:
+			v = n.V
+		default:
+			return v
+		}
+	}
 }
 
 // isNullNode reports whether v writes nothing when the style spells null as
