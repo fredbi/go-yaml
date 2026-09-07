@@ -100,6 +100,7 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 
 	values := yamlgen.Values()
 	styles := yamlgen.Styles()
+	streams := yamlgen.Streams()
 
 	out := make([]Entry, 0, documents*(1+mutantsEach))
 
@@ -122,6 +123,26 @@ func Generate(seed uint64, documents, mutantsEach int) []Entry {
 			Readings: written.Readings,
 			Means:    meansOf(written),
 		})
+
+		// One document in eight also yields a stream, which is the only way
+		// this corpus reaches a document suffix, a second document, or the
+		// grammar's l-document-prefix past the first one.
+		//
+		// It states no meaning. A stream denotes a *sequence* of documents and
+		// suite.Case.Meaning is what one document denotes, so writing one in
+		// would be answering a different question. What a stream is here for is
+		// the shape: the buckets it enters, the complaints its mutants provoke,
+		// and the verdict on whether it is YAML at all.
+		if i%8 == 0 {
+			docs := streams.Example(at)
+			asStream := yamlgen.WriteStream(docs, style)
+
+			out = append(out, Entry{
+				Name:     "generated/" + digits(i) + "/stream",
+				Src:      []byte(asStream.Text),
+				Features: asStream.Features,
+			})
+		}
 
 		// Broken on purpose, on the value, so the break is labeled rather
 		// than guessed at. These are the only generated documents that violate

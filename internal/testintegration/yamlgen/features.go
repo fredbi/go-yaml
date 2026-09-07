@@ -99,6 +99,11 @@ const (
 	FeatureNumberOctal stance.Feature = "presentation/number-octal"
 	// FeatureNumberExponent is a float written "1.5e+00".
 	FeatureNumberExponent stance.Feature = "presentation/number-exponent"
+	// FeatureMultiDocument is a stream carrying more than one document.
+	FeatureMultiDocument stance.Feature = "presentation/multi-document"
+	// FeatureDocumentSuffix is a "..." line ending a document, which 9.1.2
+	// makes the other way to separate two of them.
+	FeatureDocumentSuffix stance.Feature = "presentation/document-suffix"
 	// FeatureByteOrderMark is a U+FEFF at the head of the document, which 5.2
 	// puts in l-document-prefix and which says nothing about the content.
 	FeatureByteOrderMark stance.Feature = "encoding/byte-order-mark"
@@ -209,16 +214,7 @@ type Written struct {
 // tens of thousands of documents and wants the labels; a property check emits
 // millions and wants none of them.
 func Write(v Value, st Style) Written {
-	e := &emitter{
-		st:   st,
-		feat: features{},
-		reads: &readings{
-			plain:   map[string]bool{},
-			split:   map[string]bool{},
-			numbers: map[string]bool{},
-			st:      st,
-		},
-	}
+	e := newRecordingEmitter(st)
 	text := e.emit(v)
 
 	valueFeatures(v, e.feat)
@@ -240,6 +236,57 @@ func Write(v Value, st Style) Written {
 	w.MeansUnclear = st.Version == Reading11Version && e.reads.splitALegacySpelling()
 
 	return w
+}
+
+// WriteStream writes several documents and reports what it wrote.
+//
+// Means is the slice of what each document denotes, which is what a reader
+// looping over codec.Decoder gets.
+//
+// Readings is left alone: it tracks spellings across one document, and a stream
+// gives it several, so stating an answer would be stating one this package has
+// not measured.
+//
+// MeansUnclear is set for a stream declaring "%YAML 1.1", and that is a ruling
+// rather than a gap. Measured on 2026-09-13: this library and libfyaml 1.0.0b1
+// both apply a version directive to *every* document of the stream, not only to
+// the one it precedes -- "%YAML 1.1" over "---" over "a: yes" over "---" over
+// "b: yes" reads true twice. A %TAG handle is scoped the other way by all four
+// sources, so the library scopes one directive per document and not the other.
+// Since two implementations agree and the specification's own wording is what
+// is in question, the generator states no meaning here rather than accusing
+// anybody.
+func WriteStream(docs []Value, st Style) Written {
+	e := newRecordingEmitter(st)
+	text := e.emitStream(docs)
+
+	means := make([]any, 0, len(docs))
+	for _, v := range docs {
+		valueFeatures(v, e.feat)
+		means = append(means, v.Decoded())
+	}
+
+	return Written{
+		Text:         text,
+		Features:     e.feat.sorted(),
+		Means:        means,
+		MeansUnclear: st.Version == Reading11Version && len(docs) > 1,
+	}
+}
+
+// newRecordingEmitter is an emitter that fills the feature set and the
+// readings, which is what [Write] and [WriteStream] want and [Emit] does not.
+func newRecordingEmitter(st Style) *emitter {
+	return &emitter{
+		st:   st,
+		feat: features{},
+		reads: &readings{
+			plain:   map[string]bool{},
+			split:   map[string]bool{},
+			numbers: map[string]bool{},
+			st:      st,
+		},
+	}
 }
 
 // features is the set an emitter fills as it writes.

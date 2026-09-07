@@ -34,16 +34,106 @@ func Emit(v Value, st Style) string {
 	return e.emit(v)
 }
 
+// EmitStream writes several documents into one text, in the presentation st
+// asks for.
+//
+// A stream is not a value: each document has its own anchors, its own
+// directives and its own meaning, and 3.2.2.2 keeps an anchor from reaching
+// past the document that declares it. So this takes a slice rather than a
+// Value, and [Streams] draws one document per entry independently -- an alias
+// in the second document naming an anchor in the first is a document the
+// library refuses, and refuses correctly, so it belongs in yamlcorpus rather
+// than in an ordinary draw.
+func EmitStream(docs []Value, st Style) string {
+	e := &emitter{st: st}
+
+	return e.emitStream(docs)
+}
+
 // emit is Emit's body, shared with [Write].
 func (e *emitter) emit(v Value) string {
-	st := e.st
+	e.head()
+	e.document(v, false)
 
+	return e.finish()
+}
+
+// emitStream writes several documents into one text.
+//
+// The byte order mark is written once, at the head: 5.2 allows one before every
+// document, and the field does not agree about the later positions -- see
+// [Style.ByteOrderMark]. Directives are written per document, because a
+// directive's scope is the document it precedes and a %TAG handle declared
+// above the first is not defined for the second.
+func (e *emitter) emitStream(docs []Value) string {
+	e.head()
+
+	whole := e.st
+
+	for i, v := range docs {
+		e.st = whole
+
+		if i > 0 {
+			e.feat.add(FeatureMultiDocument)
+
+			if whole.DocumentSuffix {
+				e.feat.add(FeatureDocumentSuffix)
+				e.buf.WriteString("...\n")
+			} else {
+				// 9.1.1 puts a directive in l-directive-document, which
+				// follows l-document-prefix -- and a prefix only comes after a
+				// "..." suffix. So a document opened by "---" alone declares
+				// nothing, and a handle it cannot declare cannot be written
+				// either. Both syntax oracles refuse the alternative:
+				// "a: 1" over "%YAML 1.2" over "---" over "b: 2" is not YAML.
+				e.st.Version = ""
+				if e.st.TagSpelling == SpellHandle {
+					e.st.TagSpelling = SpellShorthand
+				}
+			}
+		}
+
+		// A document with no text at all is not a document: a bare null under
+		// the empty spelling writes nothing, and the stream reads one document
+		// fewer than it was given. The marker makes it explicit, which is what
+		// "---" over "---" is for.
+		e.document(v, (i > 0 && !whole.DocumentSuffix) || writesNothing(v, e.st))
+	}
+
+	e.st = whole
+
+	return e.finish()
+}
+
+// writesNothing reports whether v's body reaches the document as no text at
+// all, which only a bare null under the empty spelling does. A tag or an anchor
+// on it writes itself, so the document has something in it.
+func writesNothing(v Value, st Style) bool {
+	if st.NullSpelling != "" {
+		return false
+	}
+
+	_, empty := v.(Null)
+
+	return empty
+}
+
+// head writes what stands before the first document and nothing else.
+func (e *emitter) head() {
 	// 5.2 puts the byte order mark in l-document-prefix, so it stands before
 	// the directives and the marker alike.
-	if st.ByteOrderMark {
+	if e.st.ByteOrderMark {
 		e.feat.add(FeatureByteOrderMark)
 		e.buf.WriteRune(bom)
 	}
+}
+
+// document writes one document's directives, marker and body.
+//
+// needsMarker forces the "---" for a document that follows another with no
+// "..." between them, where the marker is the only thing that opens it.
+func (e *emitter) document(v Value, needsMarker bool) {
+	st := e.st
 
 	// A directive applies to the document the directives end marker opens, so
 	// writing one forces the "---" whatever the style asked for.
@@ -64,11 +154,16 @@ func (e *emitter) emit(v Value) string {
 	// being non-empty is no longer the question it used to be.
 	wroteADirective := st.Version != "" || (st.TagSpelling == SpellHandle && holdsSecondaryTag(v))
 
-	if st.Markers || wroteADirective {
+	if st.Markers || wroteADirective || needsMarker {
 		e.feat.add(FeatureDocumentMarker)
 		e.buf.WriteString("---\n")
 	}
 	e.root(v)
+}
+
+// finish substitutes the style's break and hands back the text.
+func (e *emitter) finish() string {
+	st := e.st
 
 	out := e.buf.String()
 	if st.Break != "" && st.Break != BreakLF {

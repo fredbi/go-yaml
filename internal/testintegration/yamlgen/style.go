@@ -451,6 +451,14 @@ type Style struct {
 	TimeForm TimeForm
 	// Escaping is how much of a double-quoted scalar is written as escapes.
 	Escaping Escaping
+	// DocumentSuffix separates a stream's documents with a "..." line and lets
+	// the next one open bare, rather than opening it with the "---" alone.
+	//
+	// 9.1.2 makes the suffix a document's end and 9.1.1 lets a bare document
+	// follow it, so the two spellings reach different productions: "a\n---\nb"
+	// is one l-any-document after another, and "a\n...\nb" is a
+	// l-document-suffix with a fresh l-document-prefix behind it.
+	DocumentSuffix bool
 	// ByteOrderMark writes a U+FEFF at the head of the document.
 	//
 	// 5.2 puts one in l-document-prefix, so it stands before the directives and
@@ -562,7 +570,7 @@ func (s Style) String() string {
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String() +
-		s.Escaping.String() + bomLabel(s.ByteOrderMark)
+		s.Escaping.String() + bomLabel(s.ByteOrderMark) + suffixLabel(s.DocumentSuffix)
 }
 
 // Styles generates a presentation.
@@ -627,6 +635,9 @@ func Styles() *rapid.Generator[Style] {
 			// document, and a corpus where one document in two carried one
 			// would look like nothing anybody writes.
 			ByteOrderMark: rapid.IntRange(0, 7).Draw(t, "bom") == 0,
+			// An even split: both separators are ordinary, and the "..." is
+			// the one no generated document had ever written.
+			DocumentSuffix: rapid.Bool().Draw(t, "suffix"),
 			// One mapping in four is written the long way. Weighted down
 			// because "key: value" is what documents look like, and an even
 			// split would spend half the corpus's mappings on a form few
@@ -686,6 +697,15 @@ func quoteEmpty(s string) string {
 func bomLabel(on bool) string {
 	if on {
 		return " bom"
+	}
+
+	return ""
+}
+
+// suffixLabel names the document suffix in a style's text.
+func suffixLabel(on bool) string {
+	if on {
+		return " ..."
 	}
 
 	return ""

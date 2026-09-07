@@ -4,12 +4,16 @@
 package yamlgen_test
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -296,4 +300,95 @@ func TestDefectASecondCommentOnAnExplicitKeysColonLineIsDropped(t *testing.T) {
 	t.Run("one comment on the ':' line is kept", func(t *testing.T) {
 		assert.Equal(t, "? a\n: v # c3\n", renderOnce(t, "? a\n: # c3\n  v\n"))
 	})
+}
+
+// TestDefectADocumentSuffixMishandlesAPropertiedBlockScalar: a "..." suffix
+// followed by a bare document whose root is a block scalar carrying an anchor
+// or a tag reads differently from the same stream spelled with "---".
+//
+// Two symptoms, one suffix. With an indentation indicator a column of the
+// content is dropped; without one a valid stream is refused outright.
+//
+// The reference parser settles which side is right and it is "---": it emits
+// the same events for both spellings. Do not reach for libfyaml or
+// go.yaml.in/yaml/v3 on the first symptom -- both strip a column from every
+// root block scalar with an indicator, so they agree with each other and with
+// neither the grammar nor the specification. It is a content question, and the
+// reference parser is the source that answers one.
+func TestDefectADocumentSuffixMishandlesAPropertiedBlockScalar(t *testing.T) {
+	t.Run("today a column goes missing", func(t *testing.T) {
+		for _, tc := range []struct{ suffix, marker, reads, correct string }{
+			{
+				suffix:  "a: 1\n...\n&a1 |2-\n  \n",
+				marker:  "a: 1\n---\n&a1 |2-\n  \n",
+				reads:   "",
+				correct: " ",
+			},
+			{
+				suffix:  "a: 1\n...\n!!str |2-\n  x\n",
+				marker:  "a: 1\n---\n!!str |2-\n  x\n",
+				reads:   "x",
+				correct: " x",
+			},
+		} {
+			wellFormed(t, tc.suffix)
+
+			assert.Equalf(t, tc.reads, secondDocument(t, tc.suffix), "today: %q", tc.suffix)
+			assert.Equalf(t, tc.correct, secondDocument(t, tc.marker), "the marker spelling: %q", tc.marker)
+		}
+	})
+
+	t.Run("today a valid stream is refused", func(t *testing.T) {
+		const refused = "&a3 a: 1\n...\n&a1 >-\n -\n"
+
+		wellFormed(t, refused)
+
+		_, err := parser.ParseBytes([]byte(refused), parser.WithComments())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not allowed in this context")
+
+		// The marker spelling of the same stream reads.
+		assert.Equal(t, "-", secondDocument(t, "&a3 a: 1\n---\n&a1 >-\n -\n"))
+	})
+
+	t.Run("it takes an anchor on each side, and a block scalar", func(t *testing.T) {
+		for _, src := range []string{
+			// No anchor on the first document.
+			"a: 1\n...\n&a1 >-\n -\n",
+			// None on the second.
+			"&a3 a: 1\n...\n>-\n -\n",
+			// A plain scalar rather than a block one.
+			"&a3 a: 1\n...\n&a1 x\n",
+		} {
+			_, err := parser.ParseBytes([]byte(src), parser.WithComments())
+			assert.NoErrorf(t, err, "%q", src)
+		}
+	})
+}
+
+// secondDocument reads a two-document stream and returns what the second one
+// holds, which is where this defect shows.
+func secondDocument(t *testing.T, src string) string {
+	t.Helper()
+
+	dec := codec.NewDecoder(bytes.NewReader([]byte(src)))
+
+	var last any
+
+	for i := 0; ; i++ {
+		var v any
+
+		err := dec.Decode(&v)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoErrorf(t, err, "document %d of %q", i, src)
+
+		last = v
+	}
+
+	text, isText := last.(string)
+	require.Truef(t, isText, "the last document of %q is %#v", src, last)
+
+	return text
 }

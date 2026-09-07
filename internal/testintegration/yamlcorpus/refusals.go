@@ -131,6 +131,26 @@ func Refusals() []Refusal {
 		// written for. See TestTheParserVocabularyGapIsMeasured, which reports
 		// what is left.
 		{
+			// Three tab complaints the yamlcorpus/30 draw stopped reaching,
+			// pinned together on 2026-09-13. 6.1 makes s-indent spaces and
+			// nothing else, so a tab among a line's indentation leaves the
+			// construct it introduces with nothing to sit on -- and the
+			// scanner says which construct in each case.
+			Name: "a tab in a block scalar's stated indentation",
+			Src:  "a: |2\n \tx\n", Says: "found a tab character where an indentation space is expected",
+		},
+		{
+			Name: "a tab in the indentation of a nested mapping entry",
+			Src:  "a:\n \tb: 1\n", Says: "tab character cannot stand for the indentation a mapping entry needs",
+		},
+		{
+			// A tab counts as separation and not as indentation, so it is
+			// allowed in front of a flow node -- "\t{}" is a document -- and
+			// not in front of a key.
+			Name: "a tab in front of a mapping key",
+			Src:  " \ta: 1\n", Says: "tab character cannot use as a map key directly",
+		},
+		{
 			// An anchor alone at the column of a key whose value is empty:
 			// there is no node for it to name and no entry it can open.
 			// Pinned on 2026-09-13, when the byte order mark reshuffled the

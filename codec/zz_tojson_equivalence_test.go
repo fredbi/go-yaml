@@ -161,6 +161,18 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 				continue
 			}
 
+			if opensWithAnEmptyDocument(src.text) {
+				// A recorded defect: ToJSON skips an empty first document and
+				// the decoder keeps it, so "---" over "---" over "b: 2"
+				// converts to {"b":2} one way and null the other. Pinned in
+				// TestDefectToJSONSkipsAnEmptyFirstDocument. They agree on
+				// every stream whose first document has content.
+				t.Logf("%s: ToJSON skips an empty first document", src.name)
+				skipped++
+
+				continue
+			}
+
 			if carriesATimestampOrBinaryTag(src.text) {
 				// A recorded defect: ToJSON writes a !!timestamp as the
 				// scalar's source text and the value converter writes the
@@ -263,6 +275,43 @@ func keyNamingTheSameNumber(g map[string]any, k string) (any, bool) {
 	}
 
 	return nil, false
+}
+
+// opensWithAnEmptyDocument reports whether src's first document holds nothing,
+// which is the shape the two converters disagree about.
+//
+// A crude scan and deliberately so: the first line that is not a directive, a
+// comment or blank has to be a "---", and the line after it has to be another
+// "---" or a "...". Anything else means the first document has content and the
+// two converters agree.
+//
+// Split on either break character. Style.Break writes a lone "\r" for a third
+// of the corpus, and a scan that only knows "\n" reads such a document as one
+// line -- which is how this missed fuzzseed/3226 on its first try.
+func opensWithAnEmptyDocument(src string) bool {
+	var seen int
+
+	for line := range strings.FieldsFuncSeq(src, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		// Trimmed before the prefixes are read: a comment may be indented, and
+		// " # c" is as empty a document body as "" is.
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "%") || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		seen++
+		if seen == 1 {
+			if !strings.HasPrefix(line, "---") || strings.TrimSpace(line) != "---" {
+				return false
+			}
+
+			continue
+		}
+
+		return strings.HasPrefix(line, "---") || strings.HasPrefix(line, "...")
+	}
+
+	return false
 }
 
 // carriesATimestampOrBinaryTag reports whether src tags a node !!timestamp or

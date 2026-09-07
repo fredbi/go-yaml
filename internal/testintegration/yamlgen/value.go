@@ -768,6 +768,31 @@ func Keys() *rapid.Generator[Value] {
 	})
 }
 
+// Streams generates a sequence of documents, one to three of them.
+//
+// Each is drawn independently, so no alias reaches past the document that
+// declares it and no %TAG handle is used outside the document that declares it.
+// Both of those are documents the library refuses, and refuses correctly --
+// measured on 2026-09-13 against libfyaml 1.0.0b1, go.yaml.in/yaml/v3 v3.0.5
+// and the reference parser, which all refuse the handle -- so they are
+// enumerated in yamlcorpus rather than drawn here.
+//
+// Weighted towards two. One document is what Values already draws and says
+// nothing new; three is enough to reach a separator between separators, and a
+// fourth repeats it.
+func Streams() *rapid.Generator[[]Value] {
+	return rapid.Custom(func(t *rapid.T) []Value {
+		n := rapid.SampledFrom([]int{2, 2, 2, 3}).Draw(t, "documents")
+
+		docs := make([]Value, 0, n)
+		for range n {
+			docs = append(docs, Values().Draw(t, "document"))
+		}
+
+		return docs
+	})
+}
+
 // Strings generates a string, weighted toward the ones that are awkward to
 // write down.
 func Strings() *rapid.Generator[string] {
