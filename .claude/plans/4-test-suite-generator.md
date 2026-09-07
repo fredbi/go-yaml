@@ -222,11 +222,21 @@ Actions below.
    - ⚠️ `codec.Decoder` still has no option that passes a version through, so a directive is the only
      route into 1.1 through the decoder.
 
-8. 📝 **Byte order marks.** Still **0 of 40,000** generated documents carry one (re-measured 2026-09-10);
-   they exist in the corpus only as hand-written `stance.EncodingShapes`.
-   - 📌 Two of the eight complaints provoked on 2026-09-10 are byte order marks in positions the generator
-     cannot reach — a mark inside a line, and one where no document begins — so the shapes are pinned even
-     though the axis is not built.
+8. ✅ **Byte order marks** (2026-09-13). `Style.ByteOrderMark` opens one document in eight with a U+FEFF.
+   5.2 puts it in `l-document-prefix`, before the directives and the marker alike, so it says nothing
+   about what the document means.
+   - **Only the leading position is written.** The other one `l-document-prefix` allows, after a `...`
+     suffix, the field does not agree about: libfyaml 1.0.0b1 reads two documents and keeps the mark
+     inside the second one's key, and `go.yaml.in/yaml/v3` v3.0.5 refuses the stream. It is also out of
+     reach while `Emit` writes one document — it comes with action 12 or not at all.
+   - Matched buckets **561 → 564**, signatures **72 → 75**, unreached templates **25 → 23**. The mutation
+     hunt gains `found a byte order mark inside a line, where a node may not hold one`, which only a
+     hand-written `Refusals` entry reached before.
+   - 📌 **Three scanners read a document's first line by its prefix and a leading mark broke all three** —
+     `features_test.go`'s `opensTheDocument` and `directiveLine`, `yamlcorpus`'s `asking`, and
+     `internal/lab`'s directive allowance. Each was caught by its own test, which is the encouraging half;
+     the discouraging half is that the same one-line assumption was written three times in three files.
+     A prefix check on a document wants the mark taken off first.
 
 9. ⏳ **Directives, explicit keys and keep chomping as `Style` axes.**
    - ✅ **Explicit keys** (2026-09-11). `Style.ExplicitKeys` writes an entry as `? key` over `: value`, in
@@ -524,6 +534,14 @@ nobody, so the test has to be what re-reads it.
 
 📌 The next-widest predicate is `decode/a-tagged-block-mapping-does-not-resolve-its-keys` at 62
 divergences in 5,643 draws. It closes on the `conformance-fixes` rebase, so it is not worth narrowing.
+
+📌 **`suspectAfter` was 200 and is 1,500.** The first number came from the gap between draw counts and
+ignored the *rate*: `render/a-blank-line-before-a-comment` diverges 3 times in 805 draws, and at 329 draws
+a rate that low shows zero about three runs in ten — so the check failed a green tree on 2026-09-13 while
+its own pin said the defect was still there. 1,500 keeps a false alarm under half a percent at the lowest
+rate any entry has shown. What it gives up costs nothing: a *stale* entry is caught by its pin failing on
+a plain `go test`, so what is left for the tally is the case a pin cannot see — a live defect whose
+predicate has drifted off it.
 
 📌 **The count alone cannot tell a widened predicate from a fixed defect**, which is the limit of the
 check and was pointed out from the `conformance-fixes` side. `Divergence.Pin` closes it: every entry names
