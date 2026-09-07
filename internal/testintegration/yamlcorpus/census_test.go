@@ -13,130 +13,6 @@ import (
 	"github.com/go-openapi/go-yaml/internal/yamltestsuite"
 )
 
-// bom is U+FEFF, written as an escape because Go source may not hold one.
-const bom = "\ufeff"
-
-// shape is one structural thing a document may contain, recognized in the bytes.
-type shape struct {
-	Name string
-	Has  func(src string) bool
-}
-
-func lines(src string) []string {
-	return strings.FieldsFunc(src, func(r rune) bool { return r == '\n' || r == '\r' })
-}
-
-// trimmed is a line with a byte order mark and leading indentation removed.
-func trimmed(line string) string {
-	return strings.TrimLeft(strings.TrimPrefix(line, bom), " \t")
-}
-
-func anyLine(src string, ok func(string) bool) bool {
-	for _, line := range lines(src) {
-		if ok(trimmed(line)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-var shapes = []shape{
-	{"an explicit key", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == "?" || strings.HasPrefix(l, "? ") })
-	}},
-	{"an explicit key alone on its line", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == "?" })
-	}},
-	{"an explicit key's value line", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == ":" || strings.HasPrefix(l, ": ") })
-	}},
-	{"an explicit key inside a flow collection", func(s string) bool {
-		return strings.Contains(s, "{?") || strings.Contains(s, ", ?") || strings.Contains(s, "[?")
-	}},
-	{"a block literal", func(s string) bool { return strings.Contains(s, "|") }},
-	{"a block folded", func(s string) bool { return strings.Contains(s, ">") }},
-	{"an indentation indicator", func(s string) bool {
-		for _, c := range []string{"|1", "|2", "|3", ">1", ">2", ">3"} {
-			if strings.Contains(s, c) {
-				return true
-			}
-		}
-
-		return false
-	}},
-	{"a chomping indicator", func(s string) bool {
-		for _, c := range []string{"|-", "|+", ">-", ">+"} {
-			if strings.Contains(s, c) {
-				return true
-			}
-		}
-
-		return false
-	}},
-	{"a flow mapping", func(s string) bool { return strings.Contains(s, "{") }},
-	{"a flow sequence", func(s string) bool { return strings.Contains(s, "[") }},
-	{"an anchor", func(s string) bool { return strings.Contains(s, "&") }},
-	{"an alias", func(s string) bool { return strings.Contains(s, "*") }},
-	{"a merge key", func(s string) bool { return strings.Contains(s, "<<") }},
-	{"a secondary tag", func(s string) bool { return strings.Contains(s, "!!") }},
-	{"a verbatim tag", func(s string) bool { return strings.Contains(s, "!<") }},
-	{"a comment", func(s string) bool { return strings.Contains(s, "#") }},
-	{"a document marker", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == "---" || strings.HasPrefix(l, "--- ") })
-	}},
-	{"a document suffix", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == "..." })
-	}},
-	{"a YAML directive", func(s string) bool { return strings.Contains(s, "%YAML") }},
-	{"a TAG directive", func(s string) bool { return strings.Contains(s, "%TAG") }},
-	{"a single-quoted scalar", func(s string) bool { return strings.Contains(s, "'") }},
-	{"a double-quoted scalar", func(s string) bool { return strings.Contains(s, `"`) }},
-	{"a block sequence entry", func(s string) bool {
-		return anyLine(s, func(l string) bool { return l == "-" || strings.HasPrefix(l, "- ") })
-	}},
-	{"a tab", func(s string) bool { return strings.Contains(s, "\t") }},
-	{"a byte order mark", func(s string) bool { return strings.Contains(s, bom) }},
-	{"a carriage return", func(s string) bool { return strings.Contains(s, "\r") }},
-	{"an empty flow collection", func(s string) bool {
-		return strings.Contains(s, "{}") || strings.Contains(s, "[]")
-	}},
-	{"a zero-indented sequence under a key", func(s string) bool {
-		ls := lines(s)
-		for i := 0; i+1 < len(ls); i++ {
-			key := trimmed(ls[i])
-			next := ls[i+1]
-			if strings.HasSuffix(key, ":") && len(next) > 0 && next[0] == '-' {
-				return true
-			}
-		}
-
-		return false
-	}},
-	{"an explicit key whose content is on the line below the '?'", func(s string) bool {
-		// The ':' value line does not count. A "?" alone above ": v" is an entry
-		// whose key is the empty node, which the generator writes often; the
-		// shape here is 8.2.2's s-l+block-indented placing the KEY below its
-		// indicator, which is a different thing and the one the suite has.
-		ls := lines(s)
-		for i := 0; i+1 < len(ls); i++ {
-			next := trimmed(ls[i+1])
-			if trimmed(ls[i]) != "?" || next == "" {
-				continue
-			}
-
-			if next == ":" || strings.HasPrefix(next, ": ") {
-				continue
-			}
-
-			return true
-		}
-
-		return false
-	}},
-	{"a nested explicit key", func(s string) bool { return strings.Contains(s, "? ?") }},
-}
-
 // TestTheGeneratedCorpusIsWiderThanTheSuite is the census.
 //
 // The generated corpus is meant to be strictly wider than the official YAML
@@ -196,7 +72,7 @@ func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {
 
 	inSuite := map[string]int{}
 	for _, s := range suites {
-		for _, sh := range shapes {
+		for _, sh := range yamlcorpus.Constructs() {
 			if sh.Has(string(s.InYAML)) {
 				inSuite[sh.Name]++
 			}
@@ -223,7 +99,7 @@ func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {
 			into = byHand
 		}
 
-		for _, sh := range shapes {
+		for _, sh := range yamlcorpus.Constructs() {
 			if sh.Has(string(c.Src)) {
 				into[sh.Name]++
 			}
@@ -231,7 +107,7 @@ func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {
 	}
 
 	var missing []string
-	for _, sh := range shapes {
+	for _, sh := range yamlcorpus.Constructs() {
 		t.Logf("%-58s suite %4d   drawn %6d   by hand %3d   mutated %5d",
 			sh.Name, inSuite[sh.Name], drawn[sh.Name], byHand[sh.Name], mutated[sh.Name])
 
@@ -261,5 +137,5 @@ func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {
 		t.Errorf("%s", line)
 	}
 
-	t.Logf("%d shapes, %d suite documents, %d corpus cases", len(shapes), len(suites), len(cases))
+	t.Logf("%d shapes, %d suite documents, %d corpus cases", len(yamlcorpus.Constructs()), len(suites), len(cases))
 }

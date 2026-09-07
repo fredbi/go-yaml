@@ -59,8 +59,23 @@ type Build struct {
 // is luck rather than policy, and no cleverness in the sampling helps. A
 // thinning sample that took every power-of-two member of a group was tried and
 // found exactly nothing extra. What finds more of them is more documents.
+// Re-measured on 2026-09-07, when the keep decision gained the construct set.
+// Four configurations at the same quota, and 3,000 documents against 16 mutants
+// wins on every axis but size:
+//
+//	docs   mutants   cases    size    construct sets   complaints   "- : |1"
+//	1500        24   15,603   639KB            2,546           64          1
+//	3000        16   20,954   955KB            3,419           70         52
+//	4000        12   21,809  1057KB            3,645           68         49
+//	6000         8   21,515  1167KB            4,097           66         41
+//
+// The last column is the shape that started this: an entry with no key whose
+// value is a block scalar, drawn about one document in 588. At 1,500 documents
+// the corpus held one by luck and had held none the build before. Fewer mutants
+// each does not cost complaints -- 70 against 64 -- because what finds a
+// complaint is more documents, which the paragraph above already said.
 func Smoke() Build {
-	return Build{Tier: "smoke", Seed: 1, Documents: 1500, MutantsEach: 24, PerSignature: 16}
+	return Build{Tier: "smoke", Seed: 1, Documents: 3000, MutantsEach: 16, PerSignature: 16}
 }
 
 // Full is the corpus that ships as a release artifact, where nothing is
@@ -128,6 +143,9 @@ func (b Build) cases() []suite.Case {
 	seen := grammar.YAML.NewCoverage()
 	one := grammar.YAML.NewCoverage()
 	kept := map[string]int{}
+	// The construct sets already held, so a document bringing a new combination
+	// survives the quota. See the keep decision below.
+	seenConstructs := map[string]bool{}
 
 	for _, e := range Generate(b.Seed, b.Documents, b.MutantsEach) {
 		one.Reset()
@@ -137,6 +155,7 @@ func (b Build) cases() []suite.Case {
 
 		signature := fmt.Sprintf("%x", one.Signature())
 		covers := one.AddsTo(seen)
+		shape := ConstructSet(e.Src)
 		meaning := meaningOfEntry(e, wellFormed)
 
 		// A document carrying a meaning is exempt from the quota, for the same
@@ -155,9 +174,24 @@ func (b Build) cases() []suite.Case {
 		// carries *is* its route: nobody knows what it denotes, which is why it
 		// carries no meaning, so two mutants that fail identically really are
 		// one test wearing two disguises.
-		if b.minimizing() && meaning == nil && !covers && kept[signature] >= b.PerSignature {
+		//
+		// The construct set is the second half of the decision, added
+		// 2026-09-07, and it is what the route alone could not do. A signature
+		// fingerprints which productions ran, and that axis is saturated -- the
+		// corpus enters 605 of 605 buckets -- so it cannot tell a document
+		// holding a tab from one holding a space, or an explicit key whose
+		// content is on the next line from one whose content is on the same
+		// line. Both take the same route. A document whose combination of
+		// constructs nothing before it held is kept whatever its route was.
+		//
+		// It is an *or* rather than a replacement: the route still keeps
+		// everything it kept, and this keeps what the route was blind to.
+		novel := !seenConstructs[shape]
+		if b.minimizing() && meaning == nil && !covers && !novel && kept[signature] >= b.PerSignature {
 			continue
 		}
+
+		seenConstructs[shape] = true
 
 		seen.Merge(one)
 		kept[signature]++

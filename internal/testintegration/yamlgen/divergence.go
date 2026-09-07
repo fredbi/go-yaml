@@ -182,6 +182,10 @@ var Ledger = []Divergence{
 			"not merge it and the tree does. In block, `? <<` over `: {x: 1}`, both agree and neither " +
 			"merges. So a caller's answer depends on the destination they chose, which is why this " +
 			"claims DecodeTyped as well.\n\n" +
+			"⚠️ **codec.ToJSON writes malformed output for it**, which is sharper than the " +
+			"disagreement. It walks, so it does not merge -- and it emits the key with no value at " +
+			"all: `{? <<: {x: 1}, y: 2}` converts to `{\"\",\"y\":2}`, which no JSON parser reads. " +
+			"Found by TestToJSONMatchesTheValueConverter once the corpus grew to 3,000 documents.\n\n" +
 			"Found on 2026-09-07 by the merge axis on its first run; the flow half by " +
 			"TestDecodingIntoAGoTypeGivesTheSameValue rather than by the value properties.",
 		Property: Decode | DecodeTyped,

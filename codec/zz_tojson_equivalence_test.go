@@ -52,6 +52,29 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 
 	var compared, skipped, refused int
 	for _, src := range jsonSources(t) {
+		if strings.Contains(src.text, "? <<") {
+			// A merge key written the long way. In flow the tree merges it and
+			// the walk does not, and ToJSON -- which walks -- writes a key with
+			// no value for it: `{? <<: {x: 1}, ...}` comes out as `{"",...`,
+			// which is not JSON at all. That is sharper than the value
+			// disagreement and is recorded on the pin,
+			// yamlgen_test.TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge.
+			skipped++
+
+			continue
+		}
+		if strings.Contains(src.text, "<<") && (strings.Contains(src.text, ",-") || strings.Contains(src.text, ", -")) {
+			// A "-" inside a flow merge sequence. The value converter reads the
+			// element as a sequence and refuses the document; the folding one
+			// reads it as the mapping and merges. Held by the last subtest of
+			// yamlgen_test.TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree,
+			// and held out here for the same reason
+			// codec.TestWalkMatchesTheStream holds it out: the two paths
+			// disagree before either converter is reached.
+			skipped++
+
+			continue
+		}
 		if strings.Contains(src.text, "&!") {
 			// The parse reads "&!a1" as an anchor with no name followed by the
 			// tag "!a1", rather than as an anchor named "!a1" -- ns-anchor-name

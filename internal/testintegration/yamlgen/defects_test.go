@@ -432,6 +432,29 @@ func TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck(t *testing.T) {
 // for the stance question of what merging a non-mapping means; this is the
 // narrower fault of the two paths disagreeing about it.
 func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
+	// A second shape, and a narrower one: the two paths read the element
+	// differently rather than the merge. "<<: [{a: 1}, - {b: 2}]" merges both
+	// mappings on the walk and is refused by the tree as "sequence was used
+	// where mapping is expected", so the tree sees a sequence where the walk
+	// sees the mapping. Every other non-mapping merge -- "<<: x", "<<: 1",
+	// "<<: [x]", "<<: [[x]]", "<<: [1]" -- is refused by both.
+	//
+	// Reached on 2026-09-07 by a mutation that put a "-" inside a merge
+	// sequence, once the corpus grew to 3,000 drawn documents.
+	t.Run("a '-' inside a flow merge sequence", func(t *testing.T) {
+		const src = "<<: [{a: 1}, - {b: 2}]\n"
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2)}, walked,
+			"today: the walk merges both")
+
+		var typed map[string]any
+		err := codec.Unmarshal([]byte(src), &typed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "sequence was used where mapping is expected")
+	})
+
 	for _, src := range []string{"<<:\n", "<<: null\n", "a:\n  <<:\n"} {
 		var walked any
 		assert.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "today: the walk reads it: %q", src)

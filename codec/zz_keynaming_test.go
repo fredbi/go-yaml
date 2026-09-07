@@ -128,3 +128,61 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 		})
 	}
 }
+
+// TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML pins the split.
+//
+// A float key whose YAML spelling differs from Go's formatting is named one way
+// by the walk and another by the tree, and only when it carries an anchor:
+//
+//	.inf: c      both name it ".inf"
+//	&a .inf: c   the walk names it "+Inf", the tree ".inf"
+//	&a .nan: c   the walk names it "NaN", the tree ".nan"
+//	&a 1e3: c    the walk names it "1000", the tree "1000.0"
+//
+// The anchor is the whole trigger. Without one the two paths agree, and an
+// anchored int, bool, null or string key agrees too -- it takes a float whose
+// canonical YAML spelling is not what Go's %v writes.
+//
+// The tree is right. ".inf" is what YAML spells it, and floatKeyText exists to
+// keep a float out of the integers' namespace: naming 1e3 "1000" puts it where
+// the integer 1000 already is, which is the collision
+// TestDefectATypedKeyIsNamedIntoTheStringsNamespace is about.
+//
+// Reached on 2026-09-07 by codec.TestWalkMatchesTheStream, once the corpus grew
+// to 3,000 drawn documents.
+func TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML(t *testing.T) {
+	t.Run("today an anchor changes the name the walk gives", func(t *testing.T) {
+		for _, tc := range []struct{ src, walk, tree string }{
+			{"&a .inf: c\n", "+Inf", ".inf"},
+			{"&a .nan: c\n", "NaN", ".nan"},
+			{"&a 1e3: c\n", "1000", "1000.0"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.walk: "c"}, walked, "today: the walk names it Go's way: %q", tc.src)
+
+			var typed map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.tree: "c"}, typed, "the tree names it YAML's way: %q", tc.src)
+		}
+	})
+
+	t.Run("without the anchor the two agree, and on YAML's spelling", func(t *testing.T) {
+		for _, tc := range []struct{ src, name string }{
+			{".inf: c\n", ".inf"},
+			{".nan: c\n", ".nan"},
+			{"&a 1: c\n", "1"},
+			{"&a true: c\n", "true"},
+			{"&a x: c\n", "x"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+
+			var typed map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
+
+			assert.Equalf(t, map[string]any{tc.name: "c"}, walked, "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.name: "c"}, typed, "%q", tc.src)
+		}
+	})
+}
