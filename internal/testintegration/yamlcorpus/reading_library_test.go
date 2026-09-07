@@ -90,6 +90,18 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
+			// A tab between a node's properties and the node: the parse refuses
+			// it after a tag and loses the value after an anchor, where the
+			// grammar, the reference parser, libfyaml and go.yaml.in/yaml/v3
+			// all read it. The corpus's meaning is right and the library cannot
+			// reach it. See yamlgen.Ledger's two entries and
+			// yamlgen_test.TestDefectATabAfterANodesPropertiesIsMishandled.
+			if propertyFollowedByTab(string(c.Src)) {
+				declared++
+
+				continue
+			}
+
 			src, askable := asking(table, c.Src)
 			if !askable {
 				declared++
@@ -172,4 +184,29 @@ func TestTheTwoReadingsActuallyDisagree(t *testing.T) {
 	}
 
 	t.Logf("%d cases state a different answer under the two readings", differed)
+}
+
+// propertyFollowedByTab reports whether a tag or an anchor ends at a tab.
+//
+// Crude on purpose, for the reason every hold-out in this suite is: one wrongly
+// held out is a document the rest of the suite still scores, and one let through
+// reports a known defect as a fresh disagreement.
+func propertyFollowedByTab(src string) bool {
+	for i := 0; i < len(src); i++ {
+		if src[i] != '&' && src[i] != '!' {
+			continue
+		}
+
+		for j := i + 1; j < len(src); j++ {
+			if src[j] == '\t' {
+				return true
+			}
+
+			if src[j] == ' ' || src[j] == '\n' || src[j] == '\r' {
+				break
+			}
+		}
+	}
+
+	return false
 }

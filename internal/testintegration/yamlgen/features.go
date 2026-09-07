@@ -134,6 +134,9 @@ const (
 	FeatureExplicitKey stance.Feature = "presentation/explicit-key"
 	// FeatureChompKeep is a block scalar written "|+" where clip would do.
 	FeatureChompKeep stance.Feature = "presentation/chomp-keep"
+	// FeatureTabSeparation is a tab standing where a space would separate an
+	// indicator from what follows it.
+	FeatureTabSeparation stance.Feature = "presentation/tab-separation"
 	// FeatureMergeKey is a "<<" entry, written bare so that it merges.
 	//
 	// A value feature rather than a presentation one: "<<" is a YAML 1.1 type

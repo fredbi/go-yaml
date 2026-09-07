@@ -258,7 +258,7 @@ func (e *emitter) lineComment() {
 		return
 	}
 	e.feat.add(FeatureCommentInline)
-	e.buf.WriteString(" ")
+	e.sep()
 	e.buf.WriteString(e.comment())
 }
 
@@ -531,7 +531,7 @@ func (e *emitter) block(v Value, indent, depth int) {
 		e.buf.WriteString(e.propText(p))
 
 		if s, ok := node.(Str); ok && e.blockScalar(s.V) {
-			e.buf.WriteString(" ")
+			e.sep()
 			e.literal(s.V, indent+e.st.Indent, e.st.Indent+1)
 
 			return
@@ -588,7 +588,7 @@ func (e *emitter) explicitKey(k Value, indent int) {
 	e.buf.WriteString("?")
 
 	if key := e.keyIn(k, false); key != "" {
-		e.buf.WriteString(" ")
+		e.sep()
 		e.buf.WriteString(key)
 	}
 
@@ -621,7 +621,7 @@ func (e *emitter) child(v Value, indent, depth int) {
 
 	if s, ok := v.(Str); ok && !flow && e.blockScalar(s.V) {
 		e.buf.WriteString(head)
-		e.buf.WriteString(" ")
+		e.sep()
 		e.literal(s.V, indent+e.st.Indent, e.st.Indent)
 
 		return
@@ -651,7 +651,7 @@ func (e *emitter) child(v Value, indent, depth int) {
 		// would be the only thing on the line after the `-` or the `key:` --
 		// trailing whitespace, and invisible in any failure it caused.
 		if inline != "" {
-			e.buf.WriteString(" ")
+			e.sep()
 		} else {
 			if p.tag != "" {
 				e.taggedLineEnds++
@@ -993,6 +993,27 @@ func (e *emitter) scalarString(s string, flow, strTagged bool) string {
 }
 
 func (e *emitter) pad(n int) { e.buf.WriteString(strings.Repeat(" ", n)) }
+
+// sep writes the separation between an indicator and what follows it.
+//
+// A tab where [Style.TabSeparation] asks for one. 6.1 makes a tab s-white and
+// not s-indent, so it may separate and may not indent -- which is why this is
+// its own call and [emitter.pad] is not: padding is indentation and stays
+// spaces however this is set.
+//
+// Every site this replaces is s-separate-in-line: after a "?", after the "-" or
+// "key:" that introduces a value, between a node's properties and a block
+// scalar, and before an inline comment.
+func (e *emitter) sep() {
+	if e.st.TabSeparation {
+		e.feat.add(FeatureTabSeparation)
+		e.buf.WriteString("\t")
+
+		return
+	}
+
+	e.buf.WriteString(" ")
+}
 
 // plainSafe is deliberately narrower than YAML allows.
 //

@@ -52,6 +52,16 @@ func TestToJSONMatchesTheValueConverter(t *testing.T) {
 
 	var compared, skipped, refused int
 	for _, src := range jsonSources(t) {
+		if directiveNamedLikeAnAnchorInText(src.text) {
+			// "%&AML 1.2" is a directive named "&AML", and the walk reads the
+			// "&AML" as an anchor and hands the "1.2" back as the whole
+			// document. ToJSON walks, so it converts the 1.2; the value
+			// converter reads the document under the directive.
+			// codec.TestDefectADirectiveNamedLikeAPropertyIsReadAsOne pins it.
+			skipped++
+
+			continue
+		}
 		if strings.Contains(src.text, "? <<") {
 			// A merge key written the long way. In flow the tree merges it and
 			// the walk does not, and ToJSON -- which walks -- writes a key with
@@ -628,4 +638,20 @@ func firstLine(text string) string {
 	}
 
 	return text
+}
+
+// directiveNamedLikeAnAnchorInText is codec.directiveNamedLikeAnAnchor, which
+// this file cannot reach across the package boundary.
+//
+// A byte order mark stands before the directives and a lone "\r" is a line
+// break, so neither a split on "\n" nor a prefix test on the whole text finds
+// the line -- the same two traps the other copy carries a comment about.
+func directiveNamedLikeAnAnchorInText(src string) bool {
+	for line := range strings.FieldsFuncSeq(src, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if strings.HasPrefix(strings.TrimPrefix(line, "\ufeff"), "%&") {
+			return true
+		}
+	}
+
+	return false
 }

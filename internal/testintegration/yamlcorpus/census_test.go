@@ -54,9 +54,6 @@ var knownGaps = map[string]string{
 		"which returns a single-line scalar, so the key always lands on the '?'s own line; and Keys() draws only " +
 		"scalars, so a collection key -- which is what the suite's two documents put below the '?' -- has no value " +
 		"to draw from. Two changes, neither small.",
-	"a tab": "no axis writes one. A tab is s-white and not s-indent, so it separates where it may not indent, " +
-		"and 56 suite documents turn on that distinction. The generator writes spaces everywhere and reaches " +
-		"none of it. Found by this census on 2026-09-07; nothing else had noticed.",
 }
 
 func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {

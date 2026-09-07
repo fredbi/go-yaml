@@ -151,6 +151,34 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
+		Name: "parse/a-tab-after-a-tag-is-refused",
+		Pin:  "TestDefectATabAfterANodesPropertiesIsMishandled",
+		Reason: "`a: !!str\tx` is refused with `found invalid tag character \"\\t\"`. 6.1 makes a tab " +
+			"s-white, so it separates a node's properties from the node exactly as a space does, and " +
+			"the tag ends at the tab rather than swallowing it.\n\n" +
+			"grammar.NewRecognizer accepts the document, the reference parser passes it, libfyaml " +
+			"1.0.0b1 and go.yaml.in/yaml/v3 v3.0.5 both read {a: x}. Unanimous against us.\n\n" +
+			"Found on 2026-09-07 by Style.TabSeparation on its first run. It claims every property, " +
+			"because a document that does not parse answers none.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesATabAfterATag,
+	},
+	{
+		Name: "decode/a-tab-after-an-anchor-loses-the-value",
+		Pin:  "TestDefectATabAfterANodesPropertiesIsMishandled",
+		Reason: "`a: &n\tx` parses and reads {a: null}: the value is gone, with no error. The same " +
+			"document with a space reads {a: \"x\"}, and libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 " +
+			"v3.0.5 both read the value through the tab.\n\n" +
+			"The worse of the pair. A tab after a tag is refused, which a caller can see; this one " +
+			"answers, and answers with the value silently dropped.\n\n" +
+			"And the anchor is not registered either, so an alias naming it takes the whole document " +
+			"down: `a: &n\tx` over `b: *n` is `could not find alias \"n\"`. So it claims every " +
+			"property -- one document reading wrong, another not parsing at all, one cause.\n\n" +
+			"Found on 2026-09-07 by Style.TabSeparation on its first run.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesATabAfterAnAnchor,
+	},
+	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
 		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
 		Reason: "A `<<` entry written `? <<` over `: *a` is read as an ordinary key named `<<`, where " +
@@ -484,6 +512,43 @@ func sharesAKey(v Value) bool {
 				seen[k] = struct{}{}
 			}
 		}
+	}
+
+	return false
+}
+
+// writesATabAfterATag reports whether a tab separates a tag from its node.
+func writesATabAfterATag(v Value, st Style) bool {
+	return st.TabSeparation && holdsA[Tagged](v)
+}
+
+// writesATabAfterAnAnchor reports whether a tab separates an anchor from its
+// node.
+func writesATabAfterAnAnchor(v Value, st Style) bool {
+	return st.TabSeparation && holdsA[Anchored](v)
+}
+
+// holdsA reports whether a value of kind T stands anywhere in v.
+func holdsA[T Value](v Value) bool {
+	if _, is := v.(T); is {
+		return true
+	}
+
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if holdsA[T](p.Key) || holdsA[T](p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsA[T])
+	case Anchored:
+		return holdsA[T](n.V)
+	case Alias:
+		return holdsA[T](n.V)
+	case Tagged:
+		return holdsA[T](n.V)
 	}
 
 	return false

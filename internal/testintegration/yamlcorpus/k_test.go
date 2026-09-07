@@ -135,6 +135,17 @@ func TestTheCorpusNoLongerAccusesACorrectParser(t *testing.T) {
 			continue
 		}
 
+		// A tab between an anchor and its node is not a mislabel either way:
+		// the corpus is right that the document should be read, and the library
+		// loses the anchor. Mislabelled counts "could not find alias" as the
+		// corpus's fault because a mutation can break one, and here nothing was
+		// mutated. Held out until the parser is fixed -- see
+		// yamlgen_test.TestDefectATabAfterANodesPropertiesIsMishandled and the
+		// ledger entry decode/a-tab-after-an-anchor-loses-the-value.
+		if anchorFollowedByTab(string(c.Src)) {
+			continue
+		}
+
 		doc := stance.Doc{
 			Name: c.Name, Src: c.Src, WellFormed: c.WellFormed,
 			Opaque: c.Opaque, Tags: asTags(c.Tags),
@@ -164,6 +175,31 @@ func TestTheCorpusNoLongerAccusesACorrectParser(t *testing.T) {
 	if accused > 0 {
 		t.Errorf("%d cases still accuse a correct parser", accused)
 	}
+}
+
+// anchorFollowedByTab reports whether an anchor name ends at a tab.
+//
+// Crude on purpose: it wants "&" then a name then a tab, anywhere. A document
+// wrongly held out here is one the rest of the suite still scores, where one let
+// through reports a defect of ours as a fault of the corpus.
+func anchorFollowedByTab(src string) bool {
+	for i := 0; i+1 < len(src); i++ {
+		if src[i] != '&' {
+			continue
+		}
+
+		for j := i + 1; j < len(src); j++ {
+			if src[j] == '\t' {
+				return true
+			}
+
+			if src[j] == ' ' || src[j] == '\n' || src[j] == '\r' {
+				break
+			}
+		}
+	}
+
+	return false
 }
 
 // Mislabelled reports whether a complaint is the corpus's fault rather than the

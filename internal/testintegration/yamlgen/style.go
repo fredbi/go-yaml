@@ -488,6 +488,19 @@ type Style struct {
 	// scanner already cut. Written once, the stream reaches that; written every
 	// time, it never does.
 	RedeclareDirectives bool
+	// TabSeparation writes a tab where a space would separate an indicator from
+	// what follows it.
+	//
+	// 6.1 makes a tab s-white and not s-indent: it may separate and may not
+	// indent. 56 documents of the YAML Test Suite turn on that distinction and
+	// no generated document held a tab at all before this, which
+	// yamlcorpus.TestTheGeneratedCorpusIsWiderThanTheSuite is what reported --
+	// the grammar coverage number was at 605 of 605 and said nothing, since a
+	// tab and a space enter the same productions.
+	//
+	// Only separation. Indentation stays spaces whatever this says, because a
+	// tab there is not YAML at all.
+	TabSeparation bool
 	// ByteOrderMark writes a U+FEFF at the head of the document.
 	//
 	// 5.2 puts one in l-document-prefix, so it stands before the directives and
@@ -599,7 +612,7 @@ func (s Style) String() string {
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String() +
-		s.Escaping.String() + bomLabel(s.ByteOrderMark) + suffixLabel(s.DocumentSuffix) +
+		s.Escaping.String() + bomLabel(s.ByteOrderMark) + suffixLabel(s.DocumentSuffix) + tabLabel(s.TabSeparation) +
 		redeclareLabel(s.RedeclareDirectives)
 }
 
@@ -668,6 +681,10 @@ func Styles() *rapid.Generator[Style] {
 			// An even split: both separators are ordinary, and the "..." is
 			// the one no generated document had ever written.
 			DocumentSuffix: rapid.Bool().Draw(t, "suffix"),
+			// One document in five separates with tabs. Weighted down because a
+			// tab is a rare thing to write and every one of them is the same
+			// axis; one in five is enough to cross with the others.
+			TabSeparation: rapid.IntRange(0, 4).Draw(t, "tabsep") == 0,
 			// Weighted towards declaring once, which is what a stream carrying
 			// a prelude looks like and the half that ends a directive's scope.
 			RedeclareDirectives: rapid.IntRange(0, 2).Draw(t, "redeclare") == 0,
@@ -748,6 +765,15 @@ func suffixLabel(on bool) string {
 func redeclareLabel(on bool) string {
 	if on {
 		return " re%"
+	}
+
+	return ""
+}
+
+// tabLabel names a presentation that separates with tabs.
+func tabLabel(on bool) string {
+	if on {
+		return " tab"
 	}
 
 	return ""

@@ -426,3 +426,65 @@ func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
 		assert.Contains(t, err.Error(), "null was used where mapping is expected")
 	}
 }
+
+// TestDefectATabAfterANodesPropertiesIsMishandled pins both halves.
+//
+// 6.1 makes a tab s-white, so it separates a node's properties from the node
+// exactly as a space does. grammar.NewRecognizer accepts both documents below,
+// the reference parser passes them, and libfyaml 1.0.0b1 and
+// go.yaml.in/yaml/v3 v3.0.5 read the value through the tab in both. We do
+// neither.
+//
+// The anchor is the worse of the two. A tab after a tag is refused, which a
+// caller can see; a tab after an anchor answers, and answers with the value
+// silently dropped.
+//
+// Found on 2026-09-07 by Style.TabSeparation, on the first run of an axis built
+// to close the census gap that 56 YAML Test Suite documents hold a tab and no
+// generated document did.
+func TestDefectATabAfterANodesPropertiesIsMishandled(t *testing.T) {
+	t.Run("today a tab after a tag is refused", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte("a: !!str\tx\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "found invalid tag character")
+	})
+
+	t.Run("today a tab after an anchor loses the value", func(t *testing.T) {
+		var got map[string]any
+		require.NoError(t, codec.Unmarshal([]byte("a: &n\tx\n"), &got))
+		assert.Equal(t, map[string]any{"a": nil}, got, "today: the value is gone")
+	})
+
+	t.Run("today the anchor is not registered either, so an alias fails the parse", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte("a: &n\tx\nb: *n\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `could not find alias "n"`)
+
+		// The same document with a space resolves both.
+		var fine map[string]any
+		require.NoError(t, codec.Unmarshal([]byte("a: &n x\nb: *n\n"), &fine))
+		assert.Equal(t, map[string]any{"a": "x", "b": "x"}, fine)
+	})
+
+	t.Run("with a space both read the value", func(t *testing.T) {
+		for _, src := range []string{"a: !!str x\n", "a: &n x\n"} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"a": "x"}, got, "%q", src)
+		}
+	})
+
+	t.Run("a tab where no property stands is read correctly", func(t *testing.T) {
+		// The separation itself is not the problem: these are the sites the
+		// axis writes a tab at, and only the ones after a property mishandle it.
+		var m map[string]any
+		require.NoError(t, codec.Unmarshal([]byte("a:\tx\n"), &m))
+		assert.Equal(t, map[string]any{"a": "x"}, m)
+
+		var s []any
+		require.NoError(t, codec.Unmarshal([]byte("-\tx\n"), &s))
+		assert.Equal(t, []any{"x"}, s)
+	})
+}
