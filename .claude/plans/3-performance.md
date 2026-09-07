@@ -961,6 +961,26 @@ Every workload significant this time, `citm_catalog` at p=0.001 where the first 
 Bytes and allocations unchanged: -77.6% and -92.2%. The two windows agreeing to within 0.1% on a geomean
 is the reproducibility check on the -22% itself.
 
+### ⚠️ All of the above is the `any` destination, and the typed path is 17 points behind it
+
+`BenchmarkTyped` reads citm_catalog into the Go struct schema it describes, on both libraries. Measured
+on `1968ba5`, n=8:
+
+| citm_catalog | vs yaml/v3, time | bytes | allocations |
+|---|---:|---:|---:|
+| into an `any` (`BenchmarkWorkloads`) | **-5.5%** | -71.0% | -87.0% |
+| into a Go struct (`BenchmarkTyped`) | **+11.3%** | -80.4% | -72.3% |
+
+Same document, same library, and the destination is worth 17 points. A `Decoder` handed an interface
+folds the document as the parse goes; a struct destination drives `reflect` to fill fields. **Memory is
+far ahead on both**, so this is a time-only gap and it is on the path a caller with a schema takes --
+which is what go-openapi does with an OpenAPI specification.
+
+⚠️ **Quote the destination with any ratio against v3.** "1.2x yaml/v3" was in circulation for the typed
+path and was right for it; restated as the library's standing it is wrong by 17 points in our favour, and
+the reverse mistake reads the -22% as covering a path it never measured. `BenchmarkTyped` is the only
+benchmark in the tree that compares a typed decode against v3, and it covers one document.
+
 ### ⚠️ The yardstick was wrong, and it read about 30 points against us
 
 `BenchmarkWorkloadV3Node` in `internal/analysis` unmarshals into `v3.Node`, which parses the document
