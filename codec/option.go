@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/yamlpath"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // DecodeOption functional option type for Decoder
@@ -83,6 +84,35 @@ func AllowFieldPrefixes(prefixes ...string) DecodeOption {
 func AllowDuplicateMapKey() DecodeOption {
 	return func(d *Decoder) error {
 		d.allowDuplicateMapKey = true
+		return nil
+	}
+}
+
+// WithParserOptions passes options straight to the parser the decode runs.
+//
+// The decode options here name what a caller wants of the *decode*, and the
+// decoder turns some of them into parser options on the caller's behalf --
+// [AllowDuplicateMapKey] becomes
+// [github.com/go-openapi/go-yaml/parser.WithAllowDuplicateMapKey], and
+// [CommentToMap] asks the parser for comments. This is the way through for the
+// rest of the parser's surface, which the decoder has no opinion about.
+//
+// The one most callers want is the version a document is read under:
+//
+//	codec.UnmarshalWithOptions(src, &v,
+//		codec.WithParserOptions(parser.WithYAMLVersion(parser.YAML11)))
+//
+// Without it a "%YAML 1.1" directive is the only route into the 1.1 schema, and
+// a document that does not carry one cannot be read under it at all.
+//
+// They are applied last and in order, so where two options set the same field
+// the later one wins. Every parser option a decode option asks for today only
+// turns something on and has no counterpart that turns it off, so this cannot
+// take one back -- it adds to them.
+func WithParserOptions(opts ...parser.Option) DecodeOption {
+	return func(d *Decoder) error {
+		d.extraParserOptions = append(d.extraParserOptions, opts...)
+
 		return nil
 	}
 }

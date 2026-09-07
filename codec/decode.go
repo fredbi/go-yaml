@@ -62,6 +62,7 @@ type Decoder struct {
 	disallowUnknownField   bool
 	allowedFieldPrefixes   []string
 	allowDuplicateMapKey   bool
+	extraParserOptions     []parser.Option
 	shareAliases           bool
 	useOrderedMap          bool
 	useStringKeys          bool
@@ -2760,6 +2761,10 @@ func (d *Decoder) parserOptions() []parser.Option {
 		// anchors. Publishing them is what lets that alias through.
 		opts = append(opts, parser.WithAnchors(d.referenceAnchorNodeMap))
 	}
+
+	// Last, so that a caller who asks for a parser option directly overrides
+	// what a decode option asked for on its behalf.
+	opts = append(opts, d.extraParserOptions...)
 
 	return opts
 }
