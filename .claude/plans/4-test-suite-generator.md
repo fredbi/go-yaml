@@ -418,6 +418,26 @@ is fixed; a *hold-out* — a document skipped inside a sweep — just stops bein
 hold-out added while waiting on another branch should be recorded here when it is added, because nothing
 else will remember it.
 
+### 📌 What separates a safe hold-out from one that swallows a regression — 2026-09-13
+
+Two of the day's findings are the same shape seen from opposite sides, and the rule that comes out of them
+is short: **a hold-out that inspects the difference is safe; one that matches the input is not.**
+
+- `yamlgen.Ledger`'s `writesALongTagOnAnEmptyNode` matched the drawn `(Value, Style)` and then excused the
+  document **whatever happened to it**. That is why 1,077 documents were excused while none diverged — and
+  why a regression in any of them would have gone unseen. The fix was to narrow the input match, which is
+  fiddly and needed two goes.
+- `internal/lab`'s `readsATaggedScalarAsText` excuses 548 documents, which looks worse and is not. It reads
+  both trees and refuses unless **every** difference is the named shape and everything else — structure,
+  positions, text — is identical. Measured directly: the intended difference alone is skipped; the same
+  difference plus one unrelated node changing type is **not**.
+
+So breadth is not the risk and never was. A hold-out keyed on what went in has to be narrowed until it
+matches only the defect; a hold-out keyed on what came out can be as broad as the defect really is, because
+anything else in the document makes it refuse. Prefer the second shape when writing one.
+
+📌 Neither kind announces its own retirement, which is what the table above is for.
+
 📌 **Two entries were narrowed after they had already been fixed elsewhere.** The 1,077-draw narrowing of
 defect 14 on 2026-09-13 was correct against `master` and moot against `conformance-fixes`, which had closed
 it four commits earlier. Measuring against your own base is right; the cost is that a long-lived branch
