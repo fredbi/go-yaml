@@ -1243,6 +1243,15 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 			return err
 		}
 		switch vv := v.(type) {
+		case int:
+			// What "!!int" reads a number as: castToInteger hands back an int
+			// where the number fits one, which is what strconv.Atoi gave. The
+			// untagged number arrives as a uint64 or an int64, so without this
+			// case "n: !!int 5" was refused where "n: 5" read.
+			if !dst.OverflowInt(int64(vv)) {
+				dst.SetInt(int64(vv))
+				return nil
+			}
 		case int64:
 			if !dst.OverflowInt(vv) {
 				dst.SetInt(vv)
@@ -1281,6 +1290,13 @@ func (d *Decoder) decodeValue(ctx context.Context, dst reflect.Value, src ast.No
 			return err
 		}
 		switch vv := v.(type) {
+		case int:
+			// See the signed case above: "!!int" reads a number that fits as an
+			// int.
+			if 0 <= vv && !dst.OverflowUint(uint64(vv)) {
+				dst.SetUint(uint64(vv))
+				return nil
+			}
 		case int64:
 			if 0 <= vv && !dst.OverflowUint(uint64(vv)) {
 				dst.SetUint(uint64(vv))

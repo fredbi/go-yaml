@@ -293,23 +293,6 @@ var Ledger = []Divergence{
 		Match:    writesAQuotedExplicitKeyOverABlockScalar,
 	},
 	{
-		Name: "decode/an-int-tag-cannot-be-read-into-a-go-integer",
-		Pin:  "TestDefectAnIntTagCannotBeReadIntoAGoInteger",
-		Reason: "`!!int` on a value cannot be read into any Go integer -- a struct field, a slice " +
-			"element or a map value. `n: !!int 5` into a struct with an int64 field is refused with " +
-			"`cannot unmarshal int into Go struct field box.N of type int64`, and so are int and " +
-			"uint64 fields, `- !!int 5` into a []int64 and `n: !!int 5` into a map[string]int64.\n\n" +
-			"Four things say it is the tag and nothing else. The same document untagged reads into " +
-			"all of them. `!!str`, `!!bool` and `!!float` on their matching fields read. `!!int` into " +
-			"an `any` field reads. And go.yaml.in/yaml/v3 v3.0.5 reads every one of them.\n\n" +
-			"[Tagged.Decoded] says where to look: an untagged non-negative integer comes back as a " +
-			"uint64 and a negative one as an int64, and `!!int` overrides both with a plain int. The " +
-			"reflection path has a case for the first two and none for int.\n\n" +
-			"Every spelling of the tag does it, the verbatim and handle forms included.",
-		Property: DecodeTyped,
-		Match:    writesAnIntTag,
-	},
-	{
 		Name: "decode/a-binary-tag-cannot-be-read-into-a-go-byte-slice",
 		Pin:  "TestDefectABinaryTagCannotBeReadIntoAGoByteSlice",
 		Reason: "`!!binary` cannot be read into a Go []byte -- a struct field, a slice element or a " +
@@ -580,30 +563,6 @@ func writesABlockScalar(v Value, st Style) bool {
 	default:
 		return false
 	}
-}
-
-// writesAnIntTag reports whether v carries `!!int` anywhere.
-func writesAnIntTag(v Value, _ Style) bool {
-	switch n := v.(type) {
-	case Tagged:
-		return n.Tag == TagInt || writesAnIntTag(n.V, Style{})
-	case Anchored:
-		return writesAnIntTag(n.V, Style{})
-	case Alias:
-		return writesAnIntTag(n.V, Style{})
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesAnIntTag(item, Style{})
-		})
-	case Map:
-		for _, p := range n.Pairs {
-			if writesAnIntTag(p.Key, Style{}) || writesAnIntTag(p.Val, Style{}) {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 // writesALocalTagBeforeAnAnchor reports whether v holds a node carrying both a

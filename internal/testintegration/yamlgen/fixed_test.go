@@ -1191,3 +1191,54 @@ func TestFixedAScalarUnderAnUnresolvedTagIsRead(t *testing.T) {
 		assert.Equal(t, want, got, "%q", src)
 	}
 }
+
+// TestFixedAnIntTagReadsIntoAGoInteger: "!!int" on a value reads into a Go
+// integer, as the same value untagged always did.
+//
+// [yamlgen.Tagged.Decoded] says where the two parted company: an untagged
+// non-negative integer comes back as a uint64 and a negative one as an int64,
+// where "!!int" hands back a plain int for a number that fits one -- which is
+// what strconv.Atoi gave. Decoder.decodeValue read a uint64, an int64, a
+// float64 and a string into an integer field and had no case for an int, so it
+// reported `cannot unmarshal int into Go struct field box.N of type int64`.
+func TestFixedAnIntTagReadsIntoAGoInteger(t *testing.T) {
+	type box struct {
+		N  int64   `yaml:"n"`
+		I  int     `yaml:"i"`
+		I8 int8    `yaml:"i8"`
+		U  uint64  `yaml:"u"`
+		F  float64 `yaml:"f"`
+		A  any     `yaml:"a"`
+	}
+
+	t.Run("into an integer field, whatever its width", func(t *testing.T) {
+		var got box
+		require.NoError(t, yaml.Unmarshal([]byte("n: !!int 5\ni: !!int 6\ni8: !!int 7\nu: !!int 8\n"), &got))
+		assert.Equal(t, box{N: 5, I: 6, I8: 7, U: 8}, got)
+
+		var negative box
+		require.NoError(t, yaml.Unmarshal([]byte("n: !<tag:yaml.org,2002:int> -5\n"), &negative))
+		assert.Equal(t, box{N: -5}, negative)
+	})
+
+	t.Run("into a slice and into a typed map", func(t *testing.T) {
+		var items []int64
+		require.NoError(t, yaml.Unmarshal([]byte("- !!int 5\n"), &items))
+		assert.Equal(t, []int64{5}, items)
+
+		var byName map[string]int64
+		require.NoError(t, yaml.Unmarshal([]byte("n: !!int 5\n"), &byName))
+		assert.Equal(t, map[string]int64{"n": 5}, byName)
+	})
+
+	t.Run("and a number too wide for the field still overflows", func(t *testing.T) {
+		// The same complaint the untagged number draws, which is the point:
+		// the tag changes what the node is and not how wide the field is.
+		for _, src := range []string{"i8: !!int 300\n", "i8: 300\n", "u: !!int -5\n"} {
+			var got box
+			err := yaml.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Contains(t, err.Error(), "overflow", "%q", src)
+		}
+	})
+}
