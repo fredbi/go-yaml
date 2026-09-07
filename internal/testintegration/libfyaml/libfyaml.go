@@ -32,6 +32,21 @@
 // something rather than the parser refusing the document. Cycles are where that
 // matters.
 //
+// # A merge needs [LoadMode]
+//
+// The merge key is a YAML 1.1 type (yaml.org/type/merge) and not part of 1.2,
+// so libfyaml resolves "<<" only when it is asked for 1.1. [Load] asks for 1.2,
+// where "a: &a {x: 1}" over "m:" over "  <<: *a" comes back as
+// {"m": {"<<": {"x": 1}}} -- the handle written out as a member name. Read that
+// as the mode and not as libfyaml lacking the feature.
+//
+// Ask [LoadMode] with [YAML11] for any question about what a merge means. It
+// is still not an oracle for two of them: it resolves a merge by document order,
+// so the mapping's own key loses to a "<<" written after it, where the merge
+// type says "unless the key already exists in it" and go.yaml.in/yaml/v3 agrees
+// with the type. And it refuses no duplicate key at all -- "{a: 1, a}" comes
+// back as {"a": null} -- so it cannot corroborate a duplicate-key refusal.
+//
 // # Read the error, not the failure
 //
 // That second limit cuts both ways, and both directions have cost a register
@@ -106,21 +121,40 @@ func Version() string {
 	return strings.TrimSpace(out)
 }
 
-// Load reads src and returns what libfyaml makes of each document in it,
-// rendered as JSON.
+// Mode is libfyaml's own "mode" argument: the YAML version it reads a document
+// under. It selects the resolution table and, with it, whether "<<" is a merge
+// key.
+type Mode string
+
+const (
+	// YAML12 is libfyaml's default: the 1.2 core schema, where "<<" is an
+	// ordinary key.
+	YAML12 Mode = "1.2"
+	// YAML11 reads the 1.1 types, which is the only mode that resolves a
+	// merge. Use it for a question about what "<<" means and for nothing else.
+	YAML11 Mode = "1.1"
+)
+
+// Load reads src under YAML 1.2 and returns what libfyaml makes of each
+// document in it, rendered as JSON.
 //
-// A document libfyaml refuses returns an error naming what it said.
-func Load(src []byte) ([]string, error) {
+// A document libfyaml refuses returns an error naming what it said. Use
+// [LoadMode] with [YAML11] when the question is what a merge means.
+func Load(src []byte) ([]string, error) { return LoadMode(src, YAML12) }
+
+// LoadMode is [Load] under a named YAML version.
+func LoadMode(src []byte, mode Mode) ([]string, error) {
 	const script = `
 import json, sys
 import libfyaml
 
+mode = sys.argv[1] if len(sys.argv) > 1 else "1.2"
 src = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
-out = [libfyaml.json_dumps(doc) for doc in libfyaml.loads_all(src)]
+out = [libfyaml.json_dumps(doc) for doc in libfyaml.loads_all(src, mode=mode)]
 print(json.dumps(out))
 `
 
-	out, err := run(script, string(src))
+	out, err := run(script, string(src), string(mode))
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +167,7 @@ print(json.dumps(out))
 	return docs, nil
 }
 
-func run(script, stdin string) (string, error) {
+func run(script, stdin string, args ...string) (string, error) {
 	home := Home()
 	if home == "" {
 		return "", ErrNotInstalled
@@ -143,7 +177,7 @@ func run(script, stdin string) (string, error) {
 		return "", ErrNotInstalled
 	}
 
-	cmd := exec.Command("python3", "-c", script)
+	cmd := exec.Command("python3", append([]string{"-c", script}, args...)...)
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+home)
 	cmd.Stdin = strings.NewReader(stdin)
 
