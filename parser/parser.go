@@ -2081,6 +2081,24 @@ func (p *Parser) tagPrefix(handle, fallback string) string {
 	return fallback
 }
 
+// parseTagValue reads the node a tag stands on, which the tag's own type
+// decides: a collection tag descends into the collection, a scalar tag reads
+// what follows, and a tag the core schema does not resolve leaves its scalar as
+// the text it was written with.
+//
+// ⚠️ Every branch settles the cursor for itself, and getting that wrong is the
+// fault this function has had three times. The rule is one line: a branch that
+// reads tk steps past it, and a branch that builds a node out of nothing does
+// not. So parseScalarValue, parseAnchor and parseLiteral are each followed by
+// ctx.goNext, newTagDefaultScalarValueNode is not -- it stands the tag on the
+// empty node and tk belongs to whatever comes next -- and parseToken,
+// parseMap, parseSequence and the two flow readers settle it themselves, which
+// is how parseToken calls them too.
+//
+// Left out, the document keeps a token nothing has read and parseDocumentBody
+// refuses it with "value is not allowed in this context", pointing at a place
+// the reader has no reason to suspect. That was "%TAG !! !local-" over
+// "v: !!seq 1", "{a: !!str &x}" and "!!null" over ">".
 func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, tk *tapeToken) (ast.Node, error) {
 	if tk == nil {
 		return p.handNull(ctx, ctx.createImplicitNullToken(newSynthetic(tagRawTk)))
