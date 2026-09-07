@@ -1,5 +1,5 @@
 > [!NOTE]
-> Last revision: 2026-09-12 (`conformance-fixes` closed twelve defects -- clusters A, B and C, and both
+> Last revision: 2026-09-12 (`conformance-fixes` closed thirteen defects -- clusters A, B and C, and both
 > entries that silently restructured a document; the decoder round is parked). Previous: 2026-09-11 (the generator writes a tag
 > three ways, reaches the shapes the flow axes need, and reads each document into a Go type as well as into
 > an `any`). Streaming is still paused — read
@@ -26,7 +26,7 @@ records live in [`reference/`](reference/), superseded plans in [`archives/`](ar
 |---|---|---|
 | 0. Fork posture | [`0-fork-posture.md`](0-fork-posture.md) | ✅ settled — hard fork, no way back |
 | 1. A low-level YAML library | [`1-library-api.md`](1-library-api.md) | ⏳ surface cut; the parser owns anchors (2026-09-07); the progressive AST is the open design, and `ToJSONTokens` is named |
-| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ decoder **372/372 scoreable**, `ToJSON` 272/274, oracle 393/393; **twenty open, all pinned** — 8 parser/scanner, 4 decoder, 3 `ToJSON`, 2 walk, 3 renderer; all three clusters closed 2026-09-12 and what is left has no cluster in it |
+| 2. 100% correctness | [`2-correctness.md`](2-correctness.md) | ⏳ decoder **372/372 scoreable**, `ToJSON` 272/274, oracle 393/393; **nineteen open, all pinned** — 7 parser/scanner, 4 decoder, 3 `ToJSON`, 2 walk, 3 renderer; all three clusters closed 2026-09-12 and what is left has no cluster in it |
 | 3. Performance, memory, streaming | [`3-performance.md`](3-performance.md) | ⏳ scanner and parser rounds closed (2026-09-04, 2026-09-05); `ToJSON` amplification 89.2x → 1.49x; anchor table priced 2026-09-07; **the decoder is the whole of what is left** |
 | 4. Test suite generator & oracle | [`4-test-suite-generator.md`](4-test-suite-generator.md) | ⏳ 605/605 buckets, 546 matched, 12,581 cases; tags, numbers, Go destinations, `? key` and chomping all became axes, opening **twelve defects** |
 | 5. Ecosystem adoption | [`5-adoption.md`](5-adoption.md) | 📝 four consumers named; `yaml-lexer` reuses `ToJSON`; **no release gate — free rein on the API** |
