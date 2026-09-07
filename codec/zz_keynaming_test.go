@@ -18,7 +18,33 @@ import (
 //
 // §3.2.1.1 makes two keys equal when they resolve to the same node, so `1: x`
 // over `"1": y` is an integer key and a string key -- two nodes, two keys, two
-// entries. `true`/`"true"` and `~`/`"null"` are the same shape.
+// entries.
+//
+// The rule is general over the resolution table rather than a handful of cases,
+// which `0x1f: x` over `"31": y` is the clearest way to see: those two keys
+// share not one character, and the walk merges them, because a key is named by
+// the canonical spelling of what it resolved to and 0x1f resolves to 31. The
+// empty key reaches it the same way -- it resolves to null, whose spelling is
+// "null" -- so `: x` over `"null": y` merges too.
+//
+// A fix wants to be general over that table rather than to add cases, and the
+// one pair that looks like an exception is the reason to say so.
+//
+// `.inf: x` over `"+.inf": y` keeps both today, and NOT because the naming is
+// careful there. It is that `+.inf` does not resolve at all: token.go's
+// reservedInfKeywords lists `.inf`, `.Inf`, `.INF`, `-.inf`, `-.Inf`, `-.INF`
+// and omits the three `+` spellings, where the 1.2 core schema float production
+// is `[-+]? ( \.inf | \.Inf | \.INF )`. So the quoted key and the plain key are
+// both strings and there is nothing to merge. `.nan` is the control and is
+// right: 1.2 admits no sign there, and we, libfyaml and go.yaml.in/yaml/v3 all
+// read `+.nan` as a string.
+//
+// ⚠️ **That row will start merging when the resolver is fixed**, and it should
+// not be read as a regression here when it does. It is a separate defect
+// standing in front of this one -- both loaders read `+.inf` and `+.INF` as
+// infinity, and codec.ToJSON writes `{"a":"+.inf"}` where it refuses `.inf`
+// outright, so the same value is a number or a string depending on which of two
+// legal spellings the document used.
 //
 // What each destination does with that:
 //
@@ -54,6 +80,14 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 		"an integer and a string": {src: "1: x\n\"1\": y\n", merged: "1"},
 		"a boolean and a string":  {src: "true: x\n\"true\": y\n", merged: "true"},
 		"a null and a string":     {src: "~: x\n\"null\": y\n", merged: "null"},
+		"a float and a string":    {src: "1.0: x\n\"1.0\": y\n", merged: "1.0"},
+		// The one that shows what the rule is. "0x1f" and "31" share not one
+		// character, and the walk merges them: a key is named by the canonical
+		// spelling of what it resolved to, and 0x1f resolves to the integer 31.
+		"a hexadecimal integer and the decimal string": {src: "0x1f: x\n\"31\": y\n", merged: "31"},
+		// The empty key reaches it too, since it resolves to null and null's
+		// canonical spelling is "null".
+		"an empty key and the string \"null\"": {src: ": x\n\"null\": y\n", merged: "null"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Run("a map[any]any keeps both, and is the only one that does", func(t *testing.T) {
