@@ -6,8 +6,6 @@ package yamlcorpus_test
 import (
 	"bytes"
 	"encoding/json"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -56,30 +54,6 @@ func asking(t stance.Table, src []byte) ([]byte, bool) {
 	return append([]byte("%YAML 1.1\n---\n"), src...), true
 }
 
-// pastFloat64 matches an exponent a float64 cannot hold: three digits or more,
-// which is 1e100 upwards, and the check below narrows that to 309 and past.
-var pastFloat64 = regexp.MustCompile(`[eE][-+]?([0-9]{3,})`)
-
-// floatTagOnANumberPastFloat64 reports whether src writes a float tag over a
-// number outside float64's range.
-//
-// The tag is matched by its suffix, so the verbatim
-// "!<tag:yaml.org,2002:float>" and a handle declared by a %TAG line are caught
-// with the "!!float" shorthand.
-func floatTagOnANumberPastFloat64(src []byte) bool {
-	if !bytes.Contains(src, []byte("float")) {
-		return false
-	}
-
-	for _, m := range pastFloat64.FindAllSubmatch(src, -1) {
-		if n, err := strconv.Atoi(string(m[1])); err == nil && n > 308 {
-			return true
-		}
-	}
-
-	return false
-}
-
 // TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading replays every case that
 // states a meaning, against the table that reads it.
 func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
@@ -107,17 +81,6 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 			// exactly, and Departures. A meaning that renders as neither an
 			// object nor an array is a document whose root is that scalar.
 			if table.Reads == yamlcorpus.GoYAML11.Reads && rootIsAScalar(meaning.JSON) {
-				departed++
-
-				continue
-			}
-
-			// A recorded defect: `!!float` on a number past what a float64
-			// holds is refused when it is large and read as zero when it is
-			// small, so "!!float -4.4e-605" comes back -0 where the corpus
-			// states the number. Stream 2 defect 8, yamlgen.Ledger's
-			// parse/a-float-tag-on-a-number-past-float64-is-not-read.
-			if floatTagOnANumberPastFloat64(c.Src) {
 				departed++
 
 				continue

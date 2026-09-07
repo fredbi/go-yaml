@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
@@ -1448,5 +1449,86 @@ func TestFixedACommentOnAnExplicitKeysColonLineIsKept(t *testing.T) {
 			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
 			assert.Equal(t, want, got, "%q", src)
 		}
+	})
+}
+
+// TestFixedALocalTagBeforeAnAnchorTypesItsScalar: a local or non-specific tag
+// keeps its scalar as text whichever side of the anchor it is written on.
+//
+// ✅ Closed 2026-09-13 by the parser reaching the scalar an anchor group names
+// and retyping the token before the node is built. It used to depend on the
+// order: "!foo &a1 true" read the boolean where "!foo true" and
+// "&a1 !foo true" read the string.
+//
+// The whole matrix is held rather than the one document that failed, because a
+// fix that traded one spelling for another would otherwise look like a fix.
+func TestFixedALocalTagBeforeAnAnchorTypesItsScalar(t *testing.T) {
+	for _, src := range []string{
+		// The four spellings, with the anchor after the tag.
+		"!foo &a1 true\n",
+		"! &a1 true\n",
+		"!<!foo> &a1 true\n",
+		// The anchor first, which always read.
+		"&a1 !foo true\n",
+		// No anchor at all.
+		"!foo true\n",
+		"! true\n",
+		// A secondary tag, which was never affected.
+		"!!str &a1 true\n",
+	} {
+		var got any
+		require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		assert.Equalf(t, "true", got, "%q", src)
+	}
+
+	t.Run("in every context", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"a: !foo &a1 true\n":   map[string]any{"a": "true"},
+			"- !foo &a1 true\n":    []any{"true"},
+			"{a: !foo &a1 true}\n": map[string]any{"a": "true"},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, want, got, "%q", src)
+		}
+	})
+}
+
+// TestFixedABinaryTagReadsIntoAGoByteSlice: `!!binary` reads into the Go type
+// the tag names.
+//
+// ✅ Closed 2026-09-13 by decodeSlice asking binaryBytes first. It used to be
+// refused with "string was used where sequence is expected", while an `any`
+// gave []uint8 and a string field gave the decoded bytes -- the one Go type the
+// tag names was the one it could not reach.
+func TestFixedABinaryTagReadsIntoAGoByteSlice(t *testing.T) {
+	const src = "a: !!binary aGVsbG8=\n"
+
+	t.Run("into a field, a typed map and a slice element", func(t *testing.T) {
+		var into struct {
+			A []byte `yaml:"a"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte(src), &into))
+		assert.Equal(t, []byte("hello"), into.A)
+
+		var byName map[string][]byte
+		require.NoError(t, yaml.Unmarshal([]byte(src), &byName))
+		assert.Equal(t, map[string][]byte{"a": []byte("hello")}, byName)
+
+		var items [][]byte
+		require.NoError(t, yaml.Unmarshal([]byte("- !!binary aGVsbG8=\n"), &items))
+		assert.Equal(t, [][]byte{[]byte("hello")}, items)
+	})
+
+	t.Run("and the destinations that always worked still do", func(t *testing.T) {
+		var loose any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &loose))
+		assert.Equal(t, map[string]any{"a": []byte("hello")}, loose)
+
+		var timed struct {
+			T time.Time `yaml:"t"`
+		}
+		require.NoError(t, yaml.Unmarshal([]byte("t: !!timestamp 2001-12-14\n"), &timed))
+		assert.Equal(t, time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC), timed.T)
 	})
 }

@@ -185,6 +185,18 @@ var yardstickDefects = map[string]string{
 	// resolution. See yamlcorpus.Departures, "two keys alike in text and
 	// different once resolved", which records the `any` half.
 	"a key colliding with one an alias resolves to": "the `any` read loses an entry the typed read refuses",
+	// The same fault without an alias, and the clearest evidence for it. "1: x"
+	// over "\"1\": y" reads into a map[any]any as both keys -- uint64(1) => "x"
+	// and "1" => "y", which is what 3.2.1.1 asks for, since an integer and a
+	// string are two nodes. The `any` path names both "1" and keeps the last,
+	// so it holds one entry and has lost "x".
+	//
+	// So the library preserves both wherever the destination can hold them, and
+	// the merge is the naming rather than the read. yamlgen.Normalize flattens
+	// a map[any]any by KeyText to compare it, which collapses the pair again
+	// and makes the comparison order-dependent -- another reason this document
+	// cannot be scored against the `any` read.
+	"two keys alike in text and different once resolved": "the `any` read merges two keys the typed read keeps apart",
 }
 
 // sameNumerically compares two decodes of one document, with numbers compared

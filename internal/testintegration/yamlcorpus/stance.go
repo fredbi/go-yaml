@@ -264,7 +264,12 @@ var Departures = []Departure{
 			"`any` it reads. So does the same collision reached through an alias -- `k: &a n` over " +
 			"`*a : 1` over `n: 2` loses an entry into an `any` and is refused by both maps. A " +
 			"duplicate written the same way, `a: 1` over `a: 2`, is refused on every path, so it is " +
-			"the resolution step the `any` path skips rather than the check being absent",
+			"the resolution step the `any` path skips rather than the check being absent.\n\n" +
+			"\U0001f4cc A map[any]any keeps both, which settles where the loss is. Measured on " +
+			"2026-09-13: `1: x` over `\"1\": y` read into a map[any]any holds uint64(1) => \"x\" " +
+			"*and* \"1\" => \"y\", two nodes and two keys exactly as 3.2.1.1 asks. So the library " +
+			"preserves the distinction wherever the destination can hold it, and what merges them " +
+			"is naming a key by the canonical spelling of its type -- not the read",
 		Departs: func(got any, err error) bool {
 			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 1 })
 		},

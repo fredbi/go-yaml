@@ -490,7 +490,7 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 }
 
 // nestsDifferentlyOnPurpose reports whether refparser swallowed the entries
-// after a tag that was written with nothing following it.
+// after a tag or an anchor that was written with nothing following it.
 //
 // "- !<tag:yaml.org,2002:null>" over "- 3.5" is a sequence of two entries:
 // 8.2.1 needs a nested block collection indented further than the collection it
@@ -498,6 +498,11 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 // it anyway, so the 3.5 disappears into the tagged node. The shipped parser
 // reads the two entries, and libfyaml 1.0.0b1, go.yaml.in/yaml/v3 v3.0.5 and
 // the reference parser all read [null, 3.5].
+//
+// An anchor alone at the end of its line goes the same way and was fixed with
+// it: "? a" over ": &a1" over "? b" over ": &a2" is a mapping of two entries,
+// and refparser reads the second into the node &a2 names. 7.1 puts no content
+// under an anchor that has none.
 //
 // One direction only: the allowance needs refparser to nest and the shipped
 // parser not to. The shipped parser has the same fault for a local tag --
@@ -512,9 +517,9 @@ func nestsDifferentlyOnPurpose(want, got *ast.File) (string, bool) {
 	return "a block collection cannot begin at the indentation of the one it sits in (8.2.1)", true
 }
 
-// swallowsTheEntriesAfterATag reports whether f nests, under a tag, a block
-// collection standing at the indentation of the collection the tag itself is
-// in.
+// swallowsTheEntriesAfterATag reports whether f nests, under a tag or an
+// anchor, a block collection standing at the indentation of the collection the
+// property itself is in.
 func swallowsTheEntriesAfterATag(f *ast.File) bool {
 	if f == nil {
 		return false
@@ -541,6 +546,10 @@ func swallowsUnder(n ast.Node, enclosing int) bool {
 
 		return swallowsUnder(node.Value, enclosing)
 	case *ast.AnchorNode:
+		if col, block := blockCollectionColumn(node.Value); block && col <= enclosing {
+			return true
+		}
+
 		return swallowsUnder(node.Value, enclosing)
 	case *ast.SequenceNode:
 		if col, block := blockCollectionColumn(node); block {

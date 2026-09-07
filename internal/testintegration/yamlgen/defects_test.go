@@ -4,9 +4,7 @@
 package yamlgen_test
 
 import (
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
@@ -95,58 +93,6 @@ func TestDefectAMappingKeyWrittenEmptyIsRefused(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.says)
 		})
 	}
-}
-
-// TestDefectABinaryTagCannotBeReadIntoAGoByteSlice: `!!binary` cannot be read
-// into a Go []byte, which is the type the tag names.
-//
-// The conversion is there -- the same document reads into an `any` as
-// []uint8{'h','e','l','l','o'} and into a string field as "hello", the decoded
-// bytes rather than the base64 text. Only []byte is refused.
-//
-// Sibling of TestDefectAnIntTagCannotBeReadIntoAGoInteger and the same shape,
-// with one difference: go.yaml.in/yaml/v3 v3.0.5 refuses it too, so this is an
-// inconsistency inside the library rather than a departure from the field.
-// encoding/json reads a base64 string into a []byte.
-func TestDefectABinaryTagCannotBeReadIntoAGoByteSlice(t *testing.T) {
-	const src = "a: !!binary aGVsbG8=\n"
-
-	wellFormed(t, src)
-
-	t.Run("today a []byte destination is refused", func(t *testing.T) {
-		var into struct {
-			A []byte `yaml:"a"`
-		}
-		err := yaml.Unmarshal([]byte(src), &into)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "string was used where sequence is expected")
-
-		var byName map[string][]byte
-		assert.Error(t, yaml.Unmarshal([]byte(src), &byName))
-
-		var items [][]byte
-		assert.Error(t, yaml.Unmarshal([]byte("- !!binary aGVsbG8=\n"), &items))
-	})
-
-	t.Run("an any and a string field read it", func(t *testing.T) {
-		var loose any
-		require.NoError(t, yaml.Unmarshal([]byte(src), &loose))
-		assert.Equal(t, map[string]any{"a": []byte("hello")}, loose)
-
-		var into struct {
-			A string `yaml:"a"`
-		}
-		require.NoError(t, yaml.Unmarshal([]byte(src), &into))
-		assert.Equal(t, "hello", into.A)
-	})
-
-	t.Run("the timestamp tag reads into the type it names", func(t *testing.T) {
-		var into struct {
-			T time.Time `yaml:"t"`
-		}
-		require.NoError(t, yaml.Unmarshal([]byte("t: !!timestamp 2001-12-14\n"), &into))
-		assert.Equal(t, time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC), into.T)
-	})
 }
 
 // The three defects Style.ExplicitKeys found on its first deep run.
@@ -274,76 +220,6 @@ func TestDefectAVersionDirectiveResolvesTheRootBlockScalarItOpens(t *testing.T) 
 			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
 			assert.NotNil(t, got, "%q", src)
 		}
-	})
-}
-
-// TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar: a local or
-// non-specific tag written before an anchor stops typing its scalar, and the
-// scalar resolves by the schema as though it carried no tag.
-//
-// The order decides, and so does the kind of tag: a `!!` shorthand is
-// unaffected. Pins the whole matrix, since a fix that traded one spelling for
-// another would otherwise look like a fix.
-func TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar(t *testing.T) {
-	t.Run("today the anchor cancels the tag", func(t *testing.T) {
-		for _, src := range []string{
-			"!foo &a1 true\n",
-			"! &a1 true\n",
-			"!<!foo> &a1 true\n",
-			"a: !foo &a1 true\n",
-			"- !foo &a1 true\n",
-			"{a: !foo &a1 true}\n",
-		} {
-			wellFormed(t, src)
-
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-			assert.NotContainsf(t, fmt.Sprintf("%#v", got), `"true"`,
-				"today: %q resolves the scalar the tag stands on", src)
-		}
-	})
-
-	t.Run("the order and the spelling each undo it", func(t *testing.T) {
-		for _, src := range []string{
-			// The anchor first.
-			"&a1 !foo true\n",
-			// A secondary tag rather than a local one.
-			"!!str &a1 true\n",
-			// No anchor at all.
-			"!foo true\n",
-			"! true\n",
-		} {
-			var got any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, "true", got, "%q", src)
-		}
-	})
-}
-
-// TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved: an entry whose value
-// is a tag written in full with nothing after it stops the key on the next line
-// from resolving.
-//
-// Only the long spellings do it, which is what ties this to
-// TestDefectATagNotWrittenAsAShorthandDoesNotTypeItsScalar.
-func TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved(t *testing.T) {
-	t.Run("today the key keeps its text", func(t *testing.T) {
-		for _, src := range []string{
-			"a: !<tag:yaml.org,2002:null>\nFalse: 1\n",
-			"%TAG !e! tag:yaml.org,2002:\n---\na: !e!null\nFalse: 1\n",
-		} {
-			wellFormed(t, src)
-
-			var got map[string]any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Containsf(t, got, "False", "today: %q leaves the key unresolved", src)
-		}
-	})
-
-	t.Run("the shorthand resolves it", func(t *testing.T) {
-		var got map[string]any
-		require.NoError(t, yaml.Unmarshal([]byte("a: !!null\nFalse: 1\n"), &got))
-		assert.Contains(t, got, "false")
 	})
 }
 
