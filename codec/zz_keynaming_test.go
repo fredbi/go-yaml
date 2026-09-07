@@ -10,6 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 )
 
 // Two keys that resolve to different nodes and name themselves alike are read
@@ -34,21 +35,25 @@ import (
 // which destination does what, since the five disagree and a caller has no way
 // to know which one they are on.
 //
-// RFC 8259 §4 says the names in a JSON object SHOULD be unique, so the last
-// row is not invalid JSON -- but every reader collapses it, and "x" is lost one
-// step later. codec.MarshalWithOptions writes the same, so the two converters
-// agree and TestToJSONMatchesTheValueConverter has nothing to report.
+// RFC 8259 section 4 says the names in a JSON object SHOULD be unique, so the
+// JSON was not invalid -- but every reader collapses it, and "x" is lost one
+// step later.
+//
+// ✅ ToJSON refuses these documents since 2026-09-13, as ErrNotJSON rather than
+// ErrDuplicateKey: they are two keys, and it is JSON that cannot hold both. The
+// parser records the pair the way it records a repeated key, under
+// WithJSONCompatible. The decoder's four rows are unchanged and are the defect
+// this file is still for.
 
 // TestDefectATypedKeyIsNamedIntoTheStringsNamespace pins all five.
 func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 	for name, tc := range map[string]struct {
 		src    string
 		merged string
-		json   string
 	}{
-		"an integer and a string": {src: "1: x\n\"1\": y\n", merged: "1", json: `{"1":"x","1":"y"}`},
-		"a boolean and a string":  {src: "true: x\n\"true\": y\n", merged: "true", json: `{"true":"x","true":"y"}`},
-		"a null and a string":     {src: "~: x\n\"null\": y\n", merged: "null", json: `{"null":"x","null":"y"}`},
+		"an integer and a string": {src: "1: x\n\"1\": y\n", merged: "1"},
+		"a boolean and a string":  {src: "true: x\n\"true\": y\n", merged: "true"},
+		"a null and a string":     {src: "~: x\n\"null\": y\n", merged: "null"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Run("a map[any]any keeps both, and is the only one that does", func(t *testing.T) {
@@ -80,10 +85,11 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 				}, got)
 			})
 
-			t.Run("ToJSON writes the name twice", func(t *testing.T) {
-				out, err := codec.ToJSON([]byte(tc.src))
-				require.NoError(t, err)
-				assert.Equal(t, tc.json, string(out))
+			t.Run("ToJSON refuses it rather than writing the name twice", func(t *testing.T) {
+				_, err := codec.ToJSON([]byte(tc.src))
+				require.Error(t, err)
+				assert.ErrorIs(t, err, yamlerrors.ErrNotJSON)
+				assert.Contains(t, err.Error(), `two keys write the JSON member "`+tc.merged+`"`)
 			})
 		})
 	}

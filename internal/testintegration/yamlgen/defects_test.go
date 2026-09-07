@@ -249,54 +249,6 @@ func secondDocument(t *testing.T, src string) string {
 	return text
 }
 
-// TestDefectAVersionDirectiveSpansTheWholeStream: a "%YAML" directive is
-// applied to every document of the stream rather than to the one it precedes.
-//
-// The library disagrees with itself: an anchor and a %TAG handle are both
-// scoped to the document that declares them, and enforced, while a version
-// directive is not. Documents are independent -- Fred, 2026-09-13 -- so the
-// second document here should be read under the core schema, which reads "yes"
-// as the string.
-func TestDefectAVersionDirectiveSpansTheWholeStream(t *testing.T) {
-	t.Run("today the directive reaches the second document", func(t *testing.T) {
-		const src = "%YAML 1.1\n---\na: yes\n---\nb: yes\n"
-
-		wellFormed(t, src)
-
-		got := readTheStream(t, src)
-		require.Len(t, got, 2)
-		assert.Equal(t, map[string]any{"a": true}, got[0], "the first document declares 1.1")
-		assert.Equal(t, map[string]any{"b": true}, got[1],
-			"today: the second declares nothing and is read under 1.1 anyway")
-	})
-
-	t.Run("what each document should mean on its own", func(t *testing.T) {
-		// The same two documents, written apart.
-		assert.Equal(t, []any{map[string]any{"a": true}}, readTheStream(t, "%YAML 1.1\n---\na: yes\n"))
-		assert.Equal(t, []any{map[string]any{"b": "yes"}}, readTheStream(t, "b: yes\n"))
-	})
-
-	t.Run("an anchor and a tag handle are scoped, which is the inconsistency", func(t *testing.T) {
-		var v any
-		err := yaml.Unmarshal([]byte("a: &x 1\n---\nb: *x\n"), &v)
-		require.Error(t, err, "an anchor does not reach the next document")
-		assert.Contains(t, err.Error(), `could not find alias "x"`)
-
-		_, herr := parser.ParseBytes(
-			[]byte("%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 1\n---\nb: !e!str 2\n"),
-			parser.WithComments())
-		require.Error(t, herr, "a handle does not reach the next document")
-		assert.Contains(t, herr.Error(), "tag handle !e! is not defined")
-	})
-
-	t.Run("each document declaring its own reads under it", func(t *testing.T) {
-		const both = "%YAML 1.1\n---\na: yes\n...\n%YAML 1.1\n---\nb: yes\n"
-
-		wellFormed(t, both)
-		assert.Equal(t, []any{map[string]any{"a": true}, map[string]any{"b": true}}, readTheStream(t, both))
-	})
-}
-
 // readTheStream reads every document of src, which is what a caller looping
 // over codec.Decoder gets.
 func readTheStream(t *testing.T, src string) []any {

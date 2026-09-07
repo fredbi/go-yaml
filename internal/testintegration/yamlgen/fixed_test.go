@@ -1801,3 +1801,65 @@ func TestFixedABlockSequenceOnItsTagsLineIsRefused(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedAVersionDirectiveIsScopedToOneDocument: a "%YAML" directive reaches
+// the document it precedes and none of the next.
+//
+// It used to reach every document of the stream, and the library disagreed with
+// itself: an anchor and a %TAG handle are both scoped to the document that
+// declares them, and enforced, while a version directive was not. Documents are
+// independent -- Fred, 2026-09-13 -- so the second document below is read under
+// the core schema, where "yes" is the string.
+//
+// ✅ Fixed on 2026-09-13. parseDocument ended the scope only for a document
+// closed by "...", and that reset did not take effect either: it set the schema
+// back and left the tokens alone, though by the time a "..." is read the
+// grouping has cut the whole of the next document. Parser.endVersionScope runs
+// for every document and hands retypeAhead the first token the descent has not
+// taken. parser/zz_version_test.go holds the shapes that separate the two.
+func TestFixedAVersionDirectiveIsScopedToOneDocument(t *testing.T) {
+	t.Run("the directive stops at the document it opens", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\na: yes\n---\nb: yes\n"
+
+		wellFormed(t, src)
+
+		got := readTheStream(t, src)
+		require.Len(t, got, 2)
+		assert.Equal(t, map[string]any{"a": true}, got[0], "the first document declares 1.1")
+		assert.Equal(t, map[string]any{"b": "yes"}, got[1],
+			"the second declares nothing and is read under the core schema")
+	})
+
+	t.Run("and a document end does not have to say so", func(t *testing.T) {
+		// The "..." form was the one that looked fixed and was not: the reset
+		// ran and the tokens had already been cut under 1.1.
+		assert.Equal(t, []any{map[string]any{"a": true}, map[string]any{"b": "yes"}},
+			readTheStream(t, "%YAML 1.1\n---\na: yes\n...\nb: yes\n"))
+	})
+
+	t.Run("which is what each document means on its own", func(t *testing.T) {
+		// The same two documents, written apart.
+		assert.Equal(t, []any{map[string]any{"a": true}}, readTheStream(t, "%YAML 1.1\n---\na: yes\n"))
+		assert.Equal(t, []any{map[string]any{"b": "yes"}}, readTheStream(t, "b: yes\n"))
+	})
+
+	t.Run("an anchor and a tag handle are scoped the same way", func(t *testing.T) {
+		var v any
+		err := yaml.Unmarshal([]byte("a: &x 1\n---\nb: *x\n"), &v)
+		require.Error(t, err, "an anchor does not reach the next document")
+		assert.Contains(t, err.Error(), `could not find alias "x"`)
+
+		_, herr := parser.ParseBytes(
+			[]byte("%TAG !e! tag:yaml.org,2002:\n---\na: !e!str 1\n---\nb: !e!str 2\n"),
+			parser.WithComments())
+		require.Error(t, herr, "a handle does not reach the next document")
+		assert.Contains(t, herr.Error(), "tag handle !e! is not defined")
+	})
+
+	t.Run("each document declaring its own reads under it", func(t *testing.T) {
+		const both = "%YAML 1.1\n---\na: yes\n...\n%YAML 1.1\n---\nb: yes\n"
+
+		wellFormed(t, both)
+		assert.Equal(t, []any{map[string]any{"a": true}, map[string]any{"b": true}}, readTheStream(t, both))
+	})
+}

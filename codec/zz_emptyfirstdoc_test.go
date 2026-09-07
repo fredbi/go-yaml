@@ -12,31 +12,35 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// ToJSON skips an empty first document where the decoder keeps it.
+// Both converters take the first document of a stream, empty or not.
 //
 // "---" over "---" over "b: 2" is a stream of two documents, the first empty.
-// The decoder reads the first and gives null; ToJSON writes {"b":2}, which is
-// the second. They agree on every stream whose first document has content --
-// both take the first -- so it is the empty one they part company over.
+// The decoder read the first and gave null; ToJSON wrote {"b":2}, which is the
+// second -- so the library gave both answers to the question of what converting
+// a stream should mean. They had always agreed on a stream whose first document
+// has content, so it was the empty one they parted company over.
 //
-// Which is right is a question about what converting a *stream* to JSON should
-// mean at all, and the two answers here are the two readings: take the first
-// document, or take the first that has anything in it. The defect is that one
-// library gives both.
+// ✅ Settled on 2026-09-13 in favor of the decoder's reading: ToJSON converts
+// the first document whatever it holds. jsonWriter counted the document bodies
+// it saw, and a document written as nothing between its markers hands over no
+// node, so the count never moved for it. parser.Step.Document now says which
+// document a node belongs to, and the writer reads that instead.
+// codec/zz_tojsonstream_test.go holds the whole contract; what this file keeps
+// is the agreement between the two converters, which is what found it.
 //
 // Found on 2026-09-13 by the stream axis, once the corpus carried a document
 // suffix into TestToJSONMatchesTheValueConverter.
 
-// TestDefectToJSONSkipsAnEmptyFirstDocument pins both sides.
-func TestDefectToJSONSkipsAnEmptyFirstDocument(t *testing.T) {
-	t.Run("today the two converters take different documents", func(t *testing.T) {
+// TestFixedBothConvertersTakeTheFirstDocument pins both sides.
+func TestFixedBothConvertersTakeTheFirstDocument(t *testing.T) {
+	t.Run("an empty first document is a null to both", func(t *testing.T) {
 		const src = "---\n---\nb: 2\n"
 
 		out, err := codec.ToJSON([]byte(src))
 		require.NoError(t, err)
-		assert.Equal(t, `{"b":2}`, string(out), "today: ToJSON takes the second")
+		assert.Equal(t, "null", string(out), "ToJSON takes the first")
 
-		assert.Equal(t, "null\n", throughValues(t, src), "the decoder takes the first")
+		assert.Equal(t, "null\n", throughValues(t, src), "and so does the decoder")
 	})
 
 	t.Run("a first document with content is taken by both", func(t *testing.T) {

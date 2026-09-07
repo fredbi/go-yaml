@@ -134,13 +134,21 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "a node carries at most one tag (6.9)", true
 	case strings.Contains(msg, "value is not allowed in this context") && holdsANodeAtItsSequencesIndent(want):
 		return "a block sequence entry's node is indented past the '-' (8.2.1)", true
-	case strings.Contains(msg, "non-map value is specified") && keysOnAnEarlierLine(want):
+	case keysOnAnEarlierLine(want) &&
+		(strings.Contains(msg, "non-map value is specified") ||
+			strings.Contains(msg, "value is not allowed in this context")):
 		// refparser reads a node written above a ':' as that ':'s implicit
 		// key, which 7.4.2 does not allow, and the document is then two nodes
 		// at one level. "!? Null" over ": &a2 \"\\n\"" is refused by
 		// grammar.NewRecognizer, by the reference parser, by libfyaml 1.0.0b1
 		// and by go.yaml.in/yaml/v3 v3.0.5, and the shipped parser joined them
 		// on 2026-09-12.
+		//
+		// Two messages, because where the ':' stands decides which the descent
+		// reaches. The seeds Style.Markers and the byte-order-mark axis drew on
+		// 2026-09-13 -- a BOM over "&a2? ''" over ": NULL", "|3-" over " .nan"
+		// over ":", "&a 2!!map" over "'007': false" -- all take the second, and
+		// grammar.NewRecognizer refuses every one of them.
 		return "an implicit key stands on the line its \":\" does (7.4.2)", true
 	default:
 		return "", false
