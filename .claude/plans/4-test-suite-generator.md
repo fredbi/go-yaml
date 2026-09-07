@@ -477,6 +477,10 @@ when its source is absent — a conformance suite that cannot run without a C li
   - 📌 `Load` hands back **Go values** and `LoadJSON` renders them, which is not a convenience. A JSON-only
     first cut *failed*, because yaml.v3 reads `1.0: a` into a map JSON cannot name — the loss was the
     finding, and JSON would have hidden it.
+  - ⚠️ `Load` calls `yaml.Unmarshal`, so **a refusal is not a syntax verdict** — the same trap libfyaml's
+    entry names, and it went undocumented here until 2026-09-13. It cost a register entry: `{a: !!bool &x}`
+    is refused by both loaders because no boolean can be built from an empty node, and that was written
+    down as both refusing the *document*. `{a: !!str &x}` is read by both.
 
 - ✅ **The YAML 1.2 reference parser** — `hack/conformance/install-reference-parser.sh`,
   `internal/testintegration/perlref`. Six files plus 47 vendored Perl modules from the `ext-perl` branch,
@@ -486,6 +490,11 @@ when its source is absent — a conformance suite that cannot run without a C li
     94%** — is the generator our `yaml-spec-1.2.json` comes out of.
   - ⚠️ Not a value oracle. It has no schema and builds no values; asking it whether `1.0` is a float is
     asking the wrong source.
+  - 📌 **The converse is the rule to work by**: it is the only one of the three that can answer *is this a
+    document*, because it is the only one that never tries to build a value from it. Where a claim is about
+    syntax — every `yamlgen.Strict` and `yamlgen.Lax` entry, and every refusal in the ledger — this is the
+    source to cite, and since 2026-09-13 `TestValidDocumentsTheLibraryRefusesAreStillRefused` and
+    `TestWronglyAcceptedDocumentsAreStillWronglyAccepted` assert it rather than leaving it to the prose.
 
 ### ❌ Known and not addressed
 
