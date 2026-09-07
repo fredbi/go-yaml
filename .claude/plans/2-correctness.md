@@ -344,6 +344,7 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 |---|---|---|---|---|
 | 6 | parser | an explicit key nested inside an explicit key | `? ? a` / `  : 1` / `: 2` | this plan, action 1 |
 | 23 | parser | a **second** comment on an explicit key's `:` line is dropped | `? a` / `: # c4` / `  # c5` / `  - 1` keeps c4, loses c5 | `yamlgen.Ledger` |
+| 38 | parser | a `...` suffix mishandles a propertied block scalar | `a: 1` / `...` / `&a1 \|2-` / two spaces reads `""` where `---` reads `" "`; with no indicator the stream is refused | `yamlgen.Ledger` |
 | 24 | renderer | a blank line before a comment survives one rendering and not the next | `a:` / ` - x` / blank / `# c` / `b: 1` | `yamlgen.Ledger` |
 | 29 | renderer | 24 again with no comment in it: a blank line before a block sequence entry | `: &1` / blank / `-` / `? ""` renders the blank after the `-`, then drops it | `yamlgen.defects_test.go` |
 | 3 | decoder | a typed key is named into the strings' namespace, and an `any` then keeps one entry | `1: x` / `"1": y` → `{"1":"y"}`, where a `map[any]any` keeps both | `Departures`, `codec/zz_keynaming_test.go` |
@@ -353,11 +354,12 @@ is the walk's when the tree is right and the walked value is not. Decoding the s
 | 12 | ToJSON 🔥 | a merge written in place writes **invalid JSON** | `<<: {a: 1}` → `{:"a":1}` | `codec/zz_merge_test.go` |
 | 32 | ToJSON | a `!!timestamp` is written as the text it was spelled with | `!!timestamp 2001-12-14t21:59:43.1Z` → `"2001-12-14t21:59:43.1Z"`, where the value converter writes `"2001-12-14T21:59:43.1Z"` | `codec/zz_timestampjson_test.go` |
 | 33 | ToJSON | a float key written the long way keeps its source text | `? 1e3` / `: x` → `{"1e3":"x"}`, where `1e3: x` → `{"1000.0":"x"}` | `codec/zz_floatkey_test.go` |
+| 39 | ToJSON | an empty first document is skipped, where the decoder keeps it | `---` / `---` / `b: 2` → `{"b":2}`, where the decoder reads `null` | `codec/zz_emptyfirstdoc_test.go` |
 | 37 | ToJSON | two keys named alike are written as a repeated member name | `1: x` / `"1": y` → `{"1":"x","1":"y"}` — RFC 8259 §4 makes a name SHOULD-unique, and every reader collapses it | `codec/zz_keynaming_test.go` |
 | 18 | walk | an anchor is lost on a tagged flow key written alone, and the tree keeps it | `{!!null &a1 null, k: *a1}` → `could not find alias`, where `UseOrderedMap` reads `{null: null, k: null}` | `codec/zz_anchor_test.go` |
 | 28 | walk 🔥 | a directive named `%&AML` is read as an anchor, **replacing the document** | `%&AML 1.2` / `---` / `k: v` → `1.2`, where the tree reads `{k: v}` | `codec/zz_directive_test.go` |
 
-**Two in the parser, four in the decoder, four in `ToJSON`, two in the walking reader, two in the
+**Three in the parser, four in the decoder, five in `ToJSON`, two in the walking reader, two in the
 renderer.**
 off this table, and 36 put one back. 30 to 35 were opened on 2026-09-13 by the `!!timestamp` and `!!binary`
 draw and by the reshuffle it caused, and 31 and 34 were closed the same day they were filed -- 31 was
