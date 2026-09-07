@@ -356,23 +356,6 @@ var Ledger = []Divergence{
 		Match:    writesABinaryTag,
 	},
 	{
-		Name: "decode/one-non-string-key-zeroes-a-whole-struct",
-		Reason: "One key a struct cannot name leaves every field at its zero value and reports " +
-			"nothing -- including the fields whose keys are strings, and whether the offending key " +
-			"stands before them or after. `1: a` beside `name: x` into a struct with a Name field " +
-			"gives an empty Name and no error.\n\n" +
-			"In keyToNodeMap, `key, ok := keyVal.(string)` falls to `return nil, err` where err is " +
-			"nil, so the whole key map comes back nil. go.yaml.in/yaml/v3 v3.0.5 reads the document " +
-			"and so does this library's own `any` path; only the struct path drops it.\n\n" +
-			"⏸ Parked deliberately -- Fred, 2026-09-06 -- until decodeStruct is inverted, which " +
-			"deletes the line it lives on. Fixing it in keyToNodeMap first would be work thrown " +
-			"away.\n\n" +
-			"The predicate matches any mapping with a key that is not a Str, which is what a struct " +
-			"tag cannot name.",
-		Property: DecodeTyped,
-		Match:    writesANonStringKey,
-	},
-	{
 		Name: "decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved",
 		Reason: "An entry whose value is a tag written in full with nothing after it stops the key on " +
 			"the next line from resolving. `a: !<tag:yaml.org,2002:null>` over `False: 1` reads the " +
@@ -815,85 +798,87 @@ func writesABinaryTag(v Value, _ Style) bool {
 	return false
 }
 
-// writesANonStringKey reports whether v holds a mapping keyed by anything other
-// than a string, which is a key no struct tag names.
+// writesALongTagOnAnEmptyNode reports whether v writes a mapping entry whose
+// value is a tag in one of the long spellings over nothing, with the *next*
+// entry keyed by a text that resolves.
 //
-// The style decides one case. A document declaring "%YAML 1.1" resolves "yes:"
-// to the boolean key true, so a Str holding one of 1.1's boolean words is a
-// non-string key there and a string key everywhere else.
-func writesANonStringKey(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			if nonStringKey(p.Key, st) || writesANonStringKey(p.Val, st) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesANonStringKey(item, st)
-		})
-	case Anchored:
-		return writesANonStringKey(n.V, st)
-	case Alias:
-		return writesANonStringKey(n.V, st)
-	case Tagged:
-		return writesANonStringKey(n.V, st)
-	}
-
-	return false
-}
-
-// nonStringKey reports whether a key reaches the decoder as something other
-// than a Go string.
-func nonStringKey(k Value, st Style) bool {
-	s, text := k.(Str)
-	if !text {
-		return true
-	}
-
-	if st.Version != Reading11Version || st.Quoting != QuotePlain {
-		return false
-	}
-
-	_, legacy := legacyBooleans[s.V]
-
-	return legacy
-}
-
-// writesALongTagOnAnEmptyNode reports whether v writes a tag in one of the long
-// spellings over a node that reaches the document as nothing.
-//
-// Only a bare Null does, and only when the style spells null as nothing.
+// All three parts are needed and the last one is what this predicate used to
+// leave out. It matched any tagged Null anywhere in the tree, which the
+// generator draws constantly: 1,077 documents were excused across the property
+// tests in one 40,000-draw run on 2026-09-13 and not one of them diverged, so
+// the entry was suppressing coverage rather than recording a defect. The
+// defect needs a key on the following line for the unresolved tag to reach.
 func writesALongTagOnAnEmptyNode(v Value, st Style) bool {
 	if st.TagSpelling == SpellShorthand || st.NullSpelling != "" {
 		return false
 	}
 
-	return holdsATaggedNull(v)
+	return holdsALongTaggedNullBeforeAResolvingKey(v)
 }
 
-func holdsATaggedNull(v Value) bool {
+// holdsALongTaggedNullBeforeAResolvingKey walks v for a mapping where one
+// entry's value is a tagged Null and the entry after it is keyed by a spelling
+// the schema resolves -- "False", "NULL", "0x10" and the rest of [resolving].
+func holdsALongTaggedNullBeforeAResolvingKey(v Value) bool {
 	switch n := v.(type) {
-	case Tagged:
-		if _, empty := n.V.(Null); empty {
-			return true
-		}
-
-		return holdsATaggedNull(n.V)
-	case Anchored:
-		return holdsATaggedNull(n.V)
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsATaggedNull)
 	case Map:
-		for _, p := range n.Pairs {
-			if holdsATaggedNull(p.Key) || holdsATaggedNull(p.Val) {
+		for i, p := range n.Pairs {
+			if taggedNull(p.Val) && i+1 < len(n.Pairs) && resolvingKey(n.Pairs[i+1].Key) {
+				return true
+			}
+
+			if holdsALongTaggedNullBeforeAResolvingKey(p.Key) ||
+				holdsALongTaggedNullBeforeAResolvingKey(p.Val) {
 				return true
 			}
 		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsALongTaggedNullBeforeAResolvingKey)
+	case Anchored:
+		return holdsALongTaggedNullBeforeAResolvingKey(n.V)
+	case Tagged:
+		return holdsALongTaggedNullBeforeAResolvingKey(n.V)
 	}
 
 	return false
+}
+
+// taggedNull reports whether v is a Null carrying a tag, which is the node that
+// reaches the document as nothing after its tag.
+func taggedNull(v Value) bool {
+	t, tagged := v.(Tagged)
+	if !tagged {
+		return false
+	}
+
+	if _, empty := t.V.(Null); empty {
+		return true
+	}
+
+	return taggedNull(t.V)
+}
+
+// resolvingKey reports whether a key's name comes from resolution rather than
+// from the characters written down, which is what the unresolved tag above it
+// costs.
+//
+// Two kinds. A Str holding one of the [resolving] spellings -- "False", "NULL",
+// "0x10" -- is read as another type when the resolution reaches it. And any key
+// that is not a Str at all is named by [KeyText] from its type, so Style.BoolCase
+// writing Bool{false} as "False" makes the same difference without the value
+// being a string. The second kind is what the first draft of this predicate
+// missed, and TestPresentationInvariance found it in under 5,000 draws.
+func resolvingKey(k Value) bool {
+	s, text := k.(Str)
+	if !text {
+		_, alias := k.(Alias)
+
+		return !alias
+	}
+
+	_, resolves := resolving[s.V]
+
+	return resolves
 }
 
 // writesASpecialFloatUnderALongTag reports whether v writes an infinity or a

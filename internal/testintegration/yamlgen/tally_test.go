@@ -4,6 +4,8 @@
 package yamlgen_test
 
 import (
+	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -24,6 +26,20 @@ import (
 // document that diverges deterministically. What the counts are good for is
 // judging a predicate: drawn and diverged should be equal, and a gap between
 // them means the entry is tolerating documents that are fine.
+//
+// # One thing they do assert
+//
+// Every tally feeds a package-wide total that TestMain checks after the run.
+// An entry drawn many times and never diverging is either fixed or matching a
+// family it is not in, and both cost the same thing: every document it matches
+// is excused from the property and never compared.
+//
+// Both were live on 2026-09-13 and both had been logging their zero for days.
+// decode/one-non-string-key-zeroes-a-whole-struct was fixed by 7dc4075 on
+// 2026-09-07 and its entry stayed, excusing 1,256 documents a run;
+// decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved matched any
+// tagged null anywhere in a tree and excused 1,077, where the defect needs a
+// resolving key on the line below. Narrowing it took the draws to 24.
 type tally struct {
 	mx     sync.Mutex
 	drawn  map[string]int
@@ -67,4 +83,74 @@ func (c *tally) report(t *testing.T, p yamlgen.Property) {
 
 		t.Logf("ledger %q: drawn %d times, diverged %d", name, drawn, failed)
 	}
+
+	totals.add(c.drawn, c.failed)
+}
+
+// suspectAfter is how many draws an entry has to reach before never diverging
+// counts against it.
+//
+// Measured rather than picked. Over a 40,000-draw run on 2026-09-13 the live
+// entries that diverge least often are drawn 102 and 141 times, and the two
+// that were suppressing coverage were drawn 1,256 and 1,077 -- so the gap is
+// wide and 200 sits in it. A short run reaches nothing here and the check stays
+// quiet, which is the point: it should fire on a real sweep and never on a
+// developer's default `go test`.
+const suspectAfter = 200
+
+// totals accumulates every tally in the package, since each property test has
+// its own and an entry claims several.
+var totals = &tally{drawn: make(map[string]int), failed: make(map[string]int)}
+
+func (c *tally) add(drawn, failed map[string]int) {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	for name, n := range drawn {
+		c.drawn[name] += n
+	}
+
+	for name, n := range failed {
+		c.failed[name] += n
+	}
+}
+
+// stale returns the entries drawn past [suspectAfter] that never diverged.
+func (c *tally) stale() []string {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+
+	var out []string
+
+	for name, drawn := range c.drawn {
+		if drawn >= suspectAfter && c.failed[name] == 0 {
+			out = append(out, fmt.Sprintf("%q: drawn %d times across the properties and never diverged", name, drawn))
+		}
+	}
+
+	sort.Strings(out)
+
+	return out
+}
+
+// TestMain runs the package and then holds the ledger to its own counts.
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	if suspect := totals.stale(); len(suspect) > 0 {
+		fmt.Fprintln(os.Stderr, "\nledger entries that excuse documents and record nothing:")
+		for _, line := range suspect {
+			fmt.Fprintln(os.Stderr, "  "+line)
+		}
+		fmt.Fprintln(os.Stderr,
+			"Either the defect is fixed and the entry goes, or the predicate matches a family the\n"+
+				"defect is not in and wants narrowing. Every document matched here was excused from\n"+
+				"its property and never compared.")
+
+		if code == 0 {
+			code = 1
+		}
+	}
+
+	os.Exit(code)
 }
