@@ -16,7 +16,7 @@ import (
 // Opening a token it is neither a comment, nothing separating it from what came before, nor the first character of a
 // plain scalar, which YAML forbids.
 func (s *Scanner) scanCommentIndicator(ctx *Context) error {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.inAnchorName('#') {
 		return nil
 	}
 

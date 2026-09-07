@@ -22,6 +22,9 @@ import (
 // Inside a flow collection another scan function claims the indicator first, which keeps "[&a, b]", an anchor on an
 // empty node, apart from "&a," at the root.
 func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
+	if s.inAnchorName(c) {
+		return nil
+	}
 	if ctx.existsBuffer() && !s.isAnchor && !s.isAlias {
 		return nil
 	}
@@ -35,7 +38,7 @@ func (s *Scanner) scanPlainFirst(ctx *Context, c rune) error {
 }
 
 func (s *Scanner) scanReservedChar(ctx *Context, c rune) error {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.inAnchorName(c) {
 		return nil
 	}
 

@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.inAnchorName(ch) {
 		return false, nil
 	}
 

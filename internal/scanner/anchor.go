@@ -82,6 +82,19 @@ func anchorNameEnd(src string, start int32) int32 {
 	return end
 }
 
+// inAnchorName reports whether c belongs to the anchor or alias name now being
+// read.
+//
+// ns-anchor-char is ns-char less the flow indicators, so every character that
+// does not end a name is one of its characters -- "@", "`", "#", a quote and a
+// "%" among them. Each of those opens a token of its own elsewhere, and the
+// scan steps that claim them ask this first: "&@" is an anchor named "@" and
+// not a reserved character, which is what libfyaml 1.0.0b1 and the reference
+// parser read it as.
+func (s *Scanner) inAnchorName(c rune) bool {
+	return (s.isAnchor || s.isAlias) && !endsAnchorName(c)
+}
+
 func endsAnchorName(c rune) bool {
 	switch c {
 	case ' ', '\t', '\r', '\n', ',', '[', ']', '{', '}':

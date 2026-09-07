@@ -6,6 +6,7 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -138,4 +139,60 @@ func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {
 			assert.Errorf(t, err, "accepted %q", source)
 		})
 	}
+}
+
+// TestParseAnchorNamesTakeEveryAnchorChar: an anchor or alias name may hold any
+// ns-anchor-char, including the characters that open a token elsewhere.
+//
+// ns-anchor-char is ns-char less the flow indicators, so "@", "`", "#", a quote
+// and a "%" are all name characters. Each was refused, with a different message
+// and by a different scan step: 5.5 reserves "@" and "`" against *starting a
+// plain scalar* and scanReservedChar applied that anywhere; "#" went to the
+// comment rule, the quotes opened a quoted scalar, and "%" went to
+// scanPlainFirst. Four faults behind one shape.
+//
+// grammar.NewRecognizer accepts every one of them, the reference parser passes
+// them and libfyaml 1.0.0b1 reads them; go.yaml.in/yaml/v3 v3.0.5 refuses them
+// all and is the outlier.
+func TestParseAnchorNamesTakeEveryAnchorChar(t *testing.T) {
+	t.Run("as a name, and as the alias that reaches it", func(t *testing.T) {
+		for _, name := range []string{"@", "#", `"`, "'", "`", "%", "@x", "x@", ":"} {
+			source := "a: &" + name + " 1\nb: *" + name + "\n"
+
+			f, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.NoErrorf(t, err, "%q", source)
+			assert.Equal(t, source, f.String(), "%q", source)
+
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(source), &got), "%q", source)
+			assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(1)}, got, "%q", source)
+		}
+	})
+
+	t.Run("a flow indicator still ends the name", func(t *testing.T) {
+		// ns-anchor-char excludes them, so an anchor opening on one names
+		// nothing. grammar.NewRecognizer, the reference parser and libfyaml all
+		// refuse these too.
+		for _, source := range []string{"a: &[ 1\n", "a: &] 1\n", "a: &{ 1\n", "a: &} 1\n", "a: &, 1\n"} {
+			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.Errorf(t, err, "%q", source)
+			assert.Contains(t, err.Error(), "must be followed by a name", "%q", source)
+		}
+	})
+
+	t.Run("and the same characters still open their own token elsewhere", func(t *testing.T) {
+		// A "#" inside a plain scalar is ordinary text either way -- a comment
+		// needs a space before it -- so the shape that reaches the comment rule
+		// is one pressed against a token already emitted.
+		for source, says := range map[string]string{
+			"a: @x\n":      "'@' is a reserved character",
+			"a: `x\n":      "'`' is a reserved character",
+			"a: %x\n":      "a plain scalar cannot begin with '%'",
+			"a: \"b\"#c\n": "a comment must be preceded by a space",
+		} {
+			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
+			require.Errorf(t, err, "%q", source)
+			assert.Contains(t, err.Error(), says, "%q", source)
+		}
+	})
 }
