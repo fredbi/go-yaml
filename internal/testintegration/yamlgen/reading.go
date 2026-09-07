@@ -3,7 +3,10 @@
 
 package yamlgen
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // What a document denotes under a reading other than YAML 1.2's core schema.
 //
@@ -105,6 +108,13 @@ func numberUnder11(text string) bool {
 		return false
 	}
 
+	if octal, isLeadingZero := leadingZeroOctal(body); isLeadingZero {
+		// A leading zero is octal under 1.1. Where the digits are not octal --
+		// "09" -- it is neither that nor a 1.1 decimal, which forbids the
+		// leading zero, so 1.1 reads the text.
+		return octal
+	}
+
 	if strings.HasPrefix(body, "0x") {
 		// 1.1 reads hex, and a hex digit may be an 'e' -- "0x3e8" is the
 		// integer 1000 and not an exponent. The test below caught this.
@@ -126,7 +136,72 @@ func numberUnder11(text string) bool {
 	return strings.HasPrefix(rest, "+") || strings.HasPrefix(rest, "-")
 }
 
-// sawNumber records a number whose text YAML 1.1 does not read as a number.
+// leadingZeroOctal reports whether body is a leading-zero integer, and whether
+// its digits make it octal.
+//
+// "0777" is octal under 1.1 and the decimal 777 under core, so the two readings
+// disagree about the value. "09" is the decimal 9 under core and a string under
+// 1.1, so they disagree about the type. "0" alone is zero under both.
+func leadingZeroOctal(body string) (octal bool, isLeadingZero bool) {
+	if len(body) < 2 || body[0] != '0' {
+		return false, false
+	}
+
+	octal = true
+
+	for i := 1; i < len(body); i++ {
+		if body[i] < '0' || body[i] > '9' {
+			// "0x1f" and "0o17" carry a letter and are read elsewhere.
+			return false, false
+		}
+
+		if body[i] > '7' {
+			octal = false
+		}
+	}
+
+	return octal, true
+}
+
+// valueUnder11 returns what YAML 1.1 makes of a number's text where it reads it
+// as a *different* number, and whether it does.
+//
+// The one form that gets here is the leading zero: 1.1 reads "0777" as octal
+// and core as the decimal 777. Every other spelling the two disagree about is a
+// number under core and a string under 1.1, which numberText answers.
+func valueUnder11(text string) (uint64, bool) {
+	body := strings.TrimLeft(text, "+")
+	if strings.HasPrefix(body, "-") {
+		// intText writes a negative integer in decimal whatever the form asks
+		// for, so no negative number reaches this.
+		return 0, false
+	}
+
+	if octal, isLeadingZero := leadingZeroOctal(body); !isLeadingZero || !octal {
+		return 0, false
+	}
+
+	n, err := strconv.ParseUint(body, 8, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	if decimal, derr := strconv.ParseUint(body, 10, 64); derr == nil && decimal == n {
+		// "0" and "00" are zero either way.
+		return 0, false
+	}
+
+	return n, true
+}
+
+// sawNumber records a number the two readings disagree about, either because
+// 1.1 does not read the text as a number at all or because it reads it as a
+// different one.
+//
+// The second was missed at first and TestTheNumberFormsMeanUnder11WhatTheLibraryReads
+// caught it: "031" is a number under both readings, so numberUnder11 said there
+// was nothing to record -- and the meaning went out as 31 where the library
+// reads 25.
 //
 // The form is not consulted, and consulting it was wrong: NumberPlain looked
 // like the form the two schemas always agree on, and a BigFloat breaks that.
@@ -134,7 +209,11 @@ func numberUnder11(text string) bool {
 // exponent with no '.' before it, which 1.1 reads as a string. The text is the
 // only thing that decides.
 func (r *readings) sawNumber(text string) {
-	if r == nil || numberUnder11(text) {
+	if r == nil {
+		return
+	}
+
+	if _, valueDiffers := valueUnder11(text); !valueDiffers && numberUnder11(text) {
 		return
 	}
 
@@ -213,14 +292,48 @@ func (r *readings) under(v Value) (any, bool) {
 	return r.legacy(v), true
 }
 
-// numberKey is [KeyText] under YAML 1.1 for a number written in a form 1.1
-// does not read: the key is named by the text rather than by the number.
+// numberValue returns what YAML 1.1 makes of a number the two readings give
+// different *values* to, and whether it does.
+//
+// Only a leading-zero integer gets here. The text is taken from the emitter's
+// own intText rather than re-derived, so the answer follows what was written.
+func (r *readings) numberValue(v Value) (uint64, bool) {
+	n, isInt := v.(Int)
+	if !isInt || r == nil {
+		return 0, false
+	}
+
+	text, _ := intText(n.V, r.st)
+
+	return valueUnder11(text)
+}
+
+// numberKey is [KeyText] under YAML 1.1 for a number the two readings
+// disagree about, and reports whether they do.
+//
+// Both halves of the disagreement reach a key. Where 1.1 does not read the
+// text as a number at all, the key is named by the text: "0b1010" stays
+// "0b1010". Where it reads a different number, the key is named by that
+// number: "? 010" is the key "8" under a "%YAML 1.1" directive and "10"
+// without one.
 func (r *readings) numberKey(v Value) (string, bool) {
-	return r.numberText(v)
+	if text, diverges := r.numberText(v); diverges {
+		return text, true
+	}
+
+	if other, differs := r.numberValue(v); differs {
+		return strconv.FormatUint(other, 10), true
+	}
+
+	return "", false
 }
 
 // numberText returns the text a number was written as and whether 1.1 reads it
 // back as that text rather than as the number.
+//
+// Being recorded is not enough: sawNumber records the value case too -- "031"
+// is a number under both readings and a different one -- and that answer comes
+// from numberValue. This is the type case alone.
 func (r *readings) numberText(v Value) (string, bool) {
 	var text string
 
@@ -237,7 +350,9 @@ func (r *readings) numberText(v Value) (string, bool) {
 		return "", false
 	}
 
-	return text, r.numbers[text]
+	// Recorded and read as a number of its own is the value case, which
+	// numberValue answers; this one is for a text 1.1 reads as a string.
+	return text, r.numbers[text] && !numberUnder11(text)
 }
 
 // legacyKey is [KeyText] under YAML 1.1.
@@ -282,6 +397,10 @@ func (r *readings) legacy(v Value) any {
 			return text
 		}
 
+		if other, differs := r.numberValue(n); differs {
+			return other
+		}
+
 		return n.Decoded()
 	case Seq:
 		out := make([]any, 0, len(n.Items))
@@ -303,18 +422,36 @@ func (r *readings) legacy(v Value) any {
 		return r.legacy(n.V)
 	case Tagged:
 		// A tag settles the type of the node it stands on, and of that node
-		// only. On a scalar it means the spelling no longer decides, so the
-		// core answer stands. On a collection it says the node is a sequence
-		// or a mapping, which the scalars inside are none the wiser for --
-		// "!!map" over "k: 0o0" leaves the 0o0 resolving by spelling, and
-		// stopping here read it as the core schema does under a directive
-		// asking for 1.1.
+		// only. On a collection it says the node is a sequence or a mapping,
+		// which the scalars inside are none the wiser for -- "!!map" over
+		// "k: 0o0" leaves the 0o0 resolving by spelling, and stopping here
+		// read it as the core schema does under a directive asking for 1.1.
 		switch n.V.(type) {
 		case Seq, Map:
 			return r.legacy(n.V)
-		default:
+		}
+
+		// A tag settles the type and not the value the spelling resolves to.
+		// "!!int 010" is an integer under both readings and a different
+		// integer under each, since 1.1 reads a leading zero as octal: the
+		// library returns 8 for it under "%YAML 1.1" and 10 without.
+		//
+		// Where the divergence is a change of type rather than of value --
+		// "!!str yes", "!!int 0b1010" -- the tag does settle it and the core
+		// answer stands, so numberText is deliberately not consulted here.
+		other, differs := r.numberValue(n.V)
+		if !differs {
 			return n.Decoded()
 		}
+
+		// "!!int" comes back as a plain int where the same number untagged
+		// comes back as a uint64, so the tag keeps deciding the Go type and
+		// only the magnitude moves.
+		if _, isInt := n.Decoded().(int); isInt {
+			return int(other)
+		}
+
+		return other
 	default:
 		return v.Decoded()
 	}

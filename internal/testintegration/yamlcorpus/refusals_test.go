@@ -193,6 +193,7 @@ var parserComplaints = []string{
 	"found a byte that is part of no character",
 	"found a character that is not a hexadecimal digit in escaped N-bit character",
 	"found a character that is not a hexadecimal digit in escaped UTF-N character",
+	"found a tab character where an indentation space is expected",
 	"found an escaped code point that is not a character",
 	"found an invalid key for this map",
 	"found character _ that a YAML stream may not hold",

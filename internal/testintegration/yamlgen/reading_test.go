@@ -131,15 +131,18 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 	})
 }
 
-// divergentForm reports the number forms YAML 1.1 may not read.
+// divergentForm reports the number forms YAML 1.1 may not read as core does.
 //
 // "0o37" is a string there, and so is a float whose exponent carries no sign.
-// The decimal and "+" forms it reads exactly as core does, and hex too.
+// A leading zero diverges both ways: 1.1 reads "010" as the octal 8 where core
+// reads 10, and reads "09" as the string "09" since 9 is no octal digit. The
+// decimal and "+" forms it reads exactly as core does, and hex too.
 //
 // A BigFloat diverges under every form: its text comes from
 // big.Float.Text('g', -1), which writes an exponent with no '.' before it.
 func divergentForm(st yamlgen.Style, v yamlgen.Value) bool {
-	if st.NumberForm == yamlgen.NumberOctal || st.NumberForm == yamlgen.NumberExponent {
+	switch st.NumberForm {
+	case yamlgen.NumberOctal, yamlgen.NumberExponent, yamlgen.NumberLeadingZero:
 		return true
 	}
 
@@ -241,6 +244,9 @@ func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
 	values := []yamlgen.Value{
 		yamlgen.Int{V: 0}, yamlgen.Int{V: 1}, yamlgen.Int{V: 31}, yamlgen.Int{V: 511},
 		yamlgen.Int{V: 1000}, yamlgen.Int{V: -31},
+		// The leading zero's own corners: 9 writes "09", which 1.1 reads as a
+		// string, and 7 writes "07", which both read as 7.
+		yamlgen.Int{V: 9}, yamlgen.Int{V: 7}, yamlgen.Int{V: 777},
 		yamlgen.Float{V: 1.5}, yamlgen.Float{V: -1.5}, yamlgen.Float{V: 0.5},
 		yamlgen.Float{V: 1000}, yamlgen.Float{V: 1e-320}, yamlgen.Float{V: 0},
 	}
@@ -248,6 +254,7 @@ func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
 	forms := []yamlgen.NumberForm{
 		yamlgen.NumberPlain, yamlgen.NumberSigned,
 		yamlgen.NumberHex, yamlgen.NumberOctal, yamlgen.NumberExponent,
+		yamlgen.NumberLeadingZero,
 	}
 
 	for _, form := range forms {

@@ -1053,6 +1053,8 @@ func intText(v int, st Style) (string, NumberForm) {
 		return "0x" + strconv.FormatInt(int64(v), 16), NumberHex
 	case NumberOctal:
 		return "0o" + strconv.FormatInt(int64(v), 8), NumberOctal
+	case NumberLeadingZero:
+		return "0" + strconv.Itoa(v), NumberLeadingZero
 	case NumberPlain, NumberExponent:
 		return strconv.Itoa(v), NumberPlain
 	default:

@@ -211,6 +211,18 @@ const (
 	NumberOctal
 	// NumberExponent writes a float as "1.5e+00", and leaves integers alone.
 	NumberExponent
+	// NumberLeadingZero writes a non-negative integer as "0777".
+	//
+	// The one form where the two readings disagree about the *value* rather
+	// than about the type. Core has no octal-by-leading-zero, so "0777" is the
+	// decimal 777; YAML 1.1 reads it as octal and makes it 511. Every other
+	// form here is a number under core and either the same number or a string
+	// under 1.1.
+	//
+	// Only offered where every digit is octal. "09" is the decimal 9 under core
+	// and a *string* under 1.1, since it is neither valid octal nor a 1.1
+	// decimal -- which readings states rather than the emitter avoiding.
+	NumberLeadingZero
 )
 
 func (n NumberForm) String() string {
@@ -223,6 +235,8 @@ func (n NumberForm) String() string {
 		return " num=0o"
 	case NumberExponent:
 		return " num=e"
+	case NumberLeadingZero:
+		return " num=0"
 	case NumberPlain:
 		return ""
 	default:
@@ -618,7 +632,7 @@ func Styles() *rapid.Generator[Style] {
 			// Weighted towards decimal, which is how a number is usually
 			// written and the only form a negative integer has. The other four
 			// share the rest evenly.
-			NumberForm: NumberForm(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4}).Draw(t, "numberform")),
+			NumberForm: NumberForm(rapid.SampledFrom([]int{0, 0, 0, 0, 1, 2, 3, 4, 5}).Draw(t, "numberform")),
 			// An even six-way split. Unlike NumberForm there is no ordinary
 			// spelling to weight towards: a timestamp is rare enough in a
 			// document that spreading the forms evenly is what gets each of
