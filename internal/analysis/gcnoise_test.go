@@ -15,19 +15,21 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// parsers are the two builds a measurement is taken over: the one that ships
-// and the one being re-architected. A candidate's memory activity means little
-// on its own, and everything against the parser it would replace.
+// parsers are the builds a measurement is taken over.
+//
+// It held two while a candidate was being measured against the frozen copy it
+// would replace. The candidate shipped, so there is one build left -- but the
+// loops below stay a range over this slice, because a candidate's memory
+// activity means little on its own and everything against the parser it would
+// replace. Add the second entry and both tables report the pair again.
 var parsers = []struct {
 	name  string
 	parse func([]byte) (*ast.File, error)
 }{
-	{"parser", func(src []byte) (*ast.File, error) { return refparser.ParseBytes(src, 0) }},
-	{"lab", func(src []byte) (*ast.File, error) { return parser.ParseBytes(src) }},
+	{"parser", func(src []byte) (*ast.File, error) { return parser.ParseBytes(src) }},
 }
 
 // TestGCActivity reports what a parse costs the collector.

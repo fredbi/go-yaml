@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 package analysis
 
 import (
@@ -10,8 +13,8 @@ import (
 
 	v3 "go.yaml.in/yaml/v3"
 
-	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/internal/scanner"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestFlatMapScaling is the headline measurement: how parse time grows with the number of
@@ -19,7 +22,7 @@ import (
 //
 // A growth factor near 2 per doubling is linear (correct). Near 4 means quadratic, which is
 // what refparser.parseMap does today by recursing once per sibling entry and discarding a whole
-// MappingNode each time (internal/refparser/parser.go:490). yaml.v3 is included only as a scale
+// MappingNode each time (parser/parser.go's parseMap). yaml.v3 is included only as a scale
 // reference -- it is linear, so it shows the difference is not inherent to YAML.
 //
 // Reports rather than asserts, so it stays informative on any machine.
@@ -48,19 +51,23 @@ func TestFlatMapScaling(t *testing.T) {
 	t.Log("See ANALYSIS-go-openapi.md §3.")
 }
 
-// TestStageAttribution splits the cost across the three stages a document goes
+// TestStageAttribution splits the cost across the two stages a document goes
 // through, so the per-key numbers subtract.
 //
-// scanner.Tokens is the scan alone. refparser.New adds copying the tokens into the
-// parser's blocks and grouping them. Parse adds building the tree. The stage
-// that grows its per-key cost is the one to look at; this is how the
-// super-linear parseMap was located, and the split is kept so the next one is
-// found the same way.
+// scanner.Tokens is the scan alone; parser.ParseBytes adds grouping the tokens
+// and building the tree. The stage that grows its per-key cost is the one to
+// look at; this is how the super-linear parseMap was located, and the split is
+// kept so the next one is found the same way.
+//
+// It was three columns while the parser was built from a drained token slice
+// and grouping could be timed on its own. The parser reads from the scanner now
+// and there is no constructor to stop at, so grouping and the tree are one
+// number.
 func TestStageAttribution(t *testing.T) {
 	skipTimings(t)
 
-	t.Logf("%-8s %-24s %-24s %s  (time, and per key)",
-		"keys", "Scan", "New (scan+group)", "Parse (+tree)")
+	t.Logf("%-8s %-24s %s  (time, and per key)",
+		"keys", "Scan", "Parse (+group, +tree)")
 
 	for _, n := range []int{1000, 2000, 4000, 8000, 16000} {
 		src := flatMap(n)
@@ -74,23 +81,15 @@ func TestStageAttribution(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-		tg := timeIt(t, func() {
-			var sc scanner.Scanner
-			sc.Init([]byte(src))
-			if _, err := refparser.New(sc.Tokens(), 0); err != nil {
-				t.Fatal(err)
-			}
-		})
 		tp := timeIt(t, func() { mustParse(t, src) })
 
-		t.Logf("%-8d %-13v %-10s %-13v %-10s %-13v %s", n,
+		t.Logf("%-8d %-13v %-10s %-13v %s", n,
 			ts.Round(time.Microsecond), perKey(ts, n),
-			tg.Round(time.Microsecond), perKey(tg, n),
 			tp.Round(time.Microsecond), perKey(tp, n))
 	}
 
 	t.Log("")
-	t.Log("Scanning and grouping hold their per-key cost; watch Parse for the one that does not.")
+	t.Log("Scanning holds its per-key cost; watch Parse for the one that does not.")
 }
 
 // TestWideDocumentCost states the practical consequence: how long a realistically-sized wide
@@ -135,7 +134,7 @@ func TestParseScalesLinearly(t *testing.T) {
 
 func mustParse(t *testing.T, src string) {
 	t.Helper()
-	if _, err := refparser.ParseBytes([]byte(src), 0); err != nil {
+	if _, err := parser.ParseBytes([]byte(src)); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 }

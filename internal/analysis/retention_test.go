@@ -11,21 +11,21 @@ import (
 
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/refparser"
 	"github.com/go-openapi/go-yaml/internal/scanner"
+	"github.com/go-openapi/go-yaml/parser"
 	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestTokenRetention measures how much of the token stream the tree keeps.
 //
-// refparser.New drains the whole iter.Seq[token.Token] into rawTokens before
-// grouping starts, and rawTokens.add is the largest single allocation site of a
-// parse: 23.3% of allocated bytes on azure_swagger. A parser reading from the
-// stream would copy out whatever the tree ends up pointing at and drop the rest
-// as it went, so the headroom for that change is the share the tree does not
-// keep.
+// It was written for the parser that drained the whole iter.Seq[token.Token]
+// into a rawTokens slice before grouping started -- the largest single
+// allocation site of a parse, 23.3% of allocated bytes on azure_swagger -- to
+// size the headroom for reading from the stream instead. The parser reads from
+// the stream now, so the number this reports is what the tape still hands the
+// tree rather than a saving still to be had.
 //
-// This measures it rather than assuming it. Run with -v for the table.
+// Run with -v for the table.
 func TestTokenRetention(t *testing.T) {
 	all, err := workloads.All()
 	require.NoError(t, err)
@@ -37,12 +37,12 @@ func TestTokenRetention(t *testing.T) {
 
 		for _, mode := range []struct {
 			label string
-			mode  refparser.Mode
+			opts  []parser.Option
 		}{
-			{"plain", 0},
-			{"comments", refparser.ParseComments},
+			{"plain", nil},
+			{"comments", []parser.Option{parser.WithComments()}},
 		} {
-			f, err := refparser.ParseBytes(w.Data, mode.mode)
+			f, err := parser.ParseBytes(w.Data, mode.opts...)
 			require.NoError(t, err)
 
 			kept := retainedTokens(f)
@@ -137,18 +137,18 @@ func TestTokenRetentionSanity(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		src  string
-		mode refparser.Mode
+		opts []parser.Option
 	}{
-		{"comments dropped", "# a\nk: v # b\n# c\n", 0},
-		{"comments kept", "# a\nk: v # b\n# c\n", refparser.ParseComments},
-		{"plain mapping", "a: 1\nb: 2\n", 0},
-		{"flow", "{a: 1, b: [2, 3]}\n", 0},
-		{"anchors and tags", "a: &x !!str v\nb: *x\n", 0},
-		{"documents", "---\na: 1\n...\n---\nb: 2\n", 0},
-		{"block scalar", "a: |\n  one\n  two\n", 0},
+		{"comments dropped", "# a\nk: v # b\n# c\n", nil},
+		{"comments kept", "# a\nk: v # b\n# c\n", []parser.Option{parser.WithComments()}},
+		{"plain mapping", "a: 1\nb: 2\n", nil},
+		{"flow", "{a: 1, b: [2, 3]}\n", nil},
+		{"anchors and tags", "a: &x !!str v\nb: *x\n", nil},
+		{"documents", "---\na: 1\n...\n---\nb: 2\n", nil},
+		{"block scalar", "a: |\n  one\n  two\n", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f, err := refparser.ParseBytes([]byte(tc.src), tc.mode)
+			f, err := parser.ParseBytes([]byte(tc.src), tc.opts...)
 			require.NoError(t, err)
 
 			scanned := countTokens(t, tc.src)

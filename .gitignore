@@ -5,3 +5,4 @@
 .worktrees
 bin/
 go.work.sum
+analysis.test

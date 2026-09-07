@@ -9,13 +9,6 @@ import (
 	"runtime/metrics"
 	"testing"
 	"time"
-
-	"github.com/go-openapi/testify/v2/require"
-
-	"github.com/go-openapi/go-yaml"
-	"github.com/go-openapi/go-yaml/internal/analysis/workloads"
-	"github.com/go-openapi/go-yaml/internal/lab"
-	"github.com/go-openapi/go-yaml/parser"
 )
 
 // peakLive reports the high-water mark of the live heap while work runs.
@@ -95,50 +88,5 @@ func peakLive(work func()) uint64 {
 			}
 			time.Sleep(50 * time.Microsecond)
 		}
-	}
-}
-
-// TestProgressiveDecodePeak measures what the lab decoder retains against what
-// Unmarshal does, on the workloads the prize was sized on.
-//
-// TestDecodePrize says the tree is 73% to 87% of an Unmarshal's peak. This says
-// whether a decoder that forgets each node as it converts it actually gets that
-// back. Run with -v.
-func TestProgressiveDecodePeak(t *testing.T) {
-	all, err := workloads.All()
-	require.NoError(t, err)
-
-	t.Logf("%-17s %9s %11s %11s %8s", "workload", "source", "Unmarshal", "progressive", "ratio")
-
-	for _, w := range all {
-		var want any
-		require.NoError(t, yaml.Unmarshal(w.Data, &want))
-
-		got, err := lab.DecodeProgressive(w.Data)
-		require.NoError(t, err)
-		require.Equal(t, want, got, "%s: the progressive decoder read a different value", w.Name)
-
-		classic := peakLive(func() {
-			var v any
-			require.NoError(t, yaml.Unmarshal(w.Data, &v))
-			runtime.KeepAlive(v)
-		})
-		progressive := peakLive(func() {
-			v, err := lab.DecodeProgressive(w.Data)
-			require.NoError(t, err)
-			runtime.KeepAlive(v)
-		})
-
-		// The floor: what a parse alone peaks at, decoding nothing. No consumer
-		// can do better than this while the parser holds what it holds.
-		parseOnly := peakLive(func() {
-			f, err := parser.ParseBytes(w.Data)
-			require.NoError(t, err)
-			runtime.KeepAlive(f)
-		})
-
-		t.Logf("%-17s %8dK %10dK %10dK %7.1fx  parse-only floor %dK",
-			w.Name, len(w.Data)/1024, classic/1024, progressive/1024,
-			float64(classic)/float64(progressive), parseOnly/1024)
 	}
 }

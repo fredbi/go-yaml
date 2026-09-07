@@ -28,7 +28,7 @@ import (
 // toJSONViaValues is the converter ToJSON was until it began writing the
 // document as the parser finished it: unmarshal into an ordered map, marshal
 // that back out. It is kept here as the oracle the folding converter is held
-// to, the way internal/refparser is kept for the parser.
+// to.
 func toJSONViaValues(src []byte) ([]byte, error) {
 	var v any
 	if err := codec.UnmarshalWithOptions(src, &v, codec.UseOrderedMap()); err != nil {

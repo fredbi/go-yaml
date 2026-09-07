@@ -1760,13 +1760,8 @@ func (n *DirectiveNode) MarshalYAML() ([]byte, error) {
 // TagNode type of tag node
 type TagNode struct {
 	BaseNode
-	// Directive is the "%TAG !!" line a tag written with the secondary handle
-	// stood under. Only [github.com/go-openapi/go-yaml/internal/refparser]
-	// fills it. The parser leaves it nil and expands every handle into URI
-	// instead.
-	Directive *DirectiveNode
-	Start     *token.Token
-	Value     Node
+	Start *token.Token
+	Value Node
 	// URI is the tag this node carries, expanded from the shorthand the
 	// document wrote: "!!int" and "!<tag:yaml.org,2002:int>" both give
 	// tag:yaml.org,2002:int, and "!thing" gives "!thing", since the primary

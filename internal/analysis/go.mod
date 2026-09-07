@@ -10,5 +10,6 @@ replace github.com/go-openapi/go-yaml => ../..
 
 require (
 	github.com/go-openapi/go-yaml v0.0.0-00010101000000-000000000000
+	github.com/go-openapi/testify/v2 v2.6.1
 	go.yaml.in/yaml/v3 v3.0.5
 )

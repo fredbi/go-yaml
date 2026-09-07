@@ -96,11 +96,10 @@ func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 
 // TestAFullScanRecyclesNothing checks the parser's own use of the arena.
 //
-// labparser pins before it reads a token and never gives the pin back, so the
+// The parser pins before it reads a token and never gives the pin back, so the
 // tail may be set as the descent goes and nothing is reclaimed. Every chunk
-// stays live, which is what makes the trees identical to the parser that holds
-// a slice of everything -- and what TestLabParserMatchesProduction then proves
-// over 18,589 documents.
+// stays live, which is what makes the trees identical to the parser that held a
+// slice of every token before the tape replaced it.
 func TestAFullScanRecyclesNothing(t *testing.T) {
 	all := readCorpus(t, corpusDir)
 
