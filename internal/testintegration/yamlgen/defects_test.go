@@ -49,56 +49,6 @@ func renderOnce(t *testing.T, src string) string {
 	return file.String()
 }
 
-// TestDefectAMappingKeyWrittenEmptyIsRefused: `: 2` rather than `k: 2` is
-// refused in several positions, and YAML 1.2 accepts every one of them.
-//
-// Three read and three do not, with two different messages, so this is more
-// than one fault behind one shape. Both failing messages name the *earlier*
-// line, and in each case that line's value carries properties or is written
-// empty.
-func TestDefectAMappingKeyWrittenEmptyIsRefused(t *testing.T) {
-	t.Run("these read", func(t *testing.T) {
-		for _, src := range []string{
-			": a\n",
-			"a: 1\n: 2\n",
-			"- k: 1\n  : 2\n",
-			"a: 1\n: &a1 !!null\n",
-		} {
-			wellFormed(t, src)
-
-			var got any
-			assert.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		}
-	})
-
-	for _, tc := range []struct{ name, src, says string }{
-		{
-			name: "after an entry with no value",
-			src:  "a:\n: 2\n",
-			says: "unexpected scalar value",
-		},
-		{
-			name: "after an entry whose value is only an anchor",
-			src:  "k: &a1\n: 1\n",
-			says: "mapping value is not allowed in this context",
-		},
-		{
-			name: "after an entry whose value carries a tag",
-			src:  "false: !!bool false\n: &a1 !!null\n",
-			says: "mapping value is not allowed in this context",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			wellFormed(t, tc.src)
-
-			var got any
-			err := yaml.Unmarshal([]byte(tc.src), &got)
-			require.Error(t, err, "today: %q is refused", tc.src)
-			assert.Contains(t, err.Error(), tc.says)
-		})
-	}
-}
-
 // The three defects Style.ExplicitKeys found on its first deep run.
 //
 // A mapping entry has two spellings -- "key: value" and "? key" over
@@ -176,52 +126,6 @@ func TestDefectABlankLineBeforeASequenceEntryDoesNotSettle(t *testing.T) {
 			assert.Equal(t, want, got)
 			text = renderOnce(t, text)
 		}
-	})
-}
-
-// TestDefectABlockScalarInASequenceSwallowsAnEmptyKey: a block scalar written
-// as a nested sequence entry, with an empty key after it, renders to text the
-// parser refuses.
-//
-// "a:" over " - |1-" over "   " over ":" renders to "a:" over "- |2-    :",
-// which reports `invalid header option: "2-    :"` on the way back in. The
-// content and the empty key's ":" are both written onto the header line, so a
-// valid document renders to one that is not YAML at all.
-//
-// The empty key is what does it: "b: 1" in its place renders correctly, at the
-// same column. Nothing else is needed -- the anchor and the whitespace-only
-// content each drop out and it still happens, and "|1" chomping the break goes
-// the same way as "|1-".
-//
-// Found on 2026-09-12 at 30,000 draws of TestRenderWritesValidYAML, on the
-// document "&a3 !!map" over `"": &a2` over " - !!null" over " - &a1 |1-" over
-// "   " over ":".
-func TestDefectABlockScalarInASequenceSwallowsAnEmptyKey(t *testing.T) {
-	for src, renders := range map[string]string{
-		"a:\n - &a1 |1-\n   \n:\n":  "a:\n- &a1 |2-    :\n",
-		"a:\n - |1-\n   \n:\n":      "a:\n- |2-    :\n",
-		"a:\n - &a1 |1-\n   x\n:\n": "a:\n- &a1 |2-    x:\n",
-		"a:\n - &a1 |1\n   \n:\n":   "a:\n- &a1 |2    :\n",
-	} {
-		wellFormed(t, src)
-
-		once := renderOnce(t, src)
-		assert.Equal(t, renders, once, "today: %q writes its content onto the header line", src)
-
-		_, err := parser.ParseBytes([]byte(once), parser.WithComments())
-		require.Errorf(t, err, "today: %q renders to text the parser refuses", src)
-		assert.Contains(t, err.Error(), "invalid header option")
-	}
-
-	t.Run("an ordinary key after it renders correctly", func(t *testing.T) {
-		const src = "a:\n - &a1 |1-\n   \nb: 1\n"
-		wellFormed(t, src)
-
-		once := renderOnce(t, src)
-		assert.Equal(t, "a:\n- &a1 |2-\n   \nb: 1\n", once)
-
-		_, err := parser.ParseBytes([]byte(once), parser.WithComments())
-		require.NoError(t, err)
 	})
 }
 

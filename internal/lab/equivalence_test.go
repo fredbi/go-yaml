@@ -127,6 +127,14 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "a node carries at most one tag (6.9)", true
 	case strings.Contains(msg, "value is not allowed in this context") && holdsANodeAtItsSequencesIndent(want):
 		return "a block sequence entry's node is indented past the '-' (8.2.1)", true
+	case strings.Contains(msg, "non-map value is specified") && keysOnAnEarlierLine(want):
+		// refparser reads a node written above a ':' as that ':'s implicit
+		// key, which 7.4.2 does not allow, and the document is then two nodes
+		// at one level. "!? Null" over ": &a2 \"\\n\"" is refused by
+		// grammar.NewRecognizer, by the reference parser, by libfyaml 1.0.0b1
+		// and by go.yaml.in/yaml/v3 v3.0.5, and the shipped parser joined them
+		// on 2026-09-12.
+		return "an implicit key stands on the line its \":\" does (7.4.2)", true
 	default:
 		return "", false
 	}
@@ -481,6 +489,16 @@ func acceptsOnPurpose(err error, got *ast.File) (string, bool) {
 		return "an anchor with no node is a node (7.1)", true
 	}
 
+	if strings.Contains(err.Error(), "mapping value is not allowed in this context") && holdsAnEmptyKey(got) {
+		// An empty key is the null node and YAML 1.2 admits one anywhere a key
+		// may stand. refparser takes whatever precedes the ':' as its key, so
+		// an entry whose value carries an anchor or is written empty leaves it
+		// with a key it cannot place: "&a a: &b b" over ": *a" is the suite's
+		// own out.yaml for aliases-in-explicit-block-mapping and refparser
+		// refuses it. The shipped parser joined the field on 2026-09-12.
+		return "a mapping key written empty is the null node (7.2)", true
+	}
+
 	if strings.Contains(err.Error(), "unexpected directive value") && countDirectives(got) > 1 {
 		// 6.8 puts no limit on how many directives a document may carry, and a
 		// "%YAML" beside a "%TAG" is the ordinary prelude. refparser refuses
@@ -642,6 +660,10 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 		t.Skipf("nested on purpose: %s", why)
 	}
 
+	if why, ok := keysOnAnEarlierLineOnPurpose(want, got); ok {
+		t.Skipf("keyed on purpose: %s", why)
+	}
+
 	if why, ok := readsATaggedScalarAsText(wantTree, gotTree); ok {
 		t.Skipf("resolved on purpose: %s", why)
 	}
@@ -657,8 +679,8 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 	require.Equal(t, wantTree, gotTree, "the two parsers build different trees")
 }
 
-// nestsDifferentlyOnPurpose reports whether refparser swallowed the entries
-// after a tag or an anchor that was written with nothing following it.
+// nestsDifferentlyOnPurpose reports whether refparser nested a block collection
+// that stands at the indentation of the one it sits in.
 //
 // "- !<tag:yaml.org,2002:null>" over "- 3.5" is a sequence of two entries:
 // 8.2.1 needs a nested block collection indented further than the collection it
@@ -671,6 +693,14 @@ func assertSameParse(t *testing.T, text string, mode refparser.Mode) {
 // it: "? a" over ": &a1" over "? b" over ": &a2" is a mapping of two entries,
 // and refparser reads the second into the node &a2 names. 7.1 puts no content
 // under an anchor that has none.
+//
+// An entry's value goes the same way, with no property in between. The suite's
+// aliases-in-explicit-block-mapping -- "? &a a" over ": &b b" over ": *a" -- is
+// two entries, and its own out.yaml writes them flat as "&a a: &b b" over
+// ": *a". refparser reads the anchored value as the key of a mapping nested
+// under the first entry, which is keyBefore taking a grouped candidate for the
+// key of a ":" on a later line; the shipped parser stopped doing that on
+// 2026-09-12.
 //
 // One direction only: the allowance needs refparser to nest and the shipped
 // parser not to. The shipped parser has the same fault for a local tag --
@@ -724,6 +754,11 @@ func swallowsUnder(n ast.Node, enclosing int) bool {
 			enclosing = col
 		}
 		for _, v := range node.Values {
+			if col, block := blockMappingColumn(v); block && col <= enclosing {
+				// As under an entry's value: a block mapping inside a sequence
+				// entry begins past the "-" that opens it.
+				return true
+			}
 			if swallowsUnder(v, enclosing) {
 				return true
 			}
@@ -741,11 +776,104 @@ func swallowsUnder(n ast.Node, enclosing int) bool {
 		if col, block := blockCollectionColumn(node); block {
 			enclosing = col
 		}
+		if col, block := blockMappingColumn(node.Value); block && col <= enclosing {
+			// A nested block *mapping* has to be written further in than the
+			// entry holding it -- 8.2.2 -- so one at the entry's own column is
+			// the swallow. A sequence is not: 8.2.1 lets a "-" stand at its
+			// key's column, which is how "a:" over "- 1" reads.
+			return true
+		}
 
 		return swallowsUnder(node.Value, enclosing)
 	}
 
 	return false
+}
+
+// holdsAnEmptyKey reports whether f has a mapping entry whose key is the null
+// node the document did not write.
+func holdsAnEmptyKey(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			entry, ok := n.(*ast.MappingValueNode)
+			if !ok || entry.Key == nil {
+				return
+			}
+			if tk := entry.Key.GetToken(); tk != nil && tk.Type == token.ImplicitNullType {
+				found = true
+			}
+		}), doc)
+	}
+
+	return found
+}
+
+// keysOnAnEarlierLineOnPurpose reports whether refparser made a node written on
+// an earlier line the implicit key of a ":".
+//
+// An implicit key and its ":" stand on one line -- 7.4.2 and the note under
+// 8.2.2 -- so a node above the ":" is not its key. "&a1" over ": 1" is an
+// anchor naming the block mapping under it, the same reading "!!map" over
+// "b: 1" gets, and the entry's key is absent. libfyaml 1.0.0b1 reads
+// {"null": 1} for it, which is what the shipped parser now builds; refparser
+// makes the anchored empty node the key and reaches the same value by another
+// tree.
+//
+// The shipped parser did the same until 2026-09-12, when keyBefore stopped
+// taking any grouped candidate for the key of a ":" on a later line.
+//
+// One direction only, as with nestsDifferentlyOnPurpose: the allowance needs
+// refparser to key that way and the shipped parser not to.
+func keysOnAnEarlierLineOnPurpose(want, got *ast.File) (string, bool) {
+	if !keysOnAnEarlierLine(want) || keysOnAnEarlierLine(got) {
+		return "", false
+	}
+
+	return "an implicit key stands on the line its \":\" does (7.4.2)", true
+}
+
+func keysOnAnEarlierLine(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			entry, ok := n.(*ast.MappingValueNode)
+			if !ok || entry.Key == nil {
+				return
+			}
+			colon, key := entry.GetToken(), entry.Key.GetToken()
+			if colon == nil || key == nil {
+				return
+			}
+			if _, explicit := entry.Key.(*ast.MappingKeyNode); explicit {
+				// "? a" over ": 1" writes the two on separate lines by design.
+				return
+			}
+			if int(key.EndLine()) < int(colon.Position.Line) {
+				found = true
+			}
+		}), doc)
+	}
+
+	return found
+}
+
+// blockMappingColumn is blockCollectionColumn for a block mapping alone.
+func blockMappingColumn(n ast.Node) (int, bool) {
+	switch n.(type) {
+	case *ast.MappingNode, *ast.MappingValueNode:
+		return blockCollectionColumn(n)
+	default:
+		return 0, false
+	}
 }
 
 // blockCollectionColumn returns the column a block collection begins at.

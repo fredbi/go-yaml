@@ -1665,3 +1665,98 @@ func TestFixedATagOnItsOwnLineTakesTheBlockScalarUnderIt(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedAMappingKeyWrittenEmptyIsRead: an empty key reads in every position,
+// and what precedes it no longer decides.
+//
+// Three shapes were refused with two messages, both naming the line above the
+// key: "a:" over ": 2" reported `unexpected scalar value`, and "k: &a1" over
+// ": 1" and "false: !!bool false" over ": &a1 !!null" both reported
+// `mapping value is not allowed in this context`.
+//
+// keyWindow.hasNoKey took any candidate the grouping had already made
+// something of as the key of the ':' that followed, whatever line it stood on.
+// So the first entry's own key group, or an anchored value, became the key of
+// the ':' below it. An implicit key stands on the line its ':' does -- 7.4.2 --
+// so the line test applies to a grouped candidate too. An explicit key is the
+// exception the rule needs: "? a" over ": 2" writes the two on separate lines
+// by design, and it is told apart by opening with a "?".
+func TestFixedAMappingKeyWrittenEmptyIsRead(t *testing.T) {
+	t.Run("every position", func(t *testing.T) {
+		for src, want := range map[string]any{
+			// The three that were refused.
+			"a:\n: 2\n":                           map[string]any{"a": nil, "null": uint64(2)},
+			"k: &a1\n: 1\n":                       map[string]any{"k": nil, "null": uint64(1)},
+			"false: !!bool false\n: &a1 !!null\n": map[string]any{"false": false, "null": nil},
+			// The three that always read.
+			": a\n":           map[string]any{"null": "a"},
+			"a: 1\n: 2\n":     map[string]any{"a": uint64(1), "null": uint64(2)},
+			"- k: 1\n  : 2\n": []any{map[string]any{"k": uint64(1), "null": uint64(2)}},
+			// An anchored value with content, and nested.
+			"k: &a1 x\n: 1\n":   map[string]any{"k": "x", "null": uint64(1)},
+			"a:\n: 2\nb: 3\n":   map[string]any{"a": nil, "null": uint64(2), "b": uint64(3)},
+			"x:\n  a:\n  : 2\n": map[string]any{"x": map[string]any{"a": nil, "null": uint64(2)}},
+			"k: |\n  x\n: 1\n":  map[string]any{"k": "x\n", "null": uint64(1)},
+		} {
+			wellFormed(t, src)
+
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("an explicit key still keys the ':' below it", func(t *testing.T) {
+		for src, want := range map[string]any{
+			"? a\n: 2\n":           map[string]any{"a": uint64(2)},
+			"? a\n: 2\n? b\n: 3\n": map[string]any{"a": uint64(2), "b": uint64(3)},
+			"? [a]\n: 1\n":         map[string]any{"[a]": uint64(1)},
+			// A key on the ':' line is still the key, grouped or not.
+			"!!str foo: 1\n": map[string]any{"foo": uint64(1)},
+			"&a1 x: 1\n":     map[string]any{"x": uint64(1)},
+			// Inside a flow collection a ':' may stand on its own line.
+			"{a: 1, : 2}\n": map[string]any{"a": uint64(1), "null": uint64(2)},
+			"{: 1}\n":       map[string]any{"null": uint64(1)},
+		} {
+			var got any
+			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equal(t, want, got, "%q", src)
+		}
+	})
+
+	t.Run("and a node above a ':' is no longer taken as its key", func(t *testing.T) {
+		// The laxity that went with it. grammar.NewRecognizer, the reference
+		// parser, libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 v3.0.5 all refuse
+		// these; this library read them.
+		for _, src := range []string{"a Null\n: 1\n", "!x Null\n: 1\n", "!!str Null\n: 1\n"} {
+			var got any
+			assert.Errorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+		}
+	})
+}
+
+// TestFixedABlockScalarInASequenceKeepsAnEmptyKeyApart: the same fix, seen
+// through the renderer.
+//
+// "a:" over " - |1-" over "   " over ":" rendered to "a:" over "- |2-    :",
+// which reported `invalid header option` on the way back in -- a valid document
+// rendering to one that is not YAML. The empty key was being read as part of
+// the block scalar's entry, so the renderer wrote the two onto one line.
+func TestFixedABlockScalarInASequenceKeepsAnEmptyKeyApart(t *testing.T) {
+	for src, renders := range map[string]string{
+		"a:\n - &a1 |1-\n   \n:\n":    "a:\n- &a1 |2-\n   \n:\n",
+		"a:\n - |1-\n   \n:\n":        "a:\n- |2-\n   \n:\n",
+		"a:\n - &a1 |1-\n   x\n:\n":   "a:\n- &a1 |2-\n   x\n:\n",
+		"a:\n - &a1 |1\n   \n:\n":     "a:\n- &a1 |2\n   \n:\n",
+		"a:\n - &a1 |1-\n   \nb: 1\n": "a:\n- &a1 |2-\n   \nb: 1\n",
+	} {
+		wellFormed(t, src)
+
+		once := renderOnce(t, src)
+		assert.Equal(t, renders, once, "%q", src)
+
+		reread, err := parser.ParseBytes([]byte(once), parser.WithComments())
+		require.NoErrorf(t, err, "%q: the rendering must parse", src)
+		assert.Equal(t, once, reread.String(), "%q: and settle", src)
+	}
+}

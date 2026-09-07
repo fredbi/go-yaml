@@ -901,10 +901,24 @@ func (w *keyWindow) hasNoKey(last int, tk *tapeToken, inFlow bool) bool {
 	if precedesAbsentKey(candidate) {
 		return true
 	}
-	if inFlow || candidate.Group != nil {
+	if inFlow {
+		// Inside a flow collection a ':' is separation like any other and may
+		// stand on a line of its own, so whatever precedes it is its key.
+		return false
+	}
+	if candidate.Type() == token.MappingKeyType {
+		// An explicit key writes its "?" and its ':' on two lines by design --
+		// 8.1 -- so it is this ':'s key wherever the ':' stands.
 		return false
 	}
 
+	// Everything else is an implicit key and has to end on the ':'s own line,
+	// whether the grouping has already made something of it or not. Taking any
+	// group as the key skipped this test: "a:" over ": 2" read the first
+	// entry's own key group as the second entry's key and reported "unexpected
+	// scalar value", and "k: &a1 x" over ": 1" took the anchor group the same
+	// way and reported "mapping value is not allowed in this context", both
+	// naming the line above the empty key.
 	return keyEndLine(candidate) != tk.Line()
 }
 

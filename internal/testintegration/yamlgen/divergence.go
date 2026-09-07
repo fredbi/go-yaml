@@ -208,29 +208,6 @@ var Ledger = []Divergence{
 		Match:    writesAPropertiedRootBlockScalarAfterASuffix,
 	},
 	{
-		Name: "parse/a-mapping-key-written-empty-is-refused",
-		Pin:  "TestDefectAMappingKeyWrittenEmptyIsRefused",
-		Reason: "A mapping entry whose key is written empty -- `: 2` rather than `k: 2` -- is " +
-			"refused in several positions. YAML 1.2 accepts every one of them and the grammar " +
-			"agrees.\n\n" +
-			"Three read correctly, which is what makes this a defect rather than a library that " +
-			"does not implement empty keys: `: a` on its own, `a: 1` then `: 2`, and " +
-			"`- k: 1` over `  : 2`. The last two were refused before 2026-09-10 and are fixed.\n\n" +
-			"Three do not, with two different messages, so there is more than one fault behind " +
-			"the shape. `a:` then `: 2` reports `unexpected scalar value`. `k: &a1` then `: 1` " +
-			"and `false: !!bool false` then `: &a1 !!null` both report `mapping value is not " +
-			"allowed in this context`, and both name the *earlier* line -- so what precedes the " +
-			"empty key matters, and an entry whose value carries properties or is written empty " +
-			"is what precedes it in each.\n\n" +
-			"The predicate asks only whether an empty key is written at all. Narrowing it would " +
-			"mean reproducing the parser's property handling inside a predicate, and one that " +
-			"tracked the defect that closely would drift from it; the pinned cases in " +
-			"defects_test.go carry the precision. It reports fewer divergences than draws.\n\n" +
-			"It claims every property, because a document that does not parse answers none.",
-		Property: Parses | Decode | Render | Settle | CommentsKept,
-		Match:    writesAnEmptyKey,
-	},
-	{
 		Name: "render/a-blank-line-before-a-comment-survives-one-rendering-and-not-the-next",
 		Pin:  "TestDefectABlankLineBeforeACommentDoesNotSettle",
 		Reason: "A blank line written before a comment is kept by the first rendering and dropped by " +
@@ -274,26 +251,6 @@ var Ledger = []Divergence{
 			"The value reads correctly in every case, so this claims CommentsKept alone.",
 		Property: CommentsKept,
 		Match:    writesACommentOnAnExplicitColonLine,
-	},
-	{
-		Name: "render/a-block-scalar-in-a-sequence-swallows-an-empty-key",
-		Pin:  "TestDefectABlockScalarInASequenceSwallowsAnEmptyKey",
-		Reason: "A block scalar written as a nested sequence entry, with an empty key after it, " +
-			"renders to text the parser refuses. `a:` over ` - |1-` over `   ` over `:` renders to " +
-			"`a:` over `- |2-    :`, and reading that back reports " +
-			"`invalid header option: \"2-    :\"`. The scalar's content and the empty key's `:` are " +
-			"both written onto the header line, so a valid document renders to one that is not " +
-			"YAML.\n\n" +
-			"The empty key is what does it: `b: 1` in its place renders correctly, at the same " +
-			"column. Nothing else is needed -- the anchor and the whitespace-only content each drop " +
-			"out and it still happens, and `|1` chomping the break goes the same way as `|1-`.\n\n" +
-			"It claims RenderValid and Settle: the text it writes does not parse, so nothing can be " +
-			"read from it or rendered again. The first read is correct.\n\n" +
-			"Found on 2026-09-12 at 30,000 draws of TestRenderWritesValidYAML.\n\n" +
-			"The predicate is wider than the defect: it asks that the document hold an empty key " +
-			"and a block scalar inside a sequence, not that the two land in that order.",
-		Property: RenderValid | Settle,
-		Match:    writesABlockScalarBesideAnEmptyKey,
 	},
 }
 
@@ -461,89 +418,6 @@ func goesOnItsOwnLine(v Value, st Style) bool {
 	default:
 		return false
 	}
-}
-
-// writesAnEmptyKey reports whether emitting v in st writes a mapping key with
-// no text at all.
-//
-// Only a bare Null reaches the document as nothing, and only when the style
-// spells null as nothing. A tag or an anchor in front of one writes itself.
-func writesAnEmptyKey(v Value, st Style) bool {
-	return st.NullSpelling == "" && holdsAnEmptyKey(v)
-}
-
-func holdsAnEmptyKey(v Value) bool {
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			if isNullNode(p.Key) || holdsAnEmptyKey(p.Val) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsAnEmptyKey)
-	case Anchored:
-		return holdsAnEmptyKey(n.V)
-	case Tagged:
-		return holdsAnEmptyKey(n.V)
-	}
-
-	return false
-}
-
-// writesABlockScalarBesideAnEmptyKey reports whether st writes both an empty
-// key and a block scalar inside a sequence.
-func writesABlockScalarBesideAnEmptyKey(v Value, st Style) bool {
-	return writesAnEmptyKey(v, st) && holdsABlockScalarInASequence(v, st)
-}
-
-func holdsABlockScalarInASequence(v Value, st Style) bool {
-	switch n := v.(type) {
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			if s, text := unwrapProperties(item).(Str); text && blockScalarIn(s.V, st) {
-				return true
-			}
-
-			return holdsABlockScalarInASequence(item, st)
-		})
-	case Map:
-		for _, p := range n.Pairs {
-			if holdsABlockScalarInASequence(p.Key, st) || holdsABlockScalarInASequence(p.Val, st) {
-				return true
-			}
-		}
-	case Anchored:
-		return holdsABlockScalarInASequence(n.V, st)
-	case Tagged:
-		return holdsABlockScalarInASequence(n.V, st)
-	case Alias:
-		return holdsABlockScalarInASequence(n.V, st)
-	}
-
-	return false
-}
-
-// unwrapProperties reaches the node an anchor or a tag stands on.
-func unwrapProperties(v Value) Value {
-	for {
-		switch n := v.(type) {
-		case Anchored:
-			v = n.V
-		case Tagged:
-			v = n.V
-		default:
-			return v
-		}
-	}
-}
-
-// isNullNode reports whether v writes nothing when the style spells null as
-// nothing.
-func isNullNode(v Value) bool {
-	_, empty := v.(Null)
-
-	return empty
 }
 
 // Known returns the ledger entry describing this pairing for the given
