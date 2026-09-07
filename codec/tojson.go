@@ -47,7 +47,7 @@ func ToJSON(src []byte, opts ...parser.Option) ([]byte, error) {
 	// source's length is one allocation that holds all of it. Growing from
 	// nothing cost more than the text itself: appendJSONString was a quarter of
 	// what the conversion allocated, almost all of it doubling.
-	w := &jsonWriter{out: make([]byte, 0, len(src))}
+	w := &jsonWriter{out: make([]byte, 0, len(src)), firstEnd: -1}
 
 	// The caller's options come first, so neither of the two below can be
 	// turned off by one of them.
@@ -59,7 +59,9 @@ func ToJSON(src []byte, opts ...parser.Option) ([]byte, error) {
 	if w.err != nil {
 		return nil, w.err
 	}
-	if w.documents == 0 {
+	if w.firstEnd < 0 {
+		// The first document holds no node: an empty stream, or a document
+		// written as nothing between its markers. Both read as a null.
 		return []byte("null"), nil
 	}
 
@@ -92,10 +94,14 @@ func isMergeKey(n ast.Node) bool {
 // the end of it, which is the one thing a converter cannot write as it goes.
 type jsonWriter struct {
 	out []byte
-	// documents counts the document bodies seen, and firstEnd is where the
-	// first one ended in out. Later documents are converted and thrown away.
-	documents int
-	firstEnd  int
+	// firstEnd is where the first document ended in out, and -1 while that
+	// document has written nothing. Later documents are converted and thrown
+	// away.
+	firstEnd int
+	// firstDoc is which document of the parse ToJSON converts. A "%YAML" or
+	// "%TAG" line is a document of its own in the File's Docs, ahead of the one
+	// it applies to, so the document to convert is the one past the directives.
+	firstDoc int
 	// named holds what each anchor of the document wrote, for an alias to write
 	// again. It is emptied at each document, since an alias names an anchor of
 	// its own document.
@@ -162,7 +168,18 @@ func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
 	if at.Depth == 0 && at.In == parser.KindNone {
 		if _, isDirective := node.(*ast.DirectiveNode); isDirective {
 			// A "%YAML" or "%TAG" line opens a document of its own, ahead of
-			// the one it applies to. It holds no value.
+			// the one it applies to. It holds no value, so nothing goes over --
+			// and the document to convert is the next one along.
+			//
+			// firstEnd guards it. A directive line names a property where the
+			// name is not a directive's -- "%&AML 1.2" hands over the "&AML" as
+			// an anchor first and the directive after it, both in one document
+			// -- and a directive arriving once the document has written
+			// something is not opening the document to convert.
+			if at.Document == w.firstDoc && w.firstEnd < 0 {
+				w.firstDoc = at.Document + 1
+			}
+
 			return false
 		}
 		w.openDocument()
@@ -248,7 +265,7 @@ func (w *jsonWriter) Leave(node ast.Node, at parser.Step) {
 		w.closeAnchor(n)
 	}
 
-	if at.Depth == 0 && at.In == parser.KindNone && w.documents == 1 {
+	if at.Depth == 0 && at.In == parser.KindNone && at.Document == w.firstDoc {
 		w.firstEnd = len(w.out)
 	}
 }
@@ -283,8 +300,12 @@ func (w *jsonWriter) closeKey(at parser.Step) {
 // named is forgotten here. The first document's text is what ToJSON returns;
 // the rest are written after it and cut off, so that an alias naming nothing is
 // still refused wherever it stands.
+//
+// Which document a node belongs to is [parser.Step]'s to say, not this
+// counter's: a document written as nothing between its markers hands over no
+// node at all, so counting the bodies seen here made "---" over "---" over
+// "b: 2" convert the second document as though it were the first.
 func (w *jsonWriter) openDocument() {
-	w.documents++
 	clear(w.named)
 	w.maps = w.maps[:0]
 	w.open = w.open[:0]

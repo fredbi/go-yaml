@@ -435,6 +435,7 @@ func (p *Parser) parse(ctx context) (*ast.File, error) {
 	for {
 		// Reading only as far as the descent has asked is what lets the tape be
 		// filled again behind it.
+		p.openWalkDocument(len(file.Docs))
 		doc, ok, err := p.parseDocument(ctx)
 		if err != nil {
 			return nil, err

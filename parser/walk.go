@@ -64,6 +64,20 @@ type Step struct {
 	Key bool
 	// At is where the first token of what is handed over stands.
 	At token.Position
+	// Document indexes the document this node belongs to in the Docs of the
+	// [ast.File] the walk returns. A walk hands every document's nodes over in
+	// one run, and a stream's documents are independent -- an anchor and a
+	// "%YAML" directive are both scoped to one -- so this tells them apart.
+	//
+	// A document written as nothing between its markers hands over no node at
+	// all, and the count moves past it anyway: "---" over "---" over "b: 2"
+	// hands over one mapping, at Document 1.
+	//
+	// Each "%YAML" or "%TAG" line is a document of its own, ahead of the one it
+	// applies to, so "%YAML 1.2" over "---" over "a: 1" puts the mapping at 1.
+	// A caller that wants the first document holding a value has to step past
+	// the directives itself.
+	Document int
 }
 
 // Visitor is handed each part of a document as the parse reaches it.
@@ -105,6 +119,8 @@ type walkState struct {
 	// block scalar reads its content through parseToken, and the content is
 	// part of the literal rather than a value of its own.
 	quiet int
+	// document is which document of the stream is being walked, counted from 0.
+	document int
 	// err is the first thing the walk refused.
 	err error
 }
@@ -192,6 +208,19 @@ func (p *Parser) closeAnchor(ctx context) {
 	}
 	p.tokens.Save(int(from), to)
 	p.tokens.Unpin()
+}
+
+// openWalkDocument records which document of the stream the walk is about to
+// read, so [Step.Document] tells the nodes of one from the nodes of the next.
+//
+// It is counted here rather than at the first node of a document, because an
+// empty document has no node to count: "---" over "---" over "b: 2" hands over
+// only the mapping, and it belongs to document 1.
+func (p *Parser) openWalkDocument(n int) {
+	if p.walk == nil {
+		return
+	}
+	p.walk.document = n
 }
 
 // releaseDocument gives back what the anchors of a document saved.
@@ -346,7 +375,7 @@ func (p *Parser) count() {
 
 // step is where the walk stands, for a node about to be handed over.
 func (p *Parser) step(node ast.Node) Step {
-	at := Step{Depth: len(p.walk.in)}
+	at := Step{Depth: len(p.walk.in), Document: p.walk.document}
 	if n := len(p.walk.in); n > 0 {
 		at.In, at.Index = p.walk.in[n-1], p.walk.index[n-1]
 	}
