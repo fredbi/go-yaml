@@ -89,6 +89,14 @@ func TestLabParserMatchesProduction(t *testing.T) {
 // stops with "value is not allowed in this context". It refuses "!!int -"
 // identically, and so does refparser, so only the long spellings reach this.
 //
+// A block sequence entry's node is s-l+block-indented(n, block-in), so it sits
+// past the "-" it belongs to. refparser reads "- !foo" over "k: 1" as an entry
+// whose content is that mapping, with the "k" in the "-"'s own column; the
+// shipped parser stops with "value is not allowed in this context". The tag is
+// what lets it through -- "- &a1" over "k: 1" is refused by both. libfyaml
+// 1.0.0b1 and go.yaml.in/yaml/v3 both say "did not find expected '-'
+// indicator", and the reference parser ends the stream without the mapping.
+//
 // Matching the reason rather than the document, because the fuzz seeds hold
 // many shapes of each and they are one finding apiece. A duplicate the shipped
 // parser reports wrongly would still be caught: yamlcorpus holds the key rules,
@@ -117,6 +125,8 @@ func divergesOnPurpose(err error, want *ast.File) (string, bool) {
 		return "a block collection begins on the line below its properties (8.2.1)", true
 	case strings.Contains(msg, "flow mapping end token") && holdsTwoTagsOnOneNode(want):
 		return "a node carries at most one tag (6.9)", true
+	case strings.Contains(msg, "value is not allowed in this context") && holdsANodeAtItsSequencesIndent(want):
+		return "a block sequence entry's node is indented past the '-' (8.2.1)", true
 	default:
 		return "", false
 	}
@@ -296,6 +306,86 @@ func holdsCollectionOnItsTagsLine(f *ast.File) bool {
 
 func sameLine(a, b *token.Token) bool {
 	return a != nil && b != nil && a.Position.Line == b.Position.Line
+}
+
+// holdsANodeAtItsSequencesIndent reports whether f has a block sequence entry
+// whose node begins on a later line and no further in than the "-" it hangs
+// from.
+//
+// The properties are walked through first: refparser puts the entry's tag and
+// anchor between the "-" and the node they decorate, and the indentation the
+// rule is about is the node's.
+func holdsANodeAtItsSequencesIndent(f *ast.File) bool {
+	if f == nil {
+		return false
+	}
+
+	found := false
+	for _, doc := range f.Docs {
+		ast.Walk(visitFunc(func(n ast.Node) {
+			seq, ok := n.(*ast.SequenceNode)
+			if !ok || seq.IsFlowStyle || seq.Start == nil {
+				return
+			}
+
+			for _, v := range seq.Values {
+				at := startsAt(withoutProperties(v))
+				if at == nil {
+					continue
+				}
+
+				found = found || (at.Position.Line > seq.Start.Position.Line &&
+					at.Position.Column <= seq.Start.Position.Column)
+			}
+		}), doc)
+	}
+
+	return found
+}
+
+// startsAt returns the token n begins with.
+//
+// GetToken answers with the token a node is built from, which for a mapping is
+// the ':' of its first entry and not the key in front of it -- 16 rather than 5
+// for the "k" of `- !foo` over `    "k": v`. The column is the whole question
+// here, so the key is what this returns.
+func startsAt(n ast.Node) *token.Token {
+	switch node := n.(type) {
+	case *ast.MappingNode:
+		if len(node.Values) == 0 {
+			return node.Start
+		}
+
+		return startsAt(node.Values[0])
+	case *ast.MappingValueNode:
+		if node.Key == nil {
+			return node.Start
+		}
+
+		return startsAt(node.Key)
+	case *ast.SequenceNode:
+		return node.Start
+	default:
+		if n == nil {
+			return nil
+		}
+
+		return n.GetToken()
+	}
+}
+
+// withoutProperties returns the node the tags and anchors on n stand on.
+func withoutProperties(n ast.Node) ast.Node {
+	for {
+		switch node := n.(type) {
+		case *ast.TagNode:
+			n = node.Value
+		case *ast.AnchorNode:
+			n = node.Value
+		default:
+			return n
+		}
+	}
 }
 
 // holdsTaggedAlias reports whether f carries a tag standing on an alias.
