@@ -299,8 +299,23 @@ Actions below.
 12. 📝 **Multi-document streams.** `Emit` takes one `Value` and writes at most one `---`. Cross-document
     aliases and a `%TAG` handle going out of scope both land with them.
 
-13. 📝 **Escapes in flow context.** `filling` in `grammar/reach_test.go` already holds the documents — 40 of
-    the 44 buckets the Test Suite leaves open. They belong in the generator.
+13. ✅ **Escapes in flow context** (2026-09-13). `Style.Escaping` writes a double-quoted scalar five ways:
+    the minimum, every character 5.7 names as that name (`\0`, `\a`, `\/`, `\_`, `\L`, and the space as
+    `\ `), `\xNN`, `\uNNNN` and `\UNNNNNNNN`. A form that cannot hold a character falls back to the
+    minimum, so every mode writes a document that reads back as the same string, and each of the
+    twenty-three escapes was read into a Go string before the axis was built.
+    - **Matched buckets 544 → 561.** That is what the axis was for: the Test Suite never writes an escape
+      inside a flow collection or a flow key, and 40 of the 44 buckets it leaves open are that one
+      omission — the hole `filling` had to close by hand.
+    - 📌 **The mutation hunt gains two parser complaints with it**, since there are now escapes in the
+      corpus to corrupt: `found a character that is not a hexadecimal digit in escaped N-bit character`
+      and `not enough length for escaped N-bit character`. Both were reachable only through a hand-written
+      `Refusals` entry before. It also reached an anchor with no node inside a flow collection, through a
+      mutant that ran an anchor name into the number after it — `&a2-4.4e-605`, a well-formed name — which
+      wanted an `internal/lab` allowance for `0b321d7`.
+    - 📌 The escape form is marked **only where it reached a character**. A string of ordinary letters
+      under `EscapeNamed` writes no named escape, and claiming the feature would say the document holds
+      something it does not.
 
 ### Area 4 — the properties
 
@@ -389,34 +404,24 @@ Actions below.
 
 ## Open items
 
-### 📌 Rebasing `conformance-3` onto `conformance-fixes` — written 2026-09-13
+### ✅ The `conformance-fixes` rebase is done — 2026-09-13
 
-Five register entries describe defects that branch has closed. Each was measured against
-`conformance-fixes` at `51b9485` with a clean tree, so the list is what to expect and not a guess.
+Both branches are on `master` at `1968ba5`. All five register entries the table here listed were deleted or
+inverted, and the two matrices — the local-tag spellings and the binary destinations — went to
+`fixed_test.go` rather than being dropped, since each is what stops a later fix trading one case for
+another.
 
-**Every one of them announces itself.** A `TestDefect` asserts the defect is *present*, so a fix turns it
-red on a plain `go test` — no sweep, no draw count, no threshold. That is the property to rely on at a
-rebase, and it is why the deletions below are safe to leave until then rather than guessed at in advance:
-the tree says which entries have gone stale, in the order they are hit.
+📌 **What the table got right**: four of the five announced themselves by turning a test red, and
+`floatTagOnANumberPastFloat64` announced nothing, exactly as written. That asymmetry is the reason to keep
+writing hold-outs down when they are added.
 
-| what goes | defect | closed by | how it announces itself |
-|---|---|---|---|
-| `yamlgen.Strict` "a tag before an anchor on a flow collection used as a key" | 15 | `d7f86ac` | `TestValidDocumentsTheLibraryRefusesAreStillRefused` logs `NOW READ` |
-| `yamlgen.Strict` "a secondary tag before an anchor on an empty flow value" | 35 | `0b321d7` | same |
-| `floatTagOnANumberPastFloat64` in `yamlcorpus/reading_library_test.go` | 8 | `06fd2a1` | nothing — a hold-out goes quiet, so this one is the only item that has to be remembered |
-| `Ledger` `decode/a-key-after-a-long-tag-on-an-empty-value-is-not-resolved`, its predicate and its pin | 14 | `f1adc59` | `TestDefectAKeyAfterALongTagOnAnEmptyValueIsNotResolved` fails |
-| `Ledger` `parse/a-local-tag-before-an-anchor-does-not-type-its-scalar` and its predicate | 34 | `77c8a3d` | `TestDefectALocalTagBeforeAnAnchorDoesNotTypeItsScalar` fails |
-
-⚠️ **The last one inverts rather than deletes.** Its pin holds all nine documents of the matrix — the two
-property orders, the four tag spellings, and the three contexts — and that matrix is what stops a later fix
-trading one spelling for another. It becomes `TestFixedALocalTagBeforeAnAnchorTypesItsScalar` in
-`fixed_test.go`. Defect 14's inverted pin already exists on the other branch as
-`TestFixedAKeyAfterALongTagOnAnEmptyValueResolves`, so mine is deleted rather than moved.
-
-📌 **The third row is the lesson.** A ledger entry and a `Strict` entry both fail loudly when their defect
-is fixed; a *hold-out* — a document skipped inside a sweep — just stops being needed and says nothing. Every
-hold-out added while waiting on another branch should be recorded here when it is added, because nothing
-else will remember it.
+📌 **What it did not cover**: the rebase itself. Six conflicts, every one the shape "their commit deletes a
+register entry this branch had edited", with something of ours bracketed inside the hunk. Three
+resolutions went wrong and two of those reached a commit before being caught, so
+`git rebase --exec 'go build ./...'` over the whole range is the minimum check — and it is not enough on
+its own, because a dropped hunk in a register file compiles. What caught the rest was the other session
+running a probe over every defect the branch closed, 27 assertions, before merging. **A rebase of register
+files wants a second reader who did not resolve the conflicts.**
 
 ### 📌 What separates a safe hold-out from one that swallows a regression — 2026-09-13
 
