@@ -98,7 +98,17 @@ func (c *tally) report(t *testing.T, p yamlgen.Property) {
 // and its own pin said the defect was still there.
 //
 // 1,500 is the number that makes a false alarm rare at the lowest rate any
-// entry has shown: 0.99627^1500 is under half a percent. What it gives up is
+// entry has shown: 0.99627^1500 is under half a percent.
+//
+// Re-measured on 2026-09-07, after the axes added that day and the parser fixes
+// merged the same day: the same entry is drawn 366 times and diverges twice per
+// 20,000 rapid checks, a rate of 0.55%. That is better than the 0.373% this
+// threshold was sized for, so 1,500 is if anything conservative now. The number
+// is written down because the check was seen firing intermittently on a branch
+// before those fixes merged -- two runs in four -- and nobody found the cause.
+// It does not reproduce here over six runs. If it returns, compare the rate
+// against these two figures first: a threshold problem and a predicate that has
+// stopped reaching its defect look identical from the failure message. What it gives up is
 // catching a stale entry early, and that costs nothing, because a stale entry
 // is caught by its own pin failing on a plain `go test` -- see
 // [yamlgen.Divergence.Pin]. What is left for this check is the case the pin
