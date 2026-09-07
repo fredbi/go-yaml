@@ -473,6 +473,21 @@ type Style struct {
 	// is one l-any-document after another, and "a\n...\nb" is a
 	// l-document-suffix with a fresh l-document-prefix behind it.
 	DocumentSuffix bool
+	// RedeclareDirectives repeats the directives above every document of a
+	// stream, rather than writing them once above the first.
+	//
+	// Only reachable with [Style.DocumentSuffix]: 9.1.1 puts a directive in
+	// l-directive-document, which follows a prefix, and a prefix only comes
+	// after a "..." suffix -- so a document opened by "---" alone declares
+	// nothing whatever this says.
+	//
+	// It is the axis, not a convenience. A directive is scoped to the document
+	// it precedes, so a stream that declares once and a stream that declares
+	// every time mean different things from the second document on, and the
+	// second shape is the one that ends a scope and has to re-read what the
+	// scanner already cut. Written once, the stream reaches that; written every
+	// time, it never does.
+	RedeclareDirectives bool
 	// ByteOrderMark writes a U+FEFF at the head of the document.
 	//
 	// 5.2 puts one in l-document-prefix, so it stands before the directives and
@@ -584,7 +599,8 @@ func (s Style) String() string {
 	return shape + " indent=" + itoa(s.Indent) + " " + s.Quoting.String() +
 		lit + markers + s.Comments.String() + " null=" + quoteEmpty(s.NullSpelling) +
 		s.Break.String() + props + spelling + s.NumberForm.String() + s.TimeForm.String() +
-		s.Escaping.String() + bomLabel(s.ByteOrderMark) + suffixLabel(s.DocumentSuffix)
+		s.Escaping.String() + bomLabel(s.ByteOrderMark) + suffixLabel(s.DocumentSuffix) +
+		redeclareLabel(s.RedeclareDirectives)
 }
 
 // Styles generates a presentation.
@@ -652,6 +668,9 @@ func Styles() *rapid.Generator[Style] {
 			// An even split: both separators are ordinary, and the "..." is
 			// the one no generated document had ever written.
 			DocumentSuffix: rapid.Bool().Draw(t, "suffix"),
+			// Weighted towards declaring once, which is what a stream carrying
+			// a prelude looks like and the half that ends a directive's scope.
+			RedeclareDirectives: rapid.IntRange(0, 2).Draw(t, "redeclare") == 0,
 			// One mapping in four is written the long way. Weighted down
 			// because "key: value" is what documents look like, and an even
 			// split would spend half the corpus's mappings on a form few
@@ -720,6 +739,15 @@ func bomLabel(on bool) string {
 func suffixLabel(on bool) string {
 	if on {
 		return " ..."
+	}
+
+	return ""
+}
+
+// redeclareLabel names a stream that repeats its directives.
+func redeclareLabel(on bool) string {
+	if on {
+		return " re%"
 	}
 
 	return ""

@@ -267,14 +267,17 @@ func WriteStream(docs []Value, st Style) Written {
 
 	var unclear bool
 
+	// Every document writes its own directive only where a "..." suffix ends
+	// the one before it and the style asked for the directive again -- see
+	// emitStream. Otherwise the first document carries it alone.
+	redeclared := st.DocumentSuffix && st.RedeclareDirectives
+
 	for i, v := range docs {
 		valueFeatures(v, e.feat)
 
 		// What one document denotes, under the version that document declares.
-		// Only the first carries the style's directive unless a "..." suffix
-		// let every document write its own -- see emitStream.
 		under := st
-		if i > 0 && !st.DocumentSuffix {
+		if i > 0 && !redeclared {
 			under.Version = ""
 		}
 

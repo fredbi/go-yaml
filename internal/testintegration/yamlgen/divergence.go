@@ -327,17 +327,18 @@ var Ledger = []Divergence{
 // directive that only its first document carries, over a value the two readings
 // disagree about.
 //
-// Both halves are needed. Without a "..." suffix only the first document may
-// declare a directive -- 9.1.1 puts one in l-directive-document, which follows
-// a suffix -- so the documents after it are core documents. And a value the two
-// schemas read alike is read correctly however the directive is scoped, so
-// matching it would excuse documents that are fine.
+// Both halves are needed. A document after the first declares nothing unless a
+// "..." suffix let it and Style.RedeclareDirectives asked -- 9.1.1 puts a
+// directive in l-directive-document, which follows a suffix -- so otherwise the
+// documents after the first are core documents. And a value the two schemas
+// read alike is read correctly however the directive is scoped, so matching it
+// would excuse documents that are fine.
 //
 // The second half is measured rather than approximated: it writes the value
 // twice and compares what each says it means. That is two emissions, and the
 // cheap half above keeps them off every draw that does not write a directive.
 func writesAStreamUnderOneDirective(v Value, st Style) bool {
-	if st.Version == "" || st.DocumentSuffix {
+	if st.Version == "" || (st.DocumentSuffix && st.RedeclareDirectives) {
 		return false
 	}
 

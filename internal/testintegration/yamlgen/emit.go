@@ -79,7 +79,13 @@ func (e *emitter) emitStream(docs []Value) string {
 			if whole.DocumentSuffix {
 				e.feat.add(FeatureDocumentSuffix)
 				e.buf.WriteString("...\n")
-			} else {
+			}
+
+			// A document after the first declares nothing unless a "..." let it
+			// and the style asked for it. That is the shape a directive's scope
+			// has to *end* for, and the one where the scanner has already cut
+			// the next document by the time the "..." is read.
+			if !whole.DocumentSuffix || !whole.RedeclareDirectives {
 				// 9.1.1 puts a directive in l-directive-document, which
 				// follows l-document-prefix -- and a prefix only comes after a
 				// "..." suffix. So a document opened by "---" alone declares
