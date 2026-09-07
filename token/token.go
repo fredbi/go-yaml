@@ -482,9 +482,11 @@ func init() {
 	}
 	for _, keyword := range reservedInfKeywords {
 		reservedKeywordTypes[keyword] = InfinityType
+		reservedEncKeywordTypes[keyword] = InfinityType
 	}
 	for _, keyword := range reservedNanKeywords {
 		reservedKeywordTypes[keyword] = NanType
+		reservedEncKeywordTypes[keyword] = NanType
 	}
 
 	for keyword, typ := range reservedKeywordTypes {
