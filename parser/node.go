@@ -237,7 +237,14 @@ func newTagDefaultScalarValueNode(ctx context, uri string, tag *token.Token) (as
 	default:
 		// A tag the core schema does not resolve -- the non-specific "!", or a
 		// local tag -- leaves the empty node unresolved, which is null.
-		tk = newSynthetic(token.New("null", "null", pos))
+		//
+		// The null is implicit, so the renderer writes nothing for it. Written
+		// out as "null" it came back as the *string* "null" on the next read,
+		// since a tag that resolves to nothing leaves its scalar as text: "!"
+		// held a null and "! null" holds "null".
+		nullTk := token.New("null", "null", pos)
+		nullTk.Type = token.ImplicitNullType
+		tk = newSynthetic(nullTk)
 		n, err := newNullNode(ctx, tk)
 		if err != nil {
 			return nil, err

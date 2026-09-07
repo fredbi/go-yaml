@@ -141,17 +141,22 @@ func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
 // looking for a closer it had already passed. And scanTag treated '}' as a
 // character no tag may hold instead of ending the tag there, and swallowed ']'
 // into the tag's name.
+//
+// The null a tag stands on when nothing follows it is implicit, so the renderer
+// writes nothing for it and the document comes back as it went in. Written out
+// as "null" it read back as the *string* "null", since a tag that resolves to
+// nothing leaves its scalar as text.
 func TestParseTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	tests := map[string]struct {
 		source string
 		want   string
 	}{
-		"the non-specific tag alone in a sequence": {source: "[!]\n", want: "[! null]\n"},
-		"before an entry":                          {source: "[!, a]\n", want: "[! null, a]\n"},
-		"after an entry":                           {source: "[a, !]\n", want: "[a, ! null]\n"},
-		"a local tag":                              {source: "[!str]\n", want: "[!str null]\n"},
+		"the non-specific tag alone in a sequence": {source: "[!]\n", want: "[!]\n"},
+		"before an entry":                          {source: "[!, a]\n", want: "[!, a]\n"},
+		"after an entry":                           {source: "[a, !]\n", want: "[a, !]\n"},
+		"a local tag":                              {source: "[!str]\n", want: "[!str]\n"},
 		"a resolved tag takes its own default":     {source: "[!!str]\n", want: "[!!str]\n"},
-		"as the value of a flow mapping entry":     {source: "{a: !}\n", want: "{a: ! null}\n"},
+		"as the value of a flow mapping entry":     {source: "{a: !}\n", want: "{a: !}\n"},
 	}
 
 	for name, test := range tests {
