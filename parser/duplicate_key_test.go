@@ -225,6 +225,74 @@ func TestDuplicateMapKeyIsPerType(t *testing.T) {
 	}
 }
 
+// TestDuplicateMapKeyUnderATagFollowsTheResolvedName checks that a key under a
+// tagged mapping is compared by what it resolves to, in both of the ways a
+// mapping records its keys.
+//
+// Three pieces of work meet here and none of them has a test for the
+// combination. The scanner types a scalar by the tag's URI rather than by the
+// characters the tag was written with, so "!!map", "!<tag:yaml.org,2002:map>"
+// and a local "!foo" all leave the keys under them to resolve. keySet scans a
+// mapping's keys up to spillAt and builds a hash index past it. And the key
+// rules say two keys are equal when they resolve to the same node, so "False"
+// and "false" are one key and "1" and "\"1\"" are two.
+//
+// The index inherits the resolution for free because keyFilter reads the kind
+// from token.KeyName, the way the map it replaced did -- the optimization made
+// the lookup cheaper without hardcoding any typing. That is worth a test rather
+// than a comment: a later index that compared the written characters would pass
+// every other test in this file, since none of them reaches spillAt with a key
+// whose name is not its text.
+func TestDuplicateMapKeyUnderATagFollowsTheResolvedName(t *testing.T) {
+	// wide writes a tagged mapping of n ordinary keys, with first written above
+	// them and last below, so the pair straddles the spill into the index.
+	wide := func(first, last string, n int) string {
+		var b strings.Builder
+
+		b.WriteString("!foo\n" + first)
+		for i := range n {
+			fmt.Fprintf(&b, "k%d: %d\n", i, i)
+		}
+		b.WriteString(last)
+
+		return b.String()
+	}
+
+	for name, test := range map[string]struct {
+		src       string
+		duplicate bool
+	}{
+		// The tag does not stop the keys under it resolving, in any spelling.
+		"a local tag":    {src: "!foo\nFalse: 1\nfalse: 2\n", duplicate: true},
+		"a shorthand":    {src: "!!map\nFalse: 1\nfalse: 2\n", duplicate: true},
+		"a verbatim tag": {src: "!<tag:yaml.org,2002:map>\nFalse: 1\nfalse: 2\n", duplicate: true},
+		"two bases":      {src: "!foo\n0x10: a\n16: b\n", duplicate: true},
+
+		// And it does not merge keys that are two nodes.
+		"two booleans":         {src: "!foo\nFalse: 1\nTrue: 2\n"},
+		"two integers":         {src: "!foo\n1: a\n2: b\n"},
+		"a number and a quote": {src: "!foo\n1: a\n\"1\": b\n"},
+
+		// Past spillAt, where the index answers instead of the scan.
+		"a repeat past the spill":          {src: wide("k0: first\n", "k0: again\n", 80), duplicate: true},
+		"no repeat past the spill":         {src: wide("", "", 80)},
+		"a resolved repeat past the spill": {src: wide("False: 1\n", "false: 2\n", 80), duplicate: true},
+		"two nodes alike past the spill":   {src: wide("1: a\n", "\"1\": b\n", 80)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(test.src))
+			require.NoError(t, err)
+
+			if test.duplicate {
+				assert.NotEmpty(t, duplicatesOf(f))
+
+				return
+			}
+			assert.Empty(t, duplicatesOf(f))
+		})
+	}
+}
+
 // TestWideMappingsAreToldApart checks that two wide mappings hold their own
 // keys, which is what the index a wide mapping spills into has to get right.
 //
