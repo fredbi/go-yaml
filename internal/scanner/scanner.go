@@ -467,6 +467,17 @@ func (s *Scanner) scan(ctx *Context) error {
 		ctx.addBuf(c)
 		ctx.addOriginBuf(c)
 		s.progressColumn(ctx, 1)
+
+		// c fell to the default arm, so what follows may too. Where the next
+		// byte is a letter or a digit it certainly does -- neither is one of
+		// the characters above -- and the run it opens is taken in one go
+		// rather than a turn of this loop apiece.
+		//
+		// The guard is here and not inside alnumRun so that a document of
+		// punctuation pays a load and a compare rather than a call.
+		if alnumFastPath && ctx.idx < ctx.size && isAlnum(ctx.src[ctx.idx]) {
+			s.takeAlnumRun(ctx, s.alnumRun(ctx))
+		}
 	}
 
 	s.addBufferedTokenIfExists(ctx)
