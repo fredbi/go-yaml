@@ -1945,6 +1945,37 @@ func TestFixedATabSeparatesAsASpaceDoes(t *testing.T) {
 	}
 }
 
+// TestFixedATabOpensABlockScalarAfterAnAnchor: an anchor separated from a block
+// scalar by a tab takes the header, so the content is block content.
+//
+// `&a1<TAB>>-` over ` , a` was refused as `a plain scalar cannot begin with ","`
+// until `a4b40c1` -- the header joined the anchor's name, so the token stream
+// held Anchor and String "a1>-" where a space gives Anchor, String "a1", Folded
+// ">-". A block scalar's content is not a plain scalar and may begin with
+// anything.
+//
+// Older than the commit that made it visible: `a0182a6` made a tab end a
+// property and fixed the tag spelling, and this one waited on the anchor path,
+// which asks the question inside the second of the tab branch's two indentation
+// tests. At the root the first test applies, so it was never asked.
+//
+// The three neighbors are the controls: change the tab for a space, the anchor
+// for a tag, or the content for something a plain scalar could begin, and each
+// read before the fix.
+func TestFixedATabOpensABlockScalarAfterAnAnchor(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"&a1\t>-\n , a\n", ", a"},
+		{"&a1\t>-\n  , a\n", ", a"},
+		{"&a1 >-\n , a\n", ", a"},
+		{"!!str\t>-\n , a\n", ", a"},
+		{"&a1\t>-\n x\n", "x"},
+	} {
+		var got any
+		require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+		assert.Equalf(t, tc.want, got, "%q", tc.src)
+	}
+}
+
 // TestFixedTwoCollectionKeysAreTwoKeys: two collections used as keys in one
 // mapping are two keys.
 //

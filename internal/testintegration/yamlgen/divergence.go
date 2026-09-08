@@ -151,30 +151,6 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
-		Name: "parse/a-tab-before-an-anchored-block-scalar-scans-its-content-as-plain",
-		Pin:  "TestDefectATabBeforeAnAnchoredBlockScalarScansItsContentAsPlain",
-		Reason: "`&a1\t>-` over ` , a` is refused with `a plain scalar cannot begin with \",\"`. The " +
-			"content of a block scalar is not a plain scalar and may begin with anything, so the " +
-			"header is not being taken.\n\n" +
-			"Four things narrow it, and each is a document that reads: the same with a space, " +
-			"`&a1 >-`, reads \", a\"; the same with a *tag*, `!!str\t>-`, reads it too; content that " +
-			"could begin a plain scalar, `&a1\t>-` over ` x`, reads; and more indentation does not " +
-			"help. So it is an anchor, a tab, and a block scalar together.\n\n" +
-			"grammar.NewRecognizer accepts the document, the reference parser passes it and " +
-			"go.yaml.in/yaml/v3 v3.0.5 reads \", a\".\n\n" +
-			"⚠️ **Not a residue of a0182a6**, which is the attribution to avoid: at 1c59c89, the " +
-			"commit before it, this document is refused with the identical message. What a0182a6 " +
-			"changed among these four is the tag row alone -- `!!str\t>-` went from refused to " +
-			"reading. So it fixed a sibling and left this one, which is what made the gap visible. " +
-			"Calling it a residue would send a bisect at the wrong commit.\n\n" +
-			"The cause, from the token stream: `&a1\t>-` scans as Anchor `&` then String `a1>-`, the " +
-			"header joined to the anchor's name, where `&a1 >-` gives Anchor, String `a1`, Folded " +
-			"`>-`. So the question of whether a tab ends a property is never asked on this path.\n\n" +
-			"It claims every property, because a document that does not parse answers none.",
-		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
-		Match:    writesATabBeforeAnAnchoredBlockScalar,
-	},
-	{
 		Name: "parse/a-collection-key-written-alone-in-flow-is-refused",
 		Pin:  "TestDefectACollectionKeyWrittenAloneInFlowIsRefused",
 		Reason: "`{{\"\": 0}}` is refused with `could not find flow map content`. 7.4.2 lets a flow " +
@@ -565,32 +541,6 @@ func sharesAKey(v Value) bool {
 	return false
 }
 
-// holdsA reports whether a value of kind T stands anywhere in v.
-func holdsA[T Value](v Value) bool {
-	if _, is := v.(T); is {
-		return true
-	}
-
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			if holdsA[T](p.Key) || holdsA[T](p.Val) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, holdsA[T])
-	case Anchored:
-		return holdsA[T](n.V)
-	case Alias:
-		return holdsA[T](n.V)
-	case Tagged:
-		return holdsA[T](n.V)
-	}
-
-	return false
-}
-
 // writesAnExplicitKeyInsideAnExplicitKey reports whether a mapping stands as a
 // key while the style writes every entry the long way.
 //
@@ -674,16 +624,4 @@ func holdsACollectionKey(v Value) bool {
 // value has to hold a collection key for there to be one.
 func writesACollectionKeyAloneInFlow(v Value, st Style) bool {
 	return st.Flow && st.FlowEmpty == FlowNullKeyAlone && holdsACollectionKey(v)
-}
-
-// writesATabBeforeAnAnchoredBlockScalar reports whether an anchor is separated
-// from a block scalar by a tab.
-//
-// Three halves: the style separates with tabs, it writes block scalars at all,
-// and the value carries an anchor for one to stand on. Wider than the defect,
-// which also needs the scalar's content to begin with a character a plain
-// scalar may not -- narrowing it that far would mean reproducing the scanner's
-// plain-scalar rule in a predicate, and the pin carries the precision.
-func writesATabBeforeAnAnchoredBlockScalar(v Value, st Style) bool {
-	return st.TabSeparation && (st.Literal || st.Folded) && holdsA[Anchored](v)
 }
