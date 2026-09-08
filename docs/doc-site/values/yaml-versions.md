@@ -23,7 +23,7 @@ bool only under 1.1.
 | `yes` | `"yes"`, a string | `true` |
 | `!!bool yes` | `true` | `true` |
 | `0777` | `777` | `511`, read as octal |
-| `<<: *d` | not merged | merged |
+| `<<: *d` | not merged, unless `parser.WithMergeKeys` | merged |
 | `!!merge <<: *d` | merged | merged |
 | `2001-12-14` | `"2001-12-14"` | `"2001-12-14"` |
 | `!!timestamp 2001-12-14` | `time.Time` | `time.Time` |

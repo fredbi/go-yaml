@@ -30,6 +30,7 @@ document has one entry; `---` starts another.
 | `WithComments` | keeps comments. **They are dropped by default**, before the grouping ever sees them. |
 | `WithYAMLVersion` | reads under 1.0, 1.1 or 1.2 rather than the document's own directive |
 | `WithAnchors` | publishes anchors declared in another parse |
+| `WithMergeKeys` | resolves a bare `<<` as a merge key at any version, and changes nothing else |
 | `WithLaxTags` | reads `!!int abc` as the text `abc` instead of refusing the document |
 | `WithAllowDuplicateMapKey` | accepts a repeated key instead of refusing it |
 | `WithJSONCompatible` | reports `1:` and `"1":` in one mapping as `ErrNotJSON`, since both write the JSON name `"1"` |

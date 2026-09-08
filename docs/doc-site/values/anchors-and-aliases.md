@@ -78,18 +78,32 @@ Decode the document above, exactly as `Marshal` wrote it:
 `people[1]` is meant to be the default person entire. Under 1.2 it comes back
 empty.
 
-Three ways to get the merge: write `!!merge <<:`, put a `%YAML 1.1` directive in
-the document, or pass
-`codec.WithParserOptions(parser.WithYAMLVersion(parser.YAML11))`.
+**Use `parser.WithMergeKeys()` when you have to read documents written this
+way.** It resolves a bare `<<` at any version and changes nothing else:
+
+```go
+codec.UnmarshalWithOptions(src, &v,
+	codec.WithParserOptions(parser.WithMergeKeys()))
+```
+
+| | merge | `a: yes` | `b: 0100` |
+|---|---|---|---|
+| default | no | `"yes"` | `100` |
+| `WithMergeKeys()` | **yes** | `"yes"` | `100` |
+| `WithYAMLVersion(YAML11)` | yes | `true` | `64` |
+
+Reading a whole document under 1.1 to get one merge key changes far more than the
+merge: `0100` becomes 64, `1_000` becomes 1000, `1:30` becomes 90 and `yes`
+becomes `true`. Reach for `WithMergeKeys` instead, or write `!!merge <<:` in the
+document if you control it.
 {{% /notice %}}
 
 This follows from one rule the library holds everywhere: **a written tag is
 honoured at any version, and only resolution by scalar shape is version-gated.**
 It has a consequence worth knowing before you rely on a round trip — the encoder
 writes the plain `<<`, so `Marshal` produces a document that `Unmarshal` will not
-merge unless the reading side asks for 1.1. Other Go libraries resolve `<<` at
-any version, so a document that merges under `go.yaml.in/yaml/v3` may not merge
-here.
+merge unless the reading side passes `WithMergeKeys`. Other Go libraries resolve
+`<<` at any version, which is what `WithMergeKeys` exists to match.
 
 When the merge does fire, the mapping's own key beats the merged one, and an
 earlier merge beats a later one.
