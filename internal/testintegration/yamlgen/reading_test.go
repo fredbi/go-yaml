@@ -13,6 +13,7 @@ import (
 	"pgregory.net/rapid"
 
 	yaml "github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
@@ -398,4 +399,40 @@ func readsAs(t *testing.T, w yamlgen.Written, core, under11 any) {
 	require.NoError(t, yaml.Unmarshal([]byte("%YAML 1.1\n---\n"+w.Text), &legacy), "%q", w.Text)
 	assert.Equal(t, under11, legacy,
 		"%q: yamlgen says %v under 1.1 and the library reads %v", w.Text, under11, legacy)
+}
+
+// TestAMergedKeyIsBeatenByTheOwnKeyThatResolvesToIt guards the accepting side
+// of the unique-key work against the merge rule.
+//
+// A mapping's own keys beat the ones a "<<" brings in, and naming a key by
+// [ast.KeyIdentity] rather than by its spelling lets `? [ 1 ]` beat a merged
+// `? [1]`: the two resolve to one node, so one overrides the other instead of
+// standing beside it.
+//
+// It is the direction that fails loudly. Had the parser recorded a merged
+// mapping's keys in the scope of the mapping holding the "<<", every override
+// would be refused as a repeat -- a valid document turned into an error. The
+// merged mapping is a node of its own with its own scope, so it is not, and
+// this says so rather than leaving it to be inferred.
+//
+// The corpus draws merges that share a key with what they merge, 34 of 51 as of
+// yamlgen/44, but it names those keys with scalars. A collection key and an
+// alias key are the shapes this work introduced identity comparison for, and
+// neither is drawn there.
+//
+// "%YAML 1.1" because a bare "<<" is an ordinary key under 1.2, where the merge
+// type is not in the schema.
+func TestAMergedKeyIsBeatenByTheOwnKeyThatResolvesToIt(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"a collection key", "%YAML 1.1\n---\na: &m\n  ? [1]\n  : from_merge\n  extra: kept\nb:\n  <<: *m\n  ? [1]\n  : own\n"},
+		{"the same key respelled", "%YAML 1.1\n---\na: &m\n  ? [1]\n  : from_merge\n  extra: kept\nb:\n  <<: *m\n  ? [ 1 ]\n  : own\n"},
+		{"an alias key", "%YAML 1.1\n---\nk: &k [1]\na: &m\n  ? *k\n  : from_merge\n  extra: kept\nb:\n  <<: *m\n  ? *k\n  : own\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{"[1]": "own", "extra": "kept"}, got["b"],
+				"the own entry wins and the merge-only key is kept: %q", tc.src)
+		})
+	}
 }
