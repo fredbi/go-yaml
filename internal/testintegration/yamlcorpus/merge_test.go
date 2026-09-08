@@ -99,6 +99,23 @@ func TestTwoMergeKeysAreAlsoADuplicate(t *testing.T) {
 // the string, and an error under "%YAML 1.1", where merging a string is no
 // operation. A corpus storing one verdict per document could not carry that.
 func TestTheMergeStandsAreMeasuredUnderBothVersions(t *testing.T) {
+	// A shape the library is known to read where the rules refuse it. The
+	// register carries the measurement and this test consults it, the way
+	// TestTheLibraryMatchesItsDeclaredStance consults it for the anchor
+	// patterns -- so a departure that closes fails here and gets deleted rather
+	// than sitting on describing a library that has moved on.
+	declared := map[string]yamlcorpus.Departure{}
+
+	for _, d := range yamlcorpus.Departures {
+		if d.Kind == yamlcorpus.Verdict {
+			declared[d.Pattern] = d
+		}
+	}
+
+	// A pattern is scored under both readings and departs under one of them, so
+	// staleness is a question about the pair rather than about either run.
+	departed := map[string]bool{}
+
 	for _, s := range yamlcorpus.MergeShapes() {
 		t.Run(s.Name, func(t *testing.T) {
 			doc := stance.Doc{
@@ -119,16 +136,31 @@ func TestTheMergeStandsAreMeasuredUnderBothVersions(t *testing.T) {
 				}
 
 				got := reads(tc.src)
+				departure, known := declared[s.Name]
+				matches := (want == stance.Accept && got == nil) || (want == stance.Reject && got != nil)
 
 				switch {
-				case want == stance.Accept && got != nil:
+				case matches:
+				case known:
+					departed[s.Name] = true
+
+					t.Logf("still departs -- %s: %s", tc.table.Name, departure.Observed)
+				case want == stance.Accept:
 					t.Errorf("%s expects %s, because %s, and the library refuses it: %v",
 						tc.table.Name, want, why, got)
-				case want == stance.Reject && got == nil:
+				default:
 					t.Errorf("%s expects %s, because %s, and the library reads it",
 						tc.table.Name, want, why)
 				}
 			}
 		})
+	}
+
+	// A departure that has stopped departing under every reading is a stale
+	// entry, and a stale entry describes a defect somebody has already fixed.
+	for _, s := range yamlcorpus.MergeShapes() {
+		if _, known := declared[s.Name]; known && !departed[s.Name] {
+			t.Errorf("no longer departs under either reading, so its entry is stale: %s", s.Name)
+		}
 	}
 }

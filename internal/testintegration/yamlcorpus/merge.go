@@ -61,6 +61,24 @@ const (
 	// The shape that turns the stance into a verdict: an error to a merging
 	// parser, and an ordinary key with an ordinary value to everyone else.
 	TagMergeNonMapping stance.Tag = "merge/into-non-mapping"
+	// TagMergeKeyAlone is a "<<" written as a flow entry's key with no ":".
+	//
+	// 7.4.2 lets a flow entry be a key with no value, so "{a: 1, <<}" is a
+	// document, and what it denotes depends entirely on whether the reader
+	// implements merge. Under the core schema it is an ordinary key named "<<"
+	// holding null. Under YAML 1.1 the three implementations measured on
+	// 2026-09-08 give three answers: go.yaml.in/yaml/v3 v3.0.5 refuses it
+	// ("map merge requires map or sequence of maps as the value"), libfyaml
+	// 1.0.0b1 reads it and drops the entry silently, and this library reads it
+	// and keeps "<<" as an ordinary key beside the merged entries -- which is
+	// the one answer nobody else holds, since the same two characters then
+	// resolve to the merge type in one entry and to a string in another.
+	//
+	// Fred's ruling of 2026-09-08: refuse it. The merge key requires its ":",
+	// so a "<<" written without one is invalid merge syntax rather than a key.
+	// That is a verdict about YAML 1.1 alone; under the core schema the same
+	// bytes stay an ordinary key and stay valid.
+	TagMergeKeyAlone stance.Tag = "merge/key-alone"
 	// TagMergeQuoted is a quoted "<<", which suppresses the merge in every
 	// reading because quoting resolves it to a string.
 	//
@@ -81,6 +99,7 @@ func MergeVocabulary() stance.Vocabulary {
 		TagMergeSequence:   stance.Construct,
 		TagMergeInline:     stance.Construct,
 		TagMergeNonMapping: stance.Construct,
+		TagMergeKeyAlone:   stance.Construct,
 		TagMergeQuoted:     stance.Construct,
 	}
 }
@@ -138,6 +157,30 @@ func MergeShapes() []stance.Shape {
 			Name:   "a merge from an alias beside a mapping written in place",
 			Src:    []byte("b: &b {q: 1}\nd:\n  <<: [*b, {a: 1}]\n"),
 			Intent: []stance.Tag{TagMergeInline, TagMergeSequence},
+		},
+		{
+			// The 1.1 half on its own, with no duplicate in sight: one "<<"
+			// written as a flow entry's key alone. Under the core schema this
+			// is an ordinary key holding null and the document is fine, which
+			// is why the tag stands Accepts on GoYAML and Refuses on GoYAML11.
+			Name:   "a merge key written as a key alone",
+			Src:    []byte("{a: 1, <<}\n"),
+			Intent: []stance.Tag{TagMergeKeyAlone},
+		},
+		{
+			// The document that took the decision: valid to the grammar and to
+			// the reference parser, and refused under both readings for two
+			// different reasons. Under the core schema the two entries are one
+			// key spelled "<<" twice, so 3.2.1.1 settles it; under YAML 1.1 the
+			// second "<<" carries no ":" and is invalid merge syntax, so the
+			// duplicate question never arises.
+			//
+			// One character separates it from a document everybody refuses:
+			// write the second entry "<<: " and this library, go.yaml.in/yaml/v3
+			// and every path agree it is a repeated key.
+			Name:   "two merge keys, the second written as a key alone",
+			Src:    []byte("{<<: {x: 1}, <<}\n"),
+			Intent: []stance.Tag{TagMergeKeyAlone, TagDuplicateKey},
 		},
 		{
 			Name:   "a quoted merge key, which is an ordinary key",

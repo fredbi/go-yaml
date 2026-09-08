@@ -376,7 +376,28 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 // The quoted spelling is the control. `{"<<": {x: 1}, "<<"}` is refused by both
 // paths under both versions, so the fault sits on the bare "<<" and nothing
 // else -- the scanner types it MergeKeyType whatever the version, and the
-// duplicate check reads that type.
+// duplicate check reads that type. So is the colon: write the second entry
+// `<<: ` and every path refuses the document today, under both versions, with
+// the ordinary `mapping key "<<" already defined at [1:2]`. One character.
+//
+// # The ruling, 2026-09-08
+//
+// Under the core schema the two entries are one key spelled "<<" twice, so the
+// duplicate check answers -- and codec.AllowDuplicateMapKey then reads the
+// document with the last entry winning, which leaves the empty one standing
+// rather than dropping it. Under "%YAML 1.1" the merge key requires its ":", so
+// a "<<" written as a flow entry's key alone is invalid merge syntax and the
+// document is refused before any duplicate question arises.
+//
+// Measured on the same day, and the ruling is the strictest of four answers:
+// go.yaml.in/yaml/v3 v3.0.5 refuses it under both versions as a repeated key,
+// libfyaml 1.0.0b1 reads it and drops an entry with nothing reported, and this
+// library reads it and keeps "<<" as an ordinary key beside the merged entries
+// -- which nobody else does, since the same two characters then resolve to the
+// merge type in one entry and to a string in another.
+//
+// yamlcorpus.MergeShapes holds both documents and Departures records what we do
+// instead, so the gap is written down at both ends.
 //
 // Found on 2026-09-07 when yamlcorpus's duplicateAKey landed on a merge key --
 // the merge axis made that reachable for the first time.
@@ -402,6 +423,37 @@ func TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck(t *testing.T) {
 		require.NoError(t, codec.Unmarshal([]byte(src), &got))
 		assert.Equal(t, map[string]any{"<<": nil, "x": uint64(1)}, got,
 			"today: the first merges and the second is a literal key")
+	})
+
+	t.Run("today a merge key alone is an ordinary key under YAML 1.1", func(t *testing.T) {
+		// The 1.1 half with no duplicate in sight, which is where the ruling
+		// bites: one "<<" written without its ":". go.yaml.in/yaml/v3 refuses
+		// it -- "map merge requires map or sequence of maps as the value" --
+		// and libfyaml drops the entry.
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{src: "%YAML 1.1\n---\n{a: 1, <<}\n", want: map[string]any{"a": uint64(1), "<<": nil}},
+			{src: "%YAML 1.1\n---\n{<<}\n", want: map[string]any{"<<": nil}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got,
+				"today: the merge key with no ':' is read as an ordinary key: %q", tc.src)
+		}
+	})
+
+	t.Run("with the colon it is refused, which is the whole difference", func(t *testing.T) {
+		for _, src := range []string{
+			"{<<: {x: 1}, <<: }\n",
+			"%YAML 1.1\n---\n{<<: {x: 1}, <<: }\n",
+		} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), `mapping key "<<" already defined`, "%q", src)
+		}
 	})
 
 	t.Run("today the two paths part company under the core schema", func(t *testing.T) {

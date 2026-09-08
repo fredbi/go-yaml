@@ -208,6 +208,17 @@ var yardstickDefects = map[string]string{
 	// and makes the comparison order-dependent -- another reason this document
 	// cannot be scored against the `any` read.
 	"two keys alike in text and different once resolved": "the `any` read merges two keys the typed read keeps apart",
+	// The merge key escaping the duplicate check on one path.
+	// "{<<: {x: 1}, <<}" reads into an `any` as {"<<": null}, with the first
+	// entry's mapping gone and nothing reported, and every typed map refuses it
+	// with `duplicate key "<<"`. The typed read is right: under the core schema
+	// the two entries are one key spelled "<<" twice.
+	//
+	// The same fault as the alias collision above, reached by a flow entry
+	// written as a key alone rather than by resolution. `{a: 1, a}` is refused
+	// on both paths, so it is the merge key that escapes and not the spelling.
+	// Departures records both readings.
+	"two merge keys, the second written as a key alone": "the `any` read loses an entry the typed read refuses",
 }
 
 // sameNumerically compares two decodes of one document, with numbers compared

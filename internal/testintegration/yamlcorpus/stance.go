@@ -84,6 +84,12 @@ var GoYAML = stance.Table{
 		TagMergeNonMapping: stance.Accepts,
 		TagMergeQuoted:     stance.Accepts,
 
+		// A "<<" written as a flow entry's key alone is an ordinary key holding
+		// null under the core schema, so this reading accepts it and GoYAML11
+		// refuses it. See TagMergeKeyAlone, and Departures for what the library
+		// does under the directive today.
+		TagMergeKeyAlone: stance.Accepts,
+
 		// Directives, measured, and one of them is a defect rather than a
 		// position. See Departures: this library reads a document with one
 		// directive and refuses a document with two, so a %YAML beside a %TAG
@@ -229,6 +235,40 @@ func departsMapping(got any, err error, wrong func(map[string]any) bool) bool {
 // different once resolved.
 var Departures = []Departure{
 	{
+		Pattern: "a merge key written as a key alone",
+		Kind:    Verdict,
+		Observed: `under "%YAML 1.1", "{a: 1, <<}" reads {"<<": null, "a": 1} -- the "<<" becomes ` +
+			`an ordinary key beside whatever the mapping's real merges brought in`,
+		Because: "the merge key requires its ':', so a \"<<\" written as a flow entry's key alone is " +
+			"invalid merge syntax and the document is refused. Reading it as a key instead lets the " +
+			"same two characters resolve to the merge type in one entry and to a string in another, " +
+			"in one mapping. Fred's ruling of 2026-09-08; under the core schema the same bytes stay " +
+			"an ordinary key and stay valid",
+		Corroborated: "go.yaml.in/yaml/v3 v3.0.5 refuses it -- \"map merge requires map or sequence " +
+			"of maps as the value\" -- reaching the same verdict by treating the entry as a merge of " +
+			"null. libfyaml 1.0.0b1 reads it and drops the entry with nothing reported, which is the " +
+			"third answer and the quietest",
+	},
+	{
+		Pattern: "two merge keys, the second written as a key alone",
+		Kind:    Verdict,
+		Observed: `"{<<: {x: 1}, <<}" is read on the walk under either version. Under the core ` +
+			`schema it comes back {"<<": null} with the first entry's mapping gone and nothing ` +
+			"reported, where the tree refuses it as `duplicate key \"<<\"`; under " +
+			`"%YAML 1.1" both paths read it as {"<<": null, "x": 1}`,
+		Because: "under the core schema the two entries are one key spelled \"<<\" twice, which " +
+			"3.2.1.1 settles, and the check has to reach a flow entry written as a key alone -- " +
+			"`{a: 1, a}` is refused, so this is the merge key escaping a check the ordinary key " +
+			"gets. Under \"%YAML 1.1\" the second \"<<\" carries no ':' and the document is refused " +
+			"as invalid merge syntax, so the duplicate question never arises. One character settles " +
+			"it either way: write the second entry \"<<: \" and every path refuses the document " +
+			"today",
+		Corroborated: "go.yaml.in/yaml/v3 v3.0.5 refuses it under both versions with " +
+			"`mapping key \"<<\" already defined`. libfyaml 1.0.0b1 reports no duplicate key " +
+			"anywhere -- `{a: 1, a: 2}` gives {\"a\": 2} -- so it says only that the document is " +
+			"readable",
+	},
+	{
 		Pattern:  "a key tagged !!float",
 		Kind:     Value,
 		Observed: `"!!float 226.0: x" comes back keyed "226" where "226.0: x" comes back keyed "226.0"`,
@@ -357,6 +397,11 @@ var GoYAML11 = stance.Table{
 func elevenStands() map[stance.Tag]stance.Stand {
 	out := maps.Clone(GoYAML.Stands)
 	out[TagMergeNonMapping] = stance.Refuses
+	// The merge key requires its ":", so "{a: 1, <<}" is invalid merge syntax
+	// under this reading and an ordinary key holding null under the core one.
+	// Fred's ruling of 2026-09-08; go.yaml.in/yaml/v3 v3.0.5 refuses it too,
+	// for the adjacent reason that the merge value is not a mapping.
+	out[TagMergeKeyAlone] = stance.Refuses
 
 	return out
 }

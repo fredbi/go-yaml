@@ -132,6 +132,34 @@ func anchoredFloatKey(src string) bool {
 // deliberately: what it guards is a disagreement between two decode paths, and
 // a document wrongly held out here is one the rest of the suite still scores.
 // A predicate that under-matched would let the disagreement through.
+// blockCollectionKeysCollide reports whether the one path that refused the
+// document did so because a block collection key is named by its first
+// indicator.
+//
+// "? - a" over ": 1" over "? - b" over ": 2" holds two keys, and the walk names
+// both of them "-", so it refuses a document the tree reads with two entries.
+// yamlgen_test.TestDefectTwoBlockCollectionKeysCollide pins it.
+//
+// Keyed on the disagreement rather than on the document: a run holds out the
+// message it actually met, so a document that stops provoking it stops being
+// held out. A mapping that genuinely repeats the key "-" is refused on both
+// paths and never reaches here.
+func blockCollectionKeysCollide(wantErr, gotErr error) bool {
+	refused := wantErr
+	if refused == nil {
+		refused = gotErr
+	}
+
+	if refused == nil {
+		return false
+	}
+
+	msg := refused.Error()
+
+	return strings.Contains(msg, `mapping key "-" already defined`) ||
+		strings.Contains(msg, `mapping key ":" already defined`)
+}
+
 func mergesNothing(src string) bool {
 	for line := range strings.FieldsFuncSeq(src, isBreak) {
 		// A byte order mark ahead of it and a comment after it, both of which
@@ -219,6 +247,12 @@ func TestWalkMatchesTheStream(t *testing.T) {
 		case wantErr != nil && gotErr != nil:
 			bothErr++
 		case wantErr != nil || gotErr != nil:
+			if blockCollectionKeysCollide(wantErr, gotErr) {
+				skipped++
+
+				continue
+			}
+
 			oneErr++
 			if oneErr <= 5 {
 				t.Logf("%s: stream err=%v walk err=%v src=%q", src.name, wantErr, gotErr, src.text)
