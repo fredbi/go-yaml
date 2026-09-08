@@ -2,28 +2,32 @@
 title: Printer
 weight: 60
 description: |
-  Rendering a document, or an error, with colour and a source excerpt.
+  Drawing a document, or one line of it, with colour.
 ---
 
-{{% notice style="note" title="Outline" %}}
-This page is an outline. The structure is settled; the prose is not written.
+{{% notice style="warning" title="Being replaced" %}}
+`printer` and the colorizer are on their way out. The behaviour stays — colouring
+a document and drawing a line under an error are both walks over the tree — but
+it will arrive through a general-purpose tree transformer rather than through this
+package. Do not build on the types below.
+
+Use `errors.FormatError` instead. It is stable and covers the common case.
 {{% /notice %}}
 
-## What the page must answer
+## Printing an error with its source
 
-- How do I print a document with syntax colouring?
-- How do I print the three lines around a token?
+Printing an error with its source underneath is one call, and it does not go
+through this package's exported surface:
 
-## Covers
+```go
+fmt.Println(errors.FormatError(err, true, true))
+```
 
-- `Printer`, `Property`, `PrintFunc`, `ColorAttribute`
-- The relationship to `errors.FormatError`, which is what most callers want
+See [Errors](../../values/errors/).
 
-## Open questions for the API
+## What is here today
 
-- `Printer` has no constructor; a caller fills the struct. Say which fields are
-  required.
-- `ColorAttribute` re-declares ANSI codes in three `iota` runs. It is a colour
-  library inside a YAML library.
-- The package is scheduled to be rewritten alongside the AST work. Keep this page
-  short until then.
+`printer.Printer` draws a document or a range of lines. It has no constructor:
+you fill the struct, and each field is a `PrintFunc` returning a `Property` — the
+strings to put either side of one kind of token. `ColorAttribute` carries the
+ANSI codes.
