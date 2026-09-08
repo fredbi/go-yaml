@@ -145,19 +145,19 @@ func KeyShapes() []stance.Shape {
 			Name:   "an explicit key whose own key is explicit",
 			Src:    []byte("?\n  ? a\n  : 0\n: v\n"),
 			Intent: []stance.Tag{TagKeyNotAString},
-			Means:  []any{map[string]any{"map[a:0]": "v"}},
+			Means:  map[string]any{"map[a:0]": "v"},
 			Pin:    "TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused",
 		},
 		{
 			// 3.2.1.1 makes two keys equal when they resolve to the same node,
-			// and two different mappings do not. This library names a collection
-			// key by its opening character while checking for duplicates, so
-			// every collection key in a mapping is the same key as every other.
+			// and two different mappings do not. This library named a collection
+			// key by its opening character while checking for duplicates until
+			// 913fb19, so every collection key in a mapping was the same key as
+			// every other -- see TestFixedTwoCollectionKeysAreTwoKeys.
 			Name:   "two collection keys in one mapping",
 			Src:    []byte("{{\"\": 0}: a, {\"\": 1}: b}\n"),
 			Intent: []stance.Tag{TagKeyNotAString},
-			Means:  []any{map[string]any{"map[:0]": "a", "map[:1]": "b"}},
-			Pin:    "TestDefectTwoCollectionKeysInOneMappingCollide",
+			Means:  map[string]any{"map[:0]": "a", "map[:1]": "b"},
 		},
 		{
 			// No Means, and the absence is the claim. 7.4.2 lets a flow entry be

@@ -151,21 +151,28 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
-		Name: "parse/two-collection-keys-in-one-mapping-collide",
-		Pin:  "TestDefectTwoCollectionKeysInOneMappingCollide",
-		Reason: "`{{\"\": 0}: a, {\"\": 1}: b}` is refused as `mapping key \"{\" already defined`. " +
-			"The two keys are different mappings and 3.2.1.1 makes them two keys; the duplicate " +
-			"check names a collection key by its opening character, so every collection key in a " +
-			"mapping is the same key as every other.\n\n" +
-			"One collection key alone reads: `{{\"\": 0}: a}` gives {\"map[:0]\": \"a\"}. So it is " +
-			"the second one and nothing about the first.\n\n" +
-			"The name is the tell. `\"{\"` is one character of the document rather than anything the " +
-			"key denotes -- KeyText names the same key `map[:0]`, which is what the decoder uses " +
-			"once the parse is through.\n\n" +
-			"Found on 2026-09-07, when Keys began drawing a collection. No generated document had " +
-			"held one before, and two in a mapping is what it takes.",
+		Name: "parse/a-tab-before-an-anchored-block-scalar-scans-its-content-as-plain",
+		Pin:  "TestDefectATabBeforeAnAnchoredBlockScalarScansItsContentAsPlain",
+		Reason: "`&a1\t>-` over ` , a` is refused with `a plain scalar cannot begin with \",\"`. The " +
+			"content of a block scalar is not a plain scalar and may begin with anything, so the " +
+			"header is not being taken.\n\n" +
+			"Four things narrow it, and each is a document that reads: the same with a space, " +
+			"`&a1 >-`, reads \", a\"; the same with a *tag*, `!!str\t>-`, reads it too; content that " +
+			"could begin a plain scalar, `&a1\t>-` over ` x`, reads; and more indentation does not " +
+			"help. So it is an anchor, a tab, and a block scalar together.\n\n" +
+			"grammar.NewRecognizer accepts the document, the reference parser passes it and " +
+			"go.yaml.in/yaml/v3 v3.0.5 reads \", a\".\n\n" +
+			"⚠️ **Not a residue of a0182a6**, which is the attribution to avoid: at 1c59c89, the " +
+			"commit before it, this document is refused with the identical message. What a0182a6 " +
+			"changed among these four is the tag row alone -- `!!str\t>-` went from refused to " +
+			"reading. So it fixed a sibling and left this one, which is what made the gap visible. " +
+			"Calling it a residue would send a bisect at the wrong commit.\n\n" +
+			"The cause, from the token stream: `&a1\t>-` scans as Anchor `&` then String `a1>-`, the " +
+			"header joined to the anchor's name, where `&a1 >-` gives Anchor, String `a1`, Folded " +
+			"`>-`. So the question of whether a tab ends a property is never asked on this path.\n\n" +
+			"It claims every property, because a document that does not parse answers none.",
 		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
-		Match:    writesTwoCollectionKeysInOneMapping,
+		Match:    writesATabBeforeAnAnchoredBlockScalar,
 	},
 	{
 		Name: "parse/a-collection-key-written-alone-in-flow-is-refused",
@@ -218,34 +225,6 @@ var Ledger = []Divergence{
 			"Suite holds no nested explicit key either -- so nothing on either side had provoked it.",
 		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
 		Match:    writesAnExplicitKeyInsideAnExplicitKey,
-	},
-	{
-		Name: "parse/a-tab-after-a-tag-is-refused",
-		Pin:  "TestDefectATabAfterANodesPropertiesIsMishandled",
-		Reason: "`a: !!str\tx` is refused with `found invalid tag character \"\\t\"`. 6.1 makes a tab " +
-			"s-white, so it separates a node's properties from the node exactly as a space does, and " +
-			"the tag ends at the tab rather than swallowing it.\n\n" +
-			"grammar.NewRecognizer accepts the document, the reference parser passes it, libfyaml " +
-			"1.0.0b1 and go.yaml.in/yaml/v3 v3.0.5 both read {a: x}. Unanimous against us.\n\n" +
-			"Found on 2026-09-07 by Style.TabSeparation on its first run. It claims every property, " +
-			"because a document that does not parse answers none.",
-		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
-		Match:    writesATabAfterATag,
-	},
-	{
-		Name: "decode/a-tab-after-an-anchor-loses-the-value",
-		Pin:  "TestDefectATabAfterANodesPropertiesIsMishandled",
-		Reason: "`a: &n\tx` parses and reads {a: null}: the value is gone, with no error. The same " +
-			"document with a space reads {a: \"x\"}, and libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 " +
-			"v3.0.5 both read the value through the tab.\n\n" +
-			"The worse of the pair. A tab after a tag is refused, which a caller can see; this one " +
-			"answers, and answers with the value silently dropped.\n\n" +
-			"And the anchor is not registered either, so an alias naming it takes the whole document " +
-			"down: `a: &n\tx` over `b: *n` is `could not find alias \"n\"`. So it claims every " +
-			"property -- one document reading wrong, another not parsing at all, one cause.\n\n" +
-			"Found on 2026-09-07 by Style.TabSeparation on its first run.",
-		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
-		Match:    writesATabAfterAnAnchor,
 	},
 	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
@@ -586,17 +565,6 @@ func sharesAKey(v Value) bool {
 	return false
 }
 
-// writesATabAfterATag reports whether a tab separates a tag from its node.
-func writesATabAfterATag(v Value, st Style) bool {
-	return st.TabSeparation && holdsA[Tagged](v)
-}
-
-// writesATabAfterAnAnchor reports whether a tab separates an anchor from its
-// node.
-func writesATabAfterAnAnchor(v Value, st Style) bool {
-	return st.TabSeparation && holdsA[Anchored](v)
-}
-
 // holdsA reports whether a value of kind T stands anywhere in v.
 func holdsA[T Value](v Value) bool {
 	if _, is := v.(T); is {
@@ -708,39 +676,14 @@ func writesACollectionKeyAloneInFlow(v Value, st Style) bool {
 	return st.Flow && st.FlowEmpty == FlowNullKeyAlone && holdsACollectionKey(v)
 }
 
-// writesTwoCollectionKeysInOneMapping reports whether one mapping has two
-// collection keys.
+// writesATabBeforeAnAnchoredBlockScalar reports whether an anchor is separated
+// from a block scalar by a tab.
 //
-// Keyed on the pair rather than on a collection key at all, because one alone
-// reads correctly: it is the duplicate check naming both by their opening
-// character that refuses the document, and that needs two to happen.
-func writesTwoCollectionKeysInOneMapping(v Value, _ Style) bool {
-	switch n := v.(type) {
-	case Map:
-		seen := 0
-		for _, p := range n.Pairs {
-			if isCollection(p.Key) {
-				seen++
-			}
-
-			if writesTwoCollectionKeysInOneMapping(p.Key, Style{}) ||
-				writesTwoCollectionKeysInOneMapping(p.Val, Style{}) {
-				return true
-			}
-		}
-
-		return seen > 1
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool {
-			return writesTwoCollectionKeysInOneMapping(item, Style{})
-		})
-	case Anchored:
-		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
-	case Alias:
-		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
-	case Tagged:
-		return writesTwoCollectionKeysInOneMapping(n.V, Style{})
-	}
-
-	return false
+// Three halves: the style separates with tabs, it writes block scalars at all,
+// and the value carries an anchor for one to stand on. Wider than the defect,
+// which also needs the scalar's content to begin with a character a plain
+// scalar may not -- narrowing it that far would mean reproducing the scanner's
+// plain-scalar rule in a predicate, and the pin carries the precision.
+func writesATabBeforeAnAnchoredBlockScalar(v Value, st Style) bool {
+	return st.TabSeparation && (st.Literal || st.Folded) && holdsA[Anchored](v)
 }

@@ -27,28 +27,30 @@ import "github.com/go-openapi/go-yaml/internal/testintegration/stance"
 // Style.TabSeparation draws them now. These are the two the drawing found, kept
 // as documents so they survive a regeneration, and they carry a meaning rather
 // than a stance because 6.1 settles them and every other implementation agrees.
+//
+// Both were defects when they were written down and both were fixed the next
+// day, in `a0182a6`. The shapes stay: what they record is what 6.1 requires, and
+// that does not change when a library starts agreeing with it.
+// TestFixedATabSeparatesAsASpaceDoes is what the fix left behind.
 func SeparationShapes() []stance.Shape {
 	return []stance.Shape{
 		{
 			// The tag ends at the tab rather than swallowing it. Refused here
-			// as `found invalid tag character`; grammar.NewRecognizer accepts
-			// it, the reference parser passes it, and libfyaml 1.0.0b1 and
-			// go.yaml.in/yaml/v3 v3.0.5 both read {a: x}.
+			// as `found invalid tag character` until a0182a6.
 			Name:   "a tab between a tag and its node",
 			Src:    []byte("a: !!str\tx\n"),
 			Intent: []stance.Tag{TagSeparatedByTab},
 			Means:  map[string]any{"a": "x"},
-			Pin:    "TestDefectATabAfterANodesPropertiesIsMishandled",
 		},
 		{
-			// The worse of the two: this one answers. The value is dropped and
-			// no error is reported, and the anchor is not registered either, so
-			// `b: *n` on a following line takes the whole document down.
+			// The worse of the two while it stood: this one answered. The
+			// anchor was cut as "nx" on the empty node, so the value was gone
+			// with no error reported, and `b: *n` named nothing and took the
+			// whole document down.
 			Name:   "a tab between an anchor and its node",
 			Src:    []byte("a: &n\tx\nb: *n\n"),
 			Intent: []stance.Tag{TagSeparatedByTab},
 			Means:  map[string]any{"a": "x", "b": "x"},
-			Pin:    "TestDefectATabAfterANodesPropertiesIsMishandled",
 		},
 		{
 			// The control, and it earns its place: a tab where no property

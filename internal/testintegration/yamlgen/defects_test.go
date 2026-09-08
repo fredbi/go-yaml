@@ -427,68 +427,6 @@ func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
 	}
 }
 
-// TestDefectATabAfterANodesPropertiesIsMishandled pins both halves.
-//
-// 6.1 makes a tab s-white, so it separates a node's properties from the node
-// exactly as a space does. grammar.NewRecognizer accepts both documents below,
-// the reference parser passes them, and libfyaml 1.0.0b1 and
-// go.yaml.in/yaml/v3 v3.0.5 read the value through the tab in both. We do
-// neither.
-//
-// The anchor is the worse of the two. A tab after a tag is refused, which a
-// caller can see; a tab after an anchor answers, and answers with the value
-// silently dropped.
-//
-// Found on 2026-09-07 by Style.TabSeparation, on the first run of an axis built
-// to close the census gap that 56 YAML Test Suite documents hold a tab and no
-// generated document did.
-func TestDefectATabAfterANodesPropertiesIsMishandled(t *testing.T) {
-	t.Run("today a tab after a tag is refused", func(t *testing.T) {
-		var got any
-		err := codec.Unmarshal([]byte("a: !!str\tx\n"), &got)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "found invalid tag character")
-	})
-
-	t.Run("today a tab after an anchor loses the value", func(t *testing.T) {
-		var got map[string]any
-		require.NoError(t, codec.Unmarshal([]byte("a: &n\tx\n"), &got))
-		assert.Equal(t, map[string]any{"a": nil}, got, "today: the value is gone")
-	})
-
-	t.Run("today the anchor is not registered either, so an alias fails the parse", func(t *testing.T) {
-		var got any
-		err := codec.Unmarshal([]byte("a: &n\tx\nb: *n\n"), &got)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `could not find alias "n"`)
-
-		// The same document with a space resolves both.
-		var fine map[string]any
-		require.NoError(t, codec.Unmarshal([]byte("a: &n x\nb: *n\n"), &fine))
-		assert.Equal(t, map[string]any{"a": "x", "b": "x"}, fine)
-	})
-
-	t.Run("with a space both read the value", func(t *testing.T) {
-		for _, src := range []string{"a: !!str x\n", "a: &n x\n"} {
-			var got map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, map[string]any{"a": "x"}, got, "%q", src)
-		}
-	})
-
-	t.Run("a tab where no property stands is read correctly", func(t *testing.T) {
-		// The separation itself is not the problem: these are the sites the
-		// axis writes a tab at, and only the ones after a property mishandle it.
-		var m map[string]any
-		require.NoError(t, codec.Unmarshal([]byte("a:\tx\n"), &m))
-		assert.Equal(t, map[string]any{"a": "x"}, m)
-
-		var s []any
-		require.NoError(t, codec.Unmarshal([]byte("-\tx\n"), &s))
-		assert.Equal(t, []any{"x"}, s)
-	})
-}
-
 // TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused pins the nesting.
 //
 // 8.2.2 puts an explicit entry's key at s-l+block-indented(n, block-out), which
@@ -586,26 +524,44 @@ func TestDefectACollectionKeyWrittenAloneInFlowIsRefused(t *testing.T) {
 	})
 }
 
-// TestDefectTwoCollectionKeysInOneMappingCollide pins it.
+// TestDefectATabBeforeAnAnchoredBlockScalarScansItsContentAsPlain pins it.
 //
-// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
-// different mappings do not. The duplicate check names a collection key by its
-// opening character, so every collection key in a mapping is the same key as
-// every other.
+// The content of a block scalar is not a plain scalar and may begin with
+// anything. `&a1<TAB>>-` over ` , a` is refused as `a plain scalar cannot begin
+// with ","`, so the header is not being taken.
 //
-// The name is the tell: "{" is one character of the document rather than
-// anything the key denotes, and KeyText names the same key "map[:0]".
-func TestDefectTwoCollectionKeysInOneMappingCollide(t *testing.T) {
-	t.Run("today two collection keys collide", func(t *testing.T) {
-		var got any
-		err := codec.Unmarshal([]byte(`{{"": 0}: a, {"": 1}: b}`+"\n"), &got)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `mapping key "{" already defined`)
+// It is NOT a residue of `a0182a6`, which made a tab end a property as a space
+// does: at `1c59c89`, the commit before it, this document is refused with the
+// identical message. That commit fixed a sibling -- `!!str<TAB>>-` went from
+// refused to reading -- and left this one, which is what made the gap visible.
+//
+// The cause is in the token stream: `&a1<TAB>>-` scans as Anchor `&` then String
+// `a1>-`, the header joined to the anchor's name, where `&a1 >-` gives Anchor,
+// String `a1`, Folded `>-`.
+//
+// grammar.NewRecognizer accepts the document, the reference parser passes it,
+// and go.yaml.in/yaml/v3 v3.0.5 reads ", a".
+func TestDefectATabBeforeAnAnchoredBlockScalarScansItsContentAsPlain(t *testing.T) {
+	t.Run("today it is refused", func(t *testing.T) {
+		for _, src := range []string{"&a1\t>-\n , a\n", "&a1\t>-\n  , a\n"} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "a plain scalar cannot begin with", "%q", src)
+		}
 	})
 
-	t.Run("one alone reads", func(t *testing.T) {
-		var got any
-		require.NoError(t, codec.Unmarshal([]byte(`{{"": 0}: a}`+"\n"), &got))
-		assert.Equal(t, map[string]any{"map[:0]": "a"}, got)
+	// Each of these reads, and together they say what the defect needs: an
+	// anchor rather than a tag, a tab rather than a space, and content a plain
+	// scalar could not begin with.
+	t.Run("change any one of the three and it reads", func(t *testing.T) {
+		for _, src := range []string{
+			"&a1 >-\n , a\n",
+			"!!str\t>-\n , a\n",
+			"&a1\t>-\n x\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+		}
 	})
 }

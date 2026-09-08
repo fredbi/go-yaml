@@ -1915,3 +1915,58 @@ func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
 		assert.Contains(t, err.Error(), `"x" already defined`)
 	})
 }
+
+// TestFixedATabSeparatesAsASpaceDoes: a tab between a node's properties and the
+// node ends the property, exactly as a space does.
+//
+// 6.1 puts a tab in s-white and s-separate-in-line is s-white+, so a tab ends an
+// anchor, an alias and a tag shorthand. Only the space did until `a0182a6`:
+// `a: !!str<TAB>x` was refused as `found invalid tag character`, and
+// `a: &n<TAB>x` cut the anchor as "nx" on the empty node, so the value was gone
+// and a later `*n` named nothing.
+//
+// Reached by Style.TabSeparation, which was built to close the census gap that
+// 56 YAML Test Suite documents hold a tab and no generated document did. Neither
+// corpus writes a tab after a property, so nothing else could have found it.
+func TestFixedATabSeparatesAsASpaceDoes(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want map[string]any
+	}{
+		{"a: !!str\tx\n", map[string]any{"a": "x"}},
+		{"a: &n\tx\n", map[string]any{"a": "x"}},
+		{"a: &n\tx\nb: *n\n", map[string]any{"a": "x", "b": "x"}},
+		{"a: !!str x\n", map[string]any{"a": "x"}},
+		{"a:\tx\n", map[string]any{"a": "x"}},
+	} {
+		var got map[string]any
+		require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+		assert.Equalf(t, tc.want, got, "%q", tc.src)
+	}
+}
+
+// TestFixedTwoCollectionKeysAreTwoKeys: two collections used as keys in one
+// mapping are two keys.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
+// different mappings do not. Until `913fb19` the duplicate check named a
+// collection key by its opening character, so every collection key in a mapping
+// was the same key as every other and the second was refused as a duplicate.
+//
+// The empty key is the neighbor worth keeping: a key written empty is a real
+// key and a repeat of it is still a duplicate, so the fix had to skip the
+// collection rather than skip a missing name.
+func TestFixedTwoCollectionKeysAreTwoKeys(t *testing.T) {
+	t.Run("two collection keys read as two", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte(`{{"": 0}: a, {"": 1}: b}`+"\n"), &got))
+		assert.Equal(t, map[string]any{"map[:0]": "a", "map[:1]": "b"}, got)
+	})
+
+	t.Run("a repeated empty key is still a duplicate", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte(": a\n: b\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "already defined")
+	})
+}

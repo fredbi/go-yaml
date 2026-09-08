@@ -172,6 +172,17 @@ var typedPathDefects = map[string]typedDefect{
 // The inverse of typedPathDefects and worth keeping apart from it: an entry
 // here is not a reason to look at the reflection path.
 var yardstickDefects = map[string]string{
+	// A collection key has no Go map key to be. `map[any]any` and
+	// `map[string]any` both refuse the document with `cannot use
+	// map[string]interface {} as a map key: Go cannot hash it`, and codec.ToJSON
+	// refuses it with `a mapping cannot be a JSON key`. Those are the right
+	// answers: Go cannot hash a map and JSON has no mapping key.
+	//
+	// The `any` read names the key by stringifying it -- "map[:0]" -- which
+	// KeyText's own comment records as a divergence rather than a meaning. So
+	// the two reads differ, the typed one is right, and there is nothing here to
+	// fix in the reflection path.
+	"two collection keys in one mapping": "a collection key is not a Go map key",
 	// A duplicate that only collides once an alias is resolved. "k: &a n" over
 	// "*a : 1" over "n: 2" reads into an `any` as {"k": "n", "n": 2}, one
 	// entry short and nothing reported, and every typed map refuses it with
