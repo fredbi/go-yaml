@@ -4,14 +4,12 @@
 package scanner_test
 
 import (
-	"sort"
 	"strings"
 	"testing"
 
-	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
-	yamltestsuite "github.com/go-openapi/go-yaml/internal/yamltestsuite"
+	"github.com/go-openapi/go-yaml/internal/ledgers"
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -75,14 +73,10 @@ var offsetMissLedger = map[string]int{ //nolint:gochecknoglobals // ok to store 
 // TestTokenOffsetsAddressTheSource measures, over the YAML Test Suite, how often a token's Offset addresses that token
 // in the source.
 func TestTokenOffsetsAddressTheSource(t *testing.T) {
-	tests, err := yamltestsuite.TestSuites()
-	require.NoError(t, err)
-	require.NotEmpty(t, tests)
-
 	missed := make(map[string]int)
 	var total int
 
-	for _, test := range tests {
+	for test := range yamlTests(t) {
 		src := string(test.InYAML)
 		tokens := scanAll(t, src)
 		for i, tk := range tokens {
@@ -99,29 +93,7 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 
 	require.NotZero(t, total)
 
-	names := make([]string, 0, len(missed)+len(offsetMissLedger))
-	for name := range missed {
-		names = append(names, name)
-	}
-	for name := range offsetMissLedger {
-		if _, seen := missed[name]; !seen {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		got, want := missed[name], offsetMissLedger[name]
-		switch {
-		case want == 0:
-			assert.Zerof(t, got, "%s: %d tokens gained an offset that misses their text", name, got)
-		case got == 0:
-			assert.Failf(t, "ledger entry is stale",
-				"%s: no longer misses %d offsets. If that is a fix, delete the entry", name, want)
-		default:
-			assert.Equalf(t, want, got, "%s: offset misses changed", name)
-		}
-	}
+	ledgers.Compare(t, "offset misses", missed, offsetMissLedger)
 }
 
 // originsOf reads back the text the document wrote each token as.
@@ -129,6 +101,10 @@ func TestTokenOffsetsAddressTheSource(t *testing.T) {
 // [token.Token] does not carry it.
 // The tokens' extents tile the source, which TestOriginsTileTheSource checks, so the text of the token
 // at i is the source between the end of the one before it and its own end, leading whitespace included.
+// TestOriginsTileTheSource lives in internal/scanner and checks that tiling.
+//
+// The scanner's own tests carry the same function. testscanner is internal to the scanner tree and cannot be
+// imported from here, and one shared copy is not worth a package of its own for twenty lines.
 func originsOf(src string, tokens []token.Token) []string {
 	origins := make([]string, len(tokens))
 	prev := 0

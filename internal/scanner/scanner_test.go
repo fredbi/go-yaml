@@ -87,3 +87,28 @@ func estimateTokens[V Doc](src V) int {
 	// over-allocates a little on the dense ones and grows once or twice on the sparse ones.
 	return len(src) / 4
 }
+
+// originsOf reads back the text the document wrote each token as.
+//
+// [token.Token] does not carry it.
+// The tokens' extents tile the source, which TestOriginsTileTheSource checks, so the text of the token
+// at i is the source between the end of the one before it and its own end, leading whitespace included.
+func originsOf(src string, tokens []token.Token) []string {
+	origins := make([]string, len(tokens))
+	prev := 0
+
+	for i, tk := range tokens {
+		end := int(tk.EndOffset())
+		if end < prev || end > len(src) {
+			origins[i] = ""
+			prev = min(max(end, prev), len(src))
+
+			continue
+		}
+
+		origins[i] = src[prev:end]
+		prev = end
+	}
+
+	return origins
+}

@@ -1,0 +1,46 @@
+# ledgers
+
+One place for the defect ledgers, which were scattered over four packages.
+
+A ledger records what a package is known to get wrong, keyed by the case or the invariant that shows it, with the
+extent written down. It is a measurement with a name attached, not an excuse: `Compare` fails when a defect appears
+that is not recorded, and fails again when a recorded defect stops showing. A fix lands by deleting the entry.
+
+## Layout
+
+```
+ledgers/
+  ledger.go            Compare, the ratchet every ledger is held with
+  scanner/             one directory per package under measurement
+    scan_test.go       helpers shared by that package's ledgers
+    position_test.go   positionLedger
+    offset_test.go     offsetMissLedger
+    state_test.go      stateLedger, behind -tags yamlprobe
+```
+
+A directory here holds test files and nothing else, so nothing in the library imports it. That is deliberate: it
+means this tree can be given its own `go.mod` the day a ledger needs a dependency the library should not carry.
+Until then it runs under `go test ./...` like everything else, and a change that breaks a ledger breaks it locally.
+
+## Moving a ledger here
+
+Only the scanner's three have moved. `parser.keyLedger`, `conformance`'s three and the root `decodeLedger` are still
+where they were, for their owners to move.
+
+1. Make a directory named after the package, with test files in `package <name>_test`.
+2. Copy the ledger variable and the test that measures it, with the comment that says what each entry is for.
+   Leave behind the tests that are not ledgers: `internal/scanner/position_test.go` and `probe_test.go` each held one
+   of each, and only the ledger half moved.
+3. Replace the comparison loop with `ledgers.Compare`. It wants a map holding only the names that show a defect, so
+   filter out the clean ones first -- `state_test.go` does that with `probe.Checks`.
+4. Copy whatever helpers the test needs. The packages under measurement keep their own test helpers unexported, and
+   a `internal/.../internal/test*` package cannot be imported from here, so a short helper is copied rather than
+   shared. `originsOf` in `scanner/offset_test.go` is the one that is.
+
+## Known red
+
+`scanner/state_test.go` fails, and failed the same way before it moved: three entries drifted
+(`indentNum==column-1/spaces` 7 -> 8, `/tab` 5 -> 12, `lastIndentLevel==indentLevel` 2,729 -> 4,213). It only runs
+under `-tags yamlprobe`, which no CI job passes, so the drift went unnoticed. Re-baselining it means deciding first
+whether the corpus grew or the scanner moved -- `TestBulkSkipMovesNoInvariant` in `internal/scanner` is the test that
+tells those apart.

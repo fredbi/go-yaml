@@ -9,6 +9,12 @@ is queried from the scanner state.
 This document is the companion's guide to a maintainer: it contains extra technical information
 that we don't want to leave in the code for the sake of clarity.
 
+## Ledgers
+
+The scanner's three defect ledgers -- positions, offset misses and the state pairs behind `-tags yamlprobe` -- live in
+`internal/ledgers/scanner`, with the ratchet that holds them. `internal/scanner/internal/testscanner` keeps only
+`WorkloadDocs`, which the benchmarks and the property tests read.
+
 ## The source is one buffer under two types
 
 [Scanner.Init] is handed a `[]byte`, makes a string of it with `nocopy.String`, and `Context.reset` takes the bytes
