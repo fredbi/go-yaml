@@ -611,7 +611,7 @@ func (a *aliaser) children(v Value) Value {
 			pairs = append(pairs, Pair{Key: a.anchorKey(p.Key), Val: a.walk(p.Val)})
 		}
 
-		return Map{Pairs: a.merge(pairs, from)}
+		return Map{Pairs: a.merge(a.aliasAKey(pairs), from)}
 	case Tagged:
 		return Tagged{Tag: n.Tag, V: a.children(n.V)}
 	default:
@@ -648,6 +648,48 @@ func (a *aliaser) anchorKey(k Value) Value {
 // rarer thing to write than an anchored value, and every one of them adds a
 // name a later alias may take.
 const keyAnchorOdds = 15
+
+// aliasKeyOdds is one in N, over the mappings drawn while the pool holds a
+// node an alias key could name.
+const aliasKeyOdds = 11
+
+// aliasAKey appends an entry whose key is an alias to a node anchored earlier
+// in the document, one time in aliasKeyOdds.
+//
+// # Why the valid case is the one worth drawing
+//
+// 3.2.2.2 makes an alias node the anchored node rather than a copy of it, so
+// "&a x: 1" beside "*a : 2" is one key written twice and a document to refuse.
+// Two *different* anchored nodes used as keys -- "a: &x [1,2]", "b: &y [3,4]",
+// "*x : p", "*y : q" -- are two keys and a document to read, and that is the
+// direction a checker naming a key from a scrubbed node fails: it invents a
+// duplicate and refuses a valid document, loudly, where missing a repeat is
+// quiet. The corpus reached 21,686 cases without drawing one.
+//
+// So this draws the accepting case and nothing else: the key is checked against
+// every key the mapping already holds and skipped where it would collide. The
+// duplicate is yamlcorpus's business, where a rule builds it on purpose and the
+// document is labeled as one to refuse.
+//
+// The pool as it stands here, not the snapshot merge takes: the entry is
+// appended, so every anchor in the pool stands above it in the document.
+func (a *aliaser) aliasAKey(pairs []Pair) []Pair {
+	if len(a.pool) == 0 || rapid.IntRange(0, aliasKeyOdds).Draw(a.t, "aliaskey") != 0 {
+		return pairs
+	}
+
+	target := rapid.SampledFrom(a.pool).Draw(a.t, "aliaskeytarget")
+	key := Alias(target)
+
+	name := KeyText(key)
+	for _, p := range pairs {
+		if KeyText(p.Key) == name {
+			return pairs
+		}
+	}
+
+	return append(pairs, Pair{Key: key, Val: Str{V: "aliased"}})
+}
 
 // mergeOdds is one in N, over the mappings drawn while the pool holds a
 // mapping to merge from.
@@ -1024,6 +1066,20 @@ func Keys() *rapid.Generator[Value] {
 		case 2:
 			return Int{V: rapid.IntRange(-1000, 1000).Draw(t, "int")}
 		default:
+			// One float key in three is whole-valued, which the continuous
+			// range alone almost never lands on: the corpus held 5 of them in
+			// 21,686 cases and not one carried an anchor.
+			//
+			// It is the float key that matters. Its canonical name carries the
+			// ".0" -- which is what keeps it out of the integers' namespace --
+			// and a property in front of it loses that: "&a1 1.0" is named "1"
+			// on the walk and "1.0" on the tree. yamlcorpus.TagKeyIntegralFloat
+			// is the family, enumerated by hand since 2026-09-03 and drawn
+			// nowhere until now.
+			if rapid.IntRange(0, 2).Draw(t, "wholefloat") == 0 {
+				return Float{V: float64(rapid.IntRange(-9, 9).Draw(t, "wholefloatvalue"))}
+			}
+
 			return Float{V: rapid.Float64Range(-1000, 1000).Draw(t, "float")}
 		}
 	})

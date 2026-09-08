@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -132,6 +134,75 @@ func anchoredFloatKey(src string) bool {
 // deliberately: what it guards is a disagreement between two decode paths, and
 // a document wrongly held out here is one the rest of the suite still scores.
 // A predicate that under-matched would let the disagreement through.
+// differOnlyByAFloatKeySpelling reports whether two decodes of one document
+// agree once every float-spelling key is named the same way.
+//
+// A float key standing behind a property is named by its canonical YAML
+// spelling on the tree and by Go's %v on the walk: "&a1 -2.0: x" is keyed
+// "-2.0" one way and "-2" the other, and "&a .inf" is ".inf" against "+Inf".
+// yamlgen_test.TestDefectAFloatKeyBehindAPropertyLosesItsSpelling pins it and
+// TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds the infinities.
+//
+// Keyed on the disagreement rather than on the document: the hold-out stops
+// matching by itself when the two paths name the key the same way, so nothing
+// has to remember to remove it.
+func differOnlyByAFloatKeySpelling(want, got any) bool {
+	return fmt.Sprintf("%#v", floatKeysNamedByGo(want)) == fmt.Sprintf("%#v", floatKeysNamedByGo(got))
+}
+
+// floatKeysNamedByGo rewrites every map key that spells a float to Go's %v of
+// it, so that ".inf" and "+Inf" become one key and "-2.0" and "-2" another.
+func floatKeysNamedByGo(v any) any {
+	switch n := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(n))
+		for k, val := range n {
+			out[floatKeyNamedByGo(k)] = floatKeysNamedByGo(val)
+		}
+
+		return out
+	case []any:
+		out := make([]any, 0, len(n))
+		for _, item := range n {
+			out = append(out, floatKeysNamedByGo(item))
+		}
+
+		return out
+	default:
+		return v
+	}
+}
+
+// floatKeyNamedByGo returns Go's %v of a key that spells a float, and the key
+// unchanged otherwise.
+//
+// The YAML spellings of the infinities and of a not-a-number are taken by name:
+// ParseFloat reads "inf" and "nan" and not ".inf" and ".nan".
+func floatKeyNamedByGo(key string) string {
+	switch key {
+	case ".inf", ".Inf", ".INF", "+.inf":
+		return fmt.Sprintf("%v", math.Inf(1))
+	case "-.inf", "-.Inf", "-.INF":
+		return fmt.Sprintf("%v", math.Inf(-1))
+	case ".nan", ".NaN", ".NAN":
+		return fmt.Sprintf("%v", math.NaN())
+	}
+
+	// A key that is not a float, or an integer spelling that a float key would
+	// never be named by: only a key holding a "." or an exponent can be the
+	// canonical spelling of a float.
+	if !strings.ContainsAny(key, ".eE") {
+		return key
+	}
+
+	f, err := strconv.ParseFloat(key, 64)
+	if err != nil {
+		return key
+	}
+
+	return fmt.Sprintf("%v", f)
+}
+
 // blockCollectionKeysCollide reports whether the one path that refused the
 // document did so because a block collection key is named by its first
 // indicator.
@@ -259,6 +330,8 @@ func TestWalkMatchesTheStream(t *testing.T) {
 			}
 		case fmt.Sprintf("%#v", want) == fmt.Sprintf("%#v", got):
 			same++
+		case differOnlyByAFloatKeySpelling(want, got):
+			skipped++
 		default:
 			differ++
 			if differ <= 5 {

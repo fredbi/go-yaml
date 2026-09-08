@@ -272,7 +272,7 @@ func readTheStream(t *testing.T, src string) []any {
 	}
 }
 
-// TestDefectAnAnchorOnAFloatKeyLosesItsSpelling pins the naming.
+// TestDefectAFloatKeyBehindAPropertyLosesItsSpelling pins the naming.
 //
 // A float key is named by its canonical spelling, and the ".0" is what keeps it
 // out of the integers' namespace: "1.0: x" comes back keyed "1.0". Put an
@@ -293,7 +293,7 @@ func readTheStream(t *testing.T, src string) []any {
 //
 // Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the
 // aliaser began anchoring keys.
-func TestDefectAnAnchorOnAFloatKeyLosesItsSpelling(t *testing.T) {
+func TestDefectAFloatKeyBehindAPropertyLosesItsSpelling(t *testing.T) {
 	t.Run("a bare float key keeps its spelling", func(t *testing.T) {
 		for _, tc := range []struct{ src, key string }{
 			{src: "1.0: x\n", key: "1.0"},
@@ -482,7 +482,7 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 	})
 }
 
-// TestDefectATagOnAKeyEmptiesAStructField pins the destination that loses it.
+// TestDefectAPropertiedKeyDoesNotReachAStructField pins the destination that loses it.
 //
 // Hand-written for the same reason as TestDefectAPropertiedEmptyKeyIsMishandled:
 // the generator can write a tagged key and does not draw one yet.
@@ -501,7 +501,7 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 // 2026-09-08 is the reach: the tagger walks keys now, so a generated document
 // carries a tagged key and TestDecodingIntoAGoTypeGivesTheSameValue meets it
 // without anybody writing one by hand.
-func TestDefectATagOnAKeyEmptiesAStructField(t *testing.T) {
+func TestDefectAPropertiedKeyDoesNotReachAStructField(t *testing.T) {
 	type target struct {
 		X any `yaml:"x"`
 	}
@@ -516,6 +516,25 @@ func TestDefectATagOnAKeyEmptiesAStructField(t *testing.T) {
 		var got target
 		require.NoError(t, codec.Unmarshal([]byte("&a1 x: 1\n"), &got))
 		assert.Equal(t, uint64(1), got.X)
+	})
+
+	t.Run("today an alias standing as the key leaves it empty too", func(t *testing.T) {
+		// The alias resolves to the anchored node, so the key is "n" and the
+		// `any` read fills it. Drawn since 2026-09-08 by aliaser.aliasAKey,
+		// which is how this half was found.
+		type named struct {
+			N any `yaml:"n"`
+		}
+
+		const src = "k: &a1 n\n*a1 : 1\n"
+
+		var got named
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Nil(t, got.N, "today: the field is never filled")
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, map[string]any{"k": "n", "n": uint64(1)}, walked)
 	})
 
 	t.Run("today a tag on the key leaves it empty", func(t *testing.T) {

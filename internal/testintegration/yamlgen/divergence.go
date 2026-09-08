@@ -275,8 +275,8 @@ var Ledger = []Divergence{
 		Match:    writesAPropertiedKeyBeforeABlockScalar,
 	},
 	{
-		Name: "decode/an-anchor-on-a-float-key-loses-its-spelling",
-		Pin:  "TestDefectAnAnchorOnAFloatKeyLosesItsSpelling",
+		Name: "decode/a-float-key-behind-a-property-loses-its-spelling",
+		Pin:  "TestDefectAFloatKeyBehindAPropertyLosesItsSpelling",
 		Reason: "`1.0: x` comes back keyed \"1.0\" and `&a1 1.0: x` keyed \"1\" -- on the walk. Read " +
 			"into a map[string]any the same document keeps the \"1.0\", so the destination decides " +
 			"the key. The anchor names the " +
@@ -284,8 +284,14 @@ var Ledger = []Divergence{
 			"float key is named by its canonical spelling -- the \".0\" is what keeps it out of the " +
 			"integers' namespace. `&a1 1e3: x` loses it the same way, coming back \"1000\" where " +
 			"`1e3: x` gives \"1000.0\".\n\n" +
-			"Only a float, and only the implicit key: `&a1 7`, `&a1 true` and `&a1 1.5` are named " +
-			"correctly, and `? &a1 1.0` over `: x` gives \"1.0\". Flow loses it like block.\n\n" +
+			"Only a float, and for an anchor only the implicit key: `&a1 7`, `&a1 true` and `&a1 1.5` " +
+			"are named correctly, and `? &a1 1.0` over `: x` gives \"1.0\". Flow loses it like " +
+			"block.\n\n" +
+			"An **alias** key loses it the same way, which is the same node reached by the other " +
+			"spelling: a mapping keyed `*a1` where a1 names `!!float .inf` comes back keyed " +
+			"\"+Inf\" on the walk where the canonical spelling is \".inf\", and the long form does " +
+			"not save it: `? *a1` over `: v` loses it too, where `? &a1 1.0` keeps it. " +
+			"codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds that pair.\n\n" +
 			"The same root as yamlcorpus.Departures' \"a key tagged !!float\", where `!!float 226.0` " +
 			"comes back \"226\": a property in front of the key is not looked through before the key " +
 			"is named. codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds the " +
@@ -293,7 +299,23 @@ var Ledger = []Divergence{
 			"Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the aliaser " +
 			"began anchoring keys.",
 		Property: Decode | Render | DecodeTyped,
-		Match:    writesAnAnchoredKeyNamedTwoWays,
+		Match:    writesAPropertiedKeyNamedTwoWays,
+	},
+	{
+		Name: "decode/an-alias-key-does-not-reach-a-struct-field",
+		Pin:  "TestDefectAPropertiedKeyDoesNotReachAStructField",
+		Reason: "`k: &a1 n` over `*a1 : 1` read into a struct whose field is tagged `n` leaves the " +
+			"field at its zero value and reports nothing. The same document into an `any` names the " +
+			"key \"n\" and holds the value, so the alias resolves everywhere except where a field " +
+			"has to be found for it.\n\n" +
+			"A tag on a key does the same and an anchor does not, so it is the two spellings that " +
+			"replace the key node -- an alias standing *as* the key, and a tag in front of it -- " +
+			"that the reflection path does not look through. TestDefectAPropertiedKeyDoesNotReachAStructField " +
+			"holds all three; only the alias half is drawn, since the tagger leaves keys alone.\n\n" +
+			"Reached on 2026-09-08 by TestDecodingIntoAGoTypeGivesTheSameValue, on the first run " +
+			"after aliaser.aliasAKey began appending an alias key.",
+		Property: DecodeTyped,
+		Match:    writesAnAliasKey,
 	},
 	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
@@ -539,53 +561,96 @@ func writesAsABlockScalar(v Value, st Style) bool {
 	return false
 }
 
-// writesAnAnchoredKeyNamedTwoWays reports whether a key carrying an anchor has a
-// canonical name Go's %v does not write.
+// writesAnAliasKey reports whether an alias stands as a mapping key.
 //
-// Only a float does: [KeyText] gives the float 1 the name "1.0" and %v writes
-// "1". Style.ExplicitKeys is the other half -- "? &a1 1.0" over ": x" is named
-// correctly, so it is the implicit key that loses the spelling.
-func writesAnAnchoredKeyNamedTwoWays(v Value, st Style) bool {
-	if st.ExplicitKeys {
-		return false
-	}
-
-	return holdsAnAnchoredKeyNamedTwoWays(v)
-}
-
-func holdsAnAnchoredKeyNamedTwoWays(v Value) bool {
+// The style has no say: an alias is one token wherever it stands.
+func writesAnAliasKey(v Value, _ Style) bool {
 	switch n := v.(type) {
 	case Map:
 		for _, p := range n.Pairs {
-			if namedTwoWays(p.Key) {
+			if _, aliased := p.Key.(Alias); aliased {
 				return true
 			}
 
-			if holdsAnAnchoredKeyNamedTwoWays(p.Key) || holdsAnAnchoredKeyNamedTwoWays(p.Val) {
+			if writesAnAliasKey(p.Key, Style{}) || writesAnAliasKey(p.Val, Style{}) {
 				return true
 			}
 		}
 	case Seq:
-		return slices.ContainsFunc(n.Items, holdsAnAnchoredKeyNamedTwoWays)
+		return slices.ContainsFunc(n.Items, func(item Value) bool { return writesAnAliasKey(item, Style{}) })
 	case Anchored:
-		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+		return writesAnAliasKey(n.V, Style{})
 	case Alias:
-		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+		return writesAnAliasKey(n.V, Style{})
 	case Tagged:
-		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+		return writesAnAliasKey(n.V, Style{})
 	}
 
 	return false
 }
 
-// namedTwoWays reports whether a key carries an anchor and is named one thing by
-// KeyText and another by Go's %v of what it decodes to.
-func namedTwoWays(k Value) bool {
-	if _, anchored := k.(Anchored); !anchored {
-		return false
+// writesAPropertiedKeyNamedTwoWays reports whether a key standing behind a
+// property has a canonical name Go's %v does not write.
+//
+// Only a float does: [KeyText] gives the float 1 the name "1.0" and %v writes
+// "1", and it gives an infinity ".inf" where %v writes "+Inf". An anchor and an
+// alias both reach it, being the two ways of writing a property in front of a
+// key. Style.ExplicitKeys is the other half -- "? &a1 1.0" over ": x" is named
+// correctly, so it is the implicit key that loses the spelling.
+func writesAPropertiedKeyNamedTwoWays(v Value, st Style) bool {
+	return holdsAPropertiedKeyNamedTwoWays(v, st.ExplicitKeys)
+}
+
+func holdsAPropertiedKeyNamedTwoWays(v Value, explicit bool) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if namedTwoWays(p.Key, explicit) {
+				return true
+			}
+
+			if holdsAPropertiedKeyNamedTwoWays(p.Key, explicit) ||
+				holdsAPropertiedKeyNamedTwoWays(p.Val, explicit) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAPropertiedKeyNamedTwoWays(item, explicit)
+		})
+	case Anchored:
+		return holdsAPropertiedKeyNamedTwoWays(n.V, explicit)
+	case Alias:
+		return holdsAPropertiedKeyNamedTwoWays(n.V, explicit)
+	case Tagged:
+		return holdsAPropertiedKeyNamedTwoWays(n.V, explicit)
 	}
 
-	node := peelProperties(k)
+	return false
+}
+
+// namedTwoWays reports whether a key stands behind a property and is named one
+// thing by KeyText and another by Go's %v of what it decodes to.
+//
+// The long form parts the two spellings. "? &a1 1.0" over ": x" keeps the
+// canonical name where "&a1 1.0: x" loses it, so an anchored key diverges only
+// where the entry is written short; an alias key loses it either way, since
+// "? *a1" over ": v" is named "+Inf" too.
+func namedTwoWays(k Value, explicit bool) bool {
+	var node Value
+
+	switch n := k.(type) {
+	case Anchored:
+		if explicit {
+			return false
+		}
+
+		node = peelProperties(n.V)
+	case Alias:
+		node = peelProperties(n.V)
+	default:
+		return false
+	}
 
 	return KeyText(node) != fmt.Sprintf("%v", node.Decoded())
 }
