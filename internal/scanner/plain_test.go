@@ -76,8 +76,7 @@ func itoa32(i int32) string {
 	return string(b)
 }
 
-// TestAlnumRunReadsWhatTheByteLoopReads is what decides whether the bulk skip is
-// right.
+// TestAlnumRunReadsWhatTheByteLoopReads decides whether the bulk skip is right.
 //
 // Stepping over a run of characters in one go has broken something different
 // each of the three times it was tried before -- four origin recordings lost, a

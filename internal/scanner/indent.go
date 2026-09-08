@@ -27,10 +27,12 @@ const (
 func (s *Scanner) updateIndentLevel() {
 	if s.prevLineIndentNum < s.indentNum {
 		s.indentLevel++
-	} else if s.prevLineIndentNum > s.indentNum {
-		if s.indentLevel > 0 {
-			s.indentLevel--
-		}
+
+		return
+	}
+
+	if s.prevLineIndentNum > s.indentNum && s.indentLevel > 0 {
+		s.indentLevel--
 	}
 }
 
@@ -75,16 +77,19 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 
 		return
 	}
+
 	if s.isFirstCharAtLine && c == '\t' {
 		// found tab indent.
 		// In this case, scanTab returns error.
 		s.indentHasTab = true
 		return
 	}
+
 	if !s.isFirstCharAtLine {
 		s.indentState = IndentStateKeep
 		return
 	}
+
 	s.updateIndentLevel()
 	s.updateIndentState()
 	s.isFirstCharAtLine = false

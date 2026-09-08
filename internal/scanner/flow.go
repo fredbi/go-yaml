@@ -5,11 +5,19 @@ package scanner
 
 import "github.com/go-openapi/go-yaml/token"
 
-// scanFlowDash reports a '-' that is neither a sequence entry nor the start of a scalar.
+// scanFlowDash refuses a '-' that is neither a sequence entry nor the start of a scalar.
 //
-// A plain scalar may begin with '-' only when the character after it can continue the scalar.
-// The characters structuring a flow collection cannot, so "[-]" and "[-, -]" hold no scalar at all.
-// Both used to read as the one-character string "-".
+// A plain scalar may begin with '-' only when the character behind it can continue the scalar, and the characters
+// structuring a flow collection cannot. A flow collection has no block sequence entries either, so such a '-' opens
+// nothing at all.
+//
+// Example:
+//
+//	[-]        # refused: the ']' cannot continue a scalar
+//	[-, -]     # refused, twice
+//	[-1, -x]   # both read as scalars, '1' and 'x' continuing the '-'
+//
+// Outside a flow collection the '-' is a sequence entry, so this returns nil there and the entry scan claims it.
 func (s *Scanner) scanFlowDash(ctx *Context) error {
 	if ctx.existsBuffer() || !s.isFlowMode() {
 		return nil
@@ -35,8 +43,7 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 
 // enterFlow records what a flow collection's continuation lines must clear.
 //
-// Only the outermost one matters: a collection nested inside another is already past the indentation its parent
-// required.
+// Only the outermost one matters: a collection nested inside another is already past the indentation its parent required.
 func (s *Scanner) enterFlow() {
 	if s.isFlowMode() {
 		return
@@ -66,6 +73,7 @@ func (s *Scanner) scanFlowMapStart(ctx *Context) bool {
 	s.startedFlowMapNum++
 	s.progressColumn(ctx, 1)
 	ctx.clear()
+
 	return true
 }
 
@@ -80,6 +88,7 @@ func (s *Scanner) scanFlowMapEnd(ctx *Context) bool {
 	s.startedFlowMapNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
+
 	return true
 }
 
@@ -95,6 +104,7 @@ func (s *Scanner) scanFlowArrayStart(ctx *Context) bool {
 	s.startedFlowSequenceNum++
 	s.progressColumn(ctx, 1)
 	ctx.clear()
+
 	return true
 }
 
@@ -109,6 +119,7 @@ func (s *Scanner) scanFlowArrayEnd(ctx *Context) bool {
 	s.startedFlowSequenceNum--
 	s.progressColumn(ctx, 1)
 	ctx.clear()
+
 	return true
 }
 
@@ -122,5 +133,6 @@ func (s *Scanner) scanFlowEntry(ctx *Context, c rune) bool {
 	ctx.addTokenValue(token.MakeCollectEntry(ctx.origin(), s.pos()))
 	s.progressColumn(ctx, 1)
 	ctx.clear()
+
 	return true
 }

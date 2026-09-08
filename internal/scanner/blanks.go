@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/scanner/swar"
+
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -43,6 +44,7 @@ func (s *Scanner) scanWhiteSpace(ctx *Context) bool {
 		s.addBufferedTokenIfExists(ctx)
 		s.progressColumn(ctx, 1)
 		ctx.addOriginBuf(' ')
+
 		return true
 	}
 
@@ -98,6 +100,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	} else if s.isAnchor || s.isAlias || s.isDirective {
 		s.addBufferedTokenIfExists(ctx)
 	}
+
 	if ctx.existsBuffer() && s.isFirstCharAtLine {
 		if ctx.buf[len(ctx.buf)-1] == ' ' {
 			ctx.buf[len(ctx.buf)-1] = '\n'
@@ -107,6 +110,7 @@ func (s *Scanner) scanNewLine(ctx *Context, c rune) {
 	} else {
 		ctx.addBuf(' ')
 	}
+
 	ctx.addOriginBuf(c)
 	s.progressLine(ctx)
 }
@@ -143,22 +147,12 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 	return false, err
 }
 
-// indentProbe is how many spaces are counted one at a time before the word scan takes over, and indentEager the depth
-// at which the probe is skipped altogether.
-//
-// Over the analysis workloads an indentation run is 14.5 spaces on average and 61% of them are longer than eight, so
-// the word scan earns its keep; but 17% are four or shorter, and reading a word to step over two spaces costs more than
-// reading the two spaces.
-//
-// Which of the two a line is cannot be told from its first space.
-// It can be told from the document: indentation runs together, and one that has opened a line with four spaces opens
-// the next ones the same way.
-//
-// So a document pays the probe until it shows one deep line, and pays nothing after that.
-// The alternative charged four comparisons to every line of every document, which a shallowly indented one paid for a
-// run it never has.
+// blank fast-scan knobs: after having read 4 leading blanks, assume we are in a deeply nested indented zone, and
+// proceed with fast-scanning indents with SWAR.
 const (
+	// indentProbe tells how many spaces are counted one at a time before the word scan takes over.
 	indentProbe = 4
+	// indentEager is the depth at which the probe is skipped altogether.
 	indentEager = 4
 )
 
@@ -185,7 +179,8 @@ func (s *Scanner) indentRun(ctx *Context) int32 {
 		}
 	}
 
-	// Eight bytes at a time: the run outran the probe, or the document has already shown that its lines are indented.
+	// The scanner state is recognized has "deep indented" .
+	// Proceed height bytes at a time: the run outran the probe, or the document has already shown that its lines are indented.
 	for i+8 <= int32(len(raw)) {
 		w := binary.LittleEndian.Uint64(raw[i:])
 		if m := swar.SpaceMask(w); m != 0 {
@@ -202,11 +197,5 @@ func (s *Scanner) indentRun(ctx *Context) int32 {
 }
 
 func isNewLineChar(c rune) bool {
-	if c == '\n' {
-		return true
-	}
-	if c == '\r' {
-		return true
-	}
-	return false
+	return c == '\n' || c == '\r'
 }

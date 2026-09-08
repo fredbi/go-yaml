@@ -21,8 +21,12 @@ import (
 // an editor that writes a mark still reads.
 //
 // A mark carries no information about the encoding here.
-// The spec lets a stream announce UTF-16 or UTF-32 with one; this library reads UTF-8 only, and departs from
-// YAML 1.2.2 on purpose in that one place.
+//
+// # YAML spec
+//
+// The spec lets a stream announce UTF-16 or UTF-32 with a BOM.
+// This library only supports UTF-8, and departs from YAML 1.2.2 on purpose in that one place.
+//
 // A UTF-16 stream's mark is two bytes that form no character, and validateStream refuses them.
 const byteOrderMark = '\ufeff'
 
@@ -56,6 +60,10 @@ func validateStream(text string) error {
 // or refuses a character and not a byte.
 // The word loop resumes after the run.
 func firstUnprintable(text string) int {
+	// The same bytes under the type the word loads need, as Context.reset does for the scan proper.
+	//
+	// TODO: validateStream is called from Init before the scan holds anything, so it could take the caller's []byte
+	// directly and drop this conversion. That means validateSource on []byte and utf8.DecodeRune below.
 	raw := unsafe.Slice(unsafe.StringData(text), len(text))
 
 	i := 0

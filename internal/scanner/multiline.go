@@ -538,15 +538,13 @@ func (s *MultiLineState) from(now token.Position) token.Position {
 // c-b-block-header(m,t) takes one indentation indicator and one chomping indicator, in either order, and either may be
 // left out.
 //
-// Two of either is not a header: "|--" used to pass because the check trimmed one indicator off each end and found
-// nothing left in the middle. validateMultiLineHeaderOption refuses a block scalar header that carries anything but its
-// two indicators, or two of either.
+// This refuses a header carrying anything but those two, and one carrying two of either.
 //
 // opt holds everything between the "|" or ">" and the end of its line, with any comment already cut off:
 // at most one digit 1 to 9, and at most one of "-" or "+", in either order.
 // [MultiLineState] documents what each of them does.
 //
-// "|--" used to pass, the check having trimmed one indicator off each end and found nothing left in the middle.
+// Example: "|--" is refused. Trimming one indicator off each end and testing what is left in the middle would admit it.
 func validateMultiLineHeaderOption(opt string) error {
 	var chomping, indentation bool
 

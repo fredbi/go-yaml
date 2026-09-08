@@ -54,7 +54,7 @@ var stateLedger = map[string]int64{ //nolint:gochecknoglobals // ok to store and
 	// because s-indent(n) is s-space x n and a tab is separation and not indentation. The main loop advances the column
 	// for it regardless, so from that tab to the end of the line indentNum lags column-1 and every following space
 	// trips the probe. 5 of 5 re-baselined 2026-09-07 evening, from 6 of 6: the corpus lost one space standing after
-	// a tab. The number counts spaces after a tab in the corpus, nothing more, and 100% is what it always reads. It
+	// a tab. The number counts spaces after a tab in the corpus, nothing more, and it always reads 100%. It
 	// would catch a tab starting to count as indentation, which breaks s-indent(n).
 	//
 	// The /spaces bucket is the one worth watching, and it holds one cause: a quoted scalar spanning a line break.

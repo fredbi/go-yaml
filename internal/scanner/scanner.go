@@ -18,18 +18,17 @@ import (
 // Scanner reads a YAML source and returns its tokens, one at a time.
 //
 // A Scanner may be allocated inside another data structure. Call [Scanner.Init] before reading from it.
+//
+// # Performance
+//
+// All offsets are measured as int32: this sets a ceiling on how large the input can be (20 GB).
+// This is a trade-off to produce more compact and thus faster cursors and tokens.
 type Scanner struct {
-	// quoted is the room a quoted scalar is rewritten in, kept between tokens.
-	//
-	// A scalar with nothing to rewrite never touches it, its value being a window on the source.
-	// One that does finds a buffer already grown to the size the last such scalar needed.
-	// Building each of them from nothing cost an allocation or two per escape, as the slice doubled its way up.
+	// quoted holds a rewritten quoted scalar. It is kept between tokens.
 	quoted []byte
-	// line is the line the cursor stands on, counting from 1.
+	// current line of the cursor, counting from 1.
 	line int32
-	// column is the character of that line the cursor stands on, counting from 1.
-	//
-	// Characters, not bytes. The two differ wherever the source is not ASCII, and cursor.idx counts the bytes.
+	// current column of the cursor, counting from 1.
 	column int32
 	// lastDelimColumn is the column of whatever introduced the construct now being read:
 	// a "-", a "?", or the key of a mapping entry.
@@ -44,45 +43,31 @@ type Scanner struct {
 	startedFlowSequenceNum int32
 	startedFlowMapNum      int32
 	// flowIndent holds the indentation of the line that opened the outermost flow collection.
-	//
 	// Every further line of that collection must be indented past it.
 	flowIndent  int32
 	indentState IndentState
-	// savedPos holds the position a token started at, for a token whose start the scan passed before noticing it.
-	// hasSavedPos records whether savedPos holds one.
+	// savedPos holds the position a token started at. hasSavedPos records whether savedPos holds one.
 	savedPos token.Position
 	// lastIndentLevel holds the indent level given to the last token.
-	//
 	// A block scalar's content sits one level below whatever opened it. Nothing else reads this.
 	lastIndentLevel int32
 	// initErr holds the fault Init found in the source, which the first scan then returns.
 	initErr error
-	// lookback fills in each token's BlankLineAbove and CommentBreaksAbove as it is emitted,
-	// from the tokens emitted before it.
+	// lookback fills in each token's BlankLineAbove and CommentBreaksAbove as it is emitted, from the tokens emitted before.
 	lookback token.Lookback
 	// ctx holds the cursor into the source and the tokens read but not yet taken.
-	//
 	// It lasts as long as the source does, so a scan can stop on a token and continue from there.
-	//
-	// Held by value; Init resets it.
-	// It used to come from a sync.Pool and return there on the next Init.
-	// That returned a Context only when one Scanner read a second document, and nothing returns one when a scan
-	// simply finishes.
-	//
-	// Over ten Unmarshal calls the pool was asked ten times, built ten Contexts and got none back.
-	// It cost a Get and a Put around the allocation it existed to save.
 	ctx Context
 	// err holds what stopped the scan.
-	//
 	// Once set it stays set. The scanner serves the tokens it had already read, then stops.
 	err error
 
-	// The eight fields below take one byte each and stand together. Scattered among the words above they cost the
-	// struct 24 bytes of padding, and a Scanner lasts as long as the scan does.
+	// ===================================================================
+	// The eight fields below take one byte each and stand together.
+	// Scattered among the words above they cost the struct 24 bytes of padding, and a Scanner lasts as long as the scan does.
+	// ===================================================================
 
-	// schema selects the tag resolution applied to plain scalars.
-	//
-	// See [Scanner.SetSchema].
+	// schema selects the tag resolution applied to plain scalars. See [Scanner.SetSchema].
 	schema token.Schema
 
 	// deepIndent records that a line of this document opened with indentEager spaces or more.
@@ -112,10 +97,14 @@ type Scanner struct {
 // The tokens keep windows into it: a scalar the scan carries through unchanged is a slice of these very bytes.
 // Do not write to src while those tokens are in use.
 //
-// Inside, the scanner works on a string, which it indexes, slices and decodes runes from.
-// Init takes that string over src without copying.
-// This is a detail of the implementation, so Init does it here and spares the caller.
+// The schema survives an Init. Use [Scanner.SetSchema] to change it.
+//
+// A source longer than maxSourceLen is refused, and [Scanner.Err] returns the refusal after the first read.
 func (s *Scanner) Init(src []byte) {
+	// One buffer, two types, and neither conversion copies.
+	// The scan holds a string because token.Token.Value is a string: a scalar carried through unchanged is a slice of
+	// this one. Context.reset takes the bytes back out for the swar word loads, which cannot read a string.
+	// See the README.
 	text := nocopy.String(src)
 	s.initErr = validateSource(text)
 	s.reset(text)
@@ -125,21 +114,26 @@ func (s *Scanner) Init(src []byte) {
 //
 // A scanner starts on [token.Schema12] and keeps the schema it was last given across an [Scanner.Init].
 //
-// A plain scalar's meaning depends on the schema and not on its text alone.
-// YAML 1.1 resolves "0100" to 64 and "no" to false; YAML 1.2 resolves them to 100 and the string "no".
-// The scanner applies the schema it was given and infers nothing.
+// The scanner needs to know the current schema as it affects how the type of a scalar is determined.
 //
-// The parser chooses: it reads the "%YAML" directive, scopes the schema to the document,
-// and will carry the option that sets it for a document naming no version.
+// YAML 1.1 resolves "0100" to 64 and "no" to false; YAML 1.2 resolves them to 100 and the string "no".
+//
+// The scanner applies the schema it was given: it doesn't infer the token type. The default schema is YAML1.2.
+//
+// # Interaction with the parser
+//
+// The parser decides: it reads the "%YAML" directive, and that scopes the schema to the document.
+// It sets the schema after reading the directive and before pulling the document's first token.
+//
+// The parser carries the option that sets the default schema.
 //
 // A schema set part way through a scan applies from the next scalar the scanner cuts.
-// The parser therefore sets it after reading the directive and before pulling the document's first token.
 func (s *Scanner) SetSchema(schema token.Schema) {
 	s.schema = schema
 	s.ctx.schema = schema
 }
 
-// Schema returns the schema that plain scalars resolve against.
+// Schema returns the current schema used to resolve plain scalars.
 func (s *Scanner) Schema() token.Schema { return s.schema }
 
 // Err returns the error that stopped the scan, or nil.
@@ -151,18 +145,20 @@ func (s *Scanner) Err() error {
 //
 // This is the push iterator. The scan passes each token straight to the loop as it reads it, buffering none of them,
 // which makes it the cheaper of the two ways to read a source through.
+//
 // Use [Scanner.NextToken] when the caller cannot be driven by an iterator.
 //
 // The loop ends on the end of the source and on a refusal alike. Call [Scanner.Err] afterwards to tell the two apart.
 // Breaking out leaves the scanner where it stands, and a further Tokens or NextToken continues from there.
 //
-// It is the faster of the two, by 15 to 20 nanoseconds a token, measured 2026-09-06 over the twenty-six shapes of
-// BenchmarkScannerNextToken against BenchmarkScannerTokens, interleaved, n=10: -9.98% geomean, every shape faster,
-// and 144 fewer bytes allocated because pending never grows.
+// # Performance
 //
-// The saving is flat per token, so the percentage tracks how cheap the token is: -20.8% on flow, whose tokens cost
-// 87ns, and -4.4% on blockscalars, whose tokens cost 471ns. What the pull path spends and this does not is one
-// NextToken call, one re-entry into scan, one append into pending and one copy back out.
+// The push iterator is the faster of the two, by 15 to 20 nanoseconds a token (~ 10% faster than the pull iterator).
+//
+// Also slightly fewer bytes are allocated because the slice of pending tokens never grows.
+//
+// The gain of the push version is more pronounced on cheap flow tokens (~ 20%) than on larger block scalars (~ 4%).
+// The pull path spends extra time on NextToken call: one re-entry into scan, one append into pending and one copy back out.
 func (s *Scanner) Tokens() iter.Seq[token.Token] {
 	return func(yield func(token.Token) bool) {
 		// Whatever NextToken left buffered comes first.
@@ -209,11 +205,12 @@ func (s *Scanner) Tokens() iter.Seq[token.Token] {
 //
 // This is the pull iterator.
 //
-// A source the scanner refuses stops the scan: the tokens read before the refusal come first, then the token the
-// refusal names, and then NextToken returns false for good.
-// [Scanner.Err] returns the refusal.
+// A source refused by the scanner stops the scan: the tokens read before the refusal come first, then the token the
+// refusal names. NextToken then returns false for good and [Scanner.Err] returns the refusal cause.
 //
-// The scanner reuses the room a token stood in, so it holds a block or two whatever the document's length.
+// # Performance
+//
+// The scanner reuses the room a token previously stood in, so it holds a block or two whatever the document's length.
 // A token outlives the next call because it is a value; the caller already holds its own copy.
 func (s *Scanner) NextToken() (token.Token, bool) {
 	for {
@@ -416,7 +413,7 @@ func (s *Scanner) scan(ctx *Context) error {
 			if err := s.scanCommentIndicator(ctx); err != nil {
 				return err
 			}
-		case '\'', '"':
+		case '\'', '"': // TODO(perf): why is this folded here just to leave scanQuote recheck ? I suggest both cases are split in the switch and scanQuote inlined here, with the addTokenValue / clear moved to the called methods
 			scanned, err := s.scanQuote(ctx, c)
 			if err != nil {
 				return err
@@ -550,13 +547,14 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 
 // multiLinePosition returns the line and column of a block scalar's content token.
 //
-// The block recorded where its content began when it read the first byte of it, and that is what the token carries.
-// emitMultiLine, which ends a block scalar at the end of the source, has always read the position from there.
+// A block records where its content began as it reads the first byte of it, and the token carries that. Both paths out
+// of a block read it from there: emitMultiLine, which ends the block at the end of the source, and this one, which
+// serves a dedent.
 //
-// This serves the other path, where a dedent ends the block. Working the position out again gets it wrong for a folded
-// scalar: the buffer holds fewer breaks than the source, so counting them back from the cursor comes up short, and the
-// folded value is no longer a substring of the origin, so searching for it fails and leaves the column at 0. Twelve
-// cases of the YAML Test Suite reported a content token at column 0 until this read the recorded start instead.
+// Working the position out again instead gets it wrong for a folded scalar. The buffer holds fewer breaks than the
+// source, so counting them back from the cursor comes up short, and the folded value is not a substring of the origin,
+// so searching for it fails and leaves the column at 0. Twelve cases of the YAML Test Suite reported a content token
+// at column 0 that way.
 func (s *Scanner) multiLinePosition(ctx *Context) (int32, int32) {
 	if state := ctx.getMultiLineState(); state != nil && state.hasStart {
 		return state.start.Line, state.start.Column
@@ -680,12 +678,10 @@ func (s *Scanner) progressLine(ctx *Context) {
 	s.progress(ctx, 1)
 }
 
-// progress advances by num characters and returns the bytes it crossed. progress steps the cursor over num characters.
+// progress steps the cursor over num characters.
 //
-// It used to add what it crossed to Scanner.sourcePos and hand the count back for Scanner.offset to add too.
-// Both were Context.idx by another name: over the fuzz corpus, 395,323 checks of each and not one disagreed.
-// So did Scanner.sourceSize and Context.size, Scanner.source and Context.src, and the ctx every method takes and the
-// one the Scanner holds.
+// The scanner keeps no cursor of its own: [Context] holds the only one. See the README for the four fields that
+// shadowed it and what removing them was measured against.
 func (s *Scanner) progress(ctx *Context, num int32) {
 	ctx.progress(num)
 
@@ -751,11 +747,12 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	return true, nil
 }
 
-// reset prepares s to tokenize text without judging whether text is a stream at all.
+// reset prepares a scanner to tokenize text without judging whether text is a stream at all.
+//
+// The source is scanned as it was handed in.
+// The scan steps over a byte order mark where one stands, so every offset addresses the text the caller wrote.
+// A token points into that same text, since it holds a window on the source and copies nothing.
 func (s *Scanner) reset(text string) {
-	// The source is scanned as it was handed in.
-	// The scan steps over a byte order mark where one stands, so every offset addresses the text the caller wrote.
-	// A token points into that same text, since it holds a window on the source and copies nothing.
 	src := text
 	s.line = 1
 	s.column = 1
@@ -778,8 +775,7 @@ func (s *Scanner) clearState() {
 
 // stop puts the scanner in error.
 //
-// The token err names, if it names one, is queued behind the tokens already read so that it is handed over in the place
-// it holds in the source.
+// The token err is queued behind the tokens already read so that it is handed over at the place it holds in the source.
 func (s *Scanner) stop(err error) {
 	s.err = err
 	// Nothing more is read once the scan has stopped.
@@ -792,6 +788,11 @@ func (s *Scanner) stop(err error) {
 }
 
 // isDocumentMarker reports whether a line opens with "---" or "...".
+//
+// # YAML spec
+//
+//   - "---" mark the start of a document in a stream
+//   - "..." mark the end of a document in a stream (it doesn't imply the start of a new document)
 func isDocumentMarker(line string) bool {
 	return strings.HasPrefix(line, "---") || strings.HasPrefix(line, "...")
 }
@@ -803,7 +804,7 @@ func blankOrComment(line string) bool {
 	return trimmed == "" || strings.HasPrefix(trimmed, "#")
 }
 
-func newLineCount(src []byte) int32 {
+func newLineCount(src []byte) int32 { // TODO: challenge with swar
 	size := len(src)
 	var cnt int32
 	for i := 0; i < size; i++ {
@@ -818,5 +819,6 @@ func newLineCount(src []byte) int32 {
 			cnt++
 		}
 	}
+
 	return cnt
 }

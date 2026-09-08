@@ -16,20 +16,16 @@ import (
 	"github.com/go-openapi/go-yaml/internal/probe"
 )
 
-// TestBulkSkipMovesNoInvariant reads the corpus with the bulk skip on and off
-// and compares every invariant the ledger holds.
+// TestBulkSkipMovesNoInvariant reads the corpus with the bulk skip on and off and
+// compares every invariant held by the ledger.
 //
-// It answers the question a re-baseline has to answer first: did the scanner
-// move, or did the corpus? The ledger's counts drift whenever documents are
-// added, and reading a drifted count as a scanner change wastes a day -- the
-// re-baseline of 2026-09-07 chased three entries that had moved between
-// commits only because the corpus grew under them.
+// It answers the question: did the scanner move, or did the corpus?
 //
-// Running both paths in one process settles it. The corpus is the same on both
-// sides, so any difference is the scanner's.
+// The ledger's counts drift whenever documents are added.
 //
-// Nothing may raise this: the bulk skip stands in for what the character loop
-// did, so an invariant it moves is one it stands in for wrongly.
+// Running both paths in one process settles it. The corpus is the same on both sides, so any difference is the scanner's.
+//
+// Nothing may raise this: the bulk skip stands in for what the character loop did, so an invariant it moves is one it stands in for wrongly.
 func TestBulkSkipMovesNoInvariant(t *testing.T) {
 	seeds, err := fuzzseeds.All()
 	require.NoError(t, err)

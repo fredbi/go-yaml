@@ -11,6 +11,7 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
+// TODO(perf): should be folded in the main loop as we are making a redundant byte compare here.
 func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
 	if ctx.existsBuffer() || s.inAnchorName(ch) {
 		return false, nil
@@ -35,6 +36,8 @@ func (s *Scanner) scanQuote(ctx *Context, ch rune) (bool, error) {
 	return true, nil
 }
 
+// TODO(perf): rechallenge with SVAR - we discarded it only because our current corpus doesn't quote.
+// produce a micro-benchmark with quoted scalars and compare.
 func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	ctx.addOriginBuf('\'')
 	baseIndent := s.contentIndent()
@@ -42,8 +45,9 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	startIndex := ctx.idx + 1
 	src := ctx.src
 	size := int32(len(src))
-	// A single-quoted scalar reads back as the source between its quotes unless a line break is folded or a "''" stands
-	// for one quote.
+
+	// A single-quoted scalar reads back as the source between its quotes unless a line break is folded or
+	// a "''" stands for one quote.
 	// Until one of those happens the value is a window on src and nothing is built: value stays nil and copied stays
 	// false.
 	//
@@ -60,10 +64,10 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	isFirstLineChar := false
 	isNewLine := false
 
-	var width int
+	var width int // TODO: should be int32
 	for idx := startIndex; idx < size; idx += int32(width) {
 		var c rune
-		c, width = utf8.DecodeRuneInString(src[idx:])
+		c, width = utf8.DecodeRuneInString(src[idx:]) // TODO: var w int ; width = int32(w)
 		if !isNewLine {
 			s.progressColumn(ctx, 1)
 		} else {
@@ -149,6 +153,8 @@ func (s *Scanner) scanSingleQuote(ctx *Context) (token.Token, error) {
 	return token.Token{}, ErrInvalidToken("could not find end character of single-quoted text", token.Invalid(ctx.origin(), srcpos))
 }
 
+// TODO(perf): same remark as above.
+//
 //nolint:mnd // we have a lot of runes to check and making them constants won't really improve readability.
 func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 	ctx.addOriginBuf('"')

@@ -7,8 +7,9 @@ import "unicode/utf8"
 
 // cursor holds the state that reading one byte of the source costs.
 //
-// Every character the scan reads touches src, buf, idx, size, originEnd, notSpaceCharPos and originCut, through
-// next, currentChar, progress, addBuf and addOriginBuf.
+// Every character the scan reads touches src, buf, idx, size, originEnd, notSpaceCharPos and originCut,
+// through next, currentChar, progress, addBuf and addOriginBuf.
+//
 // Those seven come to 61 bytes and stand first, so one cache line holds all of them.
 // The fields below the gap are read once a line or once a token, and would otherwise sit among the seven.
 //
@@ -23,9 +24,7 @@ type cursor struct {
 	// idx is the byte of src the scan stands on.
 	idx  int32
 	size int32
-	// originStart and originEnd bracket the current token's text in src.
-	//
-	// See [cursor.origin].
+	// originStart and originEnd bracket the current token's text in src. See [cursor.origin].
 	originEnd int32
 	// notSpaceCharPos marks how much of buf belongs to the value, leaving out the whitespace it ends with.
 	notSpaceCharPos int32
@@ -35,10 +34,8 @@ type cursor struct {
 
 	// Below the line the scan reads for every character.
 
-	// raw is src's own bytes, for the word-at-a-time scans in [github.com/go-openapi/go-yaml/internal/scanner/swar].
-	//
-	// A string cannot be loaded eight bytes at a time without unsafe, and Init was handed the slice. indentRun reads it
-	// once a line.
+	// raw is src's own bytes, under the type the word-at-a-time scans in
+	// [github.com/go-openapi/go-yaml/internal/scanner/swar] need. Nothing is copied: see the README.
 	raw []byte
 	// originCopy holds the text once a cut has taken bytes out of the middle of it.
 	originCopy []byte

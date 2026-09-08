@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	docMarker    = "---"
-	altDocMarker = "..."
-	docMarkerLen = int32(len(docMarker))
+	startDocMarker    = "---"
+	endDocMarker      = "..."
+	startDocMarkerLen = int32(len(startDocMarker))
 )
 
 func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) error {
@@ -24,13 +24,14 @@ func (s *Scanner) validateDocumentSeparatorMarker(ctx *Context, src string) erro
 	return nil
 }
 
-// foundDocumentSeparatorMarker reports that src opens with "---" or "...", standing alone and not opening a longer
-// scalar.
+// foundDocumentSeparatorMarker tells when src opens with "---" or "...",
+// as standing alone and not opening a longer scalar.
 func foundDocumentSeparatorMarker(src string) bool {
-	if !strings.HasPrefix(src, docMarker) && !strings.HasPrefix(src, altDocMarker) {
+	if !strings.HasPrefix(src, startDocMarker) && !strings.HasPrefix(src, endDocMarker) {
 		return false
 	}
-	rest := src[docMarkerLen:]
+
+	rest := src[startDocMarkerLen:]
 	if rest == "" {
 		return true
 	}
@@ -46,19 +47,19 @@ func (s *Scanner) scanDocumentStart(ctx *Context) bool {
 	if s.column != 1 {
 		return false
 	}
-	if ctx.repeatNum('-') != docMarkerLen {
+	if ctx.repeatNum('-') != startDocMarkerLen {
 		return false
 	}
-	if ctx.size > ctx.idx+docMarkerLen {
-		c := ctx.src[ctx.idx+docMarkerLen]
+	if ctx.size > ctx.idx+startDocMarkerLen {
+		c := ctx.src[ctx.idx+startDocMarkerLen]
 		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 			return false
 		}
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentHeader(ctx.origin()+docMarker, s.pos()))
-	s.progressColumn(ctx, docMarkerLen)
+	ctx.addTokenValue(token.MakeDocumentHeader(ctx.origin()+startDocMarker, s.pos()))
+	s.progressColumn(ctx, startDocMarkerLen)
 	ctx.clear()
 	s.clearState()
 
@@ -72,13 +73,14 @@ func (s *Scanner) scanDocumentEnd(ctx *Context) bool {
 	if s.column != 1 {
 		return false
 	}
-	if ctx.repeatNum('.') != docMarkerLen {
+	if ctx.repeatNum('.') != startDocMarkerLen {
 		return false
 	}
 
 	s.addBufferedTokenIfExists(ctx)
-	ctx.addTokenValue(token.MakeDocumentEnd(ctx.origin()+altDocMarker, s.pos()))
+	ctx.addTokenValue(token.MakeDocumentEnd(ctx.origin()+endDocMarker, s.pos()))
 	s.progressColumn(ctx, 3)
 	ctx.clear()
+
 	return true
 }

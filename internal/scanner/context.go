@@ -14,13 +14,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// Context holds the scan's place in the source and the tokens it has read but not yet handed over.
+// Context holds the scan's location in the source and the tokens it has read but not yet handed over.
 //
-// One Scanner owns one Context, by value, for as long as it reads a source.
+// One [Scanner] owns one [Context], by value, for as long as it reads a source.
 type Context struct {
-	// cursor holds the state reading one byte costs, kept together and kept first.
-	//
-	// See [cursor] for the fields the per-character scan touches, and for the reason behind their order.
+	// cursor holds the state reading one byte costs, kept together and kept first. See [cursor].
 	cursor
 
 	// pending holds the tokens read but not yet handed over, as values.
@@ -127,6 +125,8 @@ func (c *Context) reset(src string) {
 	c.originStart, c.originEnd = 0, 0
 	c.size = int32(len(src))
 	c.src = src
+	// The bytes Init was handed, taken back out of the string it made of them. Neither hop copies, and both views stay
+	// valid for as long as the caller leaves src alone.
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
 	// pending keeps the room it holds: it never grows past a token or two, so a Scanner reading a second document carries
 	// nothing worth dropping and makes one allocation fewer.
@@ -302,14 +302,13 @@ func (c *Context) opensADocumentPrefix() bool {
 	return true
 }
 
-// leadingBlanksHoldATab reports whether a tab stands in the whitespace read
-// since the last token was cut.
+// leadingBlanksHoldATab reports whether a tab stands in the whitespace read since the last token was cut.
 //
-// [cursor.origin] is that whitespace and the token's text together, so the run
-// in front is what separates this token from the one before it. Two callers cut
-// it with strings.TrimPrefix(origin, " ") and asked whether a tab came next,
-// which trims one space: " \ta: 1" and "  \ta: 1" were read as different
-// faults and drew different messages for one rule.
+// [cursor.origin] holds that whitespace and the token's text together, and the run in front of the text separates
+// this token from the one before it.
+//
+// This walks the whole run. strings.TrimPrefix(origin, " ") trims one space only, so " \ta: 1" and "  \ta: 1" would
+// break one rule and draw two different messages.
 func (c *Context) leadingBlanksHoldATab() bool {
 	org := c.origin()
 	for i := range len(org) {
@@ -616,13 +615,7 @@ func isPropertyToken(tk *token.Token) bool {
 //
 // c-indentation-indicator is one digit, 1 to 9, and validateMultiLineHeaderOption has already refused an option holding
 // anything else or holding two of them.
-// So the digit is found by looking for it.
-//
-// strconv.ParseInt read it before, over the option with its chomping indicator trimmed off either end.
-// A header carrying no width, a plain "|" or ">", makes up most of them, and for those it was ParseInt("") plus a
-// *strconv.NumError allocated to report the failure.
-// validateIndentColumn called it once per character of content, and it came to 95% of everything the scanner
-// allocated reading block scalars.
+// So this scans for the digit rather than parsing the option. See the README for what strconv.ParseInt cost here.
 func firstLineIndentColumnByOpt(opt string) int32 {
 	for i := range len(opt) {
 		if c := opt[i]; c >= '1' && c <= '9' {
@@ -634,7 +627,7 @@ func firstLineIndentColumnByOpt(opt string) int32 {
 }
 
 // leadingSpace counts the whitespace bytes buf opens with.
-func leadingSpace(buf string) int32 {
+func leadingSpace(buf string) int32 { // TODO: challenge with SWAR
 	var i int32
 	for i < int32(len(buf)) {
 		switch buf[i] {
