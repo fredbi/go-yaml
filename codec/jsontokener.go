@@ -35,9 +35,12 @@ type jsonTokener struct {
 	// firstDoc is which document of the stream to convert. A "%YAML" or "%TAG"
 	// line is a document of its own in the File's Docs, ahead of the one it
 	// applies to, so the document to convert is the one past the directives.
-	// ended says the walk stands outside it.
-	firstDoc int
-	ended    bool
+	// ended says the walk stands outside it. rooted says a root value has
+	// opened, and extraRoot holds a second one until it hands something over.
+	firstDoc  int
+	ended     bool
+	rooted    bool
+	extraRoot ast.Node
 
 	// maps are the mappings open, innermost last.
 	maps []tokenMapFrame
@@ -129,6 +132,22 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 		}
 
 		return false
+	}
+
+	if at.Depth == 0 && at.In == parser.KindNone && at.Document == t.firstDoc {
+		// A JSON document holds one value. A walk hands a second root over for
+		// a document the parse read as two nodes -- "&!" is an anchor named "!"
+		// standing on nothing, and the walk hands over the anchor's null and
+		// then a null of its own -- and writing both makes "nullnull", which is
+		// not a document.
+		if t.rooted {
+			// Refused where it hands something over, and not here: a walk opens
+			// a second root for constructs that write nothing -- a property the
+			// parse read as a node of its own -- and those documents have one
+			// value and convert.
+			t.extraRoot = node
+		}
+		t.rooted = true
 	}
 
 	// A later document of the stream is still read, so that a stream this
@@ -230,6 +249,16 @@ func (t *jsonTokener) emit(tok JSONToken) {
 	if t.stopped {
 		return
 	}
+	if t.extraRoot != nil {
+		// A JSON document holds one value: "&!" is an anchor named "!" standing
+		// on nothing, and the walk hands over its null and then a null of its
+		// own, which writes "nullnull".
+		t.fail(yamlerrors.NewNotJSON(
+			"a document with two root values has no single JSON root", t.extraRoot.GetToken()))
+
+		return
+	}
+
 	if t.peek >= 0 {
 		switch tok.Kind {
 		case JSONObjectStart, JSONArrayStart:

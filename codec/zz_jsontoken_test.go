@@ -96,16 +96,18 @@ func TestJSONTokensRebuildWhatToJSONWrites(t *testing.T) {
 
 			continue
 		}
-		if !assert.NoErrorf(t, gotErr, "%s: ToJSON converted %q and the tokens did not", src.name, src.text) {
-			continue
-		}
 		if !json.Valid(want) {
-			// ToJSON wrote something that is not a JSON document, so it is not
-			// an answer to hold the tokens against. Every one of these is an
-			// explicit merge key -- "? <<" -- which defect 50 records as
-			// unresolved on both paths.
+			// ToJSON wrote something that is not a JSON document, so it is no
+			// answer to hold the tokens against -- not even on whether they
+			// converted at all. Two shapes reach here: an explicit "? <<" merge
+			// key, which defect 50 records as unresolved on both paths, and an
+			// anchor the parse read as a node of its own, which makes ToJSON
+			// write two root values where the tokens refuse the document.
 			malformed++
 
+			continue
+		}
+		if !assert.NoErrorf(t, gotErr, "%s: ToJSON converted %q and the tokens did not", src.name, src.text) {
 			continue
 		}
 
