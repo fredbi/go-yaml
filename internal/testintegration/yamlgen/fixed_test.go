@@ -2266,9 +2266,9 @@ func TestFixedTwoCollectionKeysAreTwoKeys(t *testing.T) {
 // duplicate check for anything that is not a scalar, so `? [a]` over `: 1`
 // twice read as two entries while `{[a]: 1, [a]: 2}` was already refused.
 //
-// ⚠️ Naming by the source spelling misses a repeat written two ways, and that
-// costs an entry rather than a refusal -- see
-// TestDefectACollectionKeySpelledTwoWaysLosesAnEntry.
+// Naming by the source spelling then missed a repeat written two ways, which
+// cost an entry rather than a refusal; [ast.KeyIdentity] replaced it -- see
+// TestFixedACollectionKeyIsNamedByWhatItResolvesTo.
 func TestFixedARepeatedCollectionKeyIsRefused(t *testing.T) {
 	t.Run("eight spellings of the repeat are refused", func(t *testing.T) {
 		for _, src := range []string{
@@ -2318,4 +2318,125 @@ func TestFixedARepeatedCollectionKeyIsRefused(t *testing.T) {
 			assert.Equalf(t, tc.want, got, "%q", tc.src)
 		}
 	})
+}
+
+// TestFixedACollectionKeyIsNamedByWhatItResolvesTo: a key too big for one token
+// is told apart by the node it builds, not by the characters it was written
+// with.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node. `e842b79`
+// named a collection key by the source text between its first and last token,
+// which reads `[a]` and `[ a ]` as two keys where the document holds one --
+// `{[a]: 1, [ a ]: 2}` read as {"[a]": 2}, one entry short and nothing
+// reported. The same span reaches only the first indicator of a block
+// collection, so `? - a` over `: 1` over `? - b` over `: 2` was refused with
+// `mapping key "-" already defined`, making every block collection key in a
+// mapping the same key as every other.
+//
+// [ast.KeyIdentity] replaces the spelling: a scalar is its type and that type's
+// canonical spelling, a collection its kind and the identities of its members
+// in order. The parser records it when the entry is built, so `[a]`, `[ a ]`,
+// `[a,]` and `["a"]` come out one key and `- a` and `- b` come out two.
+//
+// Both decode paths are asserted at every shape. The walk hands a collection's
+// members over instead of keeping them, which left a key node empty and
+// unnameable; inside a key the members are kept -- see Parser.readingKey -- so
+// the walk names the key by the same tree the load does, down to the position
+// in the message.
+//
+// ⚠️ No oracle can confirm any of this. libfyaml 1.0.0b1 cannot hash a
+// collection key and dies with a Python traceback; go.yaml.in/yaml/v3 v3.0.5
+// refuses one as "invalid map key"; perlref answers syntax and not meaning. So
+// 3.2.1.1 is the only judge here, and yamlcorpus lists "two collection keys in
+// one mapping" among its uncorroborated meanings for the same reason. These
+// expectations are a reading of one sentence, not a measurement of the field --
+// which is what to weigh against if one of them ever has to move.
+func TestFixedACollectionKeyIsNamedByWhatItResolvesTo(t *testing.T) {
+	t.Run("two spellings of one key are one key", func(t *testing.T) {
+		for _, tc := range []struct{ src, says string }{
+			// Whitespace alone, in flow and in block.
+			{"{[a]: 1, [ a ]: 2}\n", `[1:10] mapping key "[a]" already defined at [1:2]`},
+			{"[a]: 1\n[ a ]: 2\n", `[2:1] mapping key "[a]" already defined at [1:1]`},
+			{"? [a]\n: 1\n? [ a ]\n: 2\n", `[3:1] mapping key "[a]" already defined at [1:1]`},
+			// A trailing comma, which 7.4 allows and which changes nothing.
+			{"{[a]: 1, [a,]: 2}\n", `[1:10] mapping key "[a]" already defined at [1:2]`},
+			// Quoting, which settles presentation and not the node.
+			{`{[a]: 1, ["a"]: 2}` + "\n", `[1:10] mapping key "[\"a\"]" already defined at [1:2]`},
+			{`{['a']: 1, ["a"]: 2}` + "\n", `[1:12] mapping key "[\"a\"]" already defined at [1:2]`},
+			// A tag that agrees with what the scalar already resolves to.
+			{"{[1]: x, [!!int 1]: y}\n", `[1:10] mapping key "[!!int 1]" already defined at [1:2]`},
+			// A mapping key, where the space is inside the entry.
+			{"{{a: 0}: 1, {a: 0 }: 2}\n", `[1:13] mapping key "{a: 0}" already defined at [1:2]`},
+		} {
+			assertBothPathsSay(t, tc.src, tc.says)
+		}
+	})
+
+	t.Run("two block collection keys are two keys", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"? - a\n: 1\n? - b\n: 2\n", map[string]any{"[a]": uint64(1), "[b]": uint64(2)}},
+			{"?\n  a: 0\n: 1\n?\n  b: 0\n: 2\n", map[string]any{"map[a:0]": uint64(1), "map[b:0]": uint64(2)}},
+			// A block key beside a flow key, which the two namings used to tell
+			// apart by accident.
+			{"? - a\n: 1\n? [b]\n: 2\n", map[string]any{"[a]": uint64(1), "[b]": uint64(2)}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+
+	// A block scalar is a string whatever it spells, and its own token is the
+	// header. Named by that header every one of them was "|-", so two collided;
+	// named by the string it folds to, "? |-" over "  a" is the plain key "a"
+	// and meets it in the same store.
+	t.Run("a block scalar key is the string it folds to", func(t *testing.T) {
+		for _, tc := range []struct{ src, says string }{
+			{"? |-\n  a\n: 1\n? |-\n  a\n: 2\n", `[4:1] mapping key "a" already defined at [1:1]`},
+			{"? |-\n  a\n: 1\n? >-\n  a\n: 2\n", `[4:1] mapping key "a" already defined at [1:1]`},
+			{"? |-\n  a\n: 1\na: 2\n", `[4:1] mapping key "a" already defined at [1:1]`},
+			{"a: 1\n? |-\n  a\n: 2\n", `[2:1] mapping key "a" already defined at [1:1]`},
+		} {
+			assertBothPathsSay(t, tc.src, tc.says)
+		}
+
+		// Two block scalars that fold differently are two keys, and the
+		// chomping indicator is enough: "|" keeps the trailing break that "|-"
+		// strips, so "a\n" and "a" are two strings.
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"? |-\n  a\n: 1\n? |-\n  b\n: 2\n", map[string]any{"a": uint64(1), "b": uint64(2)}},
+			{"? |\n  a\n: 1\n? |-\n  a\n: 2\n", map[string]any{"a\n": uint64(1), "a": uint64(2)}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}
+
+// assertBothPathsSay checks that decoding src is refused with says, by the walk
+// and by the tree alike.
+//
+// codec.Unmarshal walks the document and codec.UseOrderedMap loads the tree.
+// The two used to name a built key differently, so a document one refused the
+// other read one entry short; asserting the whole message, positions included,
+// is what holds them together.
+func assertBothPathsSay(t *testing.T, src, says string) {
+	t.Helper()
+
+	var walked any
+	err := codec.Unmarshal([]byte(src), &walked)
+	require.Errorf(t, err, "the walk read %q as %v", src, walked)
+	assert.Containsf(t, err.Error(), says, "the walk on %q", src)
+
+	var loaded any
+	err = codec.UnmarshalWithOptions([]byte(src), &loaded, codec.UseOrderedMap())
+	require.Errorf(t, err, "the tree read %q as %v", src, loaded)
+	assert.Containsf(t, err.Error(), says, "the tree on %q", src)
 }

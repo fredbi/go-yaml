@@ -174,6 +174,16 @@ type Parser struct {
 	// read. One pointer per mapping open at once, which is the document's
 	// nesting and not its width.
 	openMaps []*ast.MappingNode
+	// builtKeys holds, for each mapping being read, the identity of every key a
+	// single token could not name, under the position it was first written at.
+	// It stands beside openMaps and is pushed and popped with it.
+	builtKeys []map[string]token.Position
+	// readingKey counts the keys being read, one deep for a key holding
+	// another. A walk hands a collection's members over instead of appending
+	// them, which leaves the node empty and unnameable; inside a key it appends
+	// them after all, so that the key can be named by what it holds. The bound
+	// is the key's own size and not the document's.
+	readingKey int
 
 	// entryCol is the column of the '-' or of the key of the entry being read,
 	// and 0 at the document's root where no entry encloses anything. entryInMap
@@ -590,8 +600,11 @@ func (p *Parser) mappingValue(ctx context, colon, entry *tapeToken, key ast.MapK
 		}
 	}
 	n, err := newMappingValueNode(ctx, colon, entry, key, value)
-	if err == nil && p.onComplete != nil {
-		p.onComplete(n)
+	if err == nil {
+		p.recordBuiltKeyOnce(key)
+		if p.onComplete != nil {
+			p.onComplete(n)
+		}
 	}
 
 	return n, err
@@ -1131,7 +1144,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
-	if !p.walking() {
+	if !p.walking() || p.readingKey > 0 {
 		mapNode.Values = ctx.arena.MappingRun(p.entries[entryBase:])
 	}
 	defer p.leave(ctx, mapNode)
@@ -1258,7 +1271,9 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 			return nil, yamlerrors.NewSyntax("could not find value for mapping key", mapKeyTk.RawToken())
 		}
 
+		p.readingKey++
 		value, err := p.parseToken(ctx, ctx.currentToken())
+		p.readingKey--
 		if err != nil {
 			return nil, err
 		}
@@ -1288,7 +1303,9 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 		return nil, yamlerrors.NewSyntax("expected map key-value delimiter ':'", g.Last().RawToken())
 	}
 
+	p.readingKey++
 	scalar, err := p.parseMapKeyValueNode(ctx, g)
+	p.readingKey--
 	if err != nil {
 		return nil, err
 	}
@@ -1384,78 +1401,6 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 	}
 }
 
-// collectionKeyText is the document's own spelling of a collection written as a
-// key, read straight out of the source.
-//
-// The node cannot answer this. mapKeyIdentity runs while the entry is being
-// built, before the collection's own children are hung on it, so n.String()
-// renders the shell -- "[]" for a sequence and "{}" for a mapping -- and every
-// sequence key collided with every other again, which is the fault naming them
-// by their opening character had.
-//
-// The span runs from the node's first token to the end of its last, which is
-// what the tape already recorded. Two spellings of one collection are two names
-// and so two keys, which misses a repeat rather than inventing one.
-func (p *Parser) collectionKeyText(n ast.Node) string {
-	tk := n.GetToken()
-	if tk == nil {
-		return ""
-	}
-
-	from := int(tk.Position.Offset())
-	to := int(lastTokenOf(n).EndOffset())
-	if from < 0 || to > len(p.src) || from >= to {
-		return ""
-	}
-
-	return strings.TrimSpace(p.src[from:to])
-}
-
-// lastTokenOf is the token furthest into the source that n or anything under it
-// holds, which is where the node's text ends.
-func lastTokenOf(n ast.Node) *token.Token {
-	last := n.GetToken()
-
-	var walk func(ast.Node)
-	walk = func(m ast.Node) {
-		if m == nil {
-			return
-		}
-		if tk := m.GetToken(); tk != nil && (last == nil || tk.EndOffset() > last.EndOffset()) {
-			last = tk
-		}
-		switch mm := m.(type) {
-		case *ast.SequenceNode:
-			for _, v := range mm.Values {
-				walk(v)
-			}
-			// End is the ']' of a flow sequence, and nil for a block one.
-			if mm.End != nil && (last == nil || mm.End.EndOffset() > last.EndOffset()) {
-				last = mm.End
-			}
-		case *ast.MappingNode:
-			for _, v := range mm.Values {
-				walk(v)
-			}
-			if mm.End != nil && (last == nil || mm.End.EndOffset() > last.EndOffset()) {
-				last = mm.End
-			}
-		case *ast.MappingValueNode:
-			walk(mm.Key)
-			walk(mm.Value)
-		case *ast.MappingKeyNode:
-			walk(mm.Value)
-		case *ast.TagNode:
-			walk(mm.Value)
-		case *ast.AnchorNode:
-			walk(mm.Value)
-		}
-	}
-	walk(n)
-
-	return last
-}
-
 // unnamedKey reports whether mapKeyIdentity gave up on a key, which it says by
 // handing back no name under [token.KeyOther].
 func unnamedKey(name string, kind token.KeyKind) bool {
@@ -1465,8 +1410,104 @@ func unnamedKey(name string, kind token.KeyKind) bool {
 // openMapping records the mapping being read, and returns what takes it off.
 func (p *Parser) openMapping(node *ast.MappingNode) func() {
 	p.openMaps = append(p.openMaps, node)
+	p.builtKeys = append(p.builtKeys, nil)
 
-	return func() { p.openMaps = p.openMaps[:len(p.openMaps)-1] }
+	return func() {
+		p.openMaps = p.openMaps[:len(p.openMaps)-1]
+		p.builtKeys = p.builtKeys[:len(p.builtKeys)-1]
+	}
+}
+
+// recordBuiltKeyOnce records an entry whose key a single token cannot name, and
+// notes it where the key repeats one an earlier entry of this mapping wrote.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node, so "[a]" and
+// "[ a ]" are one key and the second entry repeats the first. A scalar key is
+// recorded as it is read, where its one token names it; these are what is left,
+// and [ast.KeyIdentity] names them from the built node.
+//
+// It runs from [Parser.mappingValue], where the entry is complete and its key
+// with it. Every earlier attempt named the key while the parser was still
+// cutting it, which is why a collection had no children to be named by and a
+// block scalar offered its header.
+//
+// The refusal names the repeat's own token and the token of the entry that
+// first wrote the key, which is what a reader gets for a scalar key.
+func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
+	if p.allowDuplicateMapKey || len(p.builtKeys) == 0 {
+		return
+	}
+
+	if key == nil {
+		return
+	}
+	if name, kind := p.mapKeyIdentity(key); !unnamedKey(name, kind) {
+		// Recorded as it was read, by the one token that names it.
+		return
+	}
+	if namesAnAlias(key) {
+		// An alias resolves to the node its anchor named, so 3.2.1.1 makes
+		// "&a [1]" and a later "*a" one key. Refusing that is a change of its
+		// own and not this one: it would make the tree refuse a document the
+		// walk reads -- the YAML Test Suite's aliases-in-flow-objects is one --
+		// and mapKeyIdentity has always left an alias to the load.
+		// go.yaml.in/yaml/v3 v3.0.5 reads "{&a x: 1, *a: 2}" as {x: 2}, keeping
+		// the last silently.
+		return
+	}
+
+	identity := ast.KeyIdentity(key)
+	if ast.Unnamed(identity) {
+		// Nothing to compare.
+		return
+	}
+	tk := key.GetToken()
+	if tk == nil {
+		return
+	}
+
+	top := len(p.builtKeys) - 1
+	if first, repeated := p.builtKeys[top][identity]; repeated {
+		if n := len(p.openMaps); n > 0 {
+			open := p.openMaps[n-1]
+			open.Duplicates = append(open.Duplicates,
+				ast.DuplicateKey{Name: keyDisplayName(key), At: tk.Position, FirstAt: first})
+		}
+
+		return
+	}
+	if p.builtKeys[top] == nil {
+		p.builtKeys[top] = make(map[string]token.Position, 4)
+	}
+	p.builtKeys[top][identity] = tk.Position
+}
+
+// namesAnAlias reports whether the key is an alias, or an explicit key holding
+// one.
+func namesAnAlias(n ast.Node) bool {
+	if key, explicit := n.(*ast.MappingKeyNode); explicit {
+		n = key.Value
+	}
+	_, alias := n.(*ast.AliasNode)
+
+	return alias
+}
+
+// keyDisplayName is what a refusal calls a key a single token cannot name.
+//
+// The rendered node rather than the identity: "[a]" reads back to a user where
+// "seq(string/a)" does not. The explicit "?" comes off and the lines are joined
+// with a space, so a key written over three lines still names itself on the one
+// line an error message has.
+func keyDisplayName(n ast.Node) string {
+	if key, explicit := n.(*ast.MappingKeyNode); explicit {
+		n = key.Value
+	}
+	if n == nil {
+		return ""
+	}
+
+	return strings.Join(strings.Fields(n.String()), " ")
 }
 
 // isScalarKeyToken reports whether tk is a scalar written where a key goes,
@@ -1551,25 +1592,32 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 	case *ast.AliasNode:
 		// What the alias names is not read here; the load resolves it.
 		return "", token.KeyOther
+	case *ast.LiteralNode:
+		// A literal or folded block scalar is a string whatever it spells, and
+		// its own token is the header, "|-" or ">-". Falling through to the
+		// token named every block scalar key after its header, so two of them
+		// collided however differently they read. Named by the string instead,
+		// "? |-" over "  a" is the same key as a plain "a", which 3.2.1.1 makes
+		// it -- and it is recorded beside the plain keys, so the two meet.
+		if nn.Value == nil {
+			return "", token.KeyString
+		}
+
+		return nn.Value.Value, token.KeyString
 	case *ast.SequenceNode, *ast.MappingNode, *ast.MappingValueNode:
-		// A collection used as a key is named by what it holds, written back
-		// out. 3.2.1.1 makes two keys equal when they resolve to the same node,
-		// and two collections spelled alike do, so "{{a: 0}: 1, {a: 0}: 2}" is
-		// one key written twice.
+		// A key a single token cannot name. It is checked when the mapping
+		// closes instead, by [ast.KeyIdentity] over the built node: a
+		// collection is named by what it holds, and it holds nothing while the
+		// entry is being read.
 		//
-		// Falling through named the key by its own first token instead, so
-		// every sequence key was "[" and every mapping key "{" and two keys
-		// sharing not one character collided. Handing back nothing was the
-		// other extreme and no better: it stopped the check, and the walking
-		// reader then folded the two entries into one and dropped the first
-		// value without a word.
-		//
-		// The text is the document's own spelling, so two spellings of one
-		// collection -- "{a: 0}" and "{\"a\": 0}" -- are read as two keys. That
-		// misses a repeat rather than inventing one, which is the safe
-		// direction: comparing the resolved trees is what would catch it and
-		// nothing here builds them.
-		return p.collectionKeyText(nn), token.KeyCollection
+		// Naming one here has been tried three ways and all three were wrong.
+		// The node's first token names every sequence key "[" and every block
+		// mapping key ":". Nothing at all stops the check, and the walk then
+		// folds a repeat's two entries into one and drops the first value. The
+		// document's own source text reads "[a]" and "[ a ]" as two keys, which
+		// the walk then folds anyway -- the same dropped value, reached by a
+		// longer route.
+		return "", token.KeyOther
 	}
 
 	tk := n.GetToken()
@@ -2611,9 +2659,11 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			return nil, err
 		}
 
-		if p.walking() {
+		if p.walking() && p.readingKey == 0 {
 			// Nothing gathers the element and the walk has seen it, so the
-			// cells it stands in go out again for the element after it.
+			// cells it stands in go out again for the element after it. Inside
+			// a key the elements are kept, so that the key can be named by what
+			// it holds.
 			p.rewindNodes(ctx)
 		} else {
 			node.Values = append(node.Values, value)
@@ -2659,7 +2709,7 @@ func (p *Parser) handNull(ctx context, tk *tapeToken) (ast.Node, error) {
 // parse is walking: the key went over before its value and the value announced
 // itself, so the entry holds nothing the caller has not seen.
 func (p *Parser) hold(entry *ast.MappingValueNode) {
-	if p.walking() {
+	if p.walking() && p.readingKey == 0 {
 		return
 	}
 	p.entries = append(p.entries, entry)
@@ -2747,9 +2797,11 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		if p.walking() {
+		if p.walking() && p.readingKey == 0 {
 			// Nothing gathers the entries and the walk has seen this one, so
 			// the cells it stands in go out again for the entry after it.
+			// Inside a key they are kept, so that the key can be named by what
+			// it holds.
 			p.rewindNodes(ctx)
 		} else {
 			p.seqEntries = append(p.seqEntries, pendingEntry{
@@ -2765,7 +2817,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
-	if !p.walking() {
+	if !p.walking() || p.readingKey > 0 {
 		fillSequence(seqNode, p.seqEntries[base:])
 	}
 
@@ -3042,9 +3094,12 @@ func (p *Parser) parseFootComment(ctx context, col int) *ast.CommentGroupNode {
 // same cells out again once what was built from them has gone over.
 //
 // It does nothing where the parse gathers a tree, and neither does rewindNodes:
-// a gathered tree holds every node it built.
+// a gathered tree holds every node it built. Inside a key both stand down as
+// well: a key's members are kept so that the key can be named by what it holds,
+// and handing their cells out again while the key still points at them builds a
+// node that holds itself.
 func (p *Parser) markNodes(ctx context) {
-	if !p.walking() {
+	if !p.walking() || p.readingKey > 0 {
 		return
 	}
 	ctx.arena.Push()
@@ -3057,7 +3112,7 @@ func (p *Parser) markNodes(ctx context) {
 // a mapping reads its first entry's token before rewinding to it, which is why
 // the rewind comes after that and not before.
 func (p *Parser) rewindNodes(ctx context) {
-	if !p.walking() {
+	if !p.walking() || p.readingKey > 0 {
 		return
 	}
 	ctx.arena.Pop()
@@ -3068,7 +3123,7 @@ func (p *Parser) rewindNodes(ctx context) {
 // over before its value and the value announced itself, so the entry holds
 // nothing the caller has not seen.
 func (p *Parser) holdFlowEntry(node *ast.MappingNode, entry *ast.MappingValueNode) {
-	if p.walking() {
+	if p.walking() && p.readingKey == 0 {
 		return
 	}
 	node.Values = append(node.Values, entry)

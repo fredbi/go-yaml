@@ -102,14 +102,16 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
-			// A collection standing as a key. Five open defects live there:
+			// A collection standing as a key. Three open defects live there:
 			// TestDefectACollectionKeyWrittenAloneInFlowIsRefused,
-			// TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused,
-			// TestDefectTwoBareColonLinesInARowAreRefused,
-			// TestDefectTwoBlockCollectionKeysCollide, and
-			// TestDefectACollectionKeySpelledTwoWaysLosesAnEntry. The library
-			// refuses the first four documents and reads the fifth one entry
-			// short.
+			// TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused and
+			// TestDefectTwoBareColonLinesInARowAreRefused. The library refuses
+			// all three documents.
+			//
+			// Two more closed with [ast.KeyIdentity], which names a collection
+			// key by what it holds: two block collection keys no longer
+			// collide, and "[a]" beside "[ a ]" is now one key rather than two
+			// -- see yamlgen.TestFixedACollectionKeyIsNamedByWhatItResolvesTo.
 			//
 			// Wide on purpose: it holds out every document with a collection
 			// key rather than the three shapes, because they are the same
