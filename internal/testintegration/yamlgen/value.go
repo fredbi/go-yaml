@@ -678,7 +678,24 @@ func (a *aliaser) aliasAKey(pairs []Pair) []Pair {
 		return pairs
 	}
 
-	target := rapid.SampledFrom(a.pool).Draw(a.t, "aliaskeytarget")
+	pairs = a.aliasOneKey(pairs, "aliaskeytarget")
+
+	if rapid.Bool().Draw(a.t, "twoaliaskeys") {
+		// A second, naming a different anchor. Two *distinct* nodes standing as
+		// keys is the accepting shape -- two keys, a document to read -- and
+		// the census reported the YAML Test Suite holding one of them and this
+		// corpus none, over 21,749 cases. aliasOneKey refuses a name the
+		// mapping already holds, so the pair is two keys or it is not written.
+		pairs = a.aliasOneKey(pairs, "aliaskeytarget2")
+	}
+
+	return pairs
+}
+
+// aliasOneKey appends one alias-keyed entry, or leaves the mapping alone where
+// the key it would write is one the mapping already holds.
+func (a *aliaser) aliasOneKey(pairs []Pair, label string) []Pair {
+	target := rapid.SampledFrom(a.pool).Draw(a.t, label)
 	key := Alias(target)
 
 	name := KeyText(key)

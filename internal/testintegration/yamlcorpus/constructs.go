@@ -130,6 +130,19 @@ var constructs = []Construct{
 	// integer, and yamlcorpus.TagKeyIntegralFloat is the family enumerated by
 	// hand for it.
 	{"a whole-valued float", func(s string) bool { return wholeFloat.MatchString(s) }},
+	// Two shapes on the *accepting* side of the unique-key rule, which the
+	// injection rules cannot reach: they build documents that ought to be
+	// refused, and that direction checks itself, since a missed refusal shows
+	// up as a document read. A document wrongly refused looks like a document
+	// the library refuses, and nothing reports it.
+	//
+	// Three of the four naming faults closed in the week to 2026-09-08 were
+	// invisible for exactly that reason, and in every one the missing draw was
+	// a valid document: two block collection keys that differ, a collection key
+	// respelt, two distinct anchored nodes standing as keys. The peer session's
+	// observation, 2026-09-08.
+	{"two block collection keys", func(s string) bool { return countLines(s, isBareIndicator) > 1 }},
+	{"two alias keys", func(s string) bool { return distinctAliasKeys(s) > 1 }},
 	{"a secondary tag", func(s string) bool { return strings.Contains(s, "!!") }},
 	{"a verbatim tag", func(s string) bool { return strings.Contains(s, "!<") }},
 	{"a comment", func(s string) bool { return strings.Contains(s, "#") }},
@@ -191,3 +204,39 @@ var constructs = []Construct{
 // wholeFloat matches a float written with a zero fraction, which is the
 // canonical spelling of a whole-valued float: "1.0", "-2.0", "1.0e3".
 var wholeFloat = regexp.MustCompile(`(^|[^0-9.])-?[0-9]+\.0([^0-9]|$)`)
+
+// isBareIndicator reports whether a line holds nothing but a "?", which is
+// where explicitKey writes a block collection key: the key goes on the lines
+// below.
+func isBareIndicator(line string) bool {
+	return strings.TrimSpace(strings.TrimPrefix(line, "\ufeff")) == "?"
+}
+
+// countLines counts the lines a predicate accepts.
+func countLines(src string, has func(string) bool) int {
+	var n int
+
+	for line := range strings.FieldsFuncSeq(src, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if has(line) {
+			n++
+		}
+	}
+
+	return n
+}
+
+// distinctAliasKeys counts the anchor names an alias stands under as a key.
+//
+// Two *different* names is the shape: one node used twice is a duplicate and a
+// document to refuse, and two nodes used once each is a document to read.
+func distinctAliasKeys(src string) int {
+	seen := map[string]bool{}
+
+	for _, match := range aliasKey.FindAllStringSubmatch(src, -1) {
+		seen[match[1]] = true
+	}
+
+	return len(seen)
+}
+
+var aliasKey = regexp.MustCompile(`\*([A-Za-z0-9]+)\s*:`)
