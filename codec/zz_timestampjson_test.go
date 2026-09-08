@@ -79,9 +79,10 @@ func TestToJSONWritesATimestampAsTheInstantItNames(t *testing.T) {
 		// key is a time.Time and the encoder writes RFC 3339 -- the instant
 		// ToJSON already wrote. The two agree.
 		//
-		// "!!binary" does not, and cannot the same way: a []byte is a slice, so
-		// Go cannot hash it and mapKeyNodeToValue keeps the text. That text is
-		// fmt.Sprint of the bytes, which is not the JSON array ToJSON writes.
+		// "!!binary" does not: ast.KeyName leaves a byte string to speak for
+		// itself, so the key is the base64 text the document wrote, where
+		// ToJSON writes the decoded bytes as a JSON array. Both are defensible
+		// and they are not the same, which is what keeps 30 open.
 		for _, tc := range []struct{ src, folds, values string }{
 			{
 				src:    "!!timestamp 2001-12-14: x\n",
@@ -91,7 +92,7 @@ func TestToJSONWritesATimestampAsTheInstantItNames(t *testing.T) {
 			{
 				src:    "!!binary aGVsbG8=: x\n",
 				folds:  `{"[104,101,108,108,111]":"x"}`,
-				values: `{"[104 101 108 108 111]": "x"}`,
+				values: `{"aGVsbG8=": "x"}`,
 			},
 		} {
 			out, err := codec.ToJSON([]byte(tc.src))

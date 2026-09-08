@@ -427,7 +427,7 @@ func fieldAt(v reflect.Value, at []int) (reflect.Value, error) {
 // map[string]any. keyName holds the rule, so the walk, the tree decoder and
 // ToJSON name an entry the same way.
 func entryText(n ast.Node) (string, bool) {
-	name, kind := keyName(unwrapKeyNode(n))
+	name, kind := ast.KeyName(n)
 
 	return name, kind != token.KeyOther
 }

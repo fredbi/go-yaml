@@ -366,7 +366,7 @@ func hashableKey(key any) bool {
 // wrote and what keeps it apart from the empty key: "null: a" and "\"\": b" are
 // two entries.
 func mapKeyString(node ast.Node, key any) string {
-	if name, kind := keyName(unwrapKeyNode(node)); kind != token.KeyOther {
+	if name, kind := ast.KeyName(node); kind != token.KeyOther {
 		return name
 	}
 	if key == nil {
@@ -377,24 +377,6 @@ func mapKeyString(node ast.Node, key any) string {
 	}
 
 	return fmt.Sprint(key)
-}
-
-// unwrapKeyNode steps over what stands around a key rather than being it, to
-// reach the scalar the entry is addressed by.
-func unwrapKeyNode(n ast.Node) ast.Node {
-	for {
-		switch t := n.(type) {
-		case *ast.MappingKeyNode:
-			n = t.Value
-		case *ast.AnchorNode:
-			n = t.Value
-		default:
-			return n
-		}
-		if n == nil {
-			return nil
-		}
-	}
 }
 
 // setToMapValue fills m from node.
@@ -2124,7 +2106,7 @@ func (d *Decoder) rangeMergedEntries(ctx context.Context, src ast.Node, ignoreMe
 // document reads into a map[string]any. Requiring the key to be an ast string
 // dropped every one of those instead.
 func (d *Decoder) entryName(_ context.Context, keyNode ast.Node) (string, bool, error) {
-	name, kind := keyName(unwrapKeyNode(keyNode))
+	name, kind := ast.KeyName(keyNode)
 
 	return name, kind != token.KeyOther, nil
 }

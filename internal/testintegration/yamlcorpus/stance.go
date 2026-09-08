@@ -269,24 +269,6 @@ var Departures = []Departure{
 			"readable",
 	},
 	{
-		Pattern:  "a key tagged !!float",
-		Kind:     Value,
-		Observed: `"!!float 226.0: x" comes back keyed "226" where "226.0: x" comes back keyed "226.0"`,
-		Because: "the tag says what the node is and nothing else; naming it should not depend on whether " +
-			"the tag was written. The canonical spelling of a float carries its \".0\", which is what " +
-			"keeps a float out of the integers' namespace, so the tagged form loses the distinction the " +
-			"untagged form keeps. !!int, !!str, !!bool and !!null on a key are all named correctly",
-		Corroborated: "codec.ToJSON writes \"226.0\" for both spellings, so the two converters in this " +
-			"library disagree with each other -- which is what found it",
-		Departs: func(got any, err error) bool {
-			return departsMapping(got, err, func(m map[string]any) bool {
-				_, integral := m["226"]
-
-				return integral
-			})
-		},
-	},
-	{
 		// Anchored on the resolution shape rather than on "a key that is a
 		// boolean", which is `true: a` alone and reads correctly. The
 		// departure needs the second key.
@@ -318,31 +300,6 @@ var Departures = []Departure{
 			"is naming a key by the canonical spelling of its type -- not the read",
 		Departs: func(got any, err error) bool {
 			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 1 })
-		},
-	},
-	{
-		Pattern: "a key tagged !!timestamp",
-		Kind:    Value,
-		Observed: `"!!timestamp 2001-12-14: x" comes back keyed ` +
-			`"2001-12-14 00:00:00 +0000 UTC", and "!!binary aGVsbG8=: x" keyed "[104 101 108 108 111]"`,
-		Because: "a key is named by the canonical spelling of what it resolves to, and neither the " +
-			"timestamp type nor the binary type has one -- so the name falls through to Go's %v of a " +
-			"time.Time and of a []byte. Neither text is anything a document could be written with, " +
-			"and the second is not even a spelling of a byte string. The tags resolve correctly " +
-			"everywhere else: `a: !!timestamp 2001-12-14` gives a time.Time and `a: !!binary aGVsbG8=` " +
-			"gives []byte(\"hello\"). It is naming a key that has no answer for them. yamlgen.Keys " +
-			"draws neither kind for this reason",
-		Corroborated: "codec.ToJSON writes {\"2001-12-14\": 1} and {\"[104,101,108,108,111]\": 1}, so " +
-			"the two converters in this library disagree with each other -- the same crossing that " +
-			"found \"a key tagged !!float\". libfyaml 1.0.0b1 names the timestamp key \"2001-12-14\", " +
-			"go.yaml.in/yaml/v3 v3.0.5 names it \"2001-12-14T00:00:00Z\", and the reference parser " +
-			"keeps the tag on the key and names nothing",
-		Departs: func(got any, err error) bool {
-			return departsMapping(got, err, func(m map[string]any) bool {
-				_, byGoFormatting := m["2001-12-14 00:00:00 +0000 UTC"]
-
-				return byGoFormatting
-			})
 		},
 	},
 }

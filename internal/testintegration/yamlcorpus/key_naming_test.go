@@ -116,18 +116,21 @@ func TestFixedTwoTypesAreTwoKeys(t *testing.T) {
 	})
 }
 
-// TestDefectAnExplicitFloatTagOnAKeyLosesItsFloatness: writing the tag changes
-// the name, where writing it should change nothing.
+// TestFixedAnExplicitFloatTagOnAKeyKeepsItsFloatness: writing the tag changes
+// nothing about the name, which is what writing it should do.
 //
 // Found on 2026-09-10 by the two converters in this library disagreeing with
-// each other: ToJSON writes "226.0" for both spellings and the decoder writes
-// "226" for the tagged one.
-func TestDefectAnExplicitFloatTagOnAKeyLosesItsFloatness(t *testing.T) {
+// each other: ToJSON wrote "226.0" for both spellings and the decoder "226" for
+// the tagged one. They read one node→name walk now, [ast.KeyName], which
+// resolves a tag rather than stepping over it -- so "!!float 226" is the float
+// 226.0 and is named "226.0", where stripping the tag would have read the
+// token "226" and named it after an integer.
+func TestFixedAnExplicitFloatTagOnAKeyKeepsItsFloatness(t *testing.T) {
 	assert.Contains(t, read(t, "226.0: x\n"), "226.0", "untagged, the float keeps its name")
-	assert.Contains(t, read(t, "!!float 226.0: x\n"), "226",
-		"today: the tag costs the key its \".0\"")
-	assert.Contains(t, read(t, "!!float 226: x\n"), "226",
-		"today: and a whole number under !!float is named as an integer")
+	assert.Contains(t, read(t, "!!float 226.0: x\n"), "226.0",
+		"the tag costs the key nothing")
+	assert.Contains(t, read(t, "!!float 226: x\n"), "226.0",
+		"and a whole number under !!float is named as the float it is")
 
 	t.Run("the other tags name a key correctly", func(t *testing.T) {
 		for _, tc := range []struct{ src, key string }{

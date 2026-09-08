@@ -452,7 +452,7 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 // keyText is a scalar key as the string a mapping holds it under. JSON keys are
 // strings, so 4.0 and 4 address the same entry and are both "4".
 func keyText(node ast.Node) string {
-	if name, kind := keyName(node); kind != token.KeyOther {
+	if name, kind := ast.KeyName(node); kind != token.KeyOther {
 		return name
 	}
 

@@ -257,22 +257,22 @@ var Ledger = []Divergence{
 		Match:    writesAPropertiedKeyBeforeABlockScalar,
 	},
 	{
-		Name: "decode/an-alias-or-tag-in-front-of-a-float-key-loses-its-spelling",
-		Pin:  "TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling",
+		Name: "decode/an-alias-in-front-of-a-float-key-loses-its-spelling",
+		Pin:  "TestDefectAnAliasInFrontOfAFloatKeyLosesItsSpelling",
 		Reason: "A float key is named by its canonical YAML spelling, and the \".0\" keeps it out of " +
 			"the integers' namespace: `1.0: x` comes back keyed \"1.0\" and `.inf: x` keyed " +
 			"\".inf\". Put an alias or a tag in front of the same key and the name becomes Go's " +
 			"%v, \"1\" and \"+Inf\".\n\n" +
-			"codec.unwrapKeyNode looks through a MappingKeyNode and an AnchorNode and through " +
-			"neither an AliasNode nor a TagNode, so keyName is handed a node it reads no token " +
-			"off and mapKeyString falls through to fmt.Sprint of the resolved value. Stripping a " +
-			"tag is not enough on its own: the tag decides the type, `!!float 1` is the float 1.0, " +
-			"and naming it wants the tag resolved as ast.KeyIdentity resolves it.\n\n" +
-			"⚠️ The tag half loses an entry and the two destinations disagree about it. " +
-			"`!!float 1: a` over `1: b` walks into an `any` as {\"1\": \"b\"} with nothing " +
-			"reported, and a map[string]any refuses the same document as `duplicate key \"1\"`. " +
-			"The parser holds the two apart -- it refuses `!!float 1: a` over `1.0: b` as one key " +
-			"-- so this is the naming folding two keys and not the check missing one.\n\n" +
+			"ast.KeyName owns the walk from a node down to the scalar a key is named after, and " +
+			"it stops at an alias on purpose: what an alias names depends on where the caller " +
+			"stands. A tree reads ast.AliasNode.Target; a parse still walking cannot, and keeps " +
+			"the anchored node's identity as it goes instead. codec has neither, so it names the " +
+			"alias node itself and reads no token off it. Both decode paths agree on the wrong " +
+			"name, so this is a naming defect and not a divergence.\n\n" +
+			"The **tag** half closed on 2026-09-08: codec had three node-to-name walks of its own " +
+			"and none looked through a tag. They all call ast.KeyName now, which resolves a tag " +
+			"rather than stripping it -- `!!float 1` is the float 1.0 and is named \"1.0\". That " +
+			"retired three yamlcorpus departures at once.\n\n" +
 			"The **anchor** half of this closed on 2026-09-08: parseAnchor attached the node to " +
 			"ast.AnchorNode.Value after readAnchorValue returned, and readAnchorValue fires a " +
 			"walk's Leave on its way out, so a walking reader was handed the anchor with Value " +
@@ -286,7 +286,7 @@ var Ledger = []Divergence{
 	},
 	{
 		Name: "decode/an-alias-key-does-not-reach-a-struct-field",
-		Pin:  "TestDefectAPropertiedKeyDoesNotReachAStructField",
+		Pin:  "TestDefectAnAliasStandingAsAKeyDoesNotReachAStructField",
 		Reason: "`k: &a1 n` over `*a1 : 1` read into a struct whose field is tagged `n` leaves the " +
 			"field at its zero value and reports nothing. The same document into an `any` names the " +
 			"key \"n\" and holds the value, so the alias resolves everywhere except where a field " +

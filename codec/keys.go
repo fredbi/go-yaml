@@ -11,38 +11,6 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// keyName returns the text a mapping key addresses its entry by, and the type
-// it resolved to.
-//
-// [token.KeyName] holds the rule, so the parser telling one key from another
-// and this naming an entry give one answer for one document.
-//
-// A string is taken from the node rather than from its token: the node holds
-// the text the quotes and escapes were read into, which is what the entry is
-// addressed by.
-func keyName(n ast.Node) (string, token.KeyKind) {
-	switch t := n.(type) {
-	case *ast.StringNode:
-		return t.Value, token.KeyString
-	case *ast.LiteralNode:
-		if t.Value == nil {
-			return "", token.KeyString
-		}
-
-		return t.Value.Value, token.KeyString
-	case *ast.NullNode, *ast.BoolNode, *ast.IntegerNode, *ast.FloatNode,
-		*ast.InfinityNode, *ast.NanNode:
-		tk := n.GetToken()
-		if tk == nil {
-			return "", token.KeyOther
-		}
-
-		return token.KeyName(tk.Value, tk.Type)
-	default:
-		return "", token.KeyOther
-	}
-}
-
 // refuseDuplicateKeys reports the first key the parse recorded as repeated on
 // the mapping.
 //

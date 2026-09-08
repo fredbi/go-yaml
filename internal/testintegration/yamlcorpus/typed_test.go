@@ -141,29 +141,7 @@ func (d typedDefect) failsFor(shape yamlgen.TargetShape) bool {
 	return slices.Contains(d.fails, shape)
 }
 
-var typedPathDefects = map[string]typedDefect{
-	// A tag on a key is not unwrapped before the key is named, so the key
-	// resolves to nothing a field can be named after. The same root as
-	// yamlgen.Ledger's parser entries for a tag over a key, and parked with
-	// them: see stream 2, defects 2, 13 and 14.
-	"a key tagged !!float": {why: "a tag on a key, parked"},
-	// The same root, reached by two more tags on 2026-09-13. No struct tag
-	// names the key at all: neither the name the `any` path gives it
-	// ("2001-12-14 00:00:00 +0000 UTC"), nor the text written down
-	// ("2001-12-14"), nor the decoded bytes ("hello"). The entry is dropped and
-	// nothing is reported. Departures records what the key is named; this
-	// records that the struct path cannot reach it.
-	//
-	// A map[any]any reads the timestamp key correctly, because it keeps the
-	// key's own type instead of naming it -- so this one is the struct tag and
-	// not the tag on the key. The binary key fails there too: a []byte cannot
-	// be a Go map key at all.
-	"a key tagged !!timestamp": {
-		why:   "a tag on a key, parked",
-		fails: []yamlgen.TargetShape{yamlgen.ShapePlain, yamlgen.ShapePointers},
-	},
-	"a key tagged !!binary": {why: "a tag on a key, parked"},
-}
+var typedPathDefects = map[string]typedDefect{}
 
 // yardstickDefects names the enumerated shapes where the two reads differ and
 // the *typed* one is right, so this test cannot use the `any` read as its
@@ -183,6 +161,19 @@ var yardstickDefects = map[string]string{
 	// the two reads differ, the typed one is right, and there is nothing here to
 	// fix in the reflection path.
 	"two collection keys in one mapping": "a collection key is not a Go map key",
+	// A timestamp and a byte string have no canonical YAML spelling of their
+	// own, so ast.KeyName names such a key by the text the document wrote --
+	// "2001-12-14" and "aGVsbG8=". A map[any]any does not name a key at all: it
+	// keeps the time.Time, which is right, and has nowhere to put the []byte,
+	// which it says so. The two reads differ because one names and the other
+	// keeps the type, and neither is the reflection path's fault.
+	//
+	// They used to agree by accident: the `any` read named a timestamp key
+	// "2001-12-14 00:00:00 +0000 UTC", which is Go's printing of the very
+	// time.Time the typed read holds, so the two rendered alike. Naming by the
+	// document's own text ended the coincidence.
+	"a key tagged !!timestamp": "a map[any]any keeps the time.Time rather than naming it",
+	"a key tagged !!binary":    "a []byte cannot be a Go map key",
 	// A duplicate that only collides once an alias is resolved. "k: &a n" over
 	// "*a : 1" over "n: 2" reads into an `any` as {"k": "n", "n": 2}, one
 	// entry short and nothing reported, and every typed map refuses it with

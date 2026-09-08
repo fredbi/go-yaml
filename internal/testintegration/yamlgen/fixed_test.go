@@ -2584,3 +2584,93 @@ func TestFixedAnAnchoredFloatKeyKeepsItsSpelling(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType: one node-to-name walk,
+// read by every consumer.
+//
+// codec walked from a node down to the scalar a key is named after in three
+// places -- unwrapKeyNode for the decoder, another for the reflection path, and
+// tojson naming the node with no unwrapping at all -- and only one of them
+// looked through an anchor. None looked through a tag. So `!!str x: 1` left a
+// struct field tagged `x` at its zero value with nothing reported, and
+// `!!float 226.0: x` came back keyed "226", a float in the integers' namespace.
+//
+// [ast.KeyName] owns that walk now and all of them call it. It resolves a tag
+// rather than stepping over it, which is the part that matters: `!!float 1` is
+// the float 1.0 and is named "1.0", where stripping the tag reads the token "1"
+// and names it after an integer.
+//
+// Retiring three yamlcorpus departures at once -- "a key tagged !!float",
+// "!!timestamp" and "!!binary" -- is the argument for owning the rule in one
+// place. Each had been found separately, by a different consumer.
+func TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType(t *testing.T) {
+	t.Run("a tagged key fills the field it names", func(t *testing.T) {
+		type target struct {
+			X any `yaml:"x"`
+		}
+
+		for _, src := range []string{
+			"!!str x: 1\n",
+			"!!str \"x\": 1\n",
+			"? !!str x\n: 1\n",
+			"&a1 !!str x: 1\n",
+			"!foo x: 1\n",
+			"! x: 1\n",
+		} {
+			var got target
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, uint64(1), got.X, "%q", src)
+		}
+	})
+
+	t.Run("a tag is resolved and not stripped", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			// Stripping would read the token and name these after an integer.
+			{"!!float 1: x\n", "1.0"},
+			{"!!float 226: x\n", "226.0"},
+			// Writing the tag changes nothing where it agrees with the scalar.
+			{"!!float 1.0: x\n", "1.0"},
+			{"!!float 226.0: x\n", "226.0"},
+			{"!!int 226: x\n", "226"},
+			{"!!str 226.0: x\n", "226.0"},
+			{"!!bool True: x\n", "true"},
+			{"!!null ~: x\n", "null"},
+			// A tag naming a kind leaves the node to speak for itself, so the
+			// key is the text the document wrote.
+			{"!!timestamp 2001-12-14: x\n", "2001-12-14"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+
+		// A byte string is named by the base64 the document wrote, and reaches
+		// a map only where the map is named rather than keyed: the reflection
+		// path keys a map[string]any on the resolved value and a []byte cannot
+		// be hashed. That refusal is older than the naming and is not this.
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte("!!binary aGVsbG8=: x\n"), &walked))
+		assert.Equal(t, map[string]any{"aGVsbG8=": "x"}, walked)
+
+		var typed map[string]any
+		err := codec.Unmarshal([]byte("!!binary aGVsbG8=: x\n"), &typed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot use []uint8 as a map key")
+	})
+
+	// The three consumers agree on one document, which is what the shared walk
+	// buys. ToJSON still writes a binary key as the decoded bytes, which is
+	// defect 30 and is about what a byte string means in JSON, not about the
+	// naming.
+	t.Run("the decoder and ToJSON name a tagged float alike", func(t *testing.T) {
+		const src = "!!float 226: x\n"
+
+		var got map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, map[string]any{"226.0": "x"}, got)
+
+		out, err := codec.ToJSON([]byte(src))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"226.0":"x"}`, string(out))
+	})
+}

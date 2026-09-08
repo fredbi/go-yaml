@@ -410,26 +410,28 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 	})
 }
 
-// TestDefectAPropertiedKeyDoesNotReachAStructField pins the destination that loses it.
+// TestDefectAnAliasStandingAsAKeyDoesNotReachAStructField pins the destination
+// that loses it.
 //
 // Hand-written for the same reason as TestDefectAPropertiedEmptyKeyIsMishandled:
 // the generator can write a tagged key and does not draw one yet.
 //
-// `!!str x: 1` read into a struct whose field is tagged `x` leaves the field at
-// its zero value and reports nothing. The same document read into an `any` or a
-// map[string]any names the key "x" and holds the value, so the key resolves
-// correctly everywhere except where a field has to be found for it.
+// `k: &a1 n` over `*a1 : 1` read into a struct whose field is tagged `n` leaves
+// the field at its zero value and reports nothing. The same document read into
+// an `any` or a map[string]any names the key "n" and holds the value, so the
+// key resolves correctly everywhere except where a field has to be found for
+// it.
 //
-// An anchor does not do it, which places the fault on the tag rather than on
-// properties in general.
+// Neither a bare key nor an anchored one does it, which places the fault on the
+// alias.
 //
-// yamlcorpus.Departures records the naming half of the same root for
-// "!!float 226.0: x", where the key comes back "226", and
-// yamlcorpus.typedPathDefects parks the enumerated shapes. What is new on
-// 2026-09-08 is the reach: the tagger walks keys now, so a generated document
-// carries a tagged key and TestDecodingIntoAGoTypeGivesTheSameValue meets it
-// without anybody writing one by hand.
-func TestDefectAPropertiedKeyDoesNotReachAStructField(t *testing.T) {
+// ✅ A **tag** on the key did the same until 2026-09-08 and no longer does.
+// codec walked from a node to a key's name in three places, and only one of
+// them looked through a tag; ast.KeyName owns that walk now and every caller
+// reads it, so `!!str x: 1` reaches the field. What is left is the alias, which
+// ast.KeyName deliberately does not resolve -- what an alias names depends on
+// where the caller stands, and a walking parse cannot read AliasNode.Target.
+func TestDefectAnAliasStandingAsAKeyDoesNotReachAStructField(t *testing.T) {
 	type target struct {
 		X any `yaml:"x"`
 	}
@@ -463,27 +465,6 @@ func TestDefectAPropertiedKeyDoesNotReachAStructField(t *testing.T) {
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
 		assert.Equal(t, map[string]any{"k": "n", "n": uint64(1)}, walked)
-	})
-
-	t.Run("today a tag on the key leaves it empty", func(t *testing.T) {
-		for _, src := range []string{
-			"!!str x: 1\n",
-			"!!str \"x\": 1\n",
-			"? !!str x\n: 1\n",
-			"&a1 !!str x: 1\n",
-			"!foo x: 1\n",
-			"! x: 1\n",
-		} {
-			var got target
-			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Nilf(t, got.X, "today: the field is never filled: %q", src)
-
-			// And the same document into a map holds it, which is what makes
-			// this the reflection path rather than the naming.
-			var m map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(src), &m), "%q", src)
-			assert.Equalf(t, map[string]any{"x": uint64(1)}, m, "%q", src)
-		}
 	})
 }
 
@@ -983,34 +964,34 @@ func TestDefectACommentAboveABlankLineAddsALeadingBreak(t *testing.T) {
 	})
 }
 
-// TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling pins what is left of
-// the property-in-front-of-a-key naming.
+// TestDefectAnAliasInFrontOfAFloatKeyLosesItsSpelling pins what is left of the
+// property-in-front-of-a-key naming.
 //
 // A float key is named by its canonical YAML spelling, and the ".0" keeps it
 // out of the integers' namespace: "1.0: x" comes back keyed "1.0" and
-// ".inf: x" keyed ".inf". Put an alias or a tag in front of the same key and
-// the name becomes Go's %v -- "1" and "+Inf".
+// ".inf: x" keyed ".inf". Put an alias in front of the same key and the name
+// becomes Go's %v -- "1" and "+Inf". Both decode paths agree on the wrong name,
+// so this is a naming defect and not a divergence.
 //
-// The anchor half closed when readAnchorValue began attaching the anchored node
-// before a walk is handed it; see TestFixedAnAnchoredFloatKeyKeepsItsSpelling.
-// These two are different mechanisms with the same symptom, and both paths now
-// agree on the wrong name rather than disagreeing, so this is a naming defect
-// and no longer a divergence:
+// [ast.KeyName] owns the walk from a node down to the scalar a key is named
+// after, and it stops at an alias on purpose: what an alias names depends on
+// where the caller stands. A tree reads ast.AliasNode.Target; a parse still
+// walking cannot, and keeps the anchored node's identity as it goes instead
+// (Parser.keepAnchorIdentity). codec has neither, so it names the alias node
+// itself and reads no token off it.
 //
-//   - an alias: codec.unwrapKeyNode looks through a MappingKeyNode and an
-//     AnchorNode and not an AliasNode, so keyName is handed the alias and reads
-//     no token off it.
-//   - a tag: unwrapKeyNode does not look through a TagNode either. Stripping
-//     one is not enough on its own, since the tag decides the type -- "!!float
-//     1" is the float 1.0 and wants naming "1.0", not "1" -- so this wants the
-//     tag resolved, as ast.KeyIdentity resolves it.
+// Two halves closed before this one, and neither shared its mechanism:
 //
-// ⚠️ The tag half loses an entry. The parser refuses "!!float 1: a" over
-// "1.0: b" as one key, so it reads the two as the same node; but
-// "!!float 1: a" over "1: b" reads {"1": "b"} with nothing reported, because
-// the decoder names both "1" and a Go map holds one. Two keys the parser tells
-// apart, collapsed by the naming.
-func TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling(t *testing.T) {
+//   - an **anchor**, where parseAnchor attached the node after a walk had
+//     already been handed it. TestFixedAnAnchoredFloatKeyKeepsItsSpelling.
+//   - a **tag**, where codec had a node-to-name walk of its own that looked
+//     through neither tag nor alias. It calls ast.KeyName now, which resolves a
+//     tag rather than stripping it.
+//     TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType.
+//
+// So a fix wants an answer to one question: may a consumer that does not hold
+// the parse read AliasNode.Target?
+func TestDefectAnAliasInFrontOfAFloatKeyLosesItsSpelling(t *testing.T) {
 	t.Run("the bare key keeps its spelling", func(t *testing.T) {
 		for _, tc := range []struct{ src, key string }{
 			{src: "1.0: x\n", key: "1.0"},
@@ -1041,35 +1022,4 @@ func TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling(t *testing.T) {
 		}
 	})
 
-	t.Run("today a tagged key is named by Go, and loses an entry", func(t *testing.T) {
-		for _, tc := range []struct{ src, today string }{
-			{src: "!!float 1.0: x\n", today: "1"},
-			{src: "!!float 1: x\n", today: "1"},
-			{src: "!!float 1e3: x\n", today: "1000"},
-		} {
-			var got map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
-			assert.Containsf(t, got, tc.today, "today: named by Go's %%v: %q", tc.src)
-		}
-
-		// The parser holds the two apart -- it refuses this pair as one key --
-		// so the loss below is the naming and not the check.
-		var refused map[string]any
-		err := codec.Unmarshal([]byte("!!float 1: a\n1.0: b\n"), &refused)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `mapping key "1.0" already defined`)
-
-		// And here they are two keys, which the naming folds into one -- and
-		// the two destinations part company over it. Walking into an `any`
-		// drops the float entry and reports nothing; a map[string]any sees two
-		// keys arrive under one name and refuses the document.
-		var walked any
-		require.NoError(t, codec.Unmarshal([]byte("!!float 1: a\n1: b\n"), &walked))
-		assert.Equal(t, map[string]any{"1": "b"}, walked, "today: the float entry is gone")
-
-		var typed map[string]any
-		err = codec.Unmarshal([]byte("!!float 1: a\n1: b\n"), &typed)
-		require.Error(t, err, "today: the typed map refuses what the walk read")
-		assert.Contains(t, err.Error(), `duplicate key "1"`)
-	})
 }
