@@ -281,7 +281,7 @@ var Ledger = []Divergence{
 			"into a map[string]any the same document keeps the \"1.0\", so the destination decides " +
 			"the key. The anchor names the " +
 			"node and says nothing about its type, so both are the float 1 standing as a key, and a " +
-			"float key is named by its canonical spelling -- the \".0\" is what keeps it out of the " +
+			"float key is named by its canonical spelling, and the \".0\" keeps it out of the " +
 			"integers' namespace. `&a1 1e3: x` loses it the same way, coming back \"1000\" where " +
 			"`1e3: x` gives \"1000.0\".\n\n" +
 			"Only a float, and for an anchor only the implicit key: `&a1 7`, `&a1 true` and `&a1 1.5` " +
@@ -598,7 +598,12 @@ func writesAnAliasKey(v Value, _ Style) bool {
 // key. Style.ExplicitKeys is the other half -- "? &a1 1.0" over ": x" is named
 // correctly, so it is the implicit key that loses the spelling.
 func writesAPropertiedKeyNamedTwoWays(v Value, st Style) bool {
-	return holdsAPropertiedKeyNamedTwoWays(v, st.ExplicitKeys)
+	// Style.FlowPairs writes a one-entry mapping inside a flow sequence without
+	// its braces -- the "k: v" in "[k: v]" -- and flowPair writes no "?" there
+	// whatever Style.ExplicitKeys says. So that style keeps the implicit key
+	// the anchored half of this needs, which "&a1 0.0: *a1" inside "[...]"
+	// caught.
+	return holdsAPropertiedKeyNamedTwoWays(v, st.ExplicitKeys && !st.FlowPairs)
 }
 
 func holdsAPropertiedKeyNamedTwoWays(v Value, explicit bool) bool {

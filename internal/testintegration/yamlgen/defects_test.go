@@ -274,8 +274,8 @@ func readTheStream(t *testing.T, src string) []any {
 
 // TestDefectAFloatKeyBehindAPropertyLosesItsSpelling pins the naming.
 //
-// A float key is named by its canonical spelling, and the ".0" is what keeps it
-// out of the integers' namespace: "1.0: x" comes back keyed "1.0". Put an
+// A float key is named by its canonical spelling, and the ".0" keeps it out of
+// the integers' namespace: "1.0: x" comes back keyed "1.0". Put an
 // anchor on the same key and it comes back "1". The anchor names the node and
 // says nothing about its type, so both documents hold the float 1 as a key.
 //

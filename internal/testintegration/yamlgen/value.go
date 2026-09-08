@@ -1262,16 +1262,26 @@ func bigFloats() *rapid.Generator[*big.Float] {
 
 func floats() *rapid.Generator[float64] {
 	return rapid.Custom(func(t *rapid.T) float64 {
-		// One float in nine is a special. Weighted low on purpose: they are
-		// three values against a continuum, and a corpus that drew them evenly
-		// would spend most of its floats on three documents.
-		switch rapid.IntRange(0, 8).Draw(t, "kind") {
+		// One float in twelve is a special and one in twelve is whole-valued.
+		// Weighted low on purpose: the specials are three values against a
+		// continuum, and a corpus that drew them evenly would spend most of its
+		// floats on three documents.
+		switch rapid.IntRange(0, 11).Draw(t, "kind") {
 		case 0:
 			return math.Inf(1)
 		case 1:
 			return math.Inf(-1)
 		case 2:
 			return math.NaN()
+		case 3:
+			// A whole-valued float, which Float64Range never lands on. Its
+			// canonical spelling carries the ".0" -- what keeps 1.0 out of the
+			// integers' namespace -- so it is the float the encoder, [KeyText]
+			// and codec.ToJSON each have to keep apart from an integer. The
+			// same gap Keys() had: a labeled family the value range could not
+			// reach, so the corpus reported health for a region it never
+			// entered.
+			return float64(rapid.IntRange(-9, 9).Draw(t, "wholefloat"))
 		}
 
 		f := rapid.Float64Range(-1e6, 1e6).Draw(t, "f")

@@ -3,7 +3,10 @@
 
 package yamlcorpus
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Construct is one structural thing a document may contain.
 type Construct struct {
@@ -115,6 +118,18 @@ var constructs = []Construct{
 	{"an anchor", func(s string) bool { return strings.Contains(s, "&") }},
 	{"an alias", func(s string) bool { return strings.Contains(s, "*") }},
 	{"a merge key", func(s string) bool { return strings.Contains(s, "<<") }},
+	// A value shape rather than a structural one, and here because a shape the
+	// draws cannot reach is invisible everywhere else. Every declared feature
+	// was reachable on 2026-09-08 and a whole-valued float was not: Keys() and
+	// floats() both drew from a continuous range, so the corpus held 5 of them
+	// in 21,686 cases -- and a feature count could not see it, since
+	// "value/float" says a float was written and not which one.
+	//
+	// The ".0" keeps 1.0 out of the integers' namespace, so the
+	// encoder, KeyText and codec.ToJSON each have to hold it apart from an
+	// integer, and yamlcorpus.TagKeyIntegralFloat is the family enumerated by
+	// hand for it.
+	{"a whole-valued float", func(s string) bool { return wholeFloat.MatchString(s) }},
 	{"a secondary tag", func(s string) bool { return strings.Contains(s, "!!") }},
 	{"a verbatim tag", func(s string) bool { return strings.Contains(s, "!<") }},
 	{"a comment", func(s string) bool { return strings.Contains(s, "#") }},
@@ -172,3 +187,7 @@ var constructs = []Construct{
 	}},
 	{"a nested explicit key", func(s string) bool { return strings.Contains(s, "? ?") }},
 }
+
+// wholeFloat matches a float written with a zero fraction, which is the
+// canonical spelling of a whole-valued float: "1.0", "-2.0", "1.0e3".
+var wholeFloat = regexp.MustCompile(`(^|[^0-9.])-?[0-9]+\.0([^0-9]|$)`)
