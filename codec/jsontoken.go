@@ -134,6 +134,11 @@ type jsonPathFrame struct {
 	index int
 	array bool
 	named bool
+	// wantsKey says the next thing an object frame expects is a member name.
+	// An object alternates key and value, and the parse can hand two values
+	// over for one entry -- "&!" is an anchor the parse reads as two nodes --
+	// so the alternation is checked rather than assumed.
+	wantsKey bool
 }
 
 // ToJSONTokens reads src as the JSON tokens holding the same values, handing

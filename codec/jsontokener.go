@@ -291,6 +291,13 @@ func (t *jsonTokener) emit(tok JSONToken) {
 		return
 	}
 
+	if !t.wellFormed(tok) {
+		t.fail(yamlerrors.NewNotJSON(
+			"a mapping entry holds one value, and this document reads as two", nil))
+
+		return
+	}
+
 	t.handed++
 	t.lastAt = tok.At
 	t.step(tok)
@@ -330,24 +337,62 @@ func (t *jsonTokener) step(tok JSONToken) {
 	case JSONKey:
 		if n := len(s.frames); n > 0 {
 			s.frames[n-1].key, s.frames[n-1].named = tok.Value, true
+			s.frames[n-1].wantsKey = false
 		}
 
 		return
 	}
 
 	// Everything else fills a slot of the collection around it, a nested
-	// collection as much as a scalar, so a sequence counts one more element.
-	if n := len(s.frames); n > 0 && s.frames[n-1].array {
-		if s.frames[n-1].named {
-			s.frames[n-1].index++
-		}
-		s.frames[n-1].named = true
-	}
+	// collection as much as a scalar.
+	// A collection fills a slot of the one around it as it opens, so what it
+	// holds already reads at the right index, and the frame it opens expects a
+	// key of its own.
+	t.fillSlot()
 
 	if tok.Kind == JSONObjectStart || tok.Kind == JSONArrayStart {
 		s.depth++
-		s.frames = append(s.frames, jsonPathFrame{array: tok.Kind == JSONArrayStart})
+		s.frames = append(s.frames, jsonPathFrame{array: tok.Kind == JSONArrayStart, wantsKey: tok.Kind == JSONObjectStart})
 	}
+}
+
+// fillSlot records that the collection in hand has taken one more value: a
+// sequence counts an element, and a mapping goes back to wanting a key.
+func (t *jsonTokener) fillSlot() {
+	s := t.state
+	n := len(s.frames)
+	if n == 0 {
+		return
+	}
+
+	if !s.frames[n-1].array {
+		s.frames[n-1].wantsKey = true
+
+		return
+	}
+	if s.frames[n-1].named {
+		s.frames[n-1].index++
+	}
+	s.frames[n-1].named = true
+}
+
+// wellFormed reports whether tok may stand where the conversion has reached.
+//
+// A mapping alternates key and value, and the parse hands two values over for
+// one entry where it read a construct as two nodes: ":  &!" is one entry whose
+// value is an anchor named "!" standing on nothing, and the walk gives the
+// anchor's null and then a null of its own. Writing both makes {"null":null
+// null}, which is not a document.
+func (t *jsonTokener) wellFormed(tok JSONToken) bool {
+	n := len(t.state.frames)
+	if n == 0 || t.state.frames[n-1].array {
+		return true
+	}
+	if tok.Kind == JSONObjectEnd || tok.Kind == JSONArrayEnd {
+		return true
+	}
+
+	return t.state.frames[n-1].wantsKey == (tok.Kind == JSONKey)
 }
 
 // open hands a collection's opening token over.
