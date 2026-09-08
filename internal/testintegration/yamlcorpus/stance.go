@@ -4,6 +4,8 @@
 package yamlcorpus
 
 import (
+	"maps"
+
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
@@ -63,19 +65,23 @@ var GoYAML = stance.Table{
 		TagPercentEscape: stance.Accepts,
 		TagYAMLDirective: stance.Accepts,
 
-		// Merge keys, measured: this library implements the YAML 1.1 merge in
-		// full. It merges, a local key wins over a merged one, a sequence
-		// merges in order, and quoting suppresses the whole thing.
+		// Merge keys, measured on a document that declares no version, which is
+		// every shape in MergeShapes. Since 8acf11b this library resolves "<<"
+		// under the version the document declares, so with no directive it
+		// merges nothing and reads "<<" as an ordinary key -- and then it
+		// accepts the whole family, "<<: 1" included, the way libfyaml 1.0.0b1
+		// does.
 		//
-		// The refusal is the interesting entry. Merging obliges a parser to
-		// reject "<<: 1", because there is no operation that merges a scalar --
-		// so implementing an extension costs documents that a parser without it
-		// reads happily. libfyaml, which implements no merge, accepts them.
-		// Both are conformant and the corpus scores both.
+		// TagMergeNonMapping is where the two readings part company, and it is
+		// the entry worth reading twice. Merging obliges a parser to reject
+		// "<<: 1", because there is no operation that merges a scalar, so the
+		// same bytes are a document here and an error under "%YAML 1.1" --
+		// which is why GoYAML11 keeps its own stand on this tag rather than
+		// sharing this map wholesale.
 		TagMergeKey:        stance.Accepts,
 		TagMergeSequence:   stance.Accepts,
 		TagMergeInline:     stance.Accepts,
-		TagMergeNonMapping: stance.Refuses,
+		TagMergeNonMapping: stance.Accepts,
 		TagMergeQuoted:     stance.Accepts,
 
 		// Directives, measured, and one of them is a defect rather than a
@@ -318,11 +324,14 @@ var Departures = []Departure{
 // consumer is the wrong one. Both were tried here before this table existed.
 // GoYAML11 is the same decoder reading a document that asks for YAML 1.1.
 //
-// A third table for one library, and it differs from GoYAML in one field. Every
-// verdict is the same -- "0777" is a valid document whichever schema resolves
-// it -- so nothing about accept-or-refuse moves. What moves is the value, and
+// A third table for one library. Almost every verdict is the same -- "0777" is
+// a valid document whichever schema resolves it -- and what moves is the value:
 // Reads is what lets the corpus hand this consumer 511 where it hands GoYAML
 // 777.
+//
+// One verdict moves with it, and elevenStands is where. Merging obliges a
+// parser to reject "<<: 1", so a document the core reading accepts as a key
+// named "<<" is an error under 1.1.
 //
 // ⚠️ A document reaches this table by carrying a "%YAML 1.1" directive. The
 // parser also takes parser.WithYAMLVersion, and codec.Decoder has no option
@@ -335,7 +344,21 @@ var GoYAML11 = stance.Table{
 	Reads:    yamlgen.Reading11,
 	Speaks:   Vocabulary(),
 	Requires: allRules(),
-	Stands:   GoYAML.Stands,
+	Stands:   elevenStands(),
+}
+
+// elevenStands is GoYAML.Stands with the merge family answered for YAML 1.1.
+//
+// Merging is the whole of the difference: under a "%YAML 1.1" directive this
+// library merges, and merging costs it the documents that ask to merge
+// something which is not a mapping. Every other tag is answered the same way,
+// so the map is copied rather than restated -- a second copy of thirty stands
+// would drift from the first the moment either moved.
+func elevenStands() map[stance.Tag]stance.Stand {
+	out := maps.Clone(GoYAML.Stands)
+	out[TagMergeNonMapping] = stance.Refuses
+
+	return out
 }
 
 var GoYAMLParser = stance.Table{

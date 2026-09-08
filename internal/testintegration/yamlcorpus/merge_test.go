@@ -85,3 +85,50 @@ func TestTwoMergeKeysAreAlsoADuplicate(t *testing.T) {
 
 	t.Error("the shape is gone, so this test is checking nothing")
 }
+
+// TestTheMergeStandsAreMeasuredUnderBothVersions holds the two tables to what
+// the library actually does with each merge shape.
+//
+// The stands were prose until 2026-09-08. TestTheLibraryMatchesItsDeclaredStance
+// re-measures the anchor patterns and reaches nothing here, so
+// TagMergeNonMapping went on saying "refuses" for a week after 8acf11b made a
+// bare "<<" an ordinary key -- which accepts "<<: 1" and refuses nothing.
+//
+// One family, two verdicts, and that is the point of it: "s: &s text" over
+// "d:" over "  <<: *s" is a document under the core schema, where "<<" holds
+// the string, and an error under "%YAML 1.1", where merging a string is no
+// operation. A corpus storing one verdict per document could not carry that.
+func TestTheMergeStandsAreMeasuredUnderBothVersions(t *testing.T) {
+	for _, s := range yamlcorpus.MergeShapes() {
+		t.Run(s.Name, func(t *testing.T) {
+			doc := stance.Doc{
+				Name: s.Name, Src: s.Src, WellFormed: true,
+				VerdictAt: stance.Construct, Tags: s.Intent,
+			}
+
+			for _, tc := range []struct {
+				table stance.Table
+				src   []byte
+			}{
+				{table: yamlcorpus.GoYAML, src: s.Src},
+				{table: yamlcorpus.GoYAML11, src: append([]byte("%YAML 1.1\n---\n"), s.Src...)},
+			} {
+				want, why := tc.table.Expect(doc)
+				if want == stance.Undecided {
+					continue
+				}
+
+				got := reads(tc.src)
+
+				switch {
+				case want == stance.Accept && got != nil:
+					t.Errorf("%s expects %s, because %s, and the library refuses it: %v",
+						tc.table.Name, want, why, got)
+				case want == stance.Reject && got == nil:
+					t.Errorf("%s expects %s, because %s, and the library reads it",
+						tc.table.Name, want, why)
+				}
+			}
+		})
+	}
+}
