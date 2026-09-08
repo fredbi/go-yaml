@@ -1,5 +1,5 @@
 baseURL: https://go-openapi.github.io/go-yaml/
-title: go-yaml v2
+title: go-yaml
 theme: hugo-relearn
 languageCode: en-us
 
@@ -56,17 +56,17 @@ module:
       target: content
 
     # Custom SCSS (for theme customization) + logo
-    - source: themes/go-yaml-assets
+    - source: themes/goyaml-assets
       target: assets
 
     # Custom static files (favicon)
-    - source: themes/go-yaml-static
+    - source: themes/goyaml-static
       target: static
 
 # Relearn theme parameters
 params:
-  # Edit links - point to source code since docs are generated
-  editURL: 'https://github.com/go-openapi/go-yaml/edit/master/internal/assertions/'
+  # Edit links - point at the hand-written content
+  editURL: 'https://github.com/go-openapi/go-yaml/edit/master/docs/doc-site/'
   externalLinkTarget: _blank
 
   # Repository info
@@ -111,20 +111,23 @@ params:
   #version: 'v2.1.0'
 
   # Custom params (populated by go-yaml.yaml)
-  go-yaml:
+  goyaml:
     goVersion: ''
     latestRelease: ''
     versionMessage: ''
     buildTime: ''
 
-  # Generated metrics (populated by metrics.yaml)
+  # Conformance metrics (populated by metrics.yaml)
   metrics:
-    domains: 0
-    functions: 0
-    assertions: 0
-    generics: 0
-    helpers: 0
-    others: 0
+    buckets: 0
+    buckets_matched: 0
+    cases: 0
+    decoder_scoreable: 0
+    decoder_passing: 0
+    tojson_scoreable: 0
+    tojson_passing: 0
+    oracle_scoreable: 0
+    oracle_passing: 0
 
 # Menu configuration
 menu:

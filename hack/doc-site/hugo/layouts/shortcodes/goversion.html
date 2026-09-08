@@ -1,7 +1,6 @@
 {{- /*
-  goversion: renders an explicit "minimum Go version" pill for assertions guarded by a
-  //go:build constraint. Usage: {{% goversion "go1.26" %}}
-  The argument is the build constraint as emitted by codegen (e.g. "go1.26").
+  goversion: renders a "minimum Go version" pill. Usage: {{% goversion "go1.25" %}}
+  The argument is the build constraint spelling (e.g. "go1.25").
 */ -}}
 {{- $v := .Get 0 -}}
 <span class="go-version-badge" title="Requires {{ $v }} or newer">{{ $v }}</span>

@@ -42,14 +42,14 @@ jobs:
             docs/
       -
         name: Get all tags [go-openapi repo]
-        if: ${{ github.repository == 'go-openapi/runtime' }}
+        if: ${{ github.repository == 'go-openapi/go-yaml' }}
         run: |
           git fetch origin --prune --update-shallow --tags 'refs/tags/*:refs/tags/*'
       -
         name: Get all tags [fork]
-        if: ${{ github.repository != 'go-openapi/runtime' }}
+        if: ${{ github.repository != 'go-openapi/go-yaml' }}
         run: |
-          git remote add upstream "https://github.com/go-openapi/runtime"
+          git remote add upstream "https://github.com/go-openapi/go-yaml"
           git fetch upstream --prune --update-shallow --tags 'refs/tags/*:refs/tags/*'
           git fetch origin --prune --update-shallow --tags 'refs/tags/*:refs/tags/*'
       -
@@ -87,12 +87,12 @@ jobs:
           echo "    Version message: ${VERSION_MESSAGE}"
 
           # Generate dynamic config
-          cat runtime.yaml.template \
+          cat go-yaml.yaml.template \
             | sed "s|{{ GO_VERSION }}|${REQUIRED_GO_VERSION}|g" \
             | sed "s|{{ LATEST_RELEASE }}|${LATEST_RELEASE}|g" \
             | sed "s|{{ VERSION_MESSAGE }}|${VERSION_MESSAGE}|g" \
             | sed "s|{{ BUILD_TIME }}|${BUILD_TIME}|g" \
-            > runtime.yaml
+            > go-yaml.yaml
       -
         name: Build site with Hugo
         uses: crazy-max/ghaction-hugo@d629f74d3e4a9da53050610da35a59863ab9b26c # v3.3.0
@@ -100,7 +100,7 @@ jobs:
           version: v0.153.3  # <- pin the HUGO version, as they often break things
           extended: true
           args: >
-            --config hugo.yaml,runtime.yaml
+            --config hugo.yaml,go-yaml.yaml,metrics.yaml
             --buildDrafts
             --cleanDestinationDir
             --minify

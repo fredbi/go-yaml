@@ -1,70 +1,25 @@
+# Conformance metrics for the documentation site.
+#
+# Hand-maintained for now. The intent is for the conformance harness to emit
+# this file, so that pages quoting a score cannot go stale; until then, update
+# it from the scoreboard when the numbers move.
+#
+# Last updated: 2026-09-08
 params:
     metrics:
-        domains: 19
-        functions: 143
-        assertions: 139
-        generics: 55
-        nongeneric_assertions: 84
-        helpers: 4
-        others: 0
-        by_domain:
-            boolean:
-                name: Boolean
-                count: 4
-            collection:
-                name: Collection
-                count: 23
-            common:
-                name: Common
-                count: 0
-            comparison:
-                name: Comparison
-                count: 12
-            condition:
-                name: Condition
-                count: 9
-            equality:
-                name: Equality
-                count: 16
-            error:
-                name: Error
-                count: 10
-            file:
-                name: File
-                count: 6
-            http:
-                name: Http
-                count: 6
-            json:
-                name: Json
-                count: 5
-            number:
-                name: Number
-                count: 9
-            ordering:
-                name: Ordering
-                count: 10
-            panic:
-                name: Panic
-                count: 4
-            safety:
-                name: Safety
-                count: 2
-            string:
-                name: String
-                count: 4
-            testing:
-                name: Testing
-                count: 2
-            time:
-                name: Time
-                count: 2
-            type:
-                name: Type
-                count: 10
-            yaml:
-                name: Yaml
-                count: 5
-        package_variants: 446
-        total_variants: 892
-        total_functions: 902
+        # yamlgen generator buckets, and how many agree with the oracle.
+        buckets: 605
+        buckets_matched: 567
+        cases: 14684
+
+        # YAML test suite, decoder path.
+        decoder_scoreable: 372
+        decoder_passing: 372
+
+        # YAML test suite, ToJSON path.
+        tojson_scoreable: 274
+        tojson_passing: 272
+
+        # Reference parser oracle.
+        oracle_scoreable: 393
+        oracle_passing: 393

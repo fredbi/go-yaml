@@ -2,7 +2,7 @@
 # This file provides version information extracted from the repository
 
 params:
-  testify:
+  goyaml:
     # Go version requirement (from go.mod)
     goVersion: '{{ GO_VERSION }}'
 
