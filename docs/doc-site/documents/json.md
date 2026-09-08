@@ -2,30 +2,64 @@
 title: The JSON bridge
 weight: 50
 description: |
-  Converting YAML to JSON and back without going through Go values.
+  Converting a YAML document to JSON without building a Go value for it, and
+  what it refuses.
 ---
 
-{{% notice style="note" title="Outline" %}}
-This page is an outline. The structure is settled; the prose is not written.
-{{% /notice %}}
+## Converting
 
-## What the page must answer
+```go
+j, err := codec.ToJSON([]byte("a: 1\nb: [x, y]\n"))
+// {"a": 1, "b": ["x", "y"]}
+```
 
-- How do I turn a YAML document into the equivalent JSON?
-- What does "the equivalent" mean when YAML can express things JSON cannot?
-- What does `WalkValue` give me that `Unmarshal` into `any` does not?
+`FromJSON` goes the other way. Both are re-exported from the root package, where
+they take no options; `codec.ToJSON` takes
+[parser options](../parser/).
 
-## Covers
+`ToJSON` walks the document and writes JSON as it reaches each node. Nothing is
+decoded into a Go value on the way, so a type Go cannot hold does not stop the
+conversion — and a document too large to model as Go values still converts.
 
-- `ToJSON`, `FromJSON`, at the root and in `codec`
-- `parser.WithJSONCompatible`
-- `WalkValue`, `WalkValues`
-- `NodeToValue`, `ValueToNode`
-- `errors.NewNotJSON`
+## What it refuses
 
-## Open questions for the API
+JSON cannot express everything YAML can, and `ToJSON` reports rather than
+guesses:
 
-- `ToJSON` scores {{% siteparam "metrics.tojson_passing" %}} of
-  {{% siteparam "metrics.tojson_scoreable" %}} on the YAML test suite. The page
-  should link the conformance report rather than claim a round number.
-- A JSON token stream is designed but not built. Nothing here may describe it.
+```
+[3:4] JSON has no number for .inf
+   1 | a: 1
+   2 | b: [x, y]
+>  3 | c: .inf
+          ^
+```
+
+```
+[1:3] a sequence cannot be a JSON key
+>  1 | ? [a,b]
+         ^
+   2 | : 1
+```
+
+The errors carry a position, so they print like any other — see
+[Errors](../../values/errors/).
+
+A non-string scalar key is stringified, which can produce a duplicate JSON name:
+`'1.0': 1` and `!!float 1: 2` are two YAML keys and one JSON name.
+`parser.WithJSONCompatible` reports that pair as `ErrNotJSON` rather than letting
+it through.
+
+## Walking to Go values instead
+
+`codec.WalkValue` and `WalkValues` read a source straight to `any`, one document
+or the whole stream, without the reflection the decoder does for typed
+destinations. `codec.NodeToValue` fills a Go value from a node you already have,
+and `ValueToNode` builds a subtree from a Go value.
+
+## Conformance
+
+`ToJSON` scores {{% siteparam "metrics.tojson_passing" %}} of
+{{% siteparam "metrics.tojson_scoreable" %}} on the YAML Test Suite, against
+{{% siteparam "metrics.decoder_passing" %}} of
+{{% siteparam "metrics.decoder_scoreable" %}} through the decoder — see
+[Conformance](../../about/conformance/).
