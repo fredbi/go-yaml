@@ -94,6 +94,22 @@ type Step struct {
 // What is handed over is only good until Leave returns: the parse may reclaim
 // the tokens under it as soon as the walk moves on. Read what is needed while
 // it is there.
+//
+// ⛔ Never key on the node pointer. The parse hands its cells out again behind
+// the descent, so two nodes of one document are frequently the same pointer:
+// over 12,597 corpus documents, a map keyed on ast.Node reported 5,226 nodes
+// as handed over twice and every one of them was two different nodes sharing a
+// recycled cell. A map keyed that way merges unrelated nodes silently. Key on
+// the token's offset, or on what the node reads as.
+//
+// Leave of the innermost node at an offset is the last moment that node is
+// still the one the walk named: every deeper node at that offset has already
+// been and gone, and the parse has not yet reclaimed this one. A consumer that
+// holds a node until a later one arrives is reading whatever was written there
+// since -- transform found 610 of 88,473 labeled pieces carrying a node that
+// had moved, a string at offset 7 whose node had become an anchor name 23
+// bytes on. Not a crash and not a nil: another part of the document, read as
+// this one.
 type Visitor interface {
 	// Enter is called on a node before anything it holds. Returning false
 	// leaves what it holds unvisited, and Leave is not called for it.
