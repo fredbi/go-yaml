@@ -1844,6 +1844,14 @@ func (n *TagNode) MarshalYAML() ([]byte, error) {
 
 // IsMergeKey returns whether it is a MergeKey node.
 func (n *TagNode) IsMergeKey() bool {
+	if name, known := token.ReservedTagOf(n.URI); known && name == token.MergeTag {
+		// The tag names the type, and a written tag is not tied to a spec
+		// version: "!!merge << : *a" folds under the core schema, where a bare
+		// "<<" is an ordinary key. Reading through to the value would ask the
+		// wrong question there, since the parser builds a string for the "<<"
+		// it did not resolve.
+		return true
+	}
 	if n.Value == nil {
 		return false
 	}

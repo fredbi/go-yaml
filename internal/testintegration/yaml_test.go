@@ -225,6 +225,9 @@ type Object struct {
 }
 
 func TestInlineAnchorAndAlias(t *testing.T) {
+	// The body is held on its own: the document is read under YAML 1.1, where
+	// "<<" is the merge key, and the encoder writes no directive, so the round
+	// trip is of the body and not of the header that selects the version.
 	yml := `---
 single:
   default: &default
@@ -257,7 +260,11 @@ collection:
 	// ShareAliases is what does that; without it the anchored node is written
 	// out in full at each alias.
 	var v rootObject
-	if err := codec.UnmarshalWithOptions([]byte(yml), &v, codec.ShareAliases()); err != nil {
+	// "%YAML 1.1" selects the version and is not part of the body: "<<" is the
+	// merge key there, and the encoder writes no directive, so the round trip
+	// below compares the body alone.
+	if err := codec.UnmarshalWithOptions(
+		[]byte("%YAML 1.1\n"+yml), &v, codec.ShareAliases()); err != nil {
 		t.Fatal(err)
 	}
 	opt := codec.MarshalAnchor(func(anchor *ast.AnchorNode, value interface{}) error {

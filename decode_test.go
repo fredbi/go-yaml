@@ -662,9 +662,10 @@ c: 3
 			value: map[string]any{"a": 1, "b": 2, "c": 3},
 		},
 
-		// merge
+		// merge, read under YAML 1.1 where "<<" is the merge key
 		{
-			source: `
+			source: `%YAML 1.1
+---
 a: &a
  foo: 1
 b: &b
@@ -679,7 +680,8 @@ merge:
 			},
 		},
 		{
-			source: `
+			source: `%YAML 1.1
+---
 a: &a
  foo: 1
 b: &b
@@ -1660,7 +1662,12 @@ func TestDecoder_AnchorFiles(t *testing.T) {
 }
 
 func TestDecodeWithMergeKey(t *testing.T) {
-	yml := `
+	// Read under YAML 1.1, where "<<" is the merge key. It is a 1.1 type, so
+	// under the core schema this document holds a key named "<<" and merges
+	// nothing -- which TestABareMergeKeyIsAnOrdinaryKeyUnderTheCoreSchema
+	// asserts.
+	yml := `%YAML 1.1
+---
 a: &a
   b: 1
   c: hello
@@ -2963,7 +2970,9 @@ func TestDecoder_UnmarshalYAMLWithAlias(t *testing.T) {
 	}{
 		{
 			name: "ok",
-			yaml: `
+			// Under YAML 1.1, where "<<" is the merge key.
+			yaml: `%YAML 1.1
+---
 anchors:
  w: &w "\"hello\" \"world\""
  map: &x
@@ -2975,12 +2984,21 @@ map:
  <<: *x
  e: f
 `,
+			// The "<<" is NOT merged, and that is defect 64 rather than the
+			// rule working. unmarshalYAMLWithAliasMap implements
+			// UnmarshalYAML([]byte) and re-parses the fragment it is handed
+			// with a fresh yaml.Unmarshal, so the document's "%YAML 1.1" does
+			// not travel with the bytes and the merge key resolves as an
+			// ordinary key. The alias does survive, because it is expanded
+			// before the fragment is handed over.
 			expectedValue: value{
 				String: unmarshalYAMLWithAliasString(`"hello" "world"`),
 				Map: unmarshalYAMLWithAliasMap(map[string]interface{}{
-					"a": "b",
-					"c": "d",
-					"d": `"hello" "world"`,
+					"<<": map[string]any{
+						"a": "b",
+						"c": "d",
+						"d": `"hello" "world"`,
+					},
 					"e": "f",
 				}),
 			},
@@ -3275,7 +3293,8 @@ func TestRoundtripAnchorAlias(t *testing.T) {
 			Foo foo
 			Bar bar
 		}
-		yml := `
+		yml := `%YAML 1.1
+---
 foo:
  <<: &test-anchor
    k1: "One"
@@ -3323,7 +3342,11 @@ bar:
 			Foo        foo
 			Bar        bar
 		}
-		yml := `
+		// The body is compared on its own: the document is read under YAML 1.1,
+		// where "<<" is the merge key, and the encoder writes no directive, so
+		// the round trip is of the body and not of the header that selects the
+		// version.
+		body := `
 test-anchor: &test-anchor
   k1: One
 foo:
@@ -3334,7 +3357,7 @@ bar:
   k3: Three
 `
 		var v doc
-		if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
+		if err := yaml.Unmarshal([]byte("%YAML 1.1\n---"+body), &v); err != nil {
 			t.Fatalf("%+v", err)
 		}
 		bytes, err := yaml.Marshal(v)
@@ -3342,8 +3365,8 @@ bar:
 			t.Fatalf("%+v", err)
 		}
 		got := "\n" + string(bytes)
-		if yml != got {
-			t.Fatalf("expected:[%s] but got [%s]", yml, got)
+		if body != got {
+			t.Fatalf("expected:[%s] but got [%s]", body, got)
 		}
 	})
 }

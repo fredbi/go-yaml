@@ -12,6 +12,14 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
+// underEleven is src read under YAML 1.1, where "<<" is the merge key.
+//
+// The merge key is tag:yaml.org,2002:merge, a 1.1 type, so the version decides
+// whether a bare "<<" merges at all. Every test of what a merge means asks both
+// versions: the bare document is the library's default answer and this is the
+// other one.
+func underEleven(src string) string { return "%YAML 1.1\n---\n" + src }
+
 // TestAMergeResolvesTheSameWayOnEveryPath holds the four readers of a document
 // to one answer about "<<".
 //
@@ -61,31 +69,46 @@ func TestAMergeResolvesTheSameWayOnEveryPath(t *testing.T) {
 		},
 		{
 			name:  "a sequence of disjoint mappings brings all of them",
-			src:   "a: &a {x: 1}\nb: &b {y: 2}\nm:\n  <<: [*a, *b]\n",
-			want:  map[string]any{"x": uint64(1), "y": uint64(2)},
-			order: []string{"x", "y"},
+			src:   "a: &a {x: 1}\nb: &b {w: 2}\nm:\n  <<: [*a, *b]\n",
+			want:  map[string]any{"x": uint64(1), "w": uint64(2)},
+			order: []string{"x", "w"},
 		},
 		{
-			name:  "a merge of a mapping that merges",
-			src:   "a: &a {x: 1}\nb: &b\n  <<: *a\n  y: 2\nm:\n  <<: *b\n",
-			want:  map[string]any{"x": uint64(1), "y": uint64(2)},
-			order: []string{"y", "x"},
+			name: "a merge of a mapping that merges",
+			// The key is "w" and not "y" on purpose: 1.1 resolves "y" to the
+			// boolean true, so a test that reads under 1.1 to reach the merge
+			// has to keep clear of 1.1's other spellings.
+			src:   "a: &a {x: 1}\nb: &b\n  <<: *a\n  w: 2\nm:\n  <<: *b\n",
+			want:  map[string]any{"x": uint64(1), "w": uint64(2)},
+			order: []string{"w", "x"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			src := underEleven(tc.src)
+
 			var walked any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "%q", src)
 			assert.Equal(t, tc.want, walked.(map[string]any)["m"], "into an any")
 
 			var typed map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &typed), "%q", src)
 			assert.Equal(t, tc.want, typed["m"], "into a map[string]any")
 
 			var ordered any
 			require.NoErrorf(t,
-				codec.UnmarshalWithOptions([]byte(tc.src), &ordered, codec.UseOrderedMap()), "%q", tc.src)
+				codec.UnmarshalWithOptions([]byte(src), &ordered, codec.UseOrderedMap()), "%q", src)
 			assert.Equal(t, tc.order, orderedKeysOf(t, ordered, "m"),
 				"UseOrderedMap: the mapping's own keys in document order, then the merged ones")
+
+			t.Run("and under 1.2 the same document merges nothing", func(t *testing.T) {
+				// Every one of these mappings holds a "<<" of its own, so under
+				// the core schema every one keeps it as an ordinary key.
+				var core any
+				require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &core), "%q", tc.src)
+				entries, ok := core.(map[string]any)["m"].(map[string]any)
+				require.Truef(t, ok, "%q read %#v", tc.src, core)
+				assert.Containsf(t, entries, "<<", "%q kept no key named << : %v", tc.src, entries)
+			})
 		})
 	}
 }
@@ -97,11 +120,13 @@ func TestAMergeResolvesTheSameWayOnEveryPath(t *testing.T) {
 // came back holding that key twice. A caller ranging over it saw both, and
 // json.Marshal wrote a JSON object with the member name repeated.
 func TestAMergedKeyIsWrittenOnceIntoAMapSlice(t *testing.T) {
-	for _, src := range []string{
+	for _, plain := range []string{
 		"m:\n  <<: &a {x: 1}\n  x: 9\n",
 		"m:\n  x: 9\n  <<: &a {x: 1}\n",
 		"a: &a {x: 1}\nb: &b {x: 2}\nm:\n  x: 9\n  <<: [*a, *b]\n",
 	} {
+		src := underEleven(plain)
+
 		var got any
 		require.NoErrorf(t, codec.UnmarshalWithOptions([]byte(src), &got, codec.UseOrderedMap()), "%q", src)
 

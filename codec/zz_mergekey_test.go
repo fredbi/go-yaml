@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+// underEleven is src read under YAML 1.1, where "<<" is the merge key.
+//
+// The merge key is tag:yaml.org,2002:merge, a 1.1 type, so the version decides
+// whether a bare "<<" merges at all. These tests are about what a merge means,
+// so they ask 1.1; what the same documents mean as written is asserted in
+// codec_test's TestABareMergeKeyIsAnOrdinaryKeyUnderTheCoreSchema.
+//
+// The package has its own copy because codec_test is a different package.
+func underEleven(src string) string { return "%YAML 1.1\n---\n" + src }
+
 type mergePair struct {
 	A int `yaml:"a"`
 	B int `yaml:"b"`
@@ -22,8 +32,8 @@ type mergePair struct {
 // mappings.
 func TestMergedKeyLosesToTheMappingsOwn(t *testing.T) {
 	for name, src := range map[string]string{
-		"merge first": "base: &b\n  a: 1\n  b: 2\nuse:\n  <<: *b\n  b: 3\n",
-		"merge last":  "base: &b\n  a: 1\n  b: 2\nuse:\n  b: 3\n  <<: *b\n",
+		"merge first": underEleven("base: &b\n  a: 1\n  b: 2\nuse:\n  <<: *b\n  b: 3\n"),
+		"merge last":  underEleven("base: &b\n  a: 1\n  b: 2\nuse:\n  b: 3\n  <<: *b\n"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			var dst struct {
@@ -59,7 +69,7 @@ func TestMergedKeyLosesToTheMappingsOwn(t *testing.T) {
 // TestEarlierMergeWinsOverLater covers a mapping merging two others that write
 // the same key: the first named stands, as YAML 1.1's merge says.
 func TestEarlierMergeWinsOverLater(t *testing.T) {
-	const src = "one: &one\n  a: 1\n  b: 1\ntwo: &two\n  b: 2\n  c: 2\nuse:\n  <<: [*one, *two]\n"
+	src := underEleven("one: &one\n  a: 1\n  b: 1\ntwo: &two\n  b: 2\n  c: 2\nuse:\n  <<: [*one, *two]\n")
 
 	var dst struct {
 		Use mergePair `yaml:"use"`

@@ -81,6 +81,22 @@ var yamlVersionMap = map[string]YAMLVersion{
 
 // schemaFor is the scalar schema a version resolves against. 1.0 predates the
 // core schema and is read as 1.1, which is the closest thing it has.
+// schemaInForce is the schema the document being read is resolved under: the
+// version it declared with a "%YAML" line, and the option where it declared
+// none.
+//
+// The directive wins over the option, and its scope is one document --
+// endVersionScope clears yamlVersion at each document's end, which is defect
+// 43's fix. Reading schemaFor(p.version) instead asks for the option alone and
+// misses every directive, which is what a first cut of the merge rule did.
+func (p *Parser) schemaInForce() token.Schema {
+	if p.yamlVersion != "" {
+		return schemaFor(p.yamlVersion)
+	}
+
+	return schemaFor(p.version)
+}
+
 func schemaFor(v YAMLVersion) token.Schema {
 	switch v {
 	case YAML10, YAML11:
@@ -726,6 +742,20 @@ func (p *Parser) parseScalarValue(ctx context, tk *tapeToken) (ast.ScalarNode, e
 	}
 	switch tk.Type() {
 	case token.MergeKeyType:
+		if p.schemaInForce() != token.Schema11 {
+			// The merge key is tag:yaml.org,2002:merge, a YAML 1.1 type. 1.2
+			// leaves it a tag like any other an application defines, so a bare
+			// "<<" is an ordinary key spelled "<<" and the document reads the
+			// way libfyaml 1.0.0b1 reads it under its own 1.2 mode.
+			//
+			// The scanner types the characters whatever the version, because it
+			// cannot see a "!!merge" standing in front of them: a "%TAG" line
+			// repoints the secondary handle and the scanner never reads one. So
+			// this is where the version arrives, and "!!merge" reaches the same
+			// node through TagNode.IsMergeKey, which reads the tag's own URI.
+			return newStringNode(ctx, tk)
+		}
+
 		return newMergeKeyNode(ctx, tk)
 	case token.NullType, token.ImplicitNullType:
 		return newNullNode(ctx, tk)

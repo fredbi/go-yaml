@@ -16,14 +16,28 @@ import (
 
 // entryOf is the first mapping entry of the document's root mapping, which is
 // what MergeOf is asked about.
+//
+// It reads under YAML 1.1, where a bare "<<" is the merge key. The parser
+// decides that, and under the core schema it builds an ordinary key instead --
+// see the subtest that asserts it.
 func entryOf(t *testing.T, src string) *ast.MappingValueNode {
+	t.Helper()
+
+	return entryUnder(t, "%YAML 1.1\n---\n"+src)
+}
+
+// entryUnder is entryOf without a version prepended, for asking what a document
+// means as written.
+func entryUnder(t *testing.T, src string) *ast.MappingValueNode {
 	t.Helper()
 
 	f, err := parser.ParseBytes([]byte(src))
 	require.NoErrorf(t, err, "%q", src)
 	require.NotEmptyf(t, f.Docs, "%q", src)
 
-	switch body := f.Docs[0].Body.(type) {
+	// A "%YAML" line is a document of the parse in its own right, ahead of the
+	// one it applies to, so the body is the last document and not the first.
+	switch body := f.Docs[len(f.Docs)-1].Body.(type) {
 	case *ast.MappingNode:
 		require.NotEmptyf(t, body.Values, "%q", src)
 
@@ -48,6 +62,19 @@ func TestMergeOfAnswersForEveryEntry(t *testing.T) {
 		for _, src := range []string{"a: 1\n", "{a: 1}\n"} {
 			assert.Equalf(t, ast.NotAMerge, ast.MergeOf(entryOf(t, src)).Verdict, "%q", src)
 		}
+	})
+
+	t.Run("and under the core schema a bare << is an ordinary key too", func(t *testing.T) {
+		// The merge key is tag:yaml.org,2002:merge, a YAML 1.1 type. Under 1.2
+		// the parser builds a string for it, so nothing reaches here as a
+		// merge -- which is what libfyaml 1.0.0b1 reads in its own 1.2 mode.
+		for _, src := range []string{"<<: {x: 1}\n", "<<: [{x: 1}]\n", "<<: 1\n"} {
+			got := ast.MergeOf(entryUnder(t, src))
+			assert.Equalf(t, ast.NotAMerge, got.Verdict, "%q", src)
+		}
+
+		// A written tag names the type at any version, so this one does fold.
+		assert.Equal(t, ast.Folds, ast.MergeOf(entryUnder(t, "!!merge << : {x: 1}\n")).Verdict)
 	})
 
 	t.Run("a key the parser built as a merge folds", func(t *testing.T) {
@@ -85,10 +112,10 @@ func TestMergeOfAnswersForEveryEntry(t *testing.T) {
 		} {
 			entry := entryOf(t, src)
 			if entry.Key == nil || !entry.Key.IsMergeKey() {
-				// The first document's first entry is "a", so take the second.
-				f, err := parser.ParseBytes([]byte(src))
+				// The first document's first entry is "a", so take the last.
+				f, err := parser.ParseBytes([]byte("%YAML 1.1\n---\n" + src))
 				require.NoError(t, err)
-				body, ok := f.Docs[0].Body.(*ast.MappingNode)
+				body, ok := f.Docs[len(f.Docs)-1].Body.(*ast.MappingNode)
 				require.True(t, ok)
 				entry = body.Values[len(body.Values)-1]
 			}

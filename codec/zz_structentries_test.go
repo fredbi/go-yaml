@@ -112,10 +112,17 @@ func TestEmbeddedFieldTakesTheWholeMapping(t *testing.T) {
 // TestMergedKeyLosesToTheMappingsOwn: a merge still reaches the fields the
 // mapping says nothing about.
 func TestMergedEntryFillsAFieldTheMappingLeavesAlone(t *testing.T) {
-	const src = "base: &b\n  name: from base\n  n: 7\nuse:\n  <<: *b\n  name: own\n"
+	// The count is written "num" and not "n": read under 1.1, "n" is a boolean
+	// spelling and the key comes back as false, so the field is never filled.
+	// A test that switches version to reach the merge has to keep clear of
+	// 1.1's other spellings.
+	src := underEleven("base: &b\n  name: from base\n  num: 7\nuse:\n  <<: *b\n  name: own\n")
 
 	var dst struct {
-		Use namedOnly `yaml:"use"`
+		Use struct {
+			Name string `yaml:"name"`
+			Num  int    `yaml:"num"`
+		} `yaml:"use"`
 	}
 	if err := Unmarshal([]byte(src), &dst); err != nil {
 		t.Fatal(err)
@@ -123,7 +130,7 @@ func TestMergedEntryFillsAFieldTheMappingLeavesAlone(t *testing.T) {
 	if dst.Use.Name != "own" {
 		t.Errorf("name: got %q, want %q", dst.Use.Name, "own")
 	}
-	if dst.Use.N != 7 {
-		t.Errorf("n: got %d, want 7 from the merge", dst.Use.N)
+	if dst.Use.Num != 7 {
+		t.Errorf("num: got %d, want 7 from the merge", dst.Use.Num)
 	}
 }

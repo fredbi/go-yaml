@@ -42,6 +42,9 @@ import (
 //
 // A sequence of them lost the flag on its first element, so every element after
 // the first was written where it stood.
+// Every document here is read under YAML 1.1, where "<<" is the merge key.
+// TestABareMergeKeyIsAnOrdinaryKeyUnderTheCoreSchema asserts the other half:
+// what the same documents mean as written.
 func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 	t.Run("the shapes that were broken", func(t *testing.T) {
 		for _, tc := range []struct{ src, writes string }{
@@ -51,7 +54,7 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 			{src: "z: 9\n<<: [{a: 1}, {b: 2}]\n", writes: `{"z":9,"a":1,"b":2}`},
 			{src: "b: &b {q: 1}\n<<: [*b, {a: 1}]\n", writes: `{"b":{"q":1},"q":1,"a":1}`},
 		} {
-			out, err := codec.ToJSON([]byte(tc.src))
+			out, err := codec.ToJSON([]byte(underEleven(tc.src)))
 			require.NoError(t, err, "%q", tc.src)
 			assert.Equal(t, tc.writes, string(out), "%q", tc.src)
 			assert.True(t, json.Valid(out), "%q", tc.src)
@@ -64,7 +67,7 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 			{src: "b: &b {q: 1}\nc: &c {r: 1}\n<<: [*b, *c]\n", writes: `{"b":{"q":1},"c":{"r":1},"q":1,"r":1}`},
 			{src: "z: 9\n<<: [{a: 1}]\n", writes: `{"z":9,"a":1}`},
 		} {
-			out, err := codec.ToJSON([]byte(tc.src))
+			out, err := codec.ToJSON([]byte(underEleven(tc.src)))
 			require.NoError(t, err, "%q", tc.src)
 			assert.Equal(t, tc.writes, string(out), "%q", tc.src)
 		}
@@ -77,7 +80,7 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 			{src: "a: 1\n<<: {a: 9, b: 2}\n", writes: `{"a":1,"b":2}`},
 			{src: "<<: [{a: 1}, {a: 9, b: 2}]\n", writes: `{"a":1,"b":2}`},
 		} {
-			out, err := codec.ToJSON([]byte(tc.src))
+			out, err := codec.ToJSON([]byte(underEleven(tc.src)))
 			require.NoError(t, err, "%q", tc.src)
 			assert.Equal(t, tc.writes, string(out), "%q", tc.src)
 		}
@@ -89,7 +92,7 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 			"z: 9\n<<: [{a: 1}, {b: 2}]\n", "b: &b {q: 1}\n<<: [*b, {a: 1}]\n",
 			"a: 1\n<<: {a: 9, b: 2}\n", "<<: [{a: 1}, {a: 9, b: 2}]\n",
 		} {
-			out, err := codec.ToJSON([]byte(src))
+			out, err := codec.ToJSON([]byte(underEleven(src)))
 			require.NoErrorf(t, err, "%q", src)
 
 			var fromJSON map[string]any
@@ -99,7 +102,7 @@ func TestMergeWrittenInPlaceConvertsToJSON(t *testing.T) {
 			// here. A map[string]any destination is a third answer and a
 			// defect of its own -- see TestDefectATypedMapMergesTheWrongWay.
 			var decoded any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &decoded), "%q", src)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(underEleven(src)), &decoded), "%q", src)
 
 			entries, ok := decoded.(map[string]any)
 			require.Truef(t, ok, "%q: %#v", src, decoded)
@@ -151,13 +154,13 @@ func TestFixedATypedMapMergesLikeEveryOtherDestination(t *testing.T) {
 			{"a: 5\n<<: [{a: 1}, {a: 9}]\n", map[string]any{"a": uint64(5)}},
 		} {
 			var typed map[string]any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(underEleven(tc.src)), &typed), "%q", tc.src)
 			assert.Equalf(t, tc.want, typed, "%q", tc.src)
 		}
 
 		var nested map[string]any
 		require.NoError(t, yaml.Unmarshal(
-			[]byte("p: &p {a: 1}\nq: &q {a: 9}\nr:\n  <<: [*p, *q]\n"), &nested))
+			[]byte(underEleven("p: &p {a: 1}\nq: &q {a: 9}\nr:\n  <<: [*p, *q]\n")), &nested))
 		assert.Equal(t, map[string]any{"a": uint64(1)}, nested["r"])
 	})
 
@@ -167,12 +170,12 @@ func TestFixedATypedMapMergesLikeEveryOtherDestination(t *testing.T) {
 			"<<: {a: 9, b: 2}\na: 1\n",
 		} {
 			var typed map[string]any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &typed), "%q", src)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(underEleven(src)), &typed), "%q", src)
 			assert.Equalf(t, map[string]any{"a": uint64(1), "b": uint64(2)}, typed, "%q", src)
 		}
 
 		var nested map[string]any
-		require.NoError(t, yaml.Unmarshal([]byte("m:\n  a: 1\n  <<: {a: 9, b: 2}\n"), &nested))
+		require.NoError(t, yaml.Unmarshal([]byte(underEleven("m:\n  a: 1\n  <<: {a: 9, b: 2}\n")), &nested))
 		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2)}, nested["m"])
 	})
 
@@ -183,7 +186,7 @@ func TestFixedATypedMapMergesLikeEveryOtherDestination(t *testing.T) {
 			"<<: {a: 1, a: 2}\n",
 		} {
 			var typed map[string]any
-			err := yaml.Unmarshal([]byte(src), &typed)
+			err := yaml.Unmarshal([]byte(underEleven(src)), &typed)
 			require.Errorf(t, err, "%q", src)
 			assert.Containsf(t, err.Error(), `"a" already defined`, "%q", src)
 		}
@@ -201,16 +204,16 @@ func TestFixedATypedMapMergesLikeEveryOtherDestination(t *testing.T) {
 			"a: 1\n<<: {a: 9, b: 2}\n":     {A: 1, B: 2},
 		} {
 			var loose any
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &loose), "%q", src)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(underEleven(src)), &loose), "%q", src)
 			entries, ok := loose.(map[string]any)
 			require.Truef(t, ok, "%q", src)
 			assert.EqualValuesf(t, want.A, entries["a"], "%q into an any", src)
 
 			var got box
-			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(underEleven(src)), &got), "%q", src)
 			assert.Equal(t, want, got, "%q into a struct", src)
 
-			out, err := codec.ToJSON([]byte(src))
+			out, err := codec.ToJSON([]byte(underEleven(src)))
 			require.NoErrorf(t, err, "%q", src)
 
 			var fromJSON box

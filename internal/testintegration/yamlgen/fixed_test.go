@@ -1878,10 +1878,17 @@ func TestFixedAVersionDirectiveIsScopedToOneDocument(t *testing.T) {
 // Filed by the peer session as defect 40 from hand-written shapes; reached by
 // the merge axis on 2026-09-07 and closed the same day.
 func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
+	// Read under YAML 1.1, where "<<" is the merge key. It is a 1.1 type, so
+	// under the core schema these documents hold a key named "<<" and merge
+	// nothing.
+	//
+	// The other key is "w" and not "y": 1.1 resolves "y" to the boolean true,
+	// so a test that switches version to reach the merge has to keep clear of
+	// 1.1's other spellings.
 	t.Run("a shared key reads the same into a typed map and an any", func(t *testing.T) {
-		const src = "<<: [{x: 1}, {x: 2}]\ny: 3\n"
+		const src = "%YAML 1.1\n---\n<<: [{x: 1}, {x: 2}]\nw: 3\n"
 
-		want := map[string]any{"x": uint64(1), "y": uint64(3)}
+		want := map[string]any{"x": uint64(1), "w": uint64(3)}
 
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
@@ -1893,9 +1900,9 @@ func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
 	})
 
 	t.Run("sharing no key, every destination still reads it", func(t *testing.T) {
-		const src = "<<: [{x: 1}, {z: 2}]\ny: 3\n"
+		const src = "%YAML 1.1\n---\n<<: [{x: 1}, {z: 2}]\nw: 3\n"
 
-		want := map[string]any{"x": uint64(1), "y": uint64(3), "z": uint64(2)}
+		want := map[string]any{"x": uint64(1), "w": uint64(3), "z": uint64(2)}
 
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
@@ -1910,7 +1917,7 @@ func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
 		// The fold is what carries the earlier-wins rule. One mapping writing
 		// a key twice is 3.2.1.1's repeat and has nothing to do with it.
 		var typed map[string]any
-		err := codec.Unmarshal([]byte("<<: {x: 1, x: 2}\n"), &typed)
+		err := codec.Unmarshal([]byte("%YAML 1.1\n---\n<<: {x: 1, x: 2}\n"), &typed)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `"x" already defined`)
 	})
