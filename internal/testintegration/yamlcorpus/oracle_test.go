@@ -24,6 +24,25 @@ import (
 // and on those the specification is the only judge. A meaning stated there
 // rests on somebody's reading of the prose and nothing else, which is worth
 // knowing before trusting one.
+//
+// # Silence and contradiction are not the same darkness
+//
+// This test counts both as "no value", which is right for the meaning question
+// and hides a distinction the reader needs. yamlgen.Strict's two entries are
+// the clean example, measured 2026-09-08:
+//
+//   - `{{"": 0}}`: libfyaml and yaml/v3 both decline *after* parsing, because
+//     neither can hold a collection as a key. Nobody contradicts the grammar;
+//     nobody can be asked. Read the specification.
+//   - a flow mapping key spanning two lines: both refuse it *in the parser*, at
+//     a position, against grammar.NewRecognizer and the reference parser, which
+//     accept it. That is not silence -- it is two implementations reading 7.4.2
+//     the other way, and the evidence is about 7.4.2 rather than about any
+//     library.
+//
+// The first kind wants the prose read. The second wants the grammar
+// questioned. Both leave a meaning uncorroborated, and only the first leaves it
+// unopposed.
 
 // uncorroborated names the shapes whose stated meaning no outside
 // implementation can confirm, with the production that settles it.
