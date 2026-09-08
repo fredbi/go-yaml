@@ -237,3 +237,43 @@ func TestJSONTokensFoldAMerge(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, `{"base":{"k":1,"z":9},"use":{"k":2,"z":9}}`, string(want))
 }
+
+// TestJSONTokensSpellAKeyAsToJSONDoes pins how each shape of key is named.
+//
+// ⚠️ The corpus does not reach these: no document in it stands an alias or an
+// anchor as a mapping key over a float whose two spellings differ, so
+// TestJSONTokensRebuildWhatToJSONWrites agreed while the two converters named
+// an alias key differently. The rows are written out here for that reason.
+//
+// The last two rows are a defect the two converters share -- a property in
+// front of a key should not change the key's name -- and are pinned as they
+// stand so that a fix on either side reports itself here.
+func TestJSONTokensSpellAKeyAsToJSONDoes(t *testing.T) {
+	for name, tc := range map[string]struct{ src, key string }{
+		"a bare key":         {"1e3: x\n", "1000.0"},
+		"a key under a ?":    {"? 1e3\n: x\n", "1000.0"},
+		"a tagged key":       {"!!float 1e3: x\n", "1000.0"},
+		"an anchored key":    {"&a 1e3: x\n", "1e3"},
+		"an alias as a key":  {"a: &a1 1e3\n*a1 : v\n", "1e3"},
+		"a bare small float": {"0.00003: x\n", "3e-05"},
+		"an anchored one":    {"&a 0.00003: x\n", "0.00003"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := codec.ToJSONTokens([]byte(tc.src))
+			var keys []string
+			for tk := range s.Tokens() {
+				if tk.Kind == codec.JSONKey {
+					keys = append(keys, tk.Value)
+				}
+			}
+			require.NoError(t, s.Err())
+			require.NotEmpty(t, keys)
+			assert.Equal(t, tc.key, keys[len(keys)-1])
+
+			// And the same name ToJSON writes, which is the contract.
+			want, err := codec.ToJSON([]byte(tc.src))
+			require.NoError(t, err)
+			assert.Contains(t, string(want), `"`+tc.key+`":`)
+		})
+	}
+}

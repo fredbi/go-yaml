@@ -20,7 +20,12 @@ import (
 // parse refuses a collection key under WithJSONCompatible before it reaches
 // here.
 func (t *jsonTokener) emitKey(node ast.Node, at token.Position) {
-	name := t.keyName(node)
+	t.emitKeyNamed(t.keyName(node), at)
+}
+
+// emitKeyNamed hands a mapping key over under the name it was worked out to
+// have, and records it for the merge to be answered against.
+func (t *jsonTokener) emitKeyNamed(name string, at token.Position) {
 	if frame := t.frame(); frame != nil {
 		frame.keys = append(frame.keys, name)
 	}
@@ -374,6 +379,15 @@ func (t *jsonTokener) enterKey(node ast.Node, at parser.Step) bool {
 		return true
 	}
 
+	if _, aliased := node.(*ast.AliasNode); aliased {
+		// An alias names the entry by what its anchor wrote as a value, which
+		// is what ToJSON holds to a string here -- not the canonical spelling
+		// [ast.KeyName] gives.
+		t.emitKeyNamed(t.wrappedKeyName(node), at.At)
+
+		return false
+	}
+
 	t.emitKey(node, at.At)
 
 	return false
@@ -397,10 +411,7 @@ func (t *jsonTokener) closeKey(node ast.Node, at parser.Step) bool {
 		// keeps the digits the document wrote.
 		name = t.wrappedKeyName(mark.node)
 	}
-	if frame := t.frame(); frame != nil {
-		frame.keys = append(frame.keys, name)
-	}
-	t.emit(JSONToken{Kind: JSONKey, Value: name, At: at.At})
+	t.emitKeyNamed(name, at.At)
 
 	return true
 }
@@ -410,16 +421,24 @@ func (t *jsonTokener) closeKey(node ast.Node, at parser.Step) bool {
 //
 // It is the JSON the node would be written as if it stood as a value, held to
 // the string a JSON member name is, which is what [ToJSON] does for an anchored
-// key and is not the answer [ast.KeyName] gives. A value keeps the digits the
-// document wrote where JSON spells the number the same way and a name takes the
-// canonical spelling of its type, so "1e3: x" and "? 1e3" both name the entry
-// 1000.0 where "&a 1e3" names it 1e3. Only a float shows it: an integer, a null
-// and a boolean have no source-text path to take.
+// key and for an alias key, and is not the answer [ast.KeyName] gives. A value
+// keeps the digits the document wrote where JSON spells the number the same
+// way and a name takes the canonical spelling of its type:
 //
-// ⚠️ That difference is a defect the two converters share rather than a rule --
-// an anchor on a key should not change the key's name. It is mirrored here so
-// that the token stream says what [ToJSON] says, and both move together when it
-// is fixed.
+//	1e3: x                  names the entry 1000.0
+//	? 1e3                   names it 1000.0
+//	!!float 1e3: x          names it 1000.0
+//	&a 1e3: x               names it 1e3
+//	a: &a1 1e3 / *a1 : v    names it 1e3
+//
+// Only a float shows it: an integer, a null and a boolean have no source-text
+// path to take.
+//
+// ⚠️ Those last two are a defect the two converters share rather than a rule --
+// a property in front of a key should not change the key's name. They are
+// mirrored here so that the token stream says what [ToJSON] says, and both move
+// together when it is fixed. [TestJSONTokensSpellAKeyAsToJSONDoes] pins every
+// row above, so a fix on either side reports itself.
 func (t *jsonTokener) wrappedKeyName(node ast.Node) string {
 	inner := t.throughWrappers(node)
 	if inner == nil {
