@@ -37,10 +37,15 @@ where they were, for their owners to move.
    a `internal/.../internal/test*` package cannot be imported from here, so a short helper is copied rather than
    shared. `originsOf` in `scanner/offset_test.go` is the one that is.
 
-## Known red
+## What runs, and when
 
-`scanner/state_test.go` fails, and failed the same way before it moved: three entries drifted
-(`indentNum==column-1/spaces` 7 -> 8, `/tab` 5 -> 12, `lastIndentLevel==indentLevel` 2,729 -> 4,213). It only runs
-under `-tags yamlprobe`, which no CI job passes, so the drift went unnoticed. Re-baselining it means deciding first
-whether the corpus grew or the scanner moved -- `TestBulkSkipMovesNoInvariant` in `internal/scanner` is the test that
-tells those apart.
+`scanner/position_test.go` and `scanner/offset_test.go` run under `go test ./...`. `scanner/state_test.go` needs
+`-tags yamlprobe`, which no CI job passes -- it went red for a day before anyone ran it. Run the tagged ones by hand
+after touching the scanner:
+
+```sh
+go test -count=1 -tags yamlprobe ./internal/ledgers/...
+```
+
+A ledger measured over a generated corpus moves when the corpus grows, which is not the same as the code moving.
+`scanner/README.md` says how to tell those apart before re-baselining anything.

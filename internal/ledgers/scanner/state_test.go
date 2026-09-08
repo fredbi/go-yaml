@@ -53,25 +53,30 @@ var stateLedger = map[string]int64{ //nolint:gochecknoglobals // ok to store and
 	// already. updateIndent takes a tab in leading whitespace, sets indentHasTab and returns without counting it,
 	// because s-indent(n) is s-space x n and a tab is separation and not indentation. The main loop advances the column
 	// for it regardless, so from that tab to the end of the line indentNum lags column-1 and every following space
-	// trips the probe. 5 of 5 re-baselined 2026-09-07 evening, from 6 of 6: the corpus lost one space standing after
-	// a tab. The number counts spaces after a tab in the corpus, nothing more, and it always reads 100%. It
-	// would catch a tab starting to count as indentation, which breaks s-indent(n).
+	// trips the probe. 12 of 12 re-baselined 2026-09-08, from 5 of 5: yamlgen began drawing tab separators, so the
+	// corpus holds more spaces standing after a tab. The number counts those and nothing else, and it always reads
+	// 100%. It would catch a tab starting to count as indentation, which breaks s-indent(n).
 	//
 	// The /spaces bucket is the one worth watching, and it holds one cause: a quoted scalar spanning a line break.
 	// The quote scanners call progressLine, marking the next character as opening a line, then read the rest of the
 	// scalar with progressColumn, which never reaches updateIndent. So isFirstCharAtLine is still true after the line
-	// has been read into. 7 of 11,748 re-baselined 2026-09-07 evening, unmoved from 7 of 11,729.
-	"indent.indentNum==column-1/tab":    5,
-	"indent.indentNum==column-1/spaces": 7,
+	// has been read into. 8 of 19,953, 0.04%, re-baselined 2026-09-08 from 7 of 11,748, 0.06%: the corpus grew faster
+	// than the cause did.
+	"indent.indentNum==column-1/tab":    12,
+	"indent.indentNum==column-1/spaces": 8,
 
 	// The indent level a token was given and the level the scanner stands at part company where a block opens, so the
-	// two are not a redundant pair. 2,729 of 83,807 re-baselined 2026-09-07 evening, from 2,793 of 69,177 that
-	// morning and 3,000 of 76,279 before it.
+	// two are not a redundant pair. 4,213 of 129,685 re-baselined 2026-09-08, from 2,729 of 83,807, and 2,793 of
+	// 69,177 and 3,000 of 76,279 before that.
 	//
-	// Read the ratio, not the count: 4.0% -> 3.3% as the corpus went from 69,177 pos() calls to 83,807, which is the
-	// generated documents arriving -- yamlgen draws shallow shapes, and the two levels part company where a block
-	// opens. A count re-baselined without the ratio beside it says nothing about whether the scanner changed.
-	"indent.lastIndentLevel==indentLevel": 2729,
+	// Read the ratio, not the count. 3.26% -> 3.25% across a corpus that grew by 55%, so the scanner stands where it
+	// did; the count follows the corpus. It was 4.0% while the corpus was 69,177 pos() calls, and fell as yamlgen's
+	// shallow shapes arrived. A count re-baselined without the ratio beside it says nothing about whether the scanner
+	// changed.
+	//
+	// 2 of the 4,213 are scanDirective refusing a tab-indented '%', which ends those documents earlier than they
+	// ended before. The other 1,482 are corpus growth.
+	"indent.lastIndentLevel==indentLevel": 4213,
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.
