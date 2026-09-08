@@ -9,6 +9,7 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/parser"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // collectMerge reads what a "<<" names, without handing any of it over.
@@ -90,7 +91,7 @@ func (t *jsonTokener) collectRun(write func()) {
 // earlier merge beats a later one, so the runs are read in the order they were
 // collected and the first writer of a name wins. JSON has no way to name a
 // member twice.
-func (t *jsonTokener) closeMapping(at parser.Step) {
+func (t *jsonTokener) closeMapping(at parser.Step, end *token.Token) {
 	frame := t.maps[len(t.maps)-1]
 	t.maps = t.maps[:len(t.maps)-1]
 
@@ -106,7 +107,7 @@ func (t *jsonTokener) closeMapping(at parser.Step) {
 		}
 	}
 
-	t.close(JSONObjectEnd, at.At)
+	t.close(JSONObjectEnd, t.closeAt(end))
 
 	if t.buffer != nil && at.Depth == t.bufDepth {
 		run := *t.buffer

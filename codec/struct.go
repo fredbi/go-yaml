@@ -356,7 +356,7 @@ type readFields struct {
 	// be one no field of this type declares, such as a key an embedded struct's
 	// own `,inline` map carries at run time.
 	dropped map[string]struct{}
-	err  error
+	err     error
 }
 
 // structFieldMap returns the fields of structType, keyed by Go field name.

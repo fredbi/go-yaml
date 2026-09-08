@@ -56,6 +56,10 @@ type jsonTokener struct {
 	// an anchor and a tag are all handed over before what they stand on is
 	// parsed, so a key is named when its wrapper closes.
 	keys []tokenKeyMark
+	// lastAt is where the token handed over most recently stands, which is
+	// where a block collection's closer goes: a block has no "}" or "]" of its
+	// own, so the closer stands at the end of what it encloses.
+	lastAt token.Position
 	// peek indexes the tag in tags whose first token decides whether it holds a
 	// scalar or a collection, and is -1 where there is none.
 	peek int
@@ -198,14 +202,14 @@ func (t *jsonTokener) Leave(node ast.Node, at parser.Step) {
 
 			return
 		}
-		t.closeMapping(at)
+		t.closeMapping(at, n.End)
 	case *ast.SequenceNode:
 		if frame := t.frame(); frame != nil && frame.mergeSeq == at.Depth {
 			frame.mergeSeq, frame.mergeValue = -1, false
 
 			return
 		}
-		t.close(JSONArrayEnd, at.At)
+		t.close(JSONArrayEnd, t.closeAt(n.End))
 	case *ast.TagNode:
 		t.closeTag(n, at)
 	}
@@ -259,6 +263,7 @@ func (t *jsonTokener) emit(tok JSONToken) {
 	}
 
 	t.handed++
+	t.lastAt = tok.At
 	t.step(tok)
 	if !t.yield(tok) {
 		t.stopped = true
@@ -324,6 +329,21 @@ func (t *jsonTokener) open(kind JSONTokenKind, at token.Position) {
 // close hands a collection's closing token over.
 func (t *jsonTokener) close(kind JSONTokenKind, at token.Position) {
 	t.emit(JSONToken{Kind: kind, At: at})
+}
+
+// closeAt is where a collection's closing token stands.
+//
+// A flow collection wrote a "}" or a "]" and the closer stands on it. A block
+// collection wrote neither, so the closer stands where the last token it
+// encloses does, which keeps a document's tokens in non-decreasing order.
+// Reading the node's own position instead puts the closer back at the
+// collection's first token, before everything it closes.
+func (t *jsonTokener) closeAt(end *token.Token) token.Position {
+	if end != nil {
+		return end.Position
+	}
+
+	return t.lastAt
 }
 
 // fail records the first thing the conversion refused and stops it.

@@ -301,3 +301,55 @@ func TestJSONTokensRefuseAStreamWhenAskedTo(t *testing.T) {
 		})
 	}
 }
+
+// TestJSONTokensCloseWhereTheCollectionEnds holds that a closing token never
+// stands before what it closes.
+//
+// A flow collection wrote a "}" or a "]" and the closer stands on it. A block
+// collection wrote neither, so it stands at the last token it encloses. A
+// consumer ordering tokens by position needs that: reading the node's own
+// position puts the closer back at the collection's first token.
+func TestJSONTokensCloseWhereTheCollectionEnds(t *testing.T) {
+	for name, tc := range map[string]struct{ src, closers string }{
+		"a block mapping":  {"a: 1\nb: 2\n", "L2C4"},
+		"a block sequence": {"items:\n  - x\n  - y\n", "L3C5 L3C5"},
+		"a flow mapping":   {"{a: 1}\n", "L1C6"},
+		"a flow sequence":  {"[1, 2]\n", "L1C6"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := codec.ToJSONTokens([]byte(tc.src))
+
+			var (
+				closers []string
+				last    codec.JSONToken
+				seen    bool
+			)
+			for tk := range s.Tokens() {
+				if seen {
+					assert.GreaterOrEqualf(t, tk.At.Offset(), last.At.Offset(),
+						"%v at %d goes back before %v at %d", tk.Kind, tk.At.Offset(), last.Kind, last.At.Offset())
+				}
+				last, seen = tk, true
+
+				if tk.Kind == codec.JSONObjectEnd || tk.Kind == codec.JSONArrayEnd {
+					closers = append(closers, fmt.Sprintf("L%dC%d", tk.At.Line, tk.At.Column))
+				}
+			}
+			require.NoError(t, s.Err())
+			assert.Equal(t, tc.closers, strings.Join(closers, " "))
+		})
+	}
+}
+
+// TestJSONTokensAlwaysCarryAPosition holds that every token points somewhere in
+// the source, including the null an empty document reads as.
+func TestJSONTokensAlwaysCarryAPosition(t *testing.T) {
+	for _, src := range []string{"", "---\n", "a: 1\n", "[]\n", "a:\n"} {
+		s := codec.ToJSONTokens([]byte(src))
+		for tk := range s.Tokens() {
+			assert.Positivef(t, tk.At.Line, "%q: %v has no line", src, tk.Kind)
+			assert.Positivef(t, tk.At.Column, "%q: %v has no column", src, tk.Kind)
+		}
+		require.NoError(t, s.Err())
+	}
+}

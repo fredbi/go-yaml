@@ -270,8 +270,10 @@ func (s *JSONTokens) Tokens() iter.Seq[JSONToken] {
 		if s.err == nil && !t.stopped && t.handed == 0 {
 			// The first document holds no node: an empty stream, or a document
 			// written as nothing between its markers. Both read as a null, as
-			// they do through [ToJSON].
-			t.emit(JSONToken{Kind: JSONNull})
+			// they do through [ToJSON]. It stands at the start of the source,
+			// which is the only place a document that wrote nothing can point
+			// at, and keeps every token of a stream carrying a position.
+			t.emit(JSONToken{Kind: JSONNull, At: token.Position{Line: 1, Column: 1}})
 		}
 	}
 }
