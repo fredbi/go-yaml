@@ -823,6 +823,13 @@ func (a *aliaser) mergeFrom(from []Anchored, own []Pair) Value {
 		// are two nodes. yamlcorpus.Departures records that naming as a
 		// departure, and a generated document whose stated meaning rested on it
 		// would be encoding the departure as the answer.
+		//
+		// The library folds a merge by name too, which this correction sent the
+		// peer session to look for: an own Float{1} key overrides a merged
+		// Str{"1.0"} where 3.2.1.1 keeps three entries. Filed as stream 2's
+		// defect 69, and out of reach of every property here -- both decode
+		// paths agree, wrongly, and readings.legacyMap folds by name for the
+		// same reason the decoder does.
 		key = rapid.SampledFrom(strings).Draw(a.t, "mergeshared")
 	}
 

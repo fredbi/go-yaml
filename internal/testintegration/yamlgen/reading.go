@@ -610,6 +610,14 @@ func (r *readings) legacy(v Value) any {
 // The merged mappings are read through r.legacy as well, so "<<: {k: yes}"
 // brings in the key k holding true. Merging what Decoded returns would read the
 // document under two schemas at once.
+//
+// ⚠️ The fold matches by name, because the answer is a map[string]any and a
+// name is all it can hold. 3.2.1.1 matches by node, so a merged Str{"1.0"} and
+// an own Float{1} are two keys and this cannot say so -- and neither can the
+// library, whose MapSlice.Key holds the text for every key. Stream 2's defect
+// 69 records the library half. [aliaser.mergeFrom] draws no such pair for that
+// reason: a stated meaning resting on the name would put
+// yamlcorpus.Departures' naming in the corpus as the answer.
 func (r *readings) legacyMap(m Map) any {
 	out := make(map[string]any, len(m.Pairs))
 
