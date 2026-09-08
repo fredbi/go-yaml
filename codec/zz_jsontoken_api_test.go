@@ -353,3 +353,41 @@ func TestJSONTokensAlwaysCarryAPosition(t *testing.T) {
 		require.NoError(t, s.Err())
 	}
 }
+
+// TestJSONTokensPointAKeyAtItsScalar holds that a key written behind a property
+// points at the name it carries, not at the property.
+//
+// The offset is what a caller slices the source with, so that is what is
+// checked: src[Offset()] must be the first byte of the key's text.
+//
+// ⚠️ The column is not checked here. A scalar behind a tag reports one column
+// short of its own offset -- "!!str k" gives offset 6, which is right, and
+// column 6, where k is the seventh character -- which is defect 76 in go-yaml
+// and not this converter's doing.
+func TestJSONTokensPointAKeyAtItsScalar(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src string
+		key string
+	}{
+		"a bare key":      {"k: v\n", "k"},
+		"an anchored key": {"&a k: v\n", "k"},
+		"a tagged key":    {"!!str k: v\n", "k"},
+		"a key under a ?": {"? k\n: v\n", "k"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := codec.ToJSONTokens([]byte(tc.src))
+			var found codec.JSONToken
+			for tk := range s.Tokens() {
+				if tk.Kind == codec.JSONKey {
+					found = tk
+				}
+			}
+			require.NoError(t, s.Err())
+			assert.Equal(t, tc.key, found.Value)
+
+			at := int(found.At.Offset())
+			require.Less(t, at, len(tc.src))
+			assert.Equal(t, tc.key, tc.src[at:at+len(tc.key)], "the offset must land on the key")
+		})
+	}
+}

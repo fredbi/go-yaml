@@ -198,10 +198,7 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 		if ok {
 			name = unquoted(resolved)
 		}
-		if frame := t.frame(); frame != nil {
-			frame.keys = append(frame.keys, name)
-		}
-		t.emit(JSONToken{Kind: JSONKey, Value: name, At: at.At})
+		t.emitKeyNamed(name, t.keyAt(n.Value, at.At))
 
 		return
 	}
@@ -411,9 +408,28 @@ func (t *jsonTokener) closeKey(node ast.Node, at parser.Step) bool {
 		// keeps the digits the document wrote.
 		name = t.wrappedKeyName(mark.node)
 	}
-	t.emitKeyNamed(name, at.At)
+	t.emitKeyNamed(name, t.keyAt(mark.node, at.At))
 
 	return true
+}
+
+// keyAt is where a key written inside a "?" or an anchor stands.
+//
+// The token carries the name the scalar underneath spells, so it points at that
+// scalar rather than at the property in front of it: "&a k: v" names the entry
+// "k" and points at the k. Falls back to the wrapper's own position where the
+// wrapper stands on nothing.
+func (t *jsonTokener) keyAt(node ast.Node, wrapper token.Position) token.Position {
+	inner := t.throughWrappers(node)
+	if inner == nil {
+		return wrapper
+	}
+	tk := inner.GetToken()
+	if tk == nil {
+		return wrapper
+	}
+
+	return tk.Position
 }
 
 // wrappedKeyName is the string a key written inside a "?" or an anchor names
