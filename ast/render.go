@@ -984,6 +984,10 @@ func (r *Renderer) stringNode(n *StringNode) string {
 // blockScalarHeader returns the block header a string needs, or "" when the
 // string fits on one line or is quoted -- a quoted scalar keeps its quotes.
 func blockScalarHeader(n *StringNode) string {
+	if n.Token == nil {
+		return token.LiteralBlockHeader(n.Value)
+	}
+
 	switch n.Token.Type {
 	case token.SingleQuoteType, token.DoubleQuoteType:
 		return ""

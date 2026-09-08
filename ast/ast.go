@@ -786,7 +786,18 @@ func quotedString(n *StringNode) string {
 }
 
 // String string value to text with quote or literal header if required
+//
+// A node built rather than parsed carries no token, and there is nothing then
+// to say it was quoted or where it stood: it comes out as its plain value.
 func (n *StringNode) String() string {
+	if n.Token == nil {
+		if n.Comment != nil {
+			return addCommentString(n.Value, n.Comment)
+		}
+
+		return n.Value
+	}
+
 	switch n.Token.Type {
 	case token.SingleQuoteType, token.DoubleQuoteType:
 		quoted := quotedString(n)
@@ -826,6 +837,10 @@ func (n *StringNode) String() string {
 }
 
 func (n *StringNode) stringWithoutComment() string {
+	if n.Token == nil {
+		return n.Value
+	}
+
 	switch n.Token.Type {
 	case token.SingleQuoteType, token.DoubleQuoteType:
 		return quotedString(n)
