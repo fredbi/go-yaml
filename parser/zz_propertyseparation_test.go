@@ -88,6 +88,35 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "y", "b": uint64(2)}, got)
 	})
 
+	t.Run("at the root of a document, where no delimiter stands before it", func(t *testing.T) {
+		// The two indentation tests in the scan loop's tab branch both consume
+		// the tab and read on, and at the root lastDelimColumn is 0 with the
+		// anchor's name in the buffer, so "&a1\t>-" took the first of them:
+		// the name ran on into the header and the anchor was cut as "a1>-".
+		// The block scalar was then never opened and " , a" read as a plain
+		// scalar, refused for beginning with a ','.
+		//
+		// Asking whether a property ends before either test is what fixes it.
+		// go.yaml.in/yaml/v3 v3.0.5 reads ", a", the reference parser passes
+		// the document and grammar.NewRecognizer accepts it.
+		for _, src := range []string{
+			"&a1\t>-\n , a\n",
+			"&a1\t|-\n , a\n",
+			"&a1\t>-\n   , a\n",
+			"&a1\t>-\n x\n",
+
+			// The three neighbors that always read, kept so a fix here cannot
+			// move them: a space, a tag, and no property at all.
+			"&a1 >-\n , a\n",
+			"!!str\t>-\n , a\n",
+			">-\n , a\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.NotNilf(t, got, "%q", src)
+		}
+	})
+
 	t.Run("an alias naming nothing is still refused", func(t *testing.T) {
 		// The tab ends the alias name, so this one names "x" and not "xy" --
 		// and nothing anchors "x", which the grammar refuses too.

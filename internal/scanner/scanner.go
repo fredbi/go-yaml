@@ -439,6 +439,17 @@ func (s *Scanner) scan(ctx *Context) error {
 				return err
 			}
 		case '\t':
+			if s.isAnchor || s.isAlias {
+				// The tab separates a property from its node, which is what a
+				// space does through scanWhiteSpace. It has to be asked before
+				// either indentation test below, because both of them consume
+				// the tab and read on: at the root of a document lastDelimColumn
+				// is 0 and the buffer holds the anchor's name, so "&a1\t>-" took
+				// the first branch, the name ran on into the header and the
+				// anchor was cut as "a1>-".
+				s.endsProperty(ctx)
+			}
+
 			if ctx.existsBuffer() && s.lastDelimColumn == 0 {
 				// tab indent for plain text (yaml-test-suite's spec-example-7-12-plain-lines).
 				s.indentNum++
@@ -448,13 +459,6 @@ func (s *Scanner) scan(ctx *Context) error {
 			}
 
 			if s.lastDelimColumn < s.column {
-				if s.isAnchor || s.isAlias {
-					// The tab separates a property from its node, which is what
-					// a space does through scanWhiteSpace. Cutting the token is
-					// the whole of it: without this the anchor name ran on into
-					// the value.
-					s.endsProperty(ctx)
-				}
 				s.indentNum++
 				ctx.addOriginBuf(c)
 				s.progress(ctx, 1)
