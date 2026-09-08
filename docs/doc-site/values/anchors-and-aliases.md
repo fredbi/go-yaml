@@ -49,10 +49,21 @@ people:
 
 ## Reading a merge key
 
-{{% notice style="warning" title="A merge key does nothing under YAML 1.2" %}}
-`<<` belongs to YAML 1.1. The 1.2 core schema dropped it, and this library
-follows the schema: under the 1.2 default, `<<` is an ordinary key and the merge
-never happens. **There is no error.**
+{{% notice style="warning" title="A plain `<<` does nothing under YAML 1.2" %}}
+`<<` is a plain scalar that a 1.1 processor resolves to the merge type. YAML 1.2
+dropped resolution by scalar shape, and this library follows the schema — so
+under the 1.2 default `<<` is an ordinary key, the merge never happens, and
+**there is no error**.
+
+Writing the tag out says the same thing without relying on resolution, and that
+is honoured at every version:
+
+| written | 1.2 | 1.1 |
+|---|---|---|
+| `<<: *d` | not merged | merged |
+| `!!merge <<: *d` | merged | merged |
+
+`!!merge` on any key other than `<<` is refused: `could not find merge key`.
 
 Decode the document above, exactly as `Marshal` wrote it:
 
@@ -67,14 +78,18 @@ Decode the document above, exactly as `Marshal` wrote it:
 `people[1]` is meant to be the default person entire. Under 1.2 it comes back
 empty.
 
-To merge, put a `%YAML 1.1` directive in the document, or pass
+Three ways to get the merge: write `!!merge <<:`, put a `%YAML 1.1` directive in
+the document, or pass
 `codec.WithParserOptions(parser.WithYAMLVersion(parser.YAML11))`.
 {{% /notice %}}
 
-So `Marshal` writes a construct that `Unmarshal` ignores by default: the round
-trip through this library is not closed unless the reading side asks for 1.1.
-Other Go libraries apply `<<` whatever the version, so a document that merges
-under `go.yaml.in/yaml/v3` may not merge here.
+This follows from one rule the library holds everywhere: **a written tag is
+honoured at any version, and only resolution by scalar shape is version-gated.**
+It has a consequence worth knowing before you rely on a round trip — the encoder
+writes the plain `<<`, so `Marshal` produces a document that `Unmarshal` will not
+merge unless the reading side asks for 1.1. Other Go libraries resolve `<<` at
+any version, so a document that merges under `go.yaml.in/yaml/v3` may not merge
+here.
 
 When the merge does fire, the mapping's own key beats the merged one, and an
 earlier merge beats a later one.
