@@ -16,15 +16,15 @@ func (s *Scanner) scanDirective(ctx *Context) bool {
 		return false
 	}
 
-	if s.column != 1 {
-		// c-directive opens a line, so a '%' standing anywhere else opens no directive.
+	if s.indentNum != 0 || s.column != 1 {
+		// c-directive opens a line and takes no separation in front of it, so a '%' standing anywhere else opens no
+		// directive.
 		//
-		// s.column is the test rather than s.indentNum, the two being different numbers: indentNum is 0 both for a '%'
-		// opening a line and for the one in "a: %foo", and would admit the second.
+		// Both counters are needed, and neither catches what the other does. indentNum is 0 for the '%' in "a: %foo",
+		// which the column refuses. A tab raises indentNum without advancing the column, so "\t%YAML 1.2" passes the
+		// column test and indentNum refuses it.
 		//
-		// TODO: a tab does not advance s.column, so "\t%YAML 1.2" arrives here at column 1 and reads as a directive.
-		// c-directive allows no s-separate in front of it, so this looks wrong. Confirm against the reference parser
-		// in internal/testintegration/perlref, then refuse it here.
+		// scanDocumentStart and scanDocumentEnd guard "---" and "..." with the same pair.
 		return false
 	}
 
