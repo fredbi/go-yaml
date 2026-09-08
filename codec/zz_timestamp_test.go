@@ -11,6 +11,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // TestTimestampFormats records which of the shapes yaml.org/type/timestamp.html
@@ -62,20 +63,74 @@ func TestTimestampFormats(t *testing.T) {
 	}
 }
 
-// TestATimestampIsATextualScalar records that no version resolves one.
+// TestATimestampResolvesUnderTheVersionTheDocumentDeclares records which
+// version reads a plain timestamp as one.
 //
-// It is text into an any and text through ToJSON, whatever the document says,
-// and only a Go field of type time.Time asks for the conversion.
-func TestATimestampIsATextualScalar(t *testing.T) {
-	for _, src := range []string{"a: 2002-12-14\n", "%YAML 1.1\n---\na: 2002-12-14\n"} {
+// tag:yaml.org,2002:timestamp is a YAML 1.1 type. 1.2's core schema resolves
+// null, bool, int, float and str and no timestamp, so under 1.2 a plain
+// "2002-12-14" is the string it looks like and only a Go field of type
+// time.Time asks for the conversion. Under a "%YAML 1.1" directive, or
+// parser.WithYAMLVersion at 1.1, it resolves -- the same rule the merge key
+// follows, and Fred's ruling of 2026-09-07: resolution follows the version the
+// document declares.
+//
+// The parse marks the tag implicit, so the document renders back as it was
+// written and every consumer of types reads one answer: an `any` holds a
+// time.Time and ToJSON writes the instant, exactly as they do for a written
+// "!!timestamp".
+func TestATimestampResolvesUnderTheVersionTheDocumentDeclares(t *testing.T) {
+	t.Run("1.2 leaves it a string", func(t *testing.T) {
+		const src = "a: 2002-12-14\n"
+
 		var v any
 		require.NoError(t, codec.Unmarshal([]byte(src), &v))
-		assert.IsTypef(t, "", v.(map[string]any)["a"], "%q", src)
+		assert.IsType(t, "", v.(map[string]any)["a"])
 
 		got, err := codec.ToJSON([]byte(src))
 		require.NoError(t, err)
 		assert.Equal(t, `{"a":"2002-12-14"}`, string(got))
-	}
+	})
+
+	t.Run("1.1 resolves it", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\na: 2002-12-14\n"
+
+		var v any
+		require.NoError(t, codec.Unmarshal([]byte(src), &v))
+		assert.IsType(t, time.Time{}, v.(map[string]any)["a"])
+
+		got, err := codec.ToJSON([]byte(src))
+		require.NoError(t, err)
+		assert.Equal(t, `{"a":"2002-12-14T00:00:00Z"}`, string(got))
+	})
+
+	t.Run("and the document renders back as it was written", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\na: 2002-12-14\n"
+
+		f, err := parser.ParseBytes([]byte(src))
+		require.NoError(t, err)
+		assert.Equal(t, src, f.String(), "the implicit tag is not a tag the document holds")
+	})
+
+	// A block scalar is tag:yaml.org,2002:str whatever it spells (10.2.1.2),
+	// and the scanner cuts its content as a plain String token like any other,
+	// so this is the shape that has to be told apart from a plain scalar. The
+	// generated suite found it: parsing refused the document outright, since
+	// parseLiteral requires a StringNode for its content.
+	t.Run("a block scalar stays a string", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\na: >-\n  2002-12-14\n"
+
+		var v any
+		require.NoError(t, codec.Unmarshal([]byte(src), &v))
+		assert.IsType(t, "", v.(map[string]any)["a"])
+	})
+
+	t.Run("a quoted scalar stays a string", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\na: \"2002-12-14\"\n"
+
+		var v any
+		require.NoError(t, codec.Unmarshal([]byte(src), &v))
+		assert.IsType(t, "", v.(map[string]any)["a"])
+	})
 }
 
 // TestTimestampTagDoesNotFollowTheVersion records that an explicit
@@ -85,7 +140,8 @@ func TestATimestampIsATextualScalar(t *testing.T) {
 // the versions disagree about several of those. A tag is not resolution: it
 // names tag:yaml.org,2002:timestamp, which the 2005 type repository defines and
 // which means the same thing whichever version the document declares. See
-// TestATimestampIsATextualScalar for the untagged half of the rule.
+// TestATimestampResolvesUnderTheVersionTheDocumentDeclares for the untagged
+// half of the rule.
 func TestTimestampTagDoesNotFollowTheVersion(t *testing.T) {
 	for _, src := range []string{
 		"a: !!timestamp 2002-12-14\n",

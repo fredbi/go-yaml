@@ -1805,6 +1805,20 @@ type TagNode struct {
 	// node handed over on its own -- what DecodeFromNode and
 	// expressions.Path.Read are given -- carries the policy it was read under.
 	LaxTags bool
+	// Implicit says the parse built this tag and the document did not write it.
+	//
+	// YAML 1.1 resolves types 1.2's core schema leaves out, and a timestamp is
+	// one: under a "%YAML 1.1" directive, or
+	// [github.com/go-openapi/go-yaml/parser.WithYAMLVersion] at 1.1,
+	// "a: 2001-12-14" resolves to tag:yaml.org,2002:timestamp where under 1.2
+	// it is the string. The tag records which type the scalar resolved to,
+	// where the document wrote nothing.
+	//
+	// A renderer writing the document back leaves an implicit tag off, since
+	// the source holds none; one reformatting to explicit tags writes it. A
+	// consumer reading types -- the decoder, ToJSON -- reads URI and does not
+	// care which way it arrived.
+	Implicit bool
 }
 
 func (n *TagNode) GetValue() any {

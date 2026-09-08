@@ -119,10 +119,12 @@ var resolved11 = map[string]struct{ typ, value string }{
 	// The same in both.
 	".inf": {"float64", "+Inf"}, "-.Inf": {"float64", "-Inf"}, ".nan": {"float64", "NaN"},
 
-	// ⚠️ 1.1 has a !!timestamp type and this library does not implement it, so
-	// a date is text under both. The entry is here to record the gap rather
-	// than to claim the position is 1.1 whole.
-	"2001-12-14": {"string", "2001-12-14"},
+	// 1.1 carries a !!timestamp type and 1.2's core schema does not, so a plain
+	// date is a time under 1.1 and the string it looks like under 1.2. This
+	// entry recorded the gap while the library read it as text under both; the
+	// parse resolves it under the version the document declares since
+	// 2026-09-08, so the two positions differ here as they should.
+	"2001-12-14": {"time.Time", "2001-12-14 00:00:00 +0000 UTC"},
 }
 
 // TestTheSchemaPositionUnderYAML11 holds the 1.1 measurement still, and reaches

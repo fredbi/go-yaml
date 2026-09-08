@@ -620,6 +620,12 @@ func (r *Renderer) anchor(n *AnchorNode) string {
 }
 
 func (r *Renderer) tag(n *TagNode) string {
+	if n.Implicit {
+		// The parse resolved a type the document left implicit, so the document
+		// holds no tag to write back. See TagNode.Implicit.
+		return r.withOwnComment(n.Comment, r.String(n.Value))
+	}
+
 	return r.withOwnComment(n.Comment, r.prefixed(n.Start.Value, n.Value))
 }
 
