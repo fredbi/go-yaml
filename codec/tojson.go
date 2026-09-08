@@ -427,9 +427,14 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 		return appendJSONFloat(out, jsonScalarOf(t))
 	case *ast.IntegerNode:
 		if tk := t.GetToken(); tk != nil {
+			if isJSONNumber(tk.Value) {
+				// The digits the document wrote, where JSON spells the integer
+				// the same way. "-0" is a JSON number and reading it through
+				// strconv writes it back as "0", which is a different literal.
+				return append(out, tk.Value...)
+			}
 			if u, negative, ok := token.ParseWholeNumber(tk.Value, tk.Type); ok {
 				if negative && u != 0 {
-					// "-0" is the number zero, which JSON writes without a sign.
 					out = append(out, '-')
 				}
 

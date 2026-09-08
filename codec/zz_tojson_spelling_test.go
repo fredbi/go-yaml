@@ -44,7 +44,10 @@ func TestToJSONSpelling(t *testing.T) {
 		{"a: 1.5\n", `{"a":1.5}`},
 		{"a: -0.0\n", `{"a":-0.0}`},
 		{"a: 3\n", `{"a":3}`},
-		{"a: -0\n", `{"a":0}`},
+		// "-0" is a JSON number and keeps its sign, as "-0.0" above does. Reading
+		// it through strconv wrote it back as "0", so one converter dropped a sign
+		// the other kept.
+		{"a: -0\n", `{"a":-0}`},
 		{"a: -9223372036854775808\n", `{"a":-9223372036854775808}`},
 		{"a: 18446744073709551615\n", `{"a":18446744073709551615}`},
 		{"a: 0x1F\n", `{"a":31}`},
