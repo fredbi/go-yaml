@@ -110,7 +110,7 @@ func (p *Parser) keepAnchorIdentity(name string, value ast.Node) {
 	}
 
 	text, kind := p.mapKeyIdentity(value)
-	identity := ast.KeyIdentity(value)
+	identity := ast.KeyIdentityWithAnchors(value, p.anchorIdentityOf)
 	if unnamedKey(text, kind) && ast.Unnamed(identity) {
 		return
 	}

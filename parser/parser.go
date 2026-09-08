@@ -1511,7 +1511,22 @@ func (p *Parser) builtKeyIdentity(key ast.MapKeyNode) string {
 		return p.anchorIdentities[anchorNameOf(alias.Value)].identity
 	}
 
-	return ast.KeyIdentity(key)
+	return ast.KeyIdentityWithAnchors(key, p.anchorIdentityOf)
+}
+
+// anchorIdentityOf is what the node an anchor names resolves to, for
+// [ast.KeyIdentityWithAnchors] to answer an alias with.
+//
+// Taken when the anchor closed, so it costs a lookup rather than a walk of the
+// anchored subtree -- and an anchor still being read is not in the table, which
+// is what stops "&x [ *x ]" naming itself.
+func (p *Parser) anchorIdentityOf(name string) (string, bool) {
+	at, known := p.anchorIdentities[name]
+	if !known || at.identity == "" {
+		return "", false
+	}
+
+	return at.identity, true
 }
 
 // keyDisplayName is what a refusal calls a key a single token cannot name.

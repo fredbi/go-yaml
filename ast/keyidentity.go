@@ -31,8 +31,33 @@ import (
 // The empty string is no identity at all, which [Unnamed] reports. An alias
 // whose anchor the parse could not fill is the case that reaches it.
 func KeyIdentity(n Node) string {
+	return KeyIdentityWithAnchors(n, nil)
+}
+
+// AnchorIdentity answers what the node an anchor names resolves to, by the
+// anchor's name, and reports whether it knows.
+//
+// It is how an alias is named without reading [AliasNode.Target]. A caller that
+// holds the anchors -- the parser does, and records each identity as the anchor
+// closes -- answers in constant time from a string it already has.
+type AnchorIdentity func(name string) (string, bool)
+
+// KeyIdentityWithAnchors is [KeyIdentity] with an alias answered from anchors
+// rather than left unnamed.
+//
+// ⚠️ It never reads [AliasNode.Target], and neither does KeyIdentity. Following
+// it expands the alias graph into the identity string, and an alias graph is
+// exponential in the document's length: nine anchors each naming the one before
+// it nine times is 200 bytes of YAML and 9^9 expansions, which built a **3.7 GB
+// string in 9.7 seconds** before this took the target out. maxIdentityDepth is
+// no guard, since the depth there is 9 and the width does the damage.
+//
+// So an alias costs one map lookup whatever it names. anchors may be nil, and
+// then an alias contributes nothing and the key goes unnamed, which a caller
+// reads with [Unnamed].
+func KeyIdentityWithAnchors(n Node, anchors AnchorIdentity) string {
 	var b strings.Builder
-	if !writeKeyIdentity(&b, n, 0) {
+	if !writeKeyIdentity(&b, n, 0, anchors) {
 		return ""
 	}
 
@@ -46,25 +71,34 @@ func Unnamed(identity string) bool { return identity == "" }
 //
 // depth bounds the descent: an alias may name a collection that holds the
 // alias, and "&a [ *a ]" is a document the parser reads.
-func writeKeyIdentity(b *strings.Builder, n Node, depth int) bool {
-	if n == nil || depth > maxIdentityDepth {
+func writeKeyIdentity(b *strings.Builder, n Node, depth int, anchors AnchorIdentity) bool {
+	if n == nil || depth > maxIdentityDepth || b.Len() > maxIdentityBytes {
 		return false
 	}
 
 	switch nn := n.(type) {
 	case *MappingKeyNode:
-		return writeKeyIdentity(b, nn.Value, depth)
+		return writeKeyIdentity(b, nn.Value, depth, anchors)
 	case *AnchorNode:
 		// The anchor names the node; it does not change what the node is.
-		return writeKeyIdentity(b, nn.Value, depth)
+		return writeKeyIdentity(b, nn.Value, depth, anchors)
 	case *AliasNode:
-		if nn.Target == nil {
+		// The anchor's own identity, taken when the anchor closed. Reading
+		// Target instead walks the anchored subtree again, once per alias
+		// naming it, which is the amplification KeyIdentityWithAnchors
+		// describes.
+		if anchors == nil {
 			return false
 		}
+		identity, known := anchors(anchorName(nn))
+		if !known {
+			return false
+		}
+		b.WriteString(identity)
 
-		return writeKeyIdentity(b, nn.Target, depth+1)
+		return true
 	case *TagNode:
-		return writeTaggedIdentity(b, nn, depth)
+		return writeTaggedIdentity(b, nn, depth, anchors)
 	case *LiteralNode:
 		// A literal or folded block scalar is a string whatever it spells, and
 		// its own token is the header -- "|-" or ">-". Falling through to the
@@ -84,7 +118,7 @@ func writeKeyIdentity(b *strings.Builder, n Node, depth int) bool {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			if !writeKeyIdentity(b, v, depth+1) {
+			if !writeKeyIdentity(b, v, depth+1, anchors) {
 				return false
 			}
 		}
@@ -92,11 +126,11 @@ func writeKeyIdentity(b *strings.Builder, n Node, depth int) bool {
 
 		return true
 	case *MappingNode:
-		return writeEntriesIdentity(b, nn.Values, depth)
+		return writeEntriesIdentity(b, nn.Values, depth, anchors)
 	case *MappingValueNode:
 		// A mapping written as one entry, which is how "{a: 1}" arrives where
 		// the braces hold a single pair.
-		return writeEntriesIdentity(b, []*MappingValueNode{nn}, depth)
+		return writeEntriesIdentity(b, []*MappingValueNode{nn}, depth, anchors)
 	}
 
 	tk := n.GetToken()
@@ -110,17 +144,17 @@ func writeKeyIdentity(b *strings.Builder, n Node, depth int) bool {
 }
 
 // writeEntriesIdentity writes a mapping's identity from its entries.
-func writeEntriesIdentity(b *strings.Builder, entries []*MappingValueNode, depth int) bool {
+func writeEntriesIdentity(b *strings.Builder, entries []*MappingValueNode, depth int, anchors AnchorIdentity) bool {
 	b.WriteString("map(")
 	for i, e := range entries {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		if e == nil || !writeKeyIdentity(b, e.Key, depth+1) {
+		if e == nil || !writeKeyIdentity(b, e.Key, depth+1, anchors) {
 			return false
 		}
 		b.WriteByte(':')
-		if !writeKeyIdentity(b, e.Value, depth+1) {
+		if !writeKeyIdentity(b, e.Value, depth+1, anchors) {
 			return false
 		}
 	}
@@ -134,10 +168,10 @@ func writeEntriesIdentity(b *strings.Builder, entries []*MappingValueNode, depth
 // A tag names the type, so it names the identity: "!!str 1" is the string and
 // "1" is the integer, and the two are two keys. A tag the schema does not
 // resolve leaves the node to speak for itself.
-func writeTaggedIdentity(b *strings.Builder, n *TagNode, depth int) bool {
+func writeTaggedIdentity(b *strings.Builder, n *TagNode, depth int, anchors AnchorIdentity) bool {
 	res := n.Resolve()
 	if res.Verdict != TagResolved {
-		return writeKeyIdentity(b, n.Value, depth)
+		return writeKeyIdentity(b, n.Value, depth, anchors)
 	}
 
 	switch res.Tag {
@@ -157,7 +191,7 @@ func writeTaggedIdentity(b *strings.Builder, n *TagNode, depth int) bool {
 	default:
 		// A tag naming a kind -- !!seq, !!map, !!binary, !!timestamp -- or one
 		// the application defined. What it tags is what it is.
-		return writeKeyIdentity(b, n.Value, depth)
+		return writeKeyIdentity(b, n.Value, depth, anchors)
 	}
 
 	return true
@@ -173,5 +207,30 @@ func writeScalarIdentity(b *strings.Builder, name string, kind token.KeyKind) {
 	b.WriteString(name)
 }
 
-// maxIdentityDepth bounds the descent, which follows aliases.
+// maxIdentityDepth bounds the descent.
 const maxIdentityDepth = 64
+
+// maxIdentityBytes caps how long an identity may grow, and a key that reaches
+// it goes unnamed.
+//
+// The depth bound alone does not hold: an alias graph is exponential in the
+// document's *width*, not its depth. Nine anchors each naming the one before it
+// nine times is 9^9 expansions from 200 bytes of YAML.
+//
+// A key too big to name is simply not compared, so a repeat of one goes
+// unreported. That is the quiet direction and the safe one: the loud failure
+// would be naming two different keys alike and refusing a valid document.
+const maxIdentityBytes = 4096
+
+// anchorName is the name an alias writes.
+func anchorName(n *AliasNode) string {
+	if n == nil || n.Value == nil {
+		return ""
+	}
+	tk := n.Value.GetToken()
+	if tk == nil {
+		return ""
+	}
+
+	return tk.Value
+}
