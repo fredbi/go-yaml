@@ -5,9 +5,12 @@
 // 1. The unicode.IsPrint function was substituted for the custom implementation of IsPrint
 // 2. All code paths reachable only when ASCIIonly or grphicOnly are set to true were removed.
 
+// SPDX-FileCopyrightText: Copyright 2009 The Go Authors
+// SPDX-License-Identifier: BSD-3-Clause
+//
 // Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Use of this source code is governed by a BSD-style license, reproduced in
+// the NOTICE file at the root of this repository.
 
 package codec
 

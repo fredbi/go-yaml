@@ -46,16 +46,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-This repository is a fork of github.com/goccy/go-yaml and is distributed under
-that project's MIT License, reproduced in full in the LICENSE file at the root
-of this repository.
-
-    Copyright (c) 2019 Masaaki Goshima
-
-The fork carries no separate copyright claim: the licensing of this repository
-is the licensing of the upstream project, and the LICENSE file is authoritative.
-This file exists only to record the components below, which come from other
-projects under their own terms.
+This repository is a hard fork of github.com/goccy/go-yaml. Work by the
+go-swagger maintainers is licensed under the Apache License, Version 2.0, as
+stated in the LICENSE file at the root of this repository. The MIT License
+permits that, and requires its copyright notice and permission notice to be
+kept with the code it covers; they are reproduced in full above.
 
 
 github.com/yaml/yaml-test-suite -- internal/yamltestsuite/testdata/
@@ -66,7 +61,7 @@ https://github.com/yaml/yaml-test-suite, under the MIT License. A copy of that
 license is provided verbatim below and vendored alongside the fixtures at
 internal/yamltestsuite/testdata/LICENSE.
 
-(internal/yamltestsuite/testdata/yaml.go is not part of the suite: it is this project's
+(internal/yamltestsuite/yaml.go is not part of the suite: it is this project's
 loader for the fixtures, and is covered by the root LICENSE.)
 
 MIT License
@@ -92,10 +87,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-The Go Authors -- stdlib_quote.go
+The Go Authors -- codec/stdlib_quote.go
 ------------------------------------------------------------
 
-stdlib_quote.go is copied and trimmed down from the Go standard library's
+codec/stdlib_quote.go is copied and trimmed down from the Go standard library's
 strconv package, so that quoting uses the standard library's unexported
 quoteWith rather than a reimplementation. It is distributed under the Go
 project's BSD-3-Clause license, reproduced below from https://go.dev/LICENSE.

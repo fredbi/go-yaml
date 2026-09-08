@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 // Package fuzzseeds supplies the shared seed corpus for the fuzz targets.
 //
 // It sits under internal/ so that nothing outside this module can import it: it

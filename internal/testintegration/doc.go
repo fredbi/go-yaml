@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 // Package testintegration holds the tests that need third-party libraries.
 //
 // It is a module of its own so that those dependencies never reach the

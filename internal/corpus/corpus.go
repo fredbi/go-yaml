@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 // Package corpus generates the synthetic documents the benchmarks run on.
 //
 // It lives under testdata so that it is not part of the published module, and

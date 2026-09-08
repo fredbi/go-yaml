@@ -8,73 +8,25 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/go-openapi/go-yaml)](https://goreportcard.com/report/github.com/go-openapi/go-yaml)
 <!-- Badges: documentation & license -->
 [![GoDoc](https://pkg.go.dev/badge/github.com/go-openapi/go-yaml)](https://pkg.go.dev/github.com/go-openapi/go-yaml)
-[![License](http://img.shields.io/badge/license-MIT-orange.svg)](./LICENSE)
+[![License](http://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![go version](https://img.shields.io/github/go-mod/go-version/go-openapi/go-yaml)](https://github.com/go-openapi/go-yaml)
+**A Go library to work with YAML documents.**
 
-**A YAML library for Go, forked from the excellent [`goccy/go-yaml`](https://github.com/goccy/go-yaml).**
+A hard fork of [`goccy/go-yaml`](https://github.com/goccy/go-yaml).
+
+## Status
 
 > [!WARNING]
+>
 > Early days. The module path has changed, the API will change, and there is no release yet.
-> If you want a stable YAML library today, use [`goccy/go-yaml`](https://github.com/goccy/go-yaml) upstream —
-> it is well maintained and this fork exists for reasons specific to go-openapi, not because anything is wrong
-> with it.
+>
+> If you want a stable version of this library today, use upstream:
+> [`github.com/goccy/go-yaml`](https://github.com/goccy/go-yaml).
+>
+> If you only need to hydrate Go values from YAML, use
+> [`go.yaml.in/yaml/v3`](https://github.com/yaml/go-yaml).
 
-## Why fork?
-
-`go-openapi` needs a YAML library that a *tooling* consumer can build on, and it needs three things that no Go
-YAML library currently offers together:
-
-- **Low-level access** — a token and AST surface with accurate positions, not a `Marshal`/`Unmarshal` facade.
-  We drive editor and TUI tooling (syntax colouring, diagnostics, JSON-pointer navigation) over OpenAPI
-  documents, so we need to know *where* every construct is, not just what it means.
-- **Streaming, with a bounded memory footprint.** OpenAPI documents get large. At the fork point the whole
-  input was materialised as `[]rune`, every token was retained, and nothing could be emitted before the entire
-  document had been parsed — an AST cost roughly 32× the source. The `[]rune` is gone and a parse now makes
-  84% fewer allocations, but the parser still reads a whole document; streaming is the work in progress.
-- **Conformance** good enough to project YAML onto JSON semantics faithfully, measured against the
-  [YAML Test Suite](https://github.com/yaml/yaml-test-suite) rather than asserted.
-
-`goccy/go-yaml` is the only Go YAML library whose architecture *exposes the machinery* to build that on. That is
-why we started from it rather than from anything else.
-
-See [`ANALYSIS-go-openapi.md`](./ANALYSIS-go-openapi.md) for the measurements behind all of the above.
-
-## Is it a hard fork?
-
-**Yes.** It started as a soft fork and it is no longer one.
-
-We set out to keep every fix that cost upstream nothing as an isolated commit, ready to send as a pull request.
-Four things ended that:
-
-- **The root API.** 133 exported entries, with `Path` sitting at the top level and the encoder holding a `*Path`.
-  Ours declares four functions. Everything else moved to `codec`, `ast`, `parser`, `errors` and `expressions`.
-- **Comment manipulation wired into the top-level API**, where it belongs to the AST.
-- **The parser materializes the whole document.** The AST cost roughly 32× the source, which makes streaming
-  impossible and the memory churn structural. Fixing it means rewriting the scanner and the token, not tuning.
-- **The parser API only ever addresses a fully parsed document.** There is no shape in it for reading a stream.
-
-Alongside those, the correctness round moved the YAML Test Suite from 88.3% to 100% of scored cases, the whole
-tree was relinted to go-openapi standards, and the wasi playground was removed. Upstream is barely maintained,
-and the distance is now too large for any of this to be retrofitted.
-
-**Licensing is unchanged.** This repository stays under `goccy/go-yaml`'s MIT license (see [LICENSE](./LICENSE))
-and claims no separate copyright. Credit for almost all of the original code belongs upstream. Third-party
-components are recorded in [NOTICE](./NOTICE).
-
-## Relationship to `go-yaml/yaml`
-
-None — and that is inherited from upstream. This library was written from scratch by
-[@goccy](https://github.com/goccy), not ported from libyaml, which is precisely what makes its internals
-approachable enough to fork. If you are coming from `gopkg.in/yaml.v3` or `go.yaml.in/yaml/v3`, the upstream
-README's rationale still applies:
-
-- the source is written in Go style rather than transliterated from C
-- higher coverage of the YAML Test Suite
-- errors carry source positions, which makes validation diagnostics possible
-- comments and anchors survive a round trip, so reversible transformation is achievable
-- an API that exposes `Scanner` and `Parser`, not only `Encoder`/`Decoder`
-
-## Installation
+## Install
 
 ```sh
 go get github.com/go-openapi/go-yaml
@@ -82,25 +34,139 @@ go get github.com/go-openapi/go-yaml
 
 Requires Go 1.25 or later. We support the two most recent stable Go minor versions.
 
+## What it does
+
+go-yaml decodes and encodes Go values, like `go.yaml.in/yaml/v3`. It also exposes the layer
+underneath: a parser, a syntax tree and a token stream, so a program can read and transform a
+document without turning it into Go values first.
+
+### Speed and memory
+
+`BenchmarkWorkloads`, in `internal/benchmarks`, decodes six real documents into `any` and has
+`go.yaml.in/yaml/v3` do the same:
+
+| | against yaml/v3 |
+|---|---|
+| time | 1.29x faster (geomean -22.3%) |
+| bytes allocated | 4.5x fewer |
+| allocations | 12.9x fewer |
+
+`ToJSON` converts a document without building a Go value for it, and allocates 1.49x the size of
+the source where it once allocated 89.2x.
+
+### Conformance
+
+Conformance is a primary concern. Every number below comes from a suite in this repository.
+
+- **The [YAML Test Suite](https://github.com/yaml/yaml-test-suite): 372 of 372 scoreable cases**
+  through the decoder, and 272 of 274 through `ToJSON`.
+- **A grammar-generated corpus**, much wider than the suite: 14,684 cases over 605 buckets, checked
+  against a reference parser rather than against ourselves.
+
+What it supports:
+
+- the YAML 1.2 core schema, and the YAML 1.1 schema and tags on request
+- constructs JSON has no equivalent for, such as a mapping or a sequence used as a key
+- arbitrarily large and small numbers
+- ordered mappings
+- comments, on the tree and through a path-keyed map
+
+What it will not support:
+
+- **encodings other than UTF-8.** UTF-16 and UTF-32 are rejected.
+- **the YAML 1.1 tags `!!pair` and `!!value`** (2005).
+- **documents larger than 2^31-1 bytes**, that is 2.1 GB.
+
+## Where this is going
+
+The numbers above are where the library stands today. These are the marks it is being built to,
+and none of them is reached yet. Read the section as a statement of intent, not of behaviour.
+
+| target | today |
+|---|---|
+| **2x faster than yaml/v3**, and better where the document favours us | 1.29x |
+| **5 to 10x less memory** | 4.5x fewer bytes, 12.9x fewer allocations |
+| **Every path at 100% of the YAML Test Suite**, not the decoder alone | `ToJSON` at 272 of 274 |
+| **Streaming, with a bounded memory footprint** — parse a document without holding it, so a caller can transform nodes as they arrive and find positions without building a tree | a parse reads the whole document |
+| **Verbatim reconstruction** — render a document back byte for byte. A prospect rather than scheduled work; it is why the tree keeps each token's source text and position | nothing renders a document back |
+
+The conformance target is not negotiable down to "good enough for our documents": go-openapi exists
+to implement standards, and this library is held to the specification rather than to our own use of
+it.
+
+## Where we stand on the ambiguous parts of the spec
+
+What follows is undefined, ambiguous, or has no consensus between implementations. Each of these
+is a choice, not a reading.
+
+- **Anchors do not cross documents.** Documents in one stream are independent, so an alias must
+  name an anchor declared in the same document. libfyaml keeps a stream-scoped table and resolves
+  across the boundary; we refuse, because an alias may name any earlier anchor of its name, and
+  carrying the table on would pin every anchored subtree until the stream ends. To reach an anchor
+  from elsewhere, hand it in with `parser.WithAnchors`.
+- **Directives and tags do not cross documents either**, for the same reason: a `%YAML` or `%TAG`
+  directive in one document does not reach the next, and neither does a resolved tag.
+- **`yes` and `no` are strings by default.** They become booleans when the document carries a
+  `%YAML 1.1` directive, or under `parser.WithYAMLVersion(parser.YAML11)`.
+- **`!!timestamp` is honoured when written, and never inferred.** A date-shaped scalar with no tag
+  stays a string.
+- **Duplicate mapping keys are rejected by default.** `codec.AllowDuplicateMapKey` accepts them and
+  keeps the last.
+- **`ToJSON` refuses what JSON cannot hold**, and stringifies a non-string scalar key. That can
+  produce a duplicate: `'1.0': 1` and `!!float 1: 2` are two YAML keys and one JSON key.
+- **The decoder accepts more than JSON can express** — `map[float64]any` works. It still rejects a
+  key Go cannot hash into a map, such as `.nan` or `~`.
+
+## Why fork?
+
+`go-openapi` needs a library that works on YAML *documents*, not only a decoder, and it needs three
+things that no Go YAML library offers together:
+
+- **Low-level access** — a token and AST surface with accurate positions, not a `Marshal`/`Unmarshal`
+  facade. We drive editor and TUI tooling (syntax colouring, diagnostics, JSON-pointer navigation)
+  over OpenAPI documents, so we need to know *where* every construct is, not just what it means.
+- **A bounded memory footprint.** OpenAPI documents get large. At the fork point the whole input was
+  materialised as `[]rune`, every token was retained, and nothing could be emitted before the entire
+  document had been parsed — a tree cost roughly 32x the source. The `[]rune` is gone and a parse now
+  makes 84% fewer allocations, but the parser still reads a whole document.
+- **Conformance** good enough to project YAML onto JSON semantics faithfully.
+
+`goccy/go-yaml` is the only Go YAML library whose architecture exposes the machinery to build that
+on, which is why we started from it rather than from anything else. See
+[`ANALYSIS-go-openapi.md`](./ANALYSIS-go-openapi.md) for the measurements behind all of the above.
+
+## Relationship to `go-yaml/yaml`
+
+None, and that is inherited from upstream. This library was written from scratch by
+[@goccy](https://github.com/goccy) rather than ported from libyaml, which is what makes its internals
+approachable enough to fork. Coming from `gopkg.in/yaml.v3` or `go.yaml.in/yaml/v3`, what you gain is:
+
+- source written in Go rather than transliterated from C
+- higher coverage of the YAML Test Suite
+- errors that carry a position in the source, which is what makes a diagnostic possible
+- comments and anchors that survive a round trip
+- a parser and a tree, not only `Encoder` and `Decoder`
+
 ## Packages
 
-The root package holds `Marshal`, `Unmarshal`, `ToJSON` and `FromJSON` — the four calls that take no option.
-Everything else lives a layer down. The imports run one way: no package in this table imports one listed
-below it.
+The root package holds `Marshal`, `Unmarshal`, `ToJSON` and `FromJSON` — the four calls that take no
+option. Everything else lives a layer down. The imports run one way: no package in this table imports
+one listed below it.
 
 | package | what it holds | imports |
 |---|---|---|
-| `token` | a token and its position | — |
-| `parser/scanner` | reads a source into tokens | `token` |
+| `token` | a token, its position and its source text | — |
 | `ast` | the document as a tree | `token` |
 | `printer` | draws a document, or a line of it under an error | `ast` |
 | `errors` | `Error`, the kind it carries, and `FormatError` | `printer` |
-| `parser` | builds a tree from a token stream | `parser/scanner`, `errors` |
-| `codec` | `Encoder`, `Decoder`, the 25 options, `MapSlice`, `RawMessage`, the comment types, the marshaler interfaces | `parser` |
+| `parser` | builds a tree from a source | `errors` |
+| `codec` | `Encoder`, `Decoder`, their 36 options, `MapSlice`, `RawMessage`, the comment types, the marshaler interfaces | `parser` |
 | `expressions` | `Path` and `PathString`, to navigate a document by path | `codec` |
 | `github.com/go-openapi/go-yaml` | `Marshal`, `Unmarshal`, `ToJSON`, `FromJSON` | `codec` |
 
-## Synopsis
+The scanner is not exported. It lives at `internal/scanner`, under the parser.
+
+## Usage
 
 ### 1. Simple Encode/Decode
 
@@ -381,23 +447,17 @@ b: "hello"
 }
 ```
 
-## Playground
-
-Upstream hosts a playground that visualizes how the library processes YAML text, which is useful for debugging
-and for filing issues: https://goccy.github.io/go-yaml
-
-Note that it runs *upstream's* code, so it will not reflect changes made in this fork.
-
 ## For developers
 
 See [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
 
-The library itself has **no runtime dependencies**, and that is a property worth keeping: `go-openapi/core`
+The library has **no runtime dependencies**, and that is a property worth keeping: `go-openapi/core`
 depends on this module, so anything we add here propagates.
 
-Tests use [`go-openapi/testify/v2`](https://github.com/go-openapi/testify/v2), which is itself dependency-free —
-so the only entry in `go.mod` is a test dependency that never reaches your binary. Everything that needs more
-than that lives under `internal/`, in modules of its own listed in `go.work`:
+Tests use [`go-openapi/testify/v2`](https://github.com/go-openapi/testify), which is itself
+dependency-free — so the only entry in `go.mod` is a test dependency that never reaches your binary.
+Everything that needs more than that lives under `internal/`, in modules of its own listed in
+`go.work`:
 
 | | |
 |---|---|
@@ -412,11 +472,19 @@ go test work ./...     # the library and every module in the workspace
 
 ## Credits
 
-This library was created by [Masaaki Goshima (@goccy)](https://github.com/goccy) and is developed upstream at
-[github.com/goccy/go-yaml](https://github.com/goccy/go-yaml). If this fork is useful to you, the credit for
-almost all of it belongs there — and upstream is
-[looking for sponsors](https://github.com/sponsors/goccy).
+This library was created by [Masaaki Goshima (@goccy)](https://github.com/goccy) and is developed
+upstream at [github.com/goccy/go-yaml](https://github.com/goccy/go-yaml).
+
+Four other projects carry the correctness work, by disagreeing with us until we were right:
+
+- the [YAML Test Suite](https://github.com/yaml/yaml-test-suite)
+- [libfyaml](https://github.com/pantoniou/libfyaml)
+- the [Perl reference parser](https://github.com/ingydotnet/yaml-pp-p5)
+- [`go.yaml.in/yaml/v3`](https://github.com/yaml/go-yaml), and PyYAML in passing
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). Third-party components are recorded in [NOTICE](./NOTICE).
+Apache-2.0 — see [LICENSE](./LICENSE).
+
+This is a hard fork of `goccy/go-yaml`, whose MIT licence permits it. That licence, and the terms of
+every other component this library is built on, are recorded in [NOTICE](./NOTICE).

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 go-swagger maintainers
+// SPDX-License-Identifier: Apache-2.0
+
 // Package conformance measures this parser against the YAML Test Suite.
 //
 // It measures the parser and the AST directly. That is deliberately not what
