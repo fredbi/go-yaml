@@ -584,9 +584,10 @@ func (s *Scanner) multiLinePosition(ctx *Context) (int32, int32) {
 // scanSingleQuote read one as content; the one they refuse stands where a scalar's next line begins, which carries
 // indentation and not text.
 func (s *Scanner) checkByteOrderMark(ctx *Context) error {
-	if s.column != 1 {
-		// Past the first column, so the mark stands in a line carrying a node:
-		// a plain scalar, a flow collection, or a block scalar's content.
+	if !ctx.opensADocumentPrefix() {
+		// Something other than another mark stands in front of this one on its
+		// line, so it is not a prefix: c-byte-order-mark opens
+		// l-document-prefix and takes no whitespace before it.
 		return ErrInvalidToken(
 			"found a byte order mark inside a line, where a node may not hold one",
 			token.Invalid(string(byteOrderMark), s.pos()),

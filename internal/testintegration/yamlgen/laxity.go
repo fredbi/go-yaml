@@ -150,23 +150,9 @@ var Lax = []Laxity{
 			"find expected key`.",
 		// Kept beside `? l` over ` :` although the fault is the same, because
 		// the severity is not: there the entry had no value to lose and here
-		// the "b" is dropped without a word. Only this and the byte order mark
-		// below lose what the document wrote.
+		// the "b" is dropped without a word. It is the only entry left that
+		// loses what the document wrote; the byte order mark behind a tab was
+		// the other, and it is refused now.
 		Reads: map[string]any{"a": nil},
-	},
-	{
-		Name: "a byte order mark behind a tab",
-		Src:  "\t\ufeff\n",
-		Rule: "5.2: l-document-prefix is `c-byte-order-mark? l-comment*`, so the mark stands before " +
-			"anything else a document may open with -- a tab in front of it puts it outside the prefix. " +
-			"It is not comment text either, which l-comment requires to open with '#'. " +
-			"go.yaml.in/yaml/v3 refuses it as `found character that cannot start any token`.",
-		// The one entry here that swallows a character. libfyaml 1.0.0b1 reads
-		// the document as the string "\ufeff" -- the mark as content, which is
-		// the reading that follows from it not being a prefix. We report no
-		// error and no content at all, so a caller cannot tell this document
-		// from an empty one. Of the three answers ours is the only one that
-		// loses the byte.
-		Reads: nil,
 	},
 }

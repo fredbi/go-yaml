@@ -275,6 +275,33 @@ func (c *Context) removeRightSpaceFromBuf() {
 // isOriginSpace reports whether c is whitespace a line may end with.
 func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 
+// opensADocumentPrefix reports whether the cursor stands where
+// c-byte-order-mark may, which is at the head of a line with nothing but other
+// byte order marks in front of it.
+//
+// l-document-prefix is `c-byte-order-mark? l-comment*` and l-yaml-stream takes
+// those prefixes one after another, so a run of marks is a run of prefixes and
+// is admitted. Anything else in front is not: a space or a tab puts the mark
+// inside a line, where nb-char excludes it.
+//
+// Scanner.column does not answer this. A space advances it through
+// progressColumn and a tab does not -- the tab branch of the scan loop calls
+// progress, which moves the cursor and leaves the column alone -- so "\t\ufeff"
+// left the column at 1 and " \ufeff" did not, and only the space was refused.
+// Reading the source asks the question the production asks.
+func (c *Context) opensADocumentPrefix() bool {
+	at := c.idx
+	for at > 0 && !isNewLineChar(rune(c.src[at-1])) {
+		if at < int32(len(byteOrderMarkText)) ||
+			c.src[at-int32(len(byteOrderMarkText)):at] != byteOrderMarkText {
+			return false
+		}
+		at -= int32(len(byteOrderMarkText))
+	}
+
+	return true
+}
+
 // leadingBlanksHoldATab reports whether a tab stands in the whitespace read
 // since the last token was cut.
 //
