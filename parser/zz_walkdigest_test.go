@@ -128,8 +128,15 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // fixedWalkDigest is what the walk hands over today, over the 417 documents of
 // the YAML Test Suite and the synthetic corpus -- 323 walked and 94 refused.
 //
-// Re-baselined 2026-09-08 with the commit that made the merge key a YAML 1.1
-// type. The counts did not move -- 323 and 94 before and after -- so no
+// Re-baselined 2026-09-08 with the commit that stopped parseComment handing a
+// node over twice. The counts did not move -- 323 and 94 before and after, so
+// no document changed between walked and refused -- and every document that
+// shifted the digest carries a comment, since parseComment runs only under
+// WithComments and only on a comment token. What moved is a node behind a
+// comment going over once instead of twice.
+//
+// Re-baselined 2026-09-08 before that, with the commit that made the merge key
+// a YAML 1.1 type. The counts did not move -- 323 and 94 before and after -- so no
 // document changed between walked and refused; what moved is the node a bare
 // "<<" builds. Under the core schema the parser builds a String where it built
 // a MergeKey, and digestVisitor writes the node's type, so every suite document
@@ -139,7 +146,7 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // scanner's two tab checks: the counts held there too, and what moved was the
 // message on a document refused either way, since digestVisitor writes
 // "refused: %v" and one of the two messages was retired.
-const fixedWalkDigest = "dbc4ee0109be2d798bf912736f99572e4dc4c0d94893e2bfc81088681b641e55"
+const fixedWalkDigest = "5a0ee556370eb3621772850c1efc2ef5ab61a20ca170fe41a22fed126389ffa6"
 
 // digestVisitor writes what it is handed, so that anything the walk reads out
 // of a reclaimed cell shows up as a different document.
@@ -203,3 +210,55 @@ func walkSources(t *testing.T) []walkSource {
 
 	return srcs
 }
+
+// TestACommentDoesNotHandANodeOverTwice: a walk of a commented document hands
+// the same nodes over as a walk of the same document without the comment.
+//
+// parseComment runs inside parseToken, which reports the node it returns, and
+// it called parseToken again for the node after the comment -- so that node was
+// reported twice. "# c" over "%YAML 1.2" gave Enter and Leave on one
+// DirectiveNode twice in a row; "# c" over "foo" did it to the string. Found on
+// the transform work, where a stream of nodes is joined to a stream of tokens
+// and a repeat has nowhere to go.
+//
+// A collection hid it, because parseToken leaves those to hand themselves over
+// as they open and close -- so the shapes that show it are the ones whose
+// document body is a scalar or a directive.
+//
+// Counted by node type rather than by pointer: a walk hands its cells out again
+// behind the descent, so two nodes of one document can be the same pointer and
+// pointer identity says nothing.
+func TestACommentDoesNotHandANodeOverTwice(t *testing.T) {
+	for _, tc := range []struct{ commented, bare string }{
+		{"# c\n%YAML 1.2\n---\na: 1\n", "%YAML 1.2\n---\na: 1\n"},
+		{"# c\nfoo\n", "foo\n"},
+		{"# c\n# d\nfoo\n", "foo\n"},
+		{"# c\n- 1\n", "- 1\n"},
+		{"# c\na: 1\n", "a: 1\n"},
+		{"a: 1\n# c\nb: 2\n", "a: 1\nb: 2\n"},
+	} {
+		assert.Equalf(t, walkTypeCounts(t, tc.bare), walkTypeCounts(t, tc.commented),
+			"the comment changed which nodes went over: %q", tc.commented)
+	}
+}
+
+// walkTypeCounts is how many nodes of each type one walk hands over.
+func walkTypeCounts(t *testing.T, src string) map[string]int {
+	t.Helper()
+
+	counts := &countingVisitor{counts: map[string]int{}}
+	_, err := parser.New(parser.WithComments()).Walk([]byte(src), counts)
+	require.NoErrorf(t, err, "%q", src)
+
+	return counts.counts
+}
+
+type countingVisitor struct{ counts map[string]int }
+
+func (c *countingVisitor) Enter(n ast.Node, _ parser.Step) bool {
+	c.counts[fmt.Sprintf("%T", n)]++
+
+	return true
+}
+
+func (c *countingVisitor) Leave(ast.Node, parser.Step) {}

@@ -3077,7 +3077,12 @@ func (p *Parser) parseComment(ctx context) (ast.Node, error) {
 	if ctx.isTokenNotFound() {
 		return cm, nil
 	}
-	node, err := p.parseToken(ctx, ctx.currentToken())
+	// parseTokenNode and not parseToken: this runs *inside* parseToken, which
+	// reports the node it returns. Going round again handed a walk the same
+	// node twice -- "# c" over "%YAML 1.2" gave Enter and Leave on one
+	// DirectiveNode twice in a row, and "# c" over "foo" did it to the string.
+	// A collection hid it, since parseToken leaves those to hand themselves.
+	node, err := p.parseTokenNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
 	}
