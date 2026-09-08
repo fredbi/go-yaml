@@ -45,6 +45,6 @@ This page is an outline. The structure is settled; the prose is not written.
   `parser.WithAnchors` to their own parse, because the parser refuses an alias
   naming no anchor and the decoder does not publish the anchors it holds. That is
   a documented trap today; it should be a fixed API tomorrow.
-- Five options take a `bool` (`RecursiveDir`, `UseJSONTags`, `UseInferredNames`,
-  and the encoder's pair) while the rest are switches with no argument. Two
-  spellings for the same idea.
+- Five of the nineteen options take a `bool` (`RecursiveDir`, `UseJSONTags`,
+  `UseInferredNames`, and the encoder's pair) while the rest are switches with no
+  argument. Two spellings for the same idea.

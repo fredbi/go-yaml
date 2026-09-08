@@ -21,6 +21,8 @@ Most of the material exists in the repository README and moves here.
 
 - The fork point, and what has changed since
 - Hard fork: no upstream merges, no shared release line
+- Licensing: Apache-2.0 for this repository's work, with goccy's MIT notice
+  retained in `NOTICE` for the code the fork started from
 - The relationship to `go.yaml.in/yaml/v3`, which the codec's default struct-tag
   behaviour matches
 - go-openapi's reason for owning this: the toolkit needs a YAML implementation it
