@@ -4,7 +4,6 @@
 package yamlcorpus_test
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -220,7 +219,7 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var caught, missed, declared int
+	var caught, missed int
 
 	for _, c := range cases {
 		if !strings.HasPrefix(c.Name, "generated/") || len(c.Tags) == 0 {
@@ -242,24 +241,6 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 			continue
 		}
 
-		// One family is declared rather than failed: an alias standing as a key
-		// escapes the duplicate check, even written identically twice.
-		// "*a1 : x" over "*a1 : y" is read and the last entry kept, where the
-		// same two keys written out in full are refused -- so the check does
-		// not see an alias key at all. 3.2.2.2 makes an alias node the anchored
-		// node rather than a copy, which is what puts the two keys on one node.
-		//
-		// Reached by repeatAKey once aliaser.aliasAKey began appending an alias
-		// key on 2026-09-08. The peer session's e53e3d1 records what an
-		// anchored node resolves to and checks an alias key against it, so this
-		// allowance closes when that lands and the count below goes back to
-		// asserting zero.
-		if repeatsAnAliasKey(string(c.Src)) {
-			declared++
-
-			continue
-		}
-
 		missed++
 
 		if missed < 4 {
@@ -267,8 +248,7 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 		}
 	}
 
-	t.Logf("of the documents broken on purpose, the library catches %d, misses %d "+
-		"and reads %d that a declared departure covers", caught, missed, declared)
+	t.Logf("of the documents broken on purpose, the library catches %d and misses %d", caught, missed)
 
 	if caught == 0 {
 		t.Error("none were caught, which would make the family untested rather than passing")
@@ -285,26 +265,3 @@ func mapHoldsAMergeKey(m yamlgen.Map) bool {
 
 	return false
 }
-
-// repeatsAnAliasKey reports whether a document writes the same alias twice as a
-// mapping key.
-//
-// Keyed on the document rather than on the tag: the tag says a key was
-// repeated, and what the library misses is the alias standing as one. A
-// spelling that appears twice with a ":" after it is that shape and nothing
-// else -- an alias used twice as a *value* carries no colon of its own.
-func repeatsAnAliasKey(src string) bool {
-	seen := map[string]int{}
-
-	for _, match := range aliasKeySpelling.FindAllStringSubmatch(src, -1) {
-		seen[match[1]]++
-
-		if seen[match[1]] > 1 {
-			return true
-		}
-	}
-
-	return false
-}
-
-var aliasKeySpelling = regexp.MustCompile(`\*([A-Za-z0-9]+)\s*:`)

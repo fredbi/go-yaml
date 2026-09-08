@@ -2440,3 +2440,80 @@ func assertBothPathsSay(t *testing.T, src, says string) {
 	require.Errorf(t, err, "the tree read %q as %v", src, loaded)
 	assert.Containsf(t, err.Error(), says, "the tree on %q", src)
 }
+
+// TestFixedAnAliasKeyIsTheNodeItsAnchorNames: an alias standing as a mapping
+// key repeats the key its anchor named.
+//
+// §3.2.2.2 makes an alias node the anchored node rather than a copy of it, so
+// `&a x` and a later `*a` are one node used twice and §3.2.1.1 refuses the
+// second. `{&a x: 1, *a : 2}` read `{x: 2}` before this, dropping the `1`
+// silently -- the check skipped every alias key, because [ast.KeyIdentity]
+// follows [ast.AliasNode.Target] and a walk scrubs the anchored node once the
+// entry holding it closes: `&a [a, b]` read back as `seq()`.
+//
+// Parser.keepAnchorIdentity takes the identity where the node is still whole,
+// which Parser.keepsNothing arranges by holding a walk's cells while an anchor
+// is being read. One string per anchor outlives the node.
+//
+// The YAML Test Suite's aliases-in-flow-objects is this shape and is now
+// refused at the load. The suite scores the event stream, where the document is
+// legal; key uniqueness is a rule of the load step, so the parse still reads it
+// and records the repeat on the mapping.
+func TestFixedAnAliasKeyIsTheNodeItsAnchorNames(t *testing.T) {
+	t.Run("an alias repeats the key its anchor named", func(t *testing.T) {
+		for _, tc := range []struct{ src, says string }{
+			// A scalar anchor is recorded among the scalar keys, which name a
+			// key by what it resolves to -- as they do for "!!str a" -- so the
+			// message reads "x" rather than "*a". A collection anchor is named
+			// by the alias the document wrote: its node is gone by then, and
+			// the alias is what a reader can find in the source.
+			{"{&a x: 1, *a : 2}\n", `[1:11] mapping key "x" already defined at [1:2]`},
+			{"a: &x s\n*x : p\n*x : q\n", `[3:1] mapping key "s" already defined at [2:1]`},
+			{"a: &x [1,2]\n*x : p\n*x : q\n", `[3:1] mapping key "*x" already defined at [2:1]`},
+			// The alias beside the collection written out: one node, two
+			// spellings, and the anchor sits on the streaming path where the
+			// walk keeps no children of its own.
+			{"a: &x [1,2]\n[1, 2]: p\n*x : q\n", `[3:1] mapping key "*x" already defined at [2:1]`},
+			{"{ &a [a, &b b]: *b, *a : [c, *b, d]}\n", `[1:21] mapping key "*a" already defined at [1:3]`},
+			// The alias repeating a key written out further down, rather than
+			// the anchor it names.
+			{"k: &a1 n\n*a1 : 1\nn: 2\n", `[3:1] mapping key "n" already defined at [2:1]`},
+			{"{&a1 x: 1, *a1 : 2}\n", `[1:12] mapping key "x" already defined at [1:2]`},
+			// Two faults met here, and the second hid the first. A float key
+			// behind a property is named by its canonical YAML spelling on the
+			// tree and by Go's %v on the walk, so the tree held ".inf" and
+			// "+Inf" as two keys and never saw a repeat to refuse; the walk
+			// named both "+Inf" and kept the last. The identity is taken from
+			// the anchored node, which spells it ".inf" on either path.
+			{"&a1 .inf: 1\n*a1 : 2\n", `[2:1] mapping key ".inf" already defined at [1:1]`},
+			// The control that puts it on the alias: an anchor beside a
+			// written-out key was always refused.
+			{"&a1 .inf: 1\n.inf: 2\n", `[2:1] mapping key ".inf" already defined at [1:1]`},
+			{".inf: 1\n.inf: 2\n", `[2:1] mapping key ".inf" already defined at [1:1]`},
+		} {
+			assertBothPathsSay(t, tc.src, tc.says)
+		}
+	})
+
+	// The other direction, and the one the generated corpus never drew: two
+	// anchors naming different collections. Naming an alias key from a node the
+	// walk had already scrubbed made both of them "seq()", so a valid document
+	// was refused as a repeat -- inventing a duplicate rather than missing one.
+	t.Run("aliases to different anchors are different keys", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"a: &x [1,2]\nb: &y [3,4]\n*x : p\n*y : q\n",
+				map[string]any{"a": []any{uint64(1), uint64(2)}, "b": []any{uint64(3), uint64(4)}, "[1 2]": "p", "[3 4]": "q"}},
+			{"a: &x {k: 1}\nb: &y {k: 2}\n*x : p\n*y : q\n",
+				map[string]any{"a": map[string]any{"k": uint64(1)}, "b": map[string]any{"k": uint64(2)}, "map[k:1]": "p", "map[k:2]": "q"}},
+			{"a: &x s\nb: &y t\n*x : p\n*y : q\n",
+				map[string]any{"a": "s", "b": "t", "s": "p", "t": "q"}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}

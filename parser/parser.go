@@ -200,6 +200,12 @@ type Parser struct {
 	// the anchor's name. It goes to the document as that one closes, and the
 	// next starts with none. See anchors.go.
 	anchors map[string]ast.Node
+	// anchorIdentities holds what each anchor's node resolves to, under the
+	// same name. An alias standing as a mapping key is named from here rather
+	// than through AliasNode.Target: a walk scrubs the anchored node once the
+	// entry holding it closes, and the string outlives it. See
+	// keepAnchorIdentity.
+	anchorIdentities map[string]anchorIdentity
 	// openAnchors holds the anchors whose node is being read at this point in
 	// the descent, innermost last. An alias naming one of them stands inside
 	// what it names, and cyclicAliases holds it until that node exists.
@@ -1144,7 +1150,7 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
-	if !p.walking() || p.readingKey > 0 {
+	if !p.walking() || !p.keepsNothing() {
 		mapNode.Values = ctx.arena.MappingRun(p.entries[entryBase:])
 	}
 	defer p.leave(ctx, mapNode)
@@ -1445,18 +1451,8 @@ func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
 		// Recorded as it was read, by the one token that names it.
 		return
 	}
-	if namesAnAlias(key) {
-		// An alias resolves to the node its anchor named, so 3.2.1.1 makes
-		// "&a [1]" and a later "*a" one key. Refusing that is a change of its
-		// own and not this one: it would make the tree refuse a document the
-		// walk reads -- the YAML Test Suite's aliases-in-flow-objects is one --
-		// and mapKeyIdentity has always left an alias to the load.
-		// go.yaml.in/yaml/v3 v3.0.5 reads "{&a x: 1, *a: 2}" as {x: 2}, keeping
-		// the last silently.
-		return
-	}
 
-	identity := ast.KeyIdentity(key)
+	identity := p.builtKeyIdentity(key)
 	if ast.Unnamed(identity) {
 		// Nothing to compare.
 		return
@@ -1482,15 +1478,40 @@ func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
 	p.builtKeys[top][identity] = tk.Position
 }
 
-// namesAnAlias reports whether the key is an alias, or an explicit key holding
-// one.
-func namesAnAlias(n ast.Node) bool {
-	if key, explicit := n.(*ast.MappingKeyNode); explicit {
-		n = key.Value
-	}
-	_, alias := n.(*ast.AliasNode)
+// keepsNothing reports whether a walk may hand the cells of what it has just
+// read out again.
+//
+// It holds inside a key and inside an anchor, and for the same reason: the node
+// is read a second time, so it has to still be there. A key is named by what it
+// holds, and an alias names the anchored node, which [ast.KeyIdentity] reads
+// through [ast.AliasNode.Target].
+//
+// The anchor costs nothing new. closeAnchor already saves the tokens an anchor
+// covers until the document ends, so a walk of "a: &x" over ten thousand block
+// entries holds 80 tape chunks where the same document without the anchor holds
+// 2 -- 1.46 MiB against 55 KiB. The nodes stand on content the tape is keeping
+// either way.
+func (p *Parser) keepsNothing() bool {
+	return p.readingKey == 0 && len(p.openAnchors) == 0
+}
 
-	return alias
+// builtKeyIdentity names a key that a single token could not.
+//
+// An alias is read from the identities the anchors recorded rather than through
+// [ast.AliasNode.Target]: 3.2.1.1 makes "&a [1]" and a later "*a" one key,
+// because an alias node is the anchored node rather than a copy of it, and on a
+// walk the anchored node is scrubbed by the time the alias is read. Everything
+// else is named from the node in hand.
+func (p *Parser) builtKeyIdentity(key ast.MapKeyNode) string {
+	n := ast.Node(key)
+	if explicit, isExplicit := n.(*ast.MappingKeyNode); isExplicit {
+		n = explicit.Value
+	}
+	if alias, isAlias := n.(*ast.AliasNode); isAlias {
+		return p.anchorIdentities[anchorNameOf(alias.Value)].identity
+	}
+
+	return ast.KeyIdentity(key)
 }
 
 // keyDisplayName is what a refusal calls a key a single token cannot name.
@@ -1590,8 +1611,18 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 
 		return p.mapKeyIdentity(nn.Value)
 	case *ast.AliasNode:
-		// What the alias names is not read here; the load resolves it.
-		return "", token.KeyOther
+		// An alias node is the node its anchor named (3.2.2.2), so it is that
+		// node's key. keepAnchorIdentity read it where the node was whole; a
+		// walk has scrubbed it by now, and AliasNode.Target points at a cell
+		// holding whatever was built there next.
+		//
+		// A scalar anchor answers here and is recorded among the scalar keys,
+		// so "{&a x: 1, *a : 2}" is one key written twice. A collection anchor
+		// hands back nothing and is checked when its entry is built, by
+		// builtKeyIdentity.
+		at := p.anchorIdentities[anchorNameOf(nn.Value)]
+
+		return at.text, at.kind
 	case *ast.LiteralNode:
 		// A literal or folded block scalar is a string whatever it spells, and
 		// its own token is the header, "|-" or ">-". Falling through to the
@@ -2659,7 +2690,7 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 			return nil, err
 		}
 
-		if p.walking() && p.readingKey == 0 {
+		if p.walking() && p.keepsNothing() {
 			// Nothing gathers the element and the walk has seen it, so the
 			// cells it stands in go out again for the element after it. Inside
 			// a key the elements are kept, so that the key can be named by what
@@ -2709,7 +2740,7 @@ func (p *Parser) handNull(ctx context, tk *tapeToken) (ast.Node, error) {
 // parse is walking: the key went over before its value and the value announced
 // itself, so the entry holds nothing the caller has not seen.
 func (p *Parser) hold(entry *ast.MappingValueNode) {
-	if p.walking() && p.readingKey == 0 {
+	if p.walking() && p.keepsNothing() {
 		return
 	}
 	p.entries = append(p.entries, entry)
@@ -2797,7 +2828,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		if err != nil {
 			return nil, err
 		}
-		if p.walking() && p.readingKey == 0 {
+		if p.walking() && p.keepsNothing() {
 			// Nothing gathers the entries and the walk has seen this one, so
 			// the cells it stands in go out again for the entry after it.
 			// Inside a key they are kept, so that the key can be named by what
@@ -2817,7 +2848,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			tk = ctx.currentToken()
 		}
 	}
-	if !p.walking() || p.readingKey > 0 {
+	if !p.walking() || !p.keepsNothing() {
 		fillSequence(seqNode, p.seqEntries[base:])
 	}
 
@@ -3099,7 +3130,7 @@ func (p *Parser) parseFootComment(ctx context, col int) *ast.CommentGroupNode {
 // and handing their cells out again while the key still points at them builds a
 // node that holds itself.
 func (p *Parser) markNodes(ctx context) {
-	if !p.walking() || p.readingKey > 0 {
+	if !p.walking() || !p.keepsNothing() {
 		return
 	}
 	ctx.arena.Push()
@@ -3112,7 +3143,7 @@ func (p *Parser) markNodes(ctx context) {
 // a mapping reads its first entry's token before rewinding to it, which is why
 // the rewind comes after that and not before.
 func (p *Parser) rewindNodes(ctx context) {
-	if !p.walking() || p.readingKey > 0 {
+	if !p.walking() || !p.keepsNothing() {
 		return
 	}
 	ctx.arena.Pop()
@@ -3123,7 +3154,7 @@ func (p *Parser) rewindNodes(ctx context) {
 // over before its value and the value announced itself, so the entry holds
 // nothing the caller has not seen.
 func (p *Parser) holdFlowEntry(node *ast.MappingNode, entry *ast.MappingValueNode) {
-	if p.walking() && p.readingKey == 0 {
+	if p.walking() && p.keepsNothing() {
 		return
 	}
 	node.Values = append(node.Values, entry)

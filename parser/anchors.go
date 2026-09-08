@@ -77,6 +77,47 @@ func (p *Parser) keepAnchor(name string, value ast.Node) {
 		p.anchors = make(map[string]ast.Node, 4)
 	}
 	p.anchors[name] = value
+	p.keepAnchorIdentity(name, value)
+}
+
+// anchorIdentity is what an anchor's node resolves to, in the two forms a key
+// is told apart by.
+//
+// text and kind are what [Parser.mapKeyIdentity] reads off a scalar, and are
+// empty for a collection. identity is [ast.KeyIdentity]'s reading of the node,
+// which answers for both. An alias key is checked in whichever store its anchor
+// belongs to, so "&a x: 1" and a later "*a" meet among the scalar keys and
+// "&a [1]: 1" and its alias among the built ones.
+type anchorIdentity struct {
+	text     string
+	kind     token.KeyKind
+	identity string
+}
+
+// keepAnchorIdentity records what the anchored node resolves to, for an alias
+// that later stands as a mapping key.
+//
+// The identity is taken here because this is the last moment the node is whole
+// on a walk. Parser.keepsNothing holds the cells while the anchor is being read,
+// so the node has its children now; the mapping around it rewinds past them
+// once its entry closes, and [ast.AliasNode.Target] then points at a scrubbed
+// cell -- "&a [a, b]" read back as "seq()".
+//
+// Two strings per anchor, and nothing is retained: the node itself goes.
+func (p *Parser) keepAnchorIdentity(name string, value ast.Node) {
+	if p.allowDuplicateMapKey {
+		return
+	}
+
+	text, kind := p.mapKeyIdentity(value)
+	identity := ast.KeyIdentity(value)
+	if unnamedKey(text, kind) && ast.Unnamed(identity) {
+		return
+	}
+	if p.anchorIdentities == nil {
+		p.anchorIdentities = make(map[string]anchorIdentity, 4)
+	}
+	p.anchorIdentities[name] = anchorIdentity{text: text, kind: kind, identity: identity}
 }
 
 // dropAnchorName closes the innermost open name.
@@ -186,6 +227,7 @@ func (p *Parser) takeAnchors() map[string]ast.Node {
 
 	anchors := p.anchors
 	p.anchors = nil
+	p.anchorIdentities = nil
 	p.openAnchors = p.openAnchors[:0]
 
 	return anchors
