@@ -46,7 +46,13 @@ func at(src string, offset int) string {
 // What is left is 18 of 3,489, and none of it is the counter drifting.
 // 13 are Invalid, the tokens an error carries, built from the whole origin buffer and not from one token's worth of
 // it.
-// 5 are multi-line String values, which is block scalar content.
+// 5 are String values spanning a line break: block scalar content in spec-example-8-1-block-scalar-header and the two
+// spec-example-8-2-block-indentation-indicator cases, and two plain scalars ending in a tab in various-trailing-tabs.
+//
+// This measurement cannot see a token whose extent does not tile. originsOf reads a token's text back from the
+// extents and returns "" where they break, and the loop below skips an empty want. Six of the 402 documents break
+// the extents, so six tokens are counted nowhere here. extentLedger in extent_test.go records them, and the break
+// falls on the last token in all six, so no token after one has its origin shifted into a miss.
 //
 // It was 25 while this read the source through Scan, which returns a refusal as an error where NextToken hands over the
 // token the refusal names.

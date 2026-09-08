@@ -15,6 +15,7 @@ ledgers/
     scan_test.go       helpers shared by that package's ledgers
     position_test.go   positionLedger
     offset_test.go     offsetMissLedger
+    extent_test.go     extentLedger
     state_test.go      stateLedger, behind -tags yamlprobe
 ```
 
@@ -24,8 +25,8 @@ Until then it runs under `go test ./...` like everything else, and a change that
 
 ## Moving a ledger here
 
-Only the scanner's three have moved. `parser.keyLedger`, `conformance`'s three and the root `decodeLedger` are still
-where they were, for their owners to move.
+Only the scanner's three have moved, and `extentLedger` was written here rather than moved. `parser.keyLedger`,
+`conformance`'s three and the root `decodeLedger` are still where they were, for their owners to move.
 
 1. Make a directory named after the package, with test files in `package <name>_test`.
 2. Copy the ledger variable and the test that measures it, with the comment that says what each entry is for.
