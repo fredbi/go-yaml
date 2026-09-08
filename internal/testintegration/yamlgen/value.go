@@ -708,6 +708,19 @@ func (a *aliaser) aliasOneKey(pairs []Pair, label string) []Pair {
 	return append(pairs, Pair{Key: key, Val: Str{V: "aliased"}})
 }
 
+// stringKeys returns the string keys a mapping's entries hold.
+func stringKeys(pairs []Pair) []Str {
+	out := make([]Str, 0, len(pairs))
+
+	for _, p := range pairs {
+		if s, text := p.Key.(Str); text {
+			out = append(out, s)
+		}
+	}
+
+	return out
+}
+
 // mergeOdds is one in N, over the mappings drawn while the pool holds a
 // mapping to merge from.
 //
@@ -798,12 +811,19 @@ func (a *aliaser) mergeFrom(from []Anchored, own []Pair) Value {
 
 	key := Str{V: "merged" + strconv.Itoa(rapid.IntRange(0, 3).Draw(a.t, "mergedkey"))}
 
-	if len(own) > 0 && rapid.Bool().Draw(a.t, "mergeshares") {
-		// The name the library gives the own key, so the two are one key
-		// however the own one is written: a Float{1} own key is "1.0", and a
-		// merged Str{"1.0"} collides with it.
-		taken := rapid.SampledFrom(own).Draw(a.t, "mergeshared")
-		key = Str{V: KeyText(taken.Key)}
+	if strings := stringKeys(own); len(strings) > 0 && rapid.Bool().Draw(a.t, "mergeshares") {
+		// One of the mapping's own string keys, written the same way, so the
+		// merged key and the own key are the same node and 3.2.1.1 makes them
+		// one key.
+		//
+		// String keys only, and that is the same rule keyFamily holds for
+		// drawMap. Naming the merged key from KeyText would take a Float{1} own
+		// key as Str{"1.0"} and a Seq{[1]} as Str{"[1]"} -- pairs this library
+		// merges by name and 3.2.1.1 makes two keys, since a string and a float
+		// are two nodes. yamlcorpus.Departures records that naming as a
+		// departure, and a generated document whose stated meaning rested on it
+		// would be encoding the departure as the answer.
+		key = rapid.SampledFrom(strings).Draw(a.t, "mergeshared")
 	}
 
 	return Map{Pairs: []Pair{{

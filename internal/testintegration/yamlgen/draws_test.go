@@ -86,6 +86,64 @@ func TestAMergeSharesAKeyWithWhatItMerges(t *testing.T) {
 	}
 }
 
+// TestAMergeSequenceSharesAKeyBetweenItsMappings is the other half of the merge
+// rule's reachability.
+//
+// 1.1 merges a sequence of mappings with the earlier winning, and a sequence
+// whose mappings share no key never asks which wins. mergeFrom draws each
+// mapping independently, so the two collide when they take the same name --
+// measured at 12 of 52 sequence merges over 4,000 drawn values on 2026-09-08,
+// against the precedence half's zero, which is why only the other one needed
+// fixing.
+func TestAMergeSequenceSharesAKeyBetweenItsMappings(t *testing.T) {
+	values := yamlgen.Values()
+
+	var sequences, sharing int
+
+	for i := range 2000 {
+		walkMappings(values.Example(i), func(m yamlgen.Map) {
+			for _, p := range m.Pairs {
+				if _, isMerge := p.Key.(yamlgen.MergeKey); !isMerge {
+					continue
+				}
+
+				seq, isSeq := peelForCounting(p.Val).(yamlgen.Seq)
+				if !isSeq {
+					continue
+				}
+
+				sequences++
+
+				seen := map[string]bool{}
+
+				for _, item := range seq.Items {
+					for _, name := range mergedKeyNames(item) {
+						if seen[name] {
+							sharing++
+
+							return
+						}
+
+						seen[name] = true
+					}
+				}
+			}
+		})
+	}
+
+	t.Logf("%d merges of a sequence over 2000 drawn values, %d of them share a key between its mappings",
+		sequences, sharing)
+
+	if sequences == 0 {
+		t.Fatal("no merge takes a sequence, so nothing above was measured")
+	}
+
+	if sharing == 0 {
+		t.Error("no merge sequence holds two mappings sharing a key, so the earlier-wins half of " +
+			"the rule is claimed by Map.Decoded and reached by no document")
+	}
+}
+
 // mergedKeyNames returns the names of the keys a "<<" value brings in.
 func mergedKeyNames(v yamlgen.Value) []string {
 	switch n := peelForCounting(v).(type) {
