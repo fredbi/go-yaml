@@ -46,17 +46,14 @@ import (
 // is asserted, and the direction that means progress is logged. Closing one is
 // reported rather than failed, so a fix does not go red.
 //
-// Both were found by this census on the run it was written, which is the
-// argument for having it: the grammar coverage number was at 605 of 605 and
-// said nothing about either.
-var knownGaps = map[string]string{
-	"an explicit key whose content is on the line below the '?'": "half done as of 2026-09-07. The emitter " +
-		"writes one now -- explicitKey takes the long form for a collection key whatever Style.ExplicitKeys says " +
-		"and puts it below the '?' -- and Keys() still does not draw one, so nothing reaches it. Four defects " +
-		"were filed from the shapes it makes reachable before the draw was parked; what is left is this package's " +
-		"own model, where KeyText names a collection key from the core reading and readings.legacyKey has no case " +
-		"for one. See the note in Keys().",
-}
+// It is empty as of 2026-09-08, and it started with the two gaps this census
+// found on the run it was written -- which is the argument for having it, since
+// the grammar coverage number was at 605 of 605 and said nothing about either.
+// A tab between a property and its node closed on 2026-09-07 with
+// Style.TabSeparation; an explicit key whose content sits below the '?' closed
+// here, when Keys() began drawing a collection key and emit.go's explicitKey
+// wrote it the long way.
+var knownGaps = map[string]string{}
 
 func TestTheGeneratedCorpusIsWiderThanTheSuite(t *testing.T) {
 	suites, err := yamltestsuite.TestSuites()

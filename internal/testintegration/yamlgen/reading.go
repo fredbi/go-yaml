@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -396,7 +397,37 @@ func (r *readings) legacyKey(v Value) string {
 		return text
 	}
 
+	// A collection key is named from what it holds, and what it holds resolves
+	// under 1.1 like anything else. KeyText renders it from Decoded(), which is
+	// the core answer, so `? {k: 08}` would be named "map[k:8]" there and
+	// "map[k:08]" here -- and the library names it from what it read, which is
+	// the 1.1 value under a "%YAML 1.1" directive.
+	//
+	// The same shape as the scalar cases above and reached the same way, by
+	// asking the readings rather than the value. It is separate only because
+	// KeyText is where a collection's name is built.
+	if isKeyCollection(v) {
+		return fmt.Sprintf("%v", r.legacy(v))
+	}
+
 	return KeyText(v)
+}
+
+// isKeyCollection reports whether a key is named from a collection's contents,
+// looking through the properties that may stand in front of one.
+func isKeyCollection(v Value) bool {
+	switch n := v.(type) {
+	case Seq, Map:
+		return true
+	case Anchored:
+		return isKeyCollection(n.V)
+	case Alias:
+		return isKeyCollection(n.V)
+	case Tagged:
+		return isKeyCollection(n.V)
+	}
+
+	return false
 }
 
 // legacy rebuilds the decoded value with the divergent plain scalars read as

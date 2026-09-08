@@ -38,6 +38,17 @@ func TestDecodingIntoAGoTypeGivesTheSameValue(t *testing.T) {
 		shape := yamlgen.TargetShape(rapid.IntRange(0, 2).Draw(rt, "shape"))
 		src := yamlgen.Emit(value, style)
 
+		// A collection key is not a Go map key: Go cannot hash a map or a
+		// slice, so `map[any]any` refuses the document with `Go cannot hash
+		// it` and every generated struct is named after keys the `any` path
+		// invented by stringifying. There is no typed destination that could
+		// hold it, so the two reads have nothing to say about the reflection
+		// path. yamlcorpus's yardstickDefects records the same thing for the
+		// enumerated shape.
+		if holdsACollectionKey(value) {
+			return
+		}
+
 		// The `any` path is the yardstick, so a document it will not read has
 		// nothing to say here. TestPresentationInvariance holds that half.
 		var loose any

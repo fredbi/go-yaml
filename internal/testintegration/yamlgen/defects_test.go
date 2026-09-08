@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -521,5 +522,124 @@ func TestDefectACollectionKeyWrittenAloneInFlowIsRefused(t *testing.T) {
 		var got any
 		require.NoError(t, codec.Unmarshal([]byte("{{a: 0}: v}\n"), &got))
 		assert.Equal(t, map[string]any{"map[a:0]": "v"}, got)
+	})
+}
+
+// TestDefectTwoBareColonLinesInARowAreRefused pins it.
+//
+// 8.2.2 lets an explicit entry's value be the empty node and lets an entry's key
+// be the empty node, so `? a` over `:` over `: v` is two entries and two bare
+// ":" lines. It is refused with `found an invalid key for this map`.
+//
+// grammar.NewRecognizer accepts it, the reference parser passes it, and libfyaml
+// 1.0.0b1 reads {a: null, null: "v"}. go.yaml.in/yaml/v3 v3.0.5 refuses it,
+// which is its own refusal of a bare ":" as an empty key rather than agreement.
+//
+// Reached on 2026-09-08 by Keys drawing a collection: a collection key forces
+// the explicit form, which put a bare ":" where nothing had put one before. The
+// collection is not needed to reproduce it, which the neighbors below show.
+func TestDefectTwoBareColonLinesInARowAreRefused(t *testing.T) {
+	t.Run("today the pair of bare colon lines is refused", func(t *testing.T) {
+		for _, src := range []string{"? a\n:\n: v\n", "?\n \"\": 0\n:\n: v\n"} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "found an invalid key for this map", "%q", src)
+		}
+	})
+
+	// Change any one thing and it reads, which is what makes the pair of lines
+	// the shape rather than the explicit key, the empty value or the empty key.
+	t.Run("each neighbor reads", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"a:\n: v\n", map[string]any{"a": nil, "null": "v"}},
+			{"? a\n: 1\n: v\n", map[string]any{"a": uint64(1), "null": "v"}},
+			{"? a\n:\nk: v\n", map[string]any{"a": nil, "k": "v"}},
+			{"? a\n:\n", map[string]any{"a": nil}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}
+
+// TestDefectACommentAboveABlankLineAddsALeadingBreak pins it.
+//
+// A sequence entry carrying a comment, with a blank line before its content,
+// renders with a blank line at the head of the document. Rendering again drops
+// it, so the first pass does not settle and the second does.
+//
+// The value survives every pass, and the tab is not part of the shape: a space
+// does it too, and without the blank line it settles on the first pass.
+func TestDefectACommentAboveABlankLineAddsALeadingBreak(t *testing.T) {
+	t.Run("today the first render adds a leading break", func(t *testing.T) {
+		for _, src := range []string{"-\t#\n\n e\n", "- #\n\n e\n", "-\t# c\n\n e\n"} {
+			f, err := parser.ParseBytes([]byte(src), parser.WithComments())
+			require.NoErrorf(t, err, "%q", src)
+
+			once := f.String()
+			assert.Truef(t, strings.HasPrefix(once, "\n"), "today: %q renders to %q", src, once)
+
+			g, err := parser.ParseBytes([]byte(once), parser.WithComments())
+			require.NoErrorf(t, err, "%q", once)
+			assert.Equalf(t, strings.TrimPrefix(once, "\n"), g.String(),
+				"the second render settles: %q", once)
+		}
+	})
+
+	t.Run("the value survives every pass", func(t *testing.T) {
+		const src = "-\t#\n\n e\n"
+
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, []any{"e"}, got)
+	})
+
+	t.Run("without the blank line it settles on the first pass", func(t *testing.T) {
+		f, err := parser.ParseBytes([]byte("-\t#\n e\n"), parser.WithComments())
+		require.NoError(t, err)
+		assert.Equal(t, "- e #\n", f.String())
+	})
+}
+
+// TestDefectARepeatedCollectionKeyIsSilentlyDropped pins the over-reach.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
+// mappings spelled alike do. `{{a: 0}: 1, {a: 0}: 2}` is a repeated key and
+// should be refused; it reads as {map[a:0]: 2} with the first entry gone and
+// nothing reported.
+//
+// The other side of `913fb19`, which stopped naming every collection key "[" and
+// so stopped checking any of them. Two collection keys that differ are two keys
+// now, which is right; two that do not are still two, which is not. A scalar key
+// repeated is refused as it always was.
+func TestDefectARepeatedCollectionKeyIsSilentlyDropped(t *testing.T) {
+	t.Run("today a repeated collection key drops the first entry", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{`{[""]: 1, [""]: 2}` + "\n", map[string]any{"[]": uint64(2)}},
+			{`{{a: 0}: 1, {a: 0}: 2}` + "\n", map[string]any{"map[a:0]": uint64(2)}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "today: the first entry is gone: %q", tc.src)
+		}
+	})
+
+	t.Run("two that differ are two keys, and a scalar repeat is refused", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte(`{{a: 0}: 1, {a: 1}: 2}`+"\n"), &got))
+		assert.Equal(t, map[string]any{"map[a:0]": uint64(1), "map[a:1]": uint64(2)}, got)
+
+		var dup any
+		err := codec.Unmarshal([]byte("a: 1\na: 2\n"), &dup)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `already defined`)
 	})
 }

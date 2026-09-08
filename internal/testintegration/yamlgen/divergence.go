@@ -151,6 +151,42 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
+		Name: "render/a-comment-above-a-blank-line-adds-a-leading-break",
+		Pin:  "TestDefectACommentAboveABlankLineAddsALeadingBreak",
+		Reason: "A sequence entry carrying a comment, with a blank line before its content, renders " +
+			"with a blank line at the head of the document: `-\t#` over an empty line over ` e` " +
+			"comes back as `\n- e #`. Rendering that again drops the leading break, so the first " +
+			"pass does not settle and the second does.\n\n" +
+			"The value survives every pass -- [\"e\"] throughout -- so this claims Settle alone. The " +
+			"tab is not part of it: `- #` over a blank line over ` e` does the same, and " +
+			"`-\t#` over ` e` with no blank line settles on the first pass.\n\n" +
+			"The predicate is wider than the defect. It asks for a line comment and the padding that " +
+			"writes blank lines, which is where the pair comes from in a generated document; a blank " +
+			"line arriving another way would fail the property rather than be excused. Widen it then.",
+		Property: Settle,
+		Match:    writesACommentAboveABlankLine,
+	},
+	{
+		Name: "parse/two-bare-colon-lines-in-a-row-are-refused",
+		Pin:  "TestDefectTwoBareColonLinesInARowAreRefused",
+		Reason: "`? a` over `:` over `: v` is refused with `found an invalid key for this map`. The " +
+			"first `:` is the explicit entry's empty value and the second opens an entry whose key " +
+			"is the empty node, which 8.2.2 allows in both places.\n\n" +
+			"Three neighbors say it is the pair of bare `:` lines and nothing else, and each reads: " +
+			"`a:` over `: v` writes the same two entries with an implicit key; `? a` over `: 1` over " +
+			"`: v` gives the explicit entry a value; and the collection key that first reached this " +
+			"is not needed at all -- a scalar key does it.\n\n" +
+			"grammar.NewRecognizer accepts the document, the reference parser passes it, and " +
+			"libfyaml 1.0.0b1 reads {a: null, null: \"v\"}. go.yaml.in/yaml/v3 v3.0.5 refuses it, " +
+			"which is its own refusal of a bare `:` as an empty key rather than agreement with us -- " +
+			"see yamlcorpus's key shape `a block scalar under an entry with no key`.\n\n" +
+			"Reached on 2026-09-08 by Keys drawing a collection, which forces the explicit form and " +
+			"so put a bare `:` where nothing had put one before. It claims every property, because a " +
+			"document that does not parse answers none.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesTwoBareColonLinesInARow,
+	},
+	{
 		Name: "parse/a-collection-key-written-alone-in-flow-is-refused",
 		Pin:  "TestDefectACollectionKeyWrittenAloneInFlowIsRefused",
 		Reason: "`{{\"\": 0}}` is refused with `could not find flow map content`. 7.4.2 lets a flow " +
@@ -392,7 +428,7 @@ func holdsAPaddedBlockScalar(v Value, st Style) bool {
 // writesACommentOnAnExplicitColonLine reports whether st writes an entry the
 // long way, with a line comment, over a value that may go on its own line.
 func writesACommentOnAnExplicitColonLine(v Value, st Style) bool {
-	if !st.ExplicitKeys || (st.Comments != LineComments && st.Comments != AllComments) {
+	if !writesAnExplicitKey(v, st) || (st.Comments != LineComments && st.Comments != AllComments) {
 		return false
 	}
 
@@ -513,7 +549,7 @@ func holdsAMergeKey(v Value) bool {
 // Style.ExplicitKeys decides it for every entry of the document, so the two
 // halves are the style asking for the long form and the value holding a merge.
 func writesAMergeKeyTheLongWay(v Value, st Style) bool {
-	return st.ExplicitKeys && holdsAMergeKey(v)
+	return writesAnExplicitKey(v, st) && holdsAMergeKey(v)
 }
 
 // sharesAKey reports whether a "<<" value is a sequence holding two mappings
@@ -549,7 +585,7 @@ func sharesAKey(v Value) bool {
 // Style.ExplicitKeys, which decides how the mapping *inside* the key is written.
 // A sequence key nests no "?" and reads correctly.
 func writesAnExplicitKeyInsideAnExplicitKey(v Value, st Style) bool {
-	return st.ExplicitKeys && holdsAMappingAsAKey(v)
+	return writesAnExplicitKey(v, st) && holdsAMappingAsAKey(v)
 }
 
 // holdsAMappingAsAKey reports whether a mapping stands as a mapping's key.
@@ -624,4 +660,90 @@ func holdsACollectionKey(v Value) bool {
 // value has to hold a collection key for there to be one.
 func writesACollectionKeyAloneInFlow(v Value, st Style) bool {
 	return st.Flow && st.FlowEmpty == FlowNullKeyAlone && holdsACollectionKey(v)
+}
+
+// writesTwoBareColonLinesInARow reports whether the document can put one bare
+// ":" line under another.
+//
+// Two things make a bare ":" line: the empty null spelling, which writes nothing
+// for a Null, and an explicit key, which puts the ":" on a line of its own. The
+// third is a Null standing as a key or a value for the spelling to swallow.
+//
+// ⚠️ Wider than the defect, and deliberately so after three tries at narrowing
+// it. The two ":" lines reach each other in more arrangements than a predicate
+// over the value can enumerate: as sibling entries, as an entry's value nested
+// under it, and inside a collection key. Each narrowing matched the arrangement
+// it was written for and missed the next, so this asks for the ingredients
+// rather than the recipe. It reports more divergences than draws; the pin
+// carries the precision.
+func writesTwoBareColonLinesInARow(v Value, st Style) bool {
+	if st.NullSpelling != "" || !writesAnExplicitKey(v, st) {
+		return false
+	}
+
+	return holdsANullKeyOrValue(v)
+}
+
+// holdsANullKeyOrValue reports whether a Null stands as a mapping's key or
+// value anywhere in v.
+func holdsANullKeyOrValue(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if isNull(p.Key) || isNull(p.Val) {
+				return true
+			}
+
+			if holdsANullKeyOrValue(p.Key) || holdsANullKeyOrValue(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsANullKeyOrValue)
+	case Anchored:
+		return holdsANullKeyOrValue(n.V)
+	case Alias:
+		return holdsANullKeyOrValue(n.V)
+	case Tagged:
+		return holdsANullKeyOrValue(n.V)
+	}
+
+	return false
+}
+
+// isNull reports whether a value writes as the empty node, looking through the
+// properties that may stand in front of one.
+func isNull(v Value) bool {
+	switch n := v.(type) {
+	case Null:
+		return true
+	case Anchored:
+		return isNull(n.V)
+	case Alias:
+		return isNull(n.V)
+	case Tagged:
+		return isNull(n.V)
+	}
+
+	return false
+}
+
+// writesACommentAboveABlankLine reports whether the style writes both a comment
+// on an entry's line and the blank lines that padding leaves.
+func writesACommentAboveABlankLine(_ Value, st Style) bool {
+	return st.Comments.line() && st.Chomping == ChompPadded
+}
+
+// writesAnExplicitKey reports whether the document writes a "?" at all.
+//
+// Two sources, and the second was added on 2026-09-08 when Keys began drawing a
+// collection: Style.ExplicitKeys asks for every entry the long way, and a
+// collection key takes the long form whatever the style says, because 8.2.2
+// makes an implicit key one line and a block collection is not one line.
+//
+// Three predicates here asked only the style and missed every "?" the value
+// forced. Each was found the same way -- a property failing on a document whose
+// style label carried no "?key" at all.
+func writesAnExplicitKey(v Value, st Style) bool {
+	return st.ExplicitKeys || holdsACollectionKey(v)
 }

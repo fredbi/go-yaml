@@ -205,10 +205,12 @@ func KeyText(v Value) string {
 	case Tagged:
 		return KeyText(n.V)
 	default:
-		// A collection used as a key. The library renders it with Go's %v and
-		// codec.ToJSON writes something else again, which is a recorded
-		// divergence rather than a meaning -- so the generator does not draw
-		// one and nothing here has to name it.
+		// A collection used as a key, which Keys() draws one key in 24. The
+		// library renders it with Go's %v and codec.ToJSON writes something
+		// else again, so this names what the library does rather than what the
+		// key denotes -- a divergence, and yamlcorpus.yardstickDefects records
+		// it for the enumerated shape. readings.legacyKey answers the 1.1
+		// half, since %v of the core reading spells "08" as 8.
 		return fmt.Sprintf("%v", v.Decoded())
 	}
 }
@@ -940,10 +942,10 @@ func keyFamily(v Value) string {
 // where the defects are. One key in six is a non-string, which is enough to
 // reach the class in most documents that have more than a pair or two.
 //
-// Scalars only. A sequence or a mapping used as a key is a document YAML
-// admits, and what this library makes of one is a recorded divergence rather
-// than a settled value -- see [KeyText] -- so drawing one would mean generating
-// documents whose meaning the corpus cannot state.
+// One key in 24 is a collection, which YAML admits and this library names with
+// Go's %v -- a recorded divergence rather than a settled value, see [KeyText].
+// The corpus states the name the library gives it and holds the document out of
+// the typed-decode property, since Go cannot hash a map or a slice.
 func Keys() *rapid.Generator[Value] {
 	return rapid.Custom(func(t *rapid.T) Value {
 		// Five draws in six are strings. The weighting is measured, not
@@ -955,26 +957,14 @@ func Keys() *rapid.Generator[Value] {
 			return Str{V: Strings().Draw(t, "key")}
 		}
 
-		// ⚠️ A collection key is NOT drawn yet, and drawKeyCollection below is
-		// what would draw one. The emitter writes one correctly -- explicitKey
-		// takes the long form for it whatever Style.ExplicitKeys says and puts
-		// it below the "?", which is the census gap this was for -- and the
-		// defects it reaches are filed and pinned:
-		//
-		//	an explicit key inside an explicit key is refused
-		//	a key written below its indicator loses its indentation on render
-		//	a collection key written alone in flow is refused
-		//	two collection keys in one mapping collide, both named "{"
-		//
-		// What is left is this package's own model rather than the library's.
-		// KeyText names a collection key from Decoded(), which is the core
-		// answer, so under "%YAML 1.1" a key holding "08" is named wrongly --
-		// readings.legacyKey answers for a scalar key and has no case for a
-		// collection. Rendering a collection key also drops a comment and
-		// changes a value in ways not yet reduced.
-		//
-		// Turning the draw on is a round of work rather than a line. The
-		// yamlcorpus census keeps the gap open and says why.
+		// One non-string key in four is a collection, so one key in 24. A
+		// collection cannot be written on one line: explicitKey takes the long
+		// form for it whatever Style.ExplicitKeys says and writes it below the
+		// "?", which is the shape two YAML Test Suite documents hold and the
+		// census reported no generated document could reach.
+		if rapid.IntRange(0, 3).Draw(t, "collectionkey") == 0 {
+			return drawKeyCollection(t)
+		}
 
 		switch rapid.IntRange(0, 3).Draw(t, "scalar") {
 		case 0:
@@ -995,8 +985,6 @@ func Keys() *rapid.Generator[Value] {
 // property tests render -- once as itself and once in every message naming it --
 // and KeyText renders a collection with Go's %v, which grows fast. Two entries
 // is enough to be a collection.
-//
-//nolint:unused // Parked, not dead: Keys() names it in the note above and turning the draw on is one line.
 func drawKeyCollection(t *rapid.T) Value {
 	items := []Value{
 		Str{V: Strings().Draw(t, "keyitem")},

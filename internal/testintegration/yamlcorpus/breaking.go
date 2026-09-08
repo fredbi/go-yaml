@@ -123,6 +123,31 @@ func renameAnAlias(v yamlgen.Value) (yamlgen.Value, bool) {
 	return out, done
 }
 
+// holdsACollectionKey reports whether a mapping has a collection as a key.
+//
+// duplicateAKey skips such a mapping for the same reason it skips a merge key:
+// duplicating one writes a document whose break is not the rule the tag claims.
+// A repeated collection key is not caught at all -- 913fb19 stopped naming every
+// collection key "[" and so stopped checking any of them -- so the entry would
+// say TagDuplicateKey over a document the library reads. That shape is held by
+// yamlgen_test.TestDefectARepeatedCollectionKeyIsSilentlyDropped.
+func holdsACollectionKey(m yamlgen.Map) bool {
+	for _, p := range m.Pairs {
+		switch k := p.Key.(type) {
+		case yamlgen.Seq:
+			if len(k.Items) > 0 {
+				return true
+			}
+		case yamlgen.Map:
+			if len(k.Pairs) > 0 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // holdsAMergeKey reports whether a mapping's first entry is a "<<".
 //
 // duplicateAKey skips such a mapping, and not to keep the corpus green.
@@ -169,7 +194,7 @@ func duplicateAKey(v yamlgen.Value) (yamlgen.Value, bool) {
 
 			return yamlgen.Seq{Items: items}
 		case yamlgen.Map:
-			if len(t.Pairs) >= 2 && !done && !holdsAMergeKey(t) {
+			if len(t.Pairs) >= 2 && !done && !holdsAMergeKey(t) && !holdsACollectionKey(t) {
 				done = true
 
 				pairs := make([]yamlgen.Pair, len(t.Pairs))
