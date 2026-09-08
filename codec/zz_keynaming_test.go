@@ -143,43 +143,52 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 	}
 }
 
-// TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML pins the split.
+// TestFixedAnAnchoredFloatKeyIsNamedByYAMLOnBothPaths: an anchor no longer
+// changes the name a float key gets.
 //
-// A float key whose YAML spelling differs from Go's formatting is named one way
-// by the walk and another by the tree, and only when it carries an anchor:
+// A float whose YAML spelling differs from Go's formatting was named one way by
+// the walk and another by the tree, and only behind an anchor: the walk called
+// "&a .inf" "+Inf" where the tree called it ".inf", and "&a 1e3" "1000" against
+// "1000.0". Naming 1e3 "1000" puts a float where the integer 1000 already is,
+// which is the collision TestDefectATypedKeyIsNamedIntoTheStringsNamespace is
+// about.
 //
-//	.inf: c      both name it ".inf"
-//	&a .inf: c   the walk names it "+Inf", the tree ".inf"
-//	&a .nan: c   the walk names it "NaN", the tree ".nan"
-//	&a 1e3: c    the walk names it "1000", the tree "1000.0"
-//
-// The anchor is the whole trigger. Without one the two paths agree, and an
-// anchored int, bool, null or string key agrees too -- it takes a float whose
-// canonical YAML spelling is not what Go's %v writes.
-//
-// The tree is right. ".inf" is what YAML spells it, and floatKeyText exists to
-// keep a float out of the integers' namespace: naming 1e3 "1000" puts it where
-// the integer 1000 already is, which is the collision
-// TestDefectATypedKeyIsNamedIntoTheStringsNamespace is about.
+// parseAnchor attached the anchored node to ast.AnchorNode.Value after
+// readAnchorValue returned, and readAnchorValue fires the walk's Leave on its
+// way out -- so a walking reader was handed the anchor with Value still nil.
+// unwrapKeyNode then unwrapped to nothing, keyName had no node to read a token
+// from, and mapKeyString fell through to fmt.Sprint of the resolved float.
+// readAnchorValue attaches the value before it returns now.
 //
 // Reached on 2026-09-07 by codec.TestWalkMatchesTheStream, once the corpus grew
-// to 3,000 drawn documents.
-func TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML(t *testing.T) {
-	t.Run("today an anchor changes the name the walk gives", func(t *testing.T) {
-		for _, tc := range []struct{ src, walk, tree string }{
-			{"&a .inf: c\n", "+Inf", ".inf"},
-			{"&a .nan: c\n", "NaN", ".nan"},
-			{"&a 1e3: c\n", "1000", "1000.0"},
+// to 3,000 drawn documents. Closing it retired two hold-outs there: an
+// input-keyed anchoredFloatKey, which was excusing 525 documents whatever
+// happened to them, and the difference-keyed differOnlyByAFloatKeySpelling.
+func TestFixedAnAnchoredFloatKeyIsNamedByYAMLOnBothPaths(t *testing.T) {
+	t.Run("an anchor leaves the name alone", func(t *testing.T) {
+		for _, tc := range []struct{ src, name string }{
+			{"&a .inf: c\n", ".inf"},
+			{"&a .nan: c\n", ".nan"},
+			{"&a 1e3: c\n", "1000.0"},
+			{"&a 1.0: c\n", "1.0"},
 		} {
 			var walked any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.walk: "c"}, walked, "today: the walk names it Go's way: %q", tc.src)
 
 			var typed map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.tree: "c"}, typed, "the tree names it YAML's way: %q", tc.src)
+
+			assert.Equalf(t, map[string]any{tc.name: "c"}, walked, "the walk: %q", tc.src)
+			assert.Equalf(t, map[string]any{tc.name: "c"}, typed, "the tree: %q", tc.src)
 		}
 	})
+
+	// ⚠️ A tag is a different fault and is still open: "!!float 1.0: c" is
+	// named "1" on both paths, and "!!float 1: a" over "1: b" reads
+	// {"1": "b"} -- two keys the parser tells apart, since it refuses
+	// "!!float 1: a" over "1.0: b" as one key, collapsed into one Go map entry
+	// with nothing reported. unwrapKeyNode does not unwrap an ast.TagNode, and
+	// naming a tagged key wants the tag resolved rather than stripped.
 
 	t.Run("without the anchor the two agree, and on YAML's spelling", func(t *testing.T) {
 		for _, tc := range []struct{ src, name string }{

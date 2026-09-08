@@ -257,27 +257,28 @@ var Ledger = []Divergence{
 		Match:    writesAPropertiedKeyBeforeABlockScalar,
 	},
 	{
-		Name: "decode/a-float-key-behind-a-property-loses-its-spelling",
-		Pin:  "TestDefectAFloatKeyBehindAPropertyLosesItsSpelling",
-		Reason: "`1.0: x` comes back keyed \"1.0\" and `&a1 1.0: x` keyed \"1\" -- on the walk. Read " +
-			"into a map[string]any the same document keeps the \"1.0\", so the destination decides " +
-			"the key. The anchor names the " +
-			"node and says nothing about its type, so both are the float 1 standing as a key, and a " +
-			"float key is named by its canonical spelling, and the \".0\" keeps it out of the " +
-			"integers' namespace. `&a1 1e3: x` loses it the same way, coming back \"1000\" where " +
-			"`1e3: x` gives \"1000.0\".\n\n" +
-			"Only a float, and for an anchor only the implicit key: `&a1 7`, `&a1 true` and `&a1 1.5` " +
-			"are named correctly, and `? &a1 1.0` over `: x` gives \"1.0\". Flow loses it like " +
-			"block.\n\n" +
-			"An **alias** key loses it the same way, which is the same node reached by the other " +
-			"spelling: a mapping keyed `*a1` where a1 names `!!float .inf` comes back keyed " +
-			"\"+Inf\" on the walk where the canonical spelling is \".inf\", and the long form does " +
-			"not save it: `? *a1` over `: v` loses it too, where `? &a1 1.0` keeps it. " +
-			"codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds that pair.\n\n" +
-			"The same root as yamlcorpus.Departures' \"a key tagged !!float\", where `!!float 226.0` " +
-			"comes back \"226\": a property in front of the key is not looked through before the key " +
-			"is named. codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds the " +
-			"infinities, where `&a .inf` is named \"+Inf\" on one path and \".inf\" on the other.\n\n" +
+		Name: "decode/an-alias-or-tag-in-front-of-a-float-key-loses-its-spelling",
+		Pin:  "TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling",
+		Reason: "A float key is named by its canonical YAML spelling, and the \".0\" keeps it out of " +
+			"the integers' namespace: `1.0: x` comes back keyed \"1.0\" and `.inf: x` keyed " +
+			"\".inf\". Put an alias or a tag in front of the same key and the name becomes Go's " +
+			"%v, \"1\" and \"+Inf\".\n\n" +
+			"codec.unwrapKeyNode looks through a MappingKeyNode and an AnchorNode and through " +
+			"neither an AliasNode nor a TagNode, so keyName is handed a node it reads no token " +
+			"off and mapKeyString falls through to fmt.Sprint of the resolved value. Stripping a " +
+			"tag is not enough on its own: the tag decides the type, `!!float 1` is the float 1.0, " +
+			"and naming it wants the tag resolved as ast.KeyIdentity resolves it.\n\n" +
+			"⚠️ The tag half loses an entry and the two destinations disagree about it. " +
+			"`!!float 1: a` over `1: b` walks into an `any` as {\"1\": \"b\"} with nothing " +
+			"reported, and a map[string]any refuses the same document as `duplicate key \"1\"`. " +
+			"The parser holds the two apart -- it refuses `!!float 1: a` over `1.0: b` as one key " +
+			"-- so this is the naming folding two keys and not the check missing one.\n\n" +
+			"The **anchor** half of this closed on 2026-09-08: parseAnchor attached the node to " +
+			"ast.AnchorNode.Value after readAnchorValue returned, and readAnchorValue fires a " +
+			"walk's Leave on its way out, so a walking reader was handed the anchor with Value " +
+			"still nil. readAnchorValue attaches it first now, and " +
+			"TestFixedAnAnchoredFloatKeyKeepsItsSpelling holds it. The two halves shared a symptom " +
+			"and not a mechanism.\n\n" +
 			"Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the aliaser " +
 			"began anchoring keys.",
 		Property: Decode | Render | DecodeTyped,

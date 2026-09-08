@@ -272,78 +272,6 @@ func readTheStream(t *testing.T, src string) []any {
 	}
 }
 
-// TestDefectAFloatKeyBehindAPropertyLosesItsSpelling pins the naming.
-//
-// A float key is named by its canonical spelling, and the ".0" keeps it out of
-// the integers' namespace: "1.0: x" comes back keyed "1.0". Put an
-// anchor on the same key and it comes back "1". The anchor names the node and
-// says nothing about its type, so both documents hold the float 1 as a key.
-//
-// Only a float, and only the implicit key. An integer, a boolean and a float
-// that needs its decimals are all named correctly with an anchor, and the long
-// form "? &a1 1.0" over ": x" keeps the spelling.
-//
-// The two decode paths disagree about it, which is the sharper half: reading
-// into an `any` gives "1" and reading into a map[string]any gives "1.0", so the
-// destination decides the key. codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML
-// holds the same split for the infinities, where "&a .inf" is "+Inf" on one
-// path and ".inf" on the other. yamlcorpus.Departures' "a key tagged !!float"
-// is the tag wearing the same fault: a property in front of the key is not
-// looked through before the key is named.
-//
-// Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the
-// aliaser began anchoring keys.
-func TestDefectAFloatKeyBehindAPropertyLosesItsSpelling(t *testing.T) {
-	t.Run("a bare float key keeps its spelling", func(t *testing.T) {
-		for _, tc := range []struct{ src, key string }{
-			{src: "1.0: x\n", key: "1.0"},
-			{src: "1e3: x\n", key: "1000.0"},
-		} {
-			var got map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
-		}
-	})
-
-	t.Run("today the walk drops the .0 and the tree keeps it", func(t *testing.T) {
-		// The two decode paths part company, which is the same split
-		// codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds for
-		// the infinities: reading into an `any` walks the token stream and
-		// names the key with Go's %v, reading into a map gathers a tree and
-		// names it by the canonical spelling.
-		for _, tc := range []struct{ src, walked, tree string }{
-			{src: "&a1 1.0: x\n", walked: "1", tree: "1.0"},
-			{src: "{&a1 1.0: x}\n", walked: "1", tree: "1.0"},
-			{src: "&a1 1e3: x\n", walked: "1000", tree: "1000.0"},
-		} {
-			var walked any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.walked: "x"}, walked,
-				"today: the walk names it with Go's %%v: %q", tc.src)
-
-			var tree map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.tree: "x"}, tree,
-				"the tree keeps the canonical spelling: %q", tc.src)
-		}
-	})
-
-	t.Run("and every adjacent key is named correctly", func(t *testing.T) {
-		for _, tc := range []struct{ src, key string }{
-			{src: "&a1 7: x\n", key: "7"},
-			{src: "&a1 true: x\n", key: "true"},
-			{src: "&a1 1.5: x\n", key: "1.5"},
-			// The long form keeps the spelling, which places the fault on the
-			// implicit key.
-			{src: "? &a1 1.0\n: x\n", key: "1.0"},
-		} {
-			var got map[string]any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
-		}
-	})
-}
-
 // TestDefectAPropertiedKeyRefusesABlockScalarValue pins the combination.
 //
 // An anchor or a tag on an *implicit* key, over a block scalar value, is refused
@@ -1052,5 +980,96 @@ func TestDefectACommentAboveABlankLineAddsALeadingBreak(t *testing.T) {
 		f, err := parser.ParseBytes([]byte("-\t#\n e\n"), parser.WithComments())
 		require.NoError(t, err)
 		assert.Equal(t, "- e #\n", f.String())
+	})
+}
+
+// TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling pins what is left of
+// the property-in-front-of-a-key naming.
+//
+// A float key is named by its canonical YAML spelling, and the ".0" keeps it
+// out of the integers' namespace: "1.0: x" comes back keyed "1.0" and
+// ".inf: x" keyed ".inf". Put an alias or a tag in front of the same key and
+// the name becomes Go's %v -- "1" and "+Inf".
+//
+// The anchor half closed when readAnchorValue began attaching the anchored node
+// before a walk is handed it; see TestFixedAnAnchoredFloatKeyKeepsItsSpelling.
+// These two are different mechanisms with the same symptom, and both paths now
+// agree on the wrong name rather than disagreeing, so this is a naming defect
+// and no longer a divergence:
+//
+//   - an alias: codec.unwrapKeyNode looks through a MappingKeyNode and an
+//     AnchorNode and not an AliasNode, so keyName is handed the alias and reads
+//     no token off it.
+//   - a tag: unwrapKeyNode does not look through a TagNode either. Stripping
+//     one is not enough on its own, since the tag decides the type -- "!!float
+//     1" is the float 1.0 and wants naming "1.0", not "1" -- so this wants the
+//     tag resolved, as ast.KeyIdentity resolves it.
+//
+// ⚠️ The tag half loses an entry. The parser refuses "!!float 1: a" over
+// "1.0: b" as one key, so it reads the two as the same node; but
+// "!!float 1: a" over "1: b" reads {"1": "b"} with nothing reported, because
+// the decoder names both "1" and a Go map holds one. Two keys the parser tells
+// apart, collapsed by the naming.
+func TestDefectAnAliasOrTagInFrontOfAFloatKeyLosesItsSpelling(t *testing.T) {
+	t.Run("the bare key keeps its spelling", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "1.0: x\n", key: "1.0"},
+			{src: ".inf: x\n", key: ".inf"},
+			{src: "1e3: x\n", key: "1000.0"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+	})
+
+	t.Run("today an alias key is named by Go, on both paths", func(t *testing.T) {
+		for _, tc := range []struct{ src, today string }{
+			{src: "a: &a1 .inf\n*a1 : v\n", today: "+Inf"},
+			{src: "a: &a1 1.0\n*a1 : v\n", today: "1"},
+			{src: "a: &a1 1e3\n*a1 : v\n", today: "1000"},
+			// The long form does not save it, where it does save an anchor.
+			{src: "a: &a1 .inf\n? *a1\n: v\n", today: "+Inf"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Containsf(t, walked, tc.today, "today: named by Go's %%v: %q", tc.src)
+
+			var tree map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
+			assert.Containsf(t, tree, tc.today, "today: the tree agrees, wrongly: %q", tc.src)
+		}
+	})
+
+	t.Run("today a tagged key is named by Go, and loses an entry", func(t *testing.T) {
+		for _, tc := range []struct{ src, today string }{
+			{src: "!!float 1.0: x\n", today: "1"},
+			{src: "!!float 1: x\n", today: "1"},
+			{src: "!!float 1e3: x\n", today: "1000"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Containsf(t, got, tc.today, "today: named by Go's %%v: %q", tc.src)
+		}
+
+		// The parser holds the two apart -- it refuses this pair as one key --
+		// so the loss below is the naming and not the check.
+		var refused map[string]any
+		err := codec.Unmarshal([]byte("!!float 1: a\n1.0: b\n"), &refused)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `mapping key "1.0" already defined`)
+
+		// And here they are two keys, which the naming folds into one -- and
+		// the two destinations part company over it. Walking into an `any`
+		// drops the float entry and reports nothing; a map[string]any sees two
+		// keys arrive under one name and refuses the document.
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte("!!float 1: a\n1: b\n"), &walked))
+		assert.Equal(t, map[string]any{"1": "b"}, walked, "today: the float entry is gone")
+
+		var typed map[string]any
+		err = codec.Unmarshal([]byte("!!float 1: a\n1: b\n"), &typed)
+		require.Error(t, err, "today: the typed map refuses what the walk read")
+		assert.Contains(t, err.Error(), `duplicate key "1"`)
 	})
 }

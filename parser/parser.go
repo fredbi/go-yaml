@@ -1966,6 +1966,12 @@ func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node,
 	if _, ok := value.(*ast.AnchorNode); ok {
 		return nil, yamlerrors.NewSyntax("anchors cannot be used consecutively", value.GetToken())
 	}
+	// Attached here and not by parseAnchor, which runs after this returns: the
+	// Leave deferred above fires on the way out, so a walking reader that took
+	// the assignment on trust was handed an anchor holding nothing.
+	// codec.unwrapKeyNode then unwrapped to nil and named "&a1 1.0" after
+	// fmt.Sprint of the float rather than after its YAML spelling.
+	anchor.Value = value
 
 	return value, nil
 }

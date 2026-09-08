@@ -2517,3 +2517,70 @@ func TestFixedAnAliasKeyIsTheNodeItsAnchorNames(t *testing.T) {
 		}
 	})
 }
+
+// TestFixedAnAnchoredFloatKeyKeepsItsSpelling: an anchor in front of a float
+// key no longer changes the name the key gets.
+//
+// A float key is named by its canonical spelling, and the ".0" keeps it out of
+// the integers' namespace: "1.0: x" comes back keyed "1.0". An anchor on the
+// same key gave "1", and the two decode paths disagreed about it -- reading
+// into an `any` gave "1" and into a map[string]any "1.0", so the destination
+// decided the key.
+//
+// parseAnchor attached the node to ast.AnchorNode.Value after readAnchorValue
+// returned, and readAnchorValue fires a walk's Leave on its way out, so a
+// walking reader was handed the anchor with Value still nil and the name fell
+// through to fmt.Sprint of the float. readAnchorValue attaches it first now.
+//
+// Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the
+// aliaser began anchoring keys.
+//
+// ⚠️ A tag is a separate fault and is open: yamlcorpus.Departures records it as
+// "a key tagged !!float". unwrapKeyNode does not unwrap an ast.TagNode, so
+// "!!float 1.0: x" is named "1" on both paths -- and "!!float 1: a" over
+// "1: b" reads {"1": "b"}, two keys the parser tells apart collapsed into one
+// Go map entry with nothing reported. Naming a tagged key wants the tag
+// resolved rather than stripped, since "!!float 1" is the float 1.0.
+func TestFixedAnAnchoredFloatKeyKeepsItsSpelling(t *testing.T) {
+	t.Run("a bare float key keeps its spelling", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "1.0: x\n", key: "1.0"},
+			{src: "1e3: x\n", key: "1000.0"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+	})
+
+	t.Run("an anchored float key keeps it, on both decode paths", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "&a1 1.0: x\n", key: "1.0"},
+			{src: "{&a1 1.0: x}\n", key: "1.0"},
+			{src: "&a1 1e3: x\n", key: "1000.0"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, walked, "the walk: %q", tc.src)
+
+			var tree map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, tree, "the tree: %q", tc.src)
+		}
+	})
+
+	t.Run("and every adjacent key is named correctly", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "&a1 7: x\n", key: "7"},
+			{src: "&a1 true: x\n", key: "true"},
+			{src: "&a1 1.5: x\n", key: "1.5"},
+			// The long form keeps the spelling, which places the fault on the
+			// implicit key.
+			{src: "? &a1 1.0\n: x\n", key: "1.0"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+	})
+}
