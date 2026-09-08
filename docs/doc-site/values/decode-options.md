@@ -2,49 +2,74 @@
 title: Decode options
 weight: 30
 description: |
-  Every `DecodeOption`, grouped by what it changes: strictness, naming,
-  representation, external references.
+  The nineteen `DecodeOption`s, grouped by what they change, and the four
+  that do nothing on their own.
 ---
 
-{{% notice style="note" title="Outline" %}}
-This page is an outline. The structure is settled; the prose is not written.
+Options go to `codec.UnmarshalWithOptions` for one call, or to
+`codec.NewDecoder` for a decoder you keep.
+
+## Strictness
+
+| option | effect |
+|---|---|
+| `DisallowUnknownField()` | a key matching no exported field is an error |
+| `AllowFieldPrefixes(p...)` | a key beginning with one of `p` escapes that check |
+| `AllowDuplicateMapKey()` | a repeated key is accepted; the last one wins |
+| `Validator(v)` | runs a `StructValidator` over the decoded struct |
+| `Strict()` | **only** `DisallowUnknownField` |
+
+{{% notice style="warning" title="`Strict()` is one option, not a posture" %}}
+`Strict()` enables `DisallowUnknownField` and nothing else. It does not refuse
+duplicate keys — those are refused by default — and it does not tighten type
+conversion. Read it as an alias, not as a mode.
 {{% /notice %}}
 
-## What the page must answer
+## Naming
 
-- Which option do I need for the behaviour I want?
-- Which options conflict, and which imply another?
+`UseJSONTags(bool)`, `UseInferredNames(bool)`, and `AllowFieldPrefixes` again.
+See [Struct tags](../struct-tags/) — the default reads no `json` tag at all.
 
-## Grouping
+## What a value decodes to
 
-**Strictness** — `Strict`, `DisallowUnknownField`, `AllowDuplicateMapKey`,
-`Validator`
+| option | effect |
+|---|---|
+| `UseOrderedMap()` | an untyped mapping becomes a `MapSlice`, in document order, instead of a Go map |
+| `UseStringKeys()` | every mapping key reads as text, so `1.5: a` into `map[any]any` gives the string `"1.5"` rather than `float64(1.5)` |
+| `ShareAliases()` | an alias decodes to the same Go value as its anchor, not an independent copy |
+| `UseJSONUnmarshaler()` | a type with only `UnmarshalJSON` gets called, with the YAML converted to JSON first |
 
-**Naming** — `UseJSONTags`, `UseInferredNames`, `AllowFieldPrefixes` (see
-[Struct tags](../struct-tags/))
+`UseOrderedMap` is the answer when order matters and the document still goes
+through the codec. When the rest of the document matters too, work on
+[the document](../../documents/) instead.
 
-**Representation** — `UseOrderedMap`, `UseStringKeys`, `UseJSONUnmarshaler`,
-`ShareAliases`
+## Anchors from elsewhere
 
-**External references** — `ReferenceFiles`, `ReferenceDirs`, `ReferenceReaders`,
-`RecursiveDir`
+| option | effect |
+|---|---|
+| `ReferenceFiles(f...)` | anchors declared in those files |
+| `ReferenceDirs(d...)` | anchors declared in the YAML files of those directories |
+| `ReferenceReaders(r...)` | the same, from readers |
+| `RecursiveDir(bool)` | `ReferenceDirs` walks subdirectories |
 
-**Custom types** — `CustomUnmarshaler`, `CustomUnmarshalerContext`
+See [Anchors and aliases](../anchors-and-aliases/).
 
-**Comments** — `CommentToMap` (see [Comments](../comments/))
+## The rest
 
-**Pass-through** — `WithParserOptions`
+`CustomUnmarshaler[T]` and `CustomUnmarshalerContext[T]` register a function for
+one type, for this decode only. `CommentToMap(cm)` fills a
+[`CommentMap`](../comments/). `WithParserOptions(...)` passes
+[parser options](../../documents/parser/) through — which is how you reach
+`WithYAMLVersion`.
 
-## Open questions for the API
+## Four options that do nothing alone
 
-- `Strict()` is a bundle. Say which options it sets, because the name promises
-  more than it delivers if the list ever grows.
-- `RecursiveDir(bool)` only means something next to `ReferenceDirs`. Nothing in
-  the type says so.
-- `DecodeFromNode` with `ReferenceFiles` needs the caller to pass
-  `parser.WithAnchors` to their own parse, because the parser refuses an alias
-  naming no anchor and the decoder does not publish the anchors it holds. That is
-  a documented trap today; it should be a fixed API tomorrow.
-- Five of the nineteen options take a `bool` (`RecursiveDir`, `UseJSONTags`,
-  `UseInferredNames`, and the encoder's pair) while the rest are switches with no
-  argument. Two spellings for the same idea.
+Nothing in the type of any of these says so, and none of them reports being set
+without its partner:
+
+| option | needs |
+|---|---|
+| `RecursiveDir(true)` | `ReferenceDirs` |
+| `AllowFieldPrefixes(...)` | `DisallowUnknownField` |
+| `UseInferredNames(true)` | matters only where no `yaml` tag names the field |
+| `ShareAliases()` | matters only where the document actually aliases |

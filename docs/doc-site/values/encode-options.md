@@ -2,44 +2,89 @@
 title: Encode options
 weight: 40
 description: |
-  Every `EncodeOption`: layout, quoting, what is omitted, anchors and comments.
+  The seventeen `EncodeOption`s: layout, quoting, what is left out, anchors
+  and comments.
 ---
 
-{{% notice style="note" title="Outline" %}}
-This page is an outline. The structure is settled; the prose is not written.
+Options go to `codec.MarshalWithOptions` for one call, or to `codec.NewEncoder`
+for an encoder you keep.
+
+## Layout
+
+| option | effect |
+|---|---|
+| `Indent(n)` | spaces per level of mapping nesting; `DefaultIndentSpaces` is 2 |
+| `IndentSequence(bool)` | indents sequence entries under their key |
+| `Flow(bool)` | flow style throughout |
+| `UseLiteralStyleIfMultiline(bool)` | a multiline string is written as a literal block, whatever it contains |
+| `UseSingleQuote(bool)` | prefers `'` over `"` where a string needs quoting |
+| `JSON()` | writes JSON |
+
+Encoding `{"name": "x", "ports": [80, 443]}`:
+
+```yaml
+# default                # IndentSequence(true)
+name: x                  name: x
+ports:                   ports:
+- 80                       - 80
+- 443                      - 443
+```
+
+```
+Flow(true)   {name: x, ports: [80, 443]}
+JSON()       {"name": "x", "ports": [80, 443]}
+```
+
+**`Indent` does not move sequence entries.** They sit at their key's column
+unless `IndentSequence(true)` is also set, so `Indent(4)` alone changes nothing
+in a document whose only nesting is a sequence. With both:
+
+```yaml
+a:
+    ports:
+        - 80
+```
+
+## Leaving fields out
+
+| option | effect |
+|---|---|
+| `OmitEmpty()` | as if every field carried `,omitempty` |
+| `OmitZero()` | as if every field carried `,omitzero` |
+
+Both are the tag applied to everything, so they are the fallback for a type whose
+tags you do not control. Prefer the tag where you do.
+
+## Numbers
+
+`AutoInt()` writes a float whose fractional part is zero as an integer.
+`map[string]float64{"a": 1.0}` gives `a: 1.0` by default and `a: 1` with the
+option.
+
+{{% notice style="note" %}}
+There is no decode counterpart, so `AutoInt` breaks the round trip on purpose: a
+`float64(1.0)` written as `1` reads back as an integer.
 {{% /notice %}}
 
-## What the page must answer
+## Anchors
 
-- How do I control indentation and flow style?
-- How do I stop empty fields being written?
-- How do I produce JSON?
+| option | effect |
+|---|---|
+| `WithSmartAnchor()` | two map values sharing a pointer get an anchor on the first and aliases after; the key name becomes the anchor name, with a suffix on collision |
+| `MarshalAnchor(fn)` | calls `fn` with each `*ast.AnchorNode` as it is written |
 
-## Grouping
+Both find an anchor **by the address its value stands at**. A document decoded
+and re-encoded therefore keeps its anchors only where the decode left one value
+behind two names — which is what `ShareAliases` does. Without it, encoding writes
+the shared subtree out twice.
 
-**Layout** — `Indent`, `IndentSequence`, `Flow`, `UseLiteralStyleIfMultiline`,
-`DefaultIndentSpaces`
+## Naming and custom types
 
-**Quoting** — `UseSingleQuote`
+`WriteJSONTags(bool)` and `WriteInferredNames(bool)` mirror the decode pair — see
+[Struct tags](../struct-tags/). `UseJSONMarshaler()` calls a type's
+`MarshalJSON`. `CustomMarshaler[T]` and `CustomMarshalerContext[T]` register a
+function for one type, for this encode only.
 
-**Omission** — `OmitEmpty`, `OmitZero`
+## Comments
 
-**Numbers** — `AutoInt`
-
-**JSON** — `JSON`, `UseJSONMarshaler`
-
-**Anchors** — `MarshalAnchor`, `WithSmartAnchor` (see
-[Anchors and aliases](../anchors-and-aliases/))
-
-**Comments** — `WithComment`
-
-**Custom types** — `CustomMarshaler`, `CustomMarshalerContext`
-
-**Naming** — `WriteJSONTags`, `WriteInferredNames`
-
-## Open questions for the API
-
-- `JSON()` and `Flow(true)` overlap. Say what `JSON()` sets beyond flow style.
-- `OmitEmpty()` is an encoder-wide switch and `,omitempty` is per field. Say which
-  wins and whether the switch is worth keeping.
-- `AutoInt` has no decode counterpart, so a round trip is not symmetric.
+`WithComment(cm)` writes the comments in a [`CommentMap`](../comments/).
