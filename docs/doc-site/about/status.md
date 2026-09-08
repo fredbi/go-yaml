@@ -23,7 +23,8 @@ the API changes without notice.
 - **A JSON token stream.** Designed, not built.
 - **Verbatim reconstruction.** The AST keeps enough of the source to make it
   possible; nothing exposes it.
-- **A stable comment model on the AST.** `CommentMap` is what exists today.
+- **A stable comment model on the AST.** A caller has `CommentMap` today and
+  nothing on the tree itself.
 
 {{% notice style="info" %}}
 This page is the one place on the site allowed to describe what does not exist.

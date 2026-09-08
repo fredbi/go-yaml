@@ -20,7 +20,7 @@ This page is an outline. The structure is settled; the prose is not written.
 
 **A written tag is honoured at any version; only shape resolution is
 version-gated.** `!!bool` on `yes` gives a bool under 1.2 as it does under 1.1.
-What 1.1 changes is what an *untagged* `yes` resolves to.
+1.1 changes what an *untagged* `yes` resolves to.
 
 ## Covers
 
