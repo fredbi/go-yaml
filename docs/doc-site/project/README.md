@@ -12,7 +12,7 @@ doc site does. One thing has to happen first.
 ## Before this page is filled
 
 **The synopsis moves out.** Sections 1 to 5 of the README are usage material and
-belong under [Usage](../../usage/) and [Advanced](../../advanced/). Copying the
+belong under [Usage](../../values/) and [Advanced](../../documents/). Copying the
 README here today would duplicate them.
 
 The licence question that also held this page is settled: the library is

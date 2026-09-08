@@ -21,7 +21,7 @@ This page is an outline. The structure is settled; the prose is not written.
 ### From `go.yaml.in/yaml/v3`
 
 `Marshal` and `Unmarshal` match. The struct-tag default is v3's, held by a
-parity table in the test suite — see [Struct tags](../../usage/struct-tags/).
+parity table in the test suite — see [Struct tags](../../values/struct-tags/).
 What differs: no `yaml.Node`; the tree is `ast` and the entry point is
 `parser.ParseBytes`.
 

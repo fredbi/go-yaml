@@ -31,5 +31,5 @@ TODO — `Marshal` of the same value, and what the default output looks like.
 ## Then what
 
 Read [Which layer you need](three-levels/). Most callers stay in
-[Usage](../usage/); [Advanced](../advanced/) is for programs that work on the
+[Usage](../values/); [Advanced](../documents/) is for programs that work on the
 document rather than on Go values.
