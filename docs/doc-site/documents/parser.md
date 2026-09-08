@@ -2,35 +2,71 @@
 title: Parser
 weight: 10
 description: |
-  Turning bytes into an `ast.File`, and the options that decide what the tree
-  keeps.
+  Turning bytes into a tree, and the options that decide what the tree keeps.
 ---
 
-{{% notice style="note" title="Outline" %}}
-This page is an outline. The structure is settled; the prose is not written.
+## Parsing
+
+```go
+f, err := parser.ParseBytes(src, parser.WithComments())
+if err != nil {
+	// ...
+}
+for _, doc := range f.Docs {
+	// doc.Body is the root node of one document
+}
+```
+
+`ParseFile` reads a path. `parser.New` builds a `Parser` you can hold and reuse
+with a fixed set of options.
+
+An `*ast.File` holds every document in the stream, in `Docs`. A stream with one
+document has one entry; `---` starts another.
+
+## The options
+
+| option | what it changes |
+|---|---|
+| `WithComments` | keeps comments. **They are dropped by default**, before the grouping ever sees them. |
+| `WithYAMLVersion` | reads under 1.0, 1.1 or 1.2 rather than the document's own directive |
+| `WithAnchors` | publishes anchors declared in another parse |
+| `WithLaxTags` | reads `!!int abc` as the text `abc` instead of refusing the document |
+| `WithAllowDuplicateMapKey` | accepts a repeated key instead of refusing it |
+| `WithJSONCompatible` | reports `1:` and `"1":` in one mapping as `ErrNotJSON`, since both write the JSON name `"1"` |
+| `WithOmitNodePaths` | stops recording each node's path |
+| `WithChunkSize` | how many tokens one chunk of the token arena holds |
+| `WithOnComplete` | calls a function with each node as the parser finishes it |
+
+{{% notice style="warning" title="WithOmitNodePaths turns off more than it says" %}}
+Node paths are what `ast.Node.GetPath` returns and what a `CommentMap` is keyed
+by. Omit them and `GetPath` returns `""`, and the map `codec.CommentToMap` fills
+comes back keyed by empty strings. Neither reports anything.
+
+Paths are recorded by default and cost little. Reach for this only when you have
+measured that they cost you.
 {{% /notice %}}
 
-## What the page must answer
+## Anchors across a parse
 
-- How do I get a tree from a file or a byte slice?
-- How do I keep comments?
-- How do I parse a fragment that refers to anchors declared elsewhere?
+The parser owns the anchor table. It resolves every alias against the anchors of
+the document holding it, and refuses one that names none — so a fragment meant to
+be read beside other files has to be handed their anchors:
 
-## Covers
+```go
+f, err := parser.ParseBytes(fragment, parser.WithAnchors(anchors))
+```
 
-- `ParseBytes`, `ParseFile`, `New`, `Parser`
-- Options: `WithComments`, `WithAnchors`, `WithYAMLVersion`, `WithLaxTags`,
-  `WithJSONCompatible`, `WithAllowDuplicateMapKey`, `WithOmitNodePaths`,
-  `WithChunkSize`, `WithOnComplete`
-- Multi-document files: `ast.File.Docs`
-- The parser owns the anchor table, and every `ast.AliasNode` carries its target
+Pass `ast.DocumentNode.Anchors` from the parse that declared them. This is also
+what `codec.ReferenceFiles` needs when you drive the decode from a node you
+parsed yourself.
 
-## Open questions for the API
+## Reading a node as the parser finishes it
 
-- `WithChunkSize` is a memory knob with no other option like it. Say what it
-  trades, or hide it.
-- `WithOnComplete(func(ast.Node))` is a callback on a synchronous parse. It is
-  the seam the streaming API will use; the page must not describe it as a
-  streaming API today.
-- `WithOmitNodePaths` changes what `ast.Node.GetPath` returns. A caller who sets
-  it and then uses YAMLPath gets nothing, with no error.
+`WithOnComplete` reports each node in completion order — a node's children before
+the node itself.
+
+{{% notice style="note" %}}
+This is the seam a streaming API will use, and it is marked an experiment in the
+source. It is not a streaming API: `ParseBytes` still reads the whole document
+before it returns. See [Status](../../about/status/).
+{{% /notice %}}
