@@ -127,7 +127,13 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 
 // fixedWalkDigest is what the walk hands over today, over the 417 documents of
 // the YAML Test Suite and the synthetic corpus -- 323 walked and 94 refused.
-const fixedWalkDigest = "6fcea6ced43d24a0dde7ff745621d54cb9c6f83941b862cbd1fd79cb9904f7c9"
+//
+// Re-baselined 2026-09-07 with the commit that joined the scanner's two tab
+// checks. The counts did not move -- 323 and 94 before and after -- so no
+// document changed between walked and refused; what moved is the message on a
+// document that was refused either way, since digestVisitor writes "refused:
+// %v" and one of the two messages was retired.
+const fixedWalkDigest = "1f638bc8305d4d7022d6f18f597a565241d7deff649a113dc9f08b7238bbf02d"
 
 // digestVisitor writes what it is handed, so that anything the walk reads out
 // of a reclaimed cell shows up as a different document.

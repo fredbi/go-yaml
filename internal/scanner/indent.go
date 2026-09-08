@@ -90,6 +90,38 @@ func (s *Scanner) updateIndent(ctx *Context, c rune) {
 	s.isFirstCharAtLine = false
 }
 
+// indentHoldsATab reports whether a tab stood in this line's leading whitespace.
+//
+// s-indent(n) is spaces and nothing else, so a tab among a line's indentation
+// leaves a block entry with nothing to sit on. A tab is separation rather than
+// indentation, and is admitted where separation is: in front of a flow node or
+// a scalar, and inside a flow collection.
+//
+// updateIndent sets the flag for a tab anywhere in the run, since it leaves
+// isFirstCharAtLine standing, so "  \ta" and "\ta" both set it. Three callers
+// each asked this question their own way before -- two by cutting the origin
+// with strings.TrimPrefix(origin, " "), which trims one space and so read
+// " \ta: 1" and "  \ta: 1" differently, and one by reading the flag. Ask here.
+func (s *Scanner) indentHoldsATab() bool { return s.indentHasTab }
+
+// tabStandsWhereAnEntryNeedsIndent reports whether a tab stands where a block
+// entry needs s-indent(n).
+//
+// Two runs can hold it and they are not the same run. A tab among the line's
+// own indentation is [Scanner.indentHoldsATab]; a tab after a token already cut
+// on this line -- "- \ta: 1", where the '-' left isFirstCharAtLine false -- is
+// in the separation since that token and is [Context.leadingBlanksHoldATab].
+// Reading only the first admits "- \ta: 1", which the grammar refuses and
+// go.yaml.in/yaml/v3 refuses with it; reading only the second admits
+// "\t\"a\": 1", since a quoted key resets the origin buffer.
+//
+// A flow collection admits a tab in either place, so callers ask this together
+// with [Scanner.isFlowMode]: "{\ta: 1}" is read by the grammar, by v3 and by
+// libfyaml.
+func (s *Scanner) tabStandsWhereAnEntryNeedsIndent(ctx *Context) bool {
+	return s.indentHoldsATab() || ctx.leadingBlanksHoldATab()
+}
+
 func (s *Scanner) isChangedToIndentStateDown() bool {
 	return s.indentState == IndentStateDown
 }

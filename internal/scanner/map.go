@@ -4,9 +4,6 @@
 package scanner
 
 import (
-	"bytes"
-	"strings"
-
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -33,21 +30,12 @@ func (s *Scanner) scanMapDelim(ctx *Context) (bool, error) {
 		}
 	}
 
-	if strings.HasPrefix(strings.TrimPrefix(ctx.origin(), " "), "\t") && !bytes.HasPrefix(ctx.buf, []byte("\t")) {
-		invalidMsg := "tab character cannot use as a map key directly"
-		invalidTk := token.Invalid(ctx.origin(), s.pos())
-		s.progressColumn(ctx, 1)
-		return false, ErrInvalidToken(invalidMsg, invalidTk)
-	}
-
-	if s.indentHasTab && !s.isFlowMode() {
+	if s.tabStandsWhereAnEntryNeedsIndent(ctx) && !s.isFlowMode() {
 		// A block mapping entry is introduced by s-indent(n), which is spaces and nothing else, so a tab among this line's
 		// indentation leaves the entry with nothing to sit on.
 		// A tab counts as separation and not as indentation, so it is allowed in front of a flow node or a scalar in
-		// the same place: "\t{}" is a document and "\tfoo: 1" is not.
-		//
-		// The check above reads the origin buffer, which a quoted key resets: "\tfoo: 1" was refused there and "\t\"\": 1"
-		// was not.
+		// the same place: "\t{}" is a document and "\tfoo: 1" is not, and it is allowed inside a flow collection,
+		// which is what the flow test is for: "{\ta: 1}" is read by every oracle.
 		invalidMsg := "tab character cannot stand for the indentation a mapping entry needs"
 		invalidTk := token.Invalid(ctx.origin(), s.pos())
 		s.progressColumn(ctx, 1)

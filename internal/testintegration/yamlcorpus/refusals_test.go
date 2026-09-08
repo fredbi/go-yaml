@@ -215,7 +215,6 @@ var parserComplaints = []string{
 	"sequence entries are not allowed after a tag on the same line",
 	"sequence entries are not allowed after anchor on the same line",
 	"tab character cannot stand for the indentation a mapping entry needs",
-	"tab character cannot use as a map key directly",
 	"tab character cannot use as a sequence delimiter",
 	"tag handle _ has already been declared by a TAG directive",
 	"tag handle _ is not defined by a TAG directive",

@@ -275,6 +275,29 @@ func (c *Context) removeRightSpaceFromBuf() {
 // isOriginSpace reports whether c is whitespace a line may end with.
 func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 
+// leadingBlanksHoldATab reports whether a tab stands in the whitespace read
+// since the last token was cut.
+//
+// [cursor.origin] is that whitespace and the token's text together, so the run
+// in front is what separates this token from the one before it. Two callers cut
+// it with strings.TrimPrefix(origin, " ") and asked whether a tab came next,
+// which trims one space: " \ta: 1" and "  \ta: 1" were read as different
+// faults and drew different messages for one rule.
+func (c *Context) leadingBlanksHoldATab() bool {
+	org := c.origin()
+	for i := range len(org) {
+		switch org[i] {
+		case ' ':
+		case '\t':
+			return true
+		default:
+			return false
+		}
+	}
+
+	return false
+}
+
 // The cursor addresses c.src by byte and decodes UTF-8 to read a character.
 // c.idx and c.size count bytes. Every method below that deals in characters decodes one; none indexes for it.
 

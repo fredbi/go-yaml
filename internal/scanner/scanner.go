@@ -722,7 +722,7 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 		return false, nil
 	}
 
-	if strings.HasPrefix(strings.TrimPrefix(ctx.origin(), " "), "\t") {
+	if s.tabStandsWhereAnEntryNeedsIndent(ctx) {
 		invalidMsg := "tab character cannot use as a sequence delimiter"
 		invalidTk := token.Invalid(ctx.origin(), s.pos())
 		s.progressColumn(ctx, 1)

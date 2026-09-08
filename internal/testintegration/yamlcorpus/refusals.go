@@ -147,8 +147,36 @@ func Refusals() []Refusal {
 			// A tab counts as separation and not as indentation, so it is
 			// allowed in front of a flow node -- "\t{}" is a document -- and
 			// not in front of a key.
+			//
+			// It said "tab character cannot use as a map key directly" until
+			// 2026-09-07, when the two checks that answered this became one:
+			// the retired one cut the origin with TrimPrefix(origin, " ") and
+			// so gave a different message for two spaces than for one.
 			Name: "a tab in front of a mapping key",
-			Src:  " \ta: 1\n", Says: "tab character cannot use as a map key directly",
+			Src:  " \ta: 1\n", Says: "tab character cannot stand for the indentation a mapping entry needs",
+		},
+		{
+			// The same fault two spaces in. It drew the other message until the
+			// checks were joined, which is what made the pair worth pinning.
+			Name: "a tab in front of a mapping key, further in",
+			Src:  "  \ta: 1\n", Says: "tab character cannot stand for the indentation a mapping entry needs",
+		},
+		{
+			// A quoted key resets the origin buffer, so the retired check
+			// missed this one and it read.
+			Name: "a tab in front of a quoted mapping key",
+			Src:  "\t\"a\": 1\n", Says: "tab character cannot stand for the indentation a mapping entry needs",
+		},
+		{
+			// Nothing is at the start of the line here: the tab is in the
+			// separation the '-' left behind, which is a second run and the
+			// reason indentHoldsATab alone is not the question.
+			Name: "a tab after a sequence entry's dash",
+			Src:  "- \ta: 1\n", Says: "tab character cannot stand for the indentation a mapping entry needs",
+		},
+		{
+			Name: "a tab before a nested sequence entry",
+			Src:  "- \t- 1\n", Says: "tab character cannot use as a sequence delimiter",
 		},
 		{
 			// An anchor alone at the column of a key whose value is empty:
