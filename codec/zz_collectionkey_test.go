@@ -117,6 +117,41 @@ func TestTwoCollectionKeysAreTwoKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("and the refusal names both positions", func(t *testing.T) {
+		// The guard for a fix that is coming rather than a rule of its own.
+		//
+		// 65 and 66 want the duplicate check moved to the mapping's close,
+		// where every key is built and can be compared by what it resolves to.
+		// A check that runs there has the MAPPING in hand and will point at it
+		// unless it carries each key's own position along -- and the position
+		// is what a user reads. Nothing asserted it: yamlgen's
+		// TestFixedARepeatedCollectionKeyIsRefused matches "already defined"
+		// and no more, so it passes either way.
+		//
+		// Both positions are measured, not chosen: the repeat's own token and
+		// the token of the entry that first wrote the key.
+		for _, tc := range []struct{ src, says string }{
+			{"{{a: 0}: 1, {a: 0}: 2}\n", `[1:13] mapping key "{a: 0}" already defined at [1:2]`},
+			{"{[a]: 1, [a]: 2}\n", `[1:10] mapping key "[a]" already defined at [1:2]`},
+			{"{[\"\"]: 1, [\"\"]: 2}\n", `[1:11] mapping key "[\"\"]" already defined at [1:2]`},
+			{"{[a, b]: 1, [a, b]: 2}\n", `[1:13] mapping key "[a, b]" already defined at [1:2]`},
+			{"? [a]\n: 1\n? [a]\n: 2\n", `[3:1] mapping key "[a]" already defined at [1:1]`},
+			{"? {a: 0}\n: 1\n? {a: 0}\n: 2\n", `[3:1] mapping key "{a: 0}" already defined at [1:1]`},
+			{"[a]: 1\n[a]: 2\n", `[2:1] mapping key "[a]" already defined at [1:1]`},
+			{"? [a]\n: 1\n[a]: 2\n", `[3:1] mapping key "[a]" already defined at [1:1]`},
+
+			// The scalar spellings, so a change that moves a collection key's
+			// position cannot quietly move theirs too.
+			{"a: 1\na: 2\n", `[2:1] mapping key "a" already defined at [1:1]`},
+			{"{a: 1, a: 2}\n", `[1:8] mapping key "a" already defined at [1:2]`},
+		} {
+			var got any
+			err := codec.UnmarshalWithOptions([]byte(tc.src), &got, codec.UseOrderedMap())
+			require.Errorf(t, err, "%q read %v", tc.src, got)
+			assert.Containsf(t, err.Error(), tc.says, "%q", tc.src)
+		}
+	})
+
 	t.Run("an empty key of either spelling still reads", func(t *testing.T) {
 		for _, src := range []string{"{\"\": 1}\n", ": 1\n"} {
 			var got any

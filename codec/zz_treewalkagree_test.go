@@ -149,7 +149,11 @@ func TestBothPathsPlaceAPromotedEntryTheSameWay(t *testing.T) {
 // mapping itself is silent.
 func TestTheTreeWritesAPromotedEntryOnce(t *testing.T) {
 	t.Run("a merge does not overwrite what the mapping wrote", func(t *testing.T) {
-		const src = `
+		// Read under YAML 1.1, where "<<" is the merge key. It is a 1.1 type, so
+		// under the core schema this document holds a key named "<<" and merges
+		// nothing.
+		const src = `%YAML 1.1
+---
 base: &base
   deep: FROM_MERGE
   tail: FROM_MERGE
