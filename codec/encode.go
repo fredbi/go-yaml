@@ -656,16 +656,29 @@ func (e *Encoder) encodeArray(ctx context.Context, value reflect.Value) (*ast.Se
 	return sequence, nil
 }
 
+// encodeMapItem writes one entry of a [MapSlice].
+//
+// The key is encoded as a value, as [Encoder.encodeMap] encodes a Go map's key,
+// and falls back to its text where that does not give a node a key can be:
+// MapItem.Key is an interface{} and a decode fills it with what the key
+// resolves to, so it holds an int for "1:", a float for "1.0:" and nil for
+// "null:". Asserting a string here panicked on every one of those, and on a
+// MapSlice a caller built by hand with any key but a string.
 func (e *Encoder) encodeMapItem(ctx context.Context, item MapItem, column int) (*ast.MappingValueNode, error) {
-	k := reflect.ValueOf(item.Key)
-	v := reflect.ValueOf(item.Value)
-	value, err := e.encodeValue(ctx, v, column)
+	value, err := e.encodeValue(ctx, reflect.ValueOf(item.Value), column)
 	if err != nil {
 		return nil, err
 	}
+
+	encoded, err := e.encodeValue(ctx, reflect.ValueOf(item.Key), column)
+	key, isKey := encoded.(ast.MapKeyNode)
+	if !isKey || err != nil {
+		key = e.encodeString(fmt.Sprint(item.Key), column)
+	}
+
 	return ast.MappingValue(
 		token.New("", "", e.pos(column)),
-		e.encodeString(k.Interface().(string), column),
+		key,
 		value,
 	), nil
 }

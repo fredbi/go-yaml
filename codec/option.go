@@ -165,6 +165,10 @@ func UseOrderedMap() DecodeOption {
 // which is what a JSON object needs. A map whose key type is named -- a
 // map[float64]any -- is untouched, since the caller asked for that type.
 //
+// It reaches [MapSlice] too, whose MapItem.Key otherwise holds what the key
+// resolves to. There it makes "1: a" over "\"1\": b" two entries under one
+// name rather than an error, since a MapSlice can hold both.
+//
 // It does not make a collection usable as a key. Go cannot hash a slice or a
 // map, so "? [a]" is an error either way; use
 // [github.com/go-openapi/go-yaml/parser.WithJSONCompatible] to refuse those at

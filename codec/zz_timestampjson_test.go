@@ -74,16 +74,19 @@ func TestToJSONWritesATimestampAsTheInstantItNames(t *testing.T) {
 		assert.Equal(t, `{"a": [104, 101, 108, 108, 111]}`+"\n", string(through))
 	})
 
-	t.Run("as a key the two still part company, which is defect 30", func(t *testing.T) {
-		// The decoder names a key carrying either tag by Go's %v, so the
-		// disagreement moved rather than closing: ToJSON writes an instant a
-		// JSON consumer can parse and the decoder writes a Go string. The
-		// decoder's side is the one recorded.
+	t.Run("as a key a timestamp agrees now and a binary does not, which is defect 30", func(t *testing.T) {
+		// A MapItem.Key carries what the key resolves to, so a "!!timestamp"
+		// key is a time.Time and the encoder writes RFC 3339 -- the instant
+		// ToJSON already wrote. The two agree.
+		//
+		// "!!binary" does not, and cannot the same way: a []byte is a slice, so
+		// Go cannot hash it and mapKeyNodeToValue keeps the text. That text is
+		// fmt.Sprint of the bytes, which is not the JSON array ToJSON writes.
 		for _, tc := range []struct{ src, folds, values string }{
 			{
 				src:    "!!timestamp 2001-12-14: x\n",
 				folds:  `{"2001-12-14T00:00:00Z":"x"}`,
-				values: `{"2001-12-14 00:00:00 +0000 UTC": "x"}`,
+				values: `{"2001-12-14T00:00:00Z": "x"}`,
 			},
 			{
 				src:    "!!binary aGVsbG8=: x\n",

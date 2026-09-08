@@ -49,7 +49,9 @@ func treeRead(t *testing.T, src string) any {
 func TestDefectTheWalkLosesAnAnchorOnATaggedFlowKeyAlone(t *testing.T) {
 	t.Run("today the walk loses the anchor and the tree keeps it", func(t *testing.T) {
 		for _, tc := range []struct{ src, tree string }{
-			{src: "{!!null &a1 null, k: *a1}\n", tree: `codec.MapSlice{codec.MapItem{Key:"null", Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:interface {}(nil)}}`},
+			// The "!!null" key is the nil interface and not the text "null":
+			// a MapItem.Key carries what the key resolves to.
+			{src: "{!!null &a1 null, k: *a1}\n", tree: `codec.MapSlice{codec.MapItem{Key:interface {}(nil), Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:interface {}(nil)}}`},
 			{src: "{!!str &a1 x, k: *a1}\n", tree: `codec.MapSlice{codec.MapItem{Key:"x", Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:"x"}}`},
 		} {
 			var got any

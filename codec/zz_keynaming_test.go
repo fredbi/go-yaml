@@ -51,8 +51,8 @@ import (
 //	map[any]any     both, typed: uint64(1) => "x" and "1" => "y"   ✅
 //	map[string]any  refused, `duplicate key "1"`
 //	an `any`        one entry, {"1": "y"} -- "x" is gone, silently
-//	UseOrderedMap   both entries, both named "1"
-//	ToJSON          {"1":"x","1":"y"}, a repeated member name
+//	UseOrderedMap   both entries, typed: uint64(1) and "1"         ✅
+//	ToJSON          refused as ErrNotJSON                          ✅
 //
 // The map[any]any row is what makes this the naming rather than the read: the
 // library holds the two apart wherever the destination can, so nothing is lost
@@ -68,26 +68,40 @@ import (
 // ✅ ToJSON refuses these documents since 2026-09-13, as ErrNotJSON rather than
 // ErrDuplicateKey: they are two keys, and it is JSON that cannot hold both. The
 // parser records the pair the way it records a repeated key, under
-// WithJSONCompatible. The decoder's four rows are unchanged and are the defect
-// this file is still for.
+// WithJSONCompatible.
+//
+// ✅ UseOrderedMap holds them apart since defect 69: a MapItem.Key is an
+// interface{} and now carries what the key resolves to, as a map[any]any key
+// does, so the integer 1 and the string "1" are two entries under two keys
+// rather than two under one name.
+//
+// So two rows are left. map[string]any refusing the pair is right -- a Go map
+// cannot hold both -- which leaves one defect: an `any` keeps a single entry
+// and reports nothing, because it decodes into a map[string]any that has
+// already lost one key before anything can complain.
 
 // TestDefectATypedKeyIsNamedIntoTheStringsNamespace pins all five.
 func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 	for name, tc := range map[string]struct {
-		src    string
+		src string
+		// merged is the one name the two keys land on wherever a destination
+		// names a key by the canonical spelling of its type.
 		merged string
+		// resolved is what the plain key resolves to, which a MapSlice keeps
+		// and a Go map cannot.
+		resolved any
 	}{
-		"an integer and a string": {src: "1: x\n\"1\": y\n", merged: "1"},
-		"a boolean and a string":  {src: "true: x\n\"true\": y\n", merged: "true"},
-		"a null and a string":     {src: "~: x\n\"null\": y\n", merged: "null"},
-		"a float and a string":    {src: "1.0: x\n\"1.0\": y\n", merged: "1.0"},
+		"an integer and a string": {src: "1: x\n\"1\": y\n", merged: "1", resolved: uint64(1)},
+		"a boolean and a string":  {src: "true: x\n\"true\": y\n", merged: "true", resolved: true},
+		"a null and a string":     {src: "~: x\n\"null\": y\n", merged: "null", resolved: nil},
+		"a float and a string":    {src: "1.0: x\n\"1.0\": y\n", merged: "1.0", resolved: float64(1)},
 		// The one that shows what the rule is. "0x1f" and "31" share not one
 		// character, and the walk merges them: a key is named by the canonical
 		// spelling of what it resolved to, and 0x1f resolves to the integer 31.
-		"a hexadecimal integer and the decimal string": {src: "0x1f: x\n\"31\": y\n", merged: "31"},
+		"a hexadecimal integer and the decimal string": {src: "0x1f: x\n\"31\": y\n", merged: "31", resolved: uint64(31)},
 		// The empty key reaches it too, since it resolves to null and null's
 		// canonical spelling is "null".
-		"an empty key and the string \"null\"": {src: ": x\n\"null\": y\n", merged: "null"},
+		"an empty key and the string \"null\"": {src: ": x\n\"null\": y\n", merged: "null", resolved: nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Run("a map[any]any keeps both, and is the only one that does", func(t *testing.T) {
@@ -110,11 +124,11 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 				assert.Equal(t, map[string]any{tc.merged: "y"}, got)
 			})
 
-			t.Run("an ordered map keeps both entries under one name", func(t *testing.T) {
+			t.Run("an ordered map keeps both entries, under the keys they resolve to", func(t *testing.T) {
 				var got any
 				require.NoError(t, codec.UnmarshalWithOptions([]byte(tc.src), &got, codec.UseOrderedMap()))
 				assert.Equal(t, codec.MapSlice{
-					{Key: tc.merged, Value: "x"},
+					{Key: tc.resolved, Value: "x"},
 					{Key: tc.merged, Value: "y"},
 				}, got)
 			})

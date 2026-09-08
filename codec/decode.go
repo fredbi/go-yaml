@@ -315,6 +315,46 @@ func (d *Decoder) mapKeyNodeToString(ctx context.Context, node ast.MapKeyNode) (
 	return d.strs.clone(mapKeyString(node, key)), nil
 }
 
+// mapKeyNodeToValue is the key a [MapSlice] entry is addressed by.
+//
+// A MapItem.Key is an interface{}, so it holds what the key resolves to, as a
+// map[any]any key does: "1:" gives an integer, "1.0:" a float, "null:" nil.
+// Naming it by text instead put `"1.0": a` and `1.0: b` in one MapSlice under
+// one key, where 3.2.1.1 makes a string and a float two keys -- and a merge
+// then let one override the other, which is what defect 69 was.
+//
+// Two keys keep their text. [UseStringKeys] asks for it, and a collection key
+// has to have it: Go cannot hash a slice or a map, so a resolved one would
+// panic [MapSlice.ToMap] and read back into no Go map at all. That is the line
+// UseStringKeys already draws -- it "does not make a collection usable as a
+// key" -- and a MapSlice holds the rendered text for one, as it always has.
+func (d *Decoder) mapKeyNodeToValue(ctx context.Context, node ast.MapKeyNode) (any, error) {
+	key, err := d.nodeToValue(ctx, node)
+	if err != nil {
+		return nil, err
+	}
+	if d.useStringKeys || !hashableKey(key) {
+		return d.strs.clone(mapKeyString(node, key)), nil
+	}
+
+	return key, nil
+}
+
+// hashableKey reports whether a decoded key can stand as a Go map key, which a
+// slice and a map cannot.
+func hashableKey(key any) bool {
+	if key == nil {
+		return true
+	}
+
+	switch reflect.TypeOf(key).Kind() {
+	case reflect.Slice, reflect.Map, reflect.Func:
+		return false
+	default:
+		return true
+	}
+}
+
 // mapKeyString is the text a decoded mapping key is addressed by.
 //
 // Taken from the node where the node is a plain scalar, so that the decoder,
@@ -440,7 +480,7 @@ func (d *Decoder) setToOrderedMapValue(ctx context.Context, node ast.Node, m *Ma
 				return err
 			}
 		} else {
-			key, err := d.mapKeyNodeToString(ctx, n.Key)
+			key, err := d.mapKeyNodeToValue(ctx, n.Key)
 			if err != nil {
 				return err
 			}
@@ -549,14 +589,32 @@ func mergeEntry(node ast.Node) bool {
 // Only a merged key is looked up, and only in a mapping that holds a "<<", so
 // a scan costs nothing on a document without one. Every key a MapSlice is
 // filled with here comes from mapKeyNodeToString and is a string.
-func indexOfKey(m MapSlice, key string) int {
+func indexOfKey(m MapSlice, key any) int {
 	for i := range m {
-		if k, ok := m[i].Key.(string); ok && k == key {
+		if sameMapKey(m[i].Key, key) {
 			return i
 		}
 	}
 
 	return -1
+}
+
+// sameMapKey reports whether two decoded keys are one key.
+//
+// It compares the resolved values, so the string "1.0" and the float 1.0 are
+// two keys and a merge cannot override one with the other. Comparing the text
+// made them one, which is the half of defect 69 a MapSlice can represent; a
+// map[string]any has lost one of them before this runs.
+//
+// Only a key mapKeyNodeToValue judged hashable reaches this as a value, so ==
+// on the interfaces cannot panic -- the guard is there for a MapSlice a caller
+// built by hand.
+func sameMapKey(a, b any) bool {
+	if !hashableKey(a) || !hashableKey(b) {
+		return reflect.DeepEqual(a, b)
+	}
+
+	return a == b
 }
 
 func (d *Decoder) setPathToCommentMap(node ast.Node) {
@@ -835,16 +893,20 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			}
 			return m, nil
 		}
-		key, err := d.mapKeyNodeToString(ctx, n.Key)
-		if err != nil {
-			return nil, err
-		}
 		if d.useOrderedMap {
+			key, err := d.mapKeyNodeToValue(ctx, n.Key)
+			if err != nil {
+				return nil, err
+			}
 			v, err := d.nodeToValue(ctx, n.Value)
 			if err != nil {
 				return nil, err
 			}
 			return MapSlice{{Key: key, Value: v}}, nil
+		}
+		key, err := d.mapKeyNodeToString(ctx, n.Key)
+		if err != nil {
+			return nil, err
 		}
 		v, err := d.nodeToValue(ctx, n.Value)
 		if err != nil {
