@@ -2165,10 +2165,8 @@ func (d *Decoder) decodeInlineFields(
 		}
 		mapNode := ast.Mapping(nil, false)
 		for k, v := range entries {
-			if takesUnclaimed {
-				if _, _, _, claimed := fields.lookup(k); claimed {
-					continue
-				}
+			if takesUnclaimed && fields.claims(k) {
+				continue
 			}
 			key := &ast.StringNode{Value: k}
 			mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))

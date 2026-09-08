@@ -309,15 +309,6 @@ func isIgnoredStructField(field reflect.StructField, mode tagMode) bool {
 
 type StructFieldMap map[string]*StructField
 
-func (m StructFieldMap) isIncludedRenderName(name string) bool {
-	for _, v := range m {
-		if !v.IsInline && v.RenderName == name {
-			return true
-		}
-	}
-	return false
-}
-
 func (m StructFieldMap) hasMergeProperty() bool {
 	for _, v := range m {
 		if v.IsOmitEmpty && v.IsInline && v.IsAutoAlias {
@@ -357,6 +348,11 @@ type readFields struct {
 	// accepts once an exact match has failed. Nil outside [UseJSONTags], where
 	// a key names a field exactly or names none.
 	folded map[string]flatField
+	// dropped holds the names the conflict rule left reaching no field at all,
+	// which flat cannot record by leaving out: a name it does not hold may also
+	// be one no field of this type declares, such as a key an embedded struct's
+	// own `,inline` map carries at run time.
+	dropped map[string]struct{}
 	err  error
 }
 
@@ -425,6 +421,32 @@ func (r *readFields) lookup(name string) (sf *StructField, at []int, ord int, ok
 	}
 
 	return ff.sf, ff.at, ff.ord, true
+}
+
+// claims reports whether some field of the type answers to name.
+func (r *readFields) claims(name string) bool {
+	_, _, _, ok := r.lookup(name)
+
+	return ok
+}
+
+// writesPromoted reports whether an entry the embedded struct at index encoded
+// belongs in the mapping around it.
+//
+// flat holds the one field each name reaches, so a name it places under another
+// index is one a shallower field writes already, and a name in dropped is one
+// the conflict rule left reaching nothing. Writing either would put a key in
+// the document that reading it back would ignore or refuse.
+//
+// A name in neither is a key the type system never saw -- an embedded struct's
+// own `,inline` map carries those -- and it is written.
+func (r *readFields) writesPromoted(name string, index int) bool {
+	if ff, known := r.flat[name]; known {
+		return len(ff.at) > 0 && ff.at[0] == index
+	}
+	_, gone := r.dropped[name]
+
+	return !gone
 }
 
 // foldedNames keys every name a type answers to by its folded form.
@@ -536,11 +558,11 @@ func readType(structType reflect.Type, mode tagMode) *readFields {
 		if err := f.walk(structType, fields, r.inline, nil); err != nil {
 			return &readFields{err: err}
 		}
-		flat, err := f.resolve()
+		flat, dropped, err := f.resolve()
 		if err != nil {
 			return &readFields{err: err}
 		}
-		r.flat = flat
+		r.flat, r.dropped = flat, dropped
 	}
 	if mode.readsJSONTags() {
 		r.folded = foldedNames(r)
@@ -644,7 +666,7 @@ func (f *flattener) walk(t reflect.Type, fields StructFieldMap, inline []*Struct
 // A name only one field answers to is that field's. The rest go through
 // dominant, and the contested names are settled in order so that a type with
 // two of them always reports the same one.
-func (f *flattener) resolve() (map[string]flatField, error) {
+func (f *flattener) resolve() (map[string]flatField, map[string]struct{}, error) {
 	out := make(map[string]flatField, len(f.candidates))
 	contested := make([]string, 0, len(f.candidates))
 	for name, cs := range f.candidates {
@@ -657,14 +679,21 @@ func (f *flattener) resolve() (map[string]flatField, error) {
 	}
 	slices.Sort(contested)
 
+	var dropped map[string]struct{}
 	for _, name := range contested {
 		won, err := f.dominant(name, f.candidates[name])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if won != nil {
-			out[name] = flatField{at: won.at, sf: won.sf}
+		if won == nil {
+			if dropped == nil {
+				dropped = map[string]struct{}{}
+			}
+			dropped[name] = struct{}{}
+
+			continue
 		}
+		out[name] = flatField{at: won.at, sf: won.sf}
 	}
 
 	// The names are numbered in order, so a type reads the same way twice.
@@ -679,7 +708,7 @@ func (f *flattener) resolve() (map[string]flatField, error) {
 		out[name] = ff
 	}
 
-	return out, nil
+	return out, dropped, nil
 }
 
 // dominant picks between the fields one name reaches, or refuses the type.

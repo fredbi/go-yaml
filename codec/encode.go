@@ -40,6 +40,8 @@ type Encoder struct {
 	customMarshalerMap         map[reflect.Type]func(context.Context, interface{}) ([]byte, error)
 	omitZero                   bool
 	omitEmpty                  bool
+	writeJSONTags              bool
+	writeInferredNames         bool
 	autoInt                    bool
 	useLiteralStyleIfMultiline bool
 	commentMap                 map[nodeFilter][]*Comment
@@ -867,18 +869,35 @@ func (e *Encoder) encodeAnchor(anchorName string, value ast.Node, fieldValue ref
 	return anchorNode, nil
 }
 
+// tagMode says which of encoding/json's rules this encoder adds to the `yaml`
+// tag. Neither option set is go.yaml.in/yaml/v3 exactly, and the pair mirrors
+// [UseJSONTags] and [UseInferredNames] on the decoder.
+func (e *Encoder) tagMode() tagMode {
+	mode := yamlTags
+	if e.writeJSONTags {
+		mode |= jsonTags
+	}
+	if e.writeInferredNames {
+		mode |= inferredNames
+	}
+
+	return mode
+}
+
 func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column int) (ast.Node, error) {
 	node := ast.Mapping(token.New("", "", e.pos(column)), e.isFlowStyle)
 	structType := value.Type()
-	fieldMap, err := structFieldMap(structType, yamlTags)
+	mode := e.tagMode()
+	fields, err := structFields(structType, mode)
 	if err != nil {
 		return nil, err
 	}
+	fieldMap := fields.fields
 	hasInlineAnchorField := false
 	var inlineAnchorValue reflect.Value
 	for i := 0; i < value.NumField(); i++ {
 		field := structType.Field(i)
-		if isIgnoredStructField(field, yamlTags) {
+		if isIgnoredStructField(field, mode) {
 			continue
 		}
 		fieldValue := value.FieldByName(field.Name)
@@ -944,13 +963,20 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 				}
 				return nil, errors.New("inline value is must be map or struct type")
 			}
+			// A map holds the document's own keys, so the only question is
+			// whether a field writes the name already. A struct holds fields,
+			// and flat says which one each name reaches.
+			fromMap := inlineTakesUnclaimedEntries(fieldValue.Type())
 			mapIter := mapNode.MapRange()
 			for mapIter.Next() {
 				mapKey := mapIter.Key()
 				mapValue := mapIter.Value()
 				keyName := mapKey.GetToken().Value
-				if fieldMap.isIncludedRenderName(keyName) {
-					// if declared the same key name, skip encoding this field
+				if fromMap {
+					if fields.claims(keyName) {
+						continue
+					}
+				} else if !fields.writesPromoted(keyName, sf.Index) {
 					continue
 				}
 				node.Values = append(node.Values, ast.MappingValue(nil, mapKey, mapValue))

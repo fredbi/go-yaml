@@ -209,8 +209,8 @@ func UseStringKeys() DecodeOption {
 // though with case-insensitive matching on, both spellings of a Go name reach
 // the field either way, and the option decides which of them an encoder writes.
 //
-// The encoder is not affected and writes `yaml` names, so a document written
-// after being read under this option does not round trip.
+// [WriteJSONTags] is the encoder's half of it. Pass both and a value read from
+// a document is written back under the names it was read from.
 func UseJSONTags(use bool) DecodeOption {
 	return func(d *Decoder) error {
 		d.useJSONTags = use
@@ -231,6 +231,11 @@ func UseJSONTags(use bool) DecodeOption {
 // anonymous embedded struct is read and how a repeated name is resolved are
 // [UseJSONTags]'s to say, and the two options are independent: a struct with no
 // tags at all reads under this one alone.
+//
+// With [UseJSONTags] set, a mapping key matches a field name but for case, so
+// both spellings of a Go name reach the field whether this is set or not. What
+// it still decides there is which of them is the exact match, and so which one
+// [WriteInferredNames] writes.
 func UseInferredNames(use bool) DecodeOption {
 	return func(d *Decoder) error {
 		d.useInferredNames = use
@@ -364,6 +369,39 @@ func MarshalAnchor(callback func(*ast.AnchorNode, interface{}) error) EncodeOpti
 func UseJSONMarshaler() EncodeOption {
 	return func(e *Encoder) error {
 		e.useJSONMarshaler = true
+		return nil
+	}
+}
+
+// WriteJSONTags names a struct's fields the way encoding/json names them
+// wherever the `yaml` tag leaves off, so that a value read under [UseJSONTags]
+// is written back under the names it was read from.
+//
+// The `json` tag names a field carrying no `yaml` tag, and an anonymous
+// embedded struct that no tag names has its fields written into the mapping
+// around it rather than under a key of their own. The `yaml` tag still wins
+// wherever a field carries one.
+//
+// Without it the encoder writes the `yaml` tag's name, or the lowercased Go
+// name, as go.yaml.in/yaml/v3 does.
+func WriteJSONTags(write bool) EncodeOption {
+	return func(e *Encoder) error {
+		e.writeJSONTags = write
+
+		return nil
+	}
+}
+
+// WriteInferredNames writes a field that no tag names under its Go name,
+// verbatim, the way encoding/json writes it, and mirrors [UseInferredNames] on
+// the decoder.
+//
+// Without it such a field is written under its lowercased Go name, which is
+// what go.yaml.in/yaml/v3 writes.
+func WriteInferredNames(write bool) EncodeOption {
+	return func(e *Encoder) error {
+		e.writeInferredNames = write
+
 		return nil
 	}
 }
