@@ -78,6 +78,7 @@ func (p *Parser) keepAnchor(name string, value ast.Node) {
 	}
 	p.anchors[name] = value
 	p.keepAnchorIdentity(name, value)
+	p.pinAnchoredNodes()
 }
 
 // anchorIdentity is what an anchor's node resolves to, in the two forms a key
@@ -231,4 +232,18 @@ func (p *Parser) takeAnchors() map[string]ast.Node {
 	p.openAnchors = p.openAnchors[:0]
 
 	return anchors
+}
+
+// pinAnchoredNodes stops the walk handing the anchored node's cells out again.
+//
+// An alias names the node later in the document and reads it through
+// [ast.AliasNode.Target]. The walk rewinds the arena as each entry goes over,
+// so without this the cell is written over by what comes next and the alias
+// reads another part of the document. Only a walk rewinds, so this does nothing
+// for a parse that gathers a tree.
+func (p *Parser) pinAnchoredNodes() {
+	if !p.walking() || p.arena == nil {
+		return
+	}
+	p.arena.Commit()
 }

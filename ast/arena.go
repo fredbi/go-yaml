@@ -449,3 +449,49 @@ func (a *Arena) Sequence(tk *token.Token, isFlowStyle bool) *SequenceNode {
 
 	return n
 }
+
+// Commit pins every node handed out so far, so that no mark still outstanding
+// rewinds past it.
+//
+// A walk hands the cells of an entry out again once the entry has gone over,
+// which is what keeps its frontier flat. An anchored node has to outlive that:
+// an alias names it later in the document, and [AliasNode.Target] points at the
+// cell. Without this the cell is handed out again and the alias reads whatever
+// was built there next -- "a: &x {k: 1}" over one filler line over "b: *x" read
+// back as "{b: 0}".
+//
+// It raises the outstanding marks rather than dropping them, so the walk still
+// rewinds everything built after the anchor. What it costs is the anchored
+// subtree, plus whatever the entry holding it built before it.
+func (a *Arena) Commit() {
+	if len(a.marks) == 0 {
+		return
+	}
+
+	here := a.Mark()
+	for i := range a.marks {
+		a.marks[i].raise(here)
+	}
+}
+
+// raise moves m forward to to, in every block where to stands further on.
+func (m *Mark) raise(to Mark) {
+	m.strings = laterMark(m.strings, to.strings)
+	m.integers = laterMark(m.integers, to.integers)
+	m.floats = laterMark(m.floats, to.floats)
+	m.bools = laterMark(m.bools, to.bools)
+	m.nulls = laterMark(m.nulls, to.nulls)
+	m.mappingValues = laterMark(m.mappingValues, to.mappingValues)
+	m.mappings = laterMark(m.mappings, to.mappings)
+	m.sequences = laterMark(m.sequences, to.sequences)
+	m.sequenceEntry = laterMark(m.sequenceEntry, to.sequenceEntry)
+}
+
+// laterMark is whichever of the two stands further into the block.
+func laterMark(a, b blockMark) blockMark {
+	if b.at > a.at || (b.at == a.at && b.used > a.used) {
+		return b
+	}
+
+	return a
+}
