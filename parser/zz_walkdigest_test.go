@@ -128,7 +128,13 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // fixedWalkDigest is what the walk hands over today, over the 417 documents of
 // the YAML Test Suite and the synthetic corpus -- 323 walked and 94 refused.
 //
-// Re-baselined 2026-09-08 with the commit that counted a tag's "!" in the
+// Re-baselined 2026-09-09 with the commit that admitted a zero-indented block
+// sequence as an explicit key's body. The counts held at 323 and 94, so no
+// document moved between walked and refused; what moved is the tree for a "?"
+// whose content is such a sequence -- it used to end at the first "-", so the
+// key was the empty node and the entries below it became a value.
+//
+// Re-baselined 2026-09-08 before that, with the commit that counted a tag's "!" in the
 // column as well as in the offset. Every token standing after a tag on its line
 // moved one column right, which is where it always addressed: digestVisitor
 // writes the column, so any suite document holding a tag shifts the digest. The
@@ -152,7 +158,7 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // scanner's two tab checks: the counts held there too, and what moved was the
 // message on a document refused either way, since digestVisitor writes
 // "refused: %v" and one of the two messages was retired.
-const fixedWalkDigest = "dc93417847a0027fc02ad4042f12024a4ec02e5923dafe4af7f01ca0db0fb615"
+const fixedWalkDigest = "b51c16adee06966969034ef0f3d948398c390c53dc3459d106bd09d97d854b60"
 
 // digestVisitor writes what it is handed, so that anything the walk reads out
 // of a reclaimed cell shows up as a different document.

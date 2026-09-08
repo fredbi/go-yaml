@@ -655,6 +655,21 @@ type explicitKey struct {
 	body      []*tapeToken
 }
 
+// opensZeroIndentedSeq reports whether the body of an explicit key is a block
+// sequence written at the '?'s own column, or is still empty and could become
+// one.
+//
+// Only the entries of that one sequence continue such a body. A '-' back at the
+// '?'s column after the key has content of another shape belongs to the
+// collection around the entry, not to the key.
+func opensZeroIndentedSeq(body []*tapeToken, keyColumn int) bool {
+	if len(body) == 0 {
+		return true
+	}
+
+	return body[0].Type() == token.SequenceEntryType && body[0].Column() == keyColumn
+}
+
 // endsExplicitKeyBody reports whether tk stands past the body of the explicit
 // key introduced by a '?' at keyColumn, and counts the flow collections opened
 // inside that body.
@@ -664,11 +679,30 @@ type explicitKey struct {
 // "? []: x" has the mapping {[]: x} for its key and no value at all, which is
 // what the test suite records for it.
 //
+// A block sequence is the exception, and 8.2.2 is why: an explicit key's body
+// is s-l+block-indented(n, block-out), which admits seq-space -- a block
+// sequence written at its parent's own column rather than deeper. So a '-'
+// standing exactly at the '?' opens the key's content where anything else
+// there would end it. Only where the body is still empty: once the key has
+// content, a '-' back at the '?'s column belongs to the collection around the
+// entry.
+//
+// Without it "?" over "- a" over "- b" over ":" over "- c" ended the body at
+// the first '-', so the '?' named the empty node, the parser wrote a ':' the
+// source never held, and the document came back as two entries keyed null --
+// which the decode then refused as a repeated key. It is the test suite's
+// zero-indented-sequences-in-explicit-mapping-keys.
+//
 // A flow collection is not indentation-sensitive, so there the body runs to the
 // punctuation that ends it: its ':', a ',', or the bracket closing the
 // collection it sits in.
-func endsExplicitKeyBody(tk *tapeToken, keyColumn int, inFlow bool, depth *int) bool {
+func endsExplicitKeyBody(tk *tapeToken, keyColumn int, inFlow bool, body []*tapeToken, depth *int) bool {
 	if !inFlow {
+		if opensZeroIndentedSeq(body, keyColumn) &&
+			tk.Type() == token.SequenceEntryType && tk.Column() == keyColumn {
+			return false
+		}
+
 		return tk.Column() <= keyColumn
 	}
 

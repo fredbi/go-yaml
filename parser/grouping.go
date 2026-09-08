@@ -225,7 +225,8 @@ func flushBlockScalars(g *grouper, at int, out []*tapeToken) []*tapeToken {
 // keys are found by the stage after this one.
 func stageExplicitKeys(g *grouper, at int, tk *tapeToken, out []*tapeToken) []*tapeToken {
 	if g.explicit.key != nil {
-		if !endsExplicitKeyBody(tk, g.explicit.keyColumn, g.explicit.keyInFlow, &g.explicit.bodyDepth) {
+		if !endsExplicitKeyBody(tk, g.explicit.keyColumn, g.explicit.keyInFlow,
+			g.explicit.body, &g.explicit.bodyDepth) {
 			g.explicit.body = append(g.explicit.body, tk)
 
 			return out
