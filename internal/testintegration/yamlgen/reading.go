@@ -5,6 +5,7 @@ package yamlgen
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -23,17 +24,19 @@ import (
 // That is why the emitter records this as it writes and Write hands it back,
 // the same way it hands back the features.
 //
-// # The table is small because plainSafe is strict
+// # Two tables, and both directions of the disagreement
 //
-// plainSafe requires a leading letter or underscore, which double-quotes every
-// numeric spelling the schemas disagree about -- "0777", "1_000", "0b1010",
-// "1:30", "0x1A", "1e3", ".inf" and "2001-12-14" all come out in quotes and
-// mean the empty question. What is left is YAML 1.1's boolean words, which 1.2
-// reads as strings. yamlcorpus's Resolutions carries the numeric ones as
-// enumerated shapes, where the answers are written by hand.
+// A spelling can be a number under one reading and a string under the other,
+// and it happens both ways round. numberUnder11 answers the first direction:
+// the emitter writes an Int or a Float, core reads the number back, and 1.1
+// reads the text -- "0o37", "1e-320", "09". legacyNumbers answers the second:
+// the emitter writes a Str whose text 1.1 reads as a number and core reads
+// back as the text -- "1_000", "0b1010", "1:30". legacyBooleans is the second
+// direction for the boolean words.
 //
-// Widening plainSafe is what would grow this table, and the two go together:
-// the comment there says being wrong would mean "generating documents whose
+// plainSafe refuses every one of the legacyNumbers texts on its leading
+// character, so canPlain consults the table by name. That is the condition the
+// note there sets out: being wrong would mean "generating documents whose
 // expected value we got wrong", and a spelling whose readings are written down
 // here is a spelling that can be let through.
 
@@ -67,6 +70,77 @@ var legacyBooleans = map[string]bool{
 	"on": true, "On": true, "ON": true,
 	"n": false, "N": false, "no": false, "No": false, "NO": false,
 	"off": false, "Off": false, "OFF": false,
+}
+
+// legacyNumbers are the plain spellings YAML 1.1 reads as numbers and YAML 1.2
+// reads as strings, with what 1.1 makes of each.
+//
+// Four productions of 1.1's §10.3 and §10.4 that 1.2 dropped: the "_" digit
+// separator, the "0b" binary prefix, base 60, and the same three inside a
+// float. Every value is written as the Go type this library hands back --
+// uint64 for a non-negative integer and int64 for a negative one, the
+// asymmetry [Int.Decoded] records -- and
+// TestTheLegacyNumbersMeanUnderElevenWhatTheLibraryReads holds the whole table
+// to the library's own 1.1 reader.
+//
+// 190:20:30 is 190*3600 + 20*60 + 30, and 12:00.5 is 12*60 + 0.5. Base 60
+// counts from the right, so the leftmost group is unbounded and the rest are
+// two digits under 60.
+var legacyNumbers = map[string]any{
+	"1_000":      uint64(1000),
+	"-1_0":       int64(-10),
+	"0b1010":     uint64(10),
+	"+0b11":      uint64(3),
+	"0x_1F":      uint64(31),
+	"1:30":       uint64(90),
+	"190:20:30":  uint64(685230),
+	"685_230.15": float64(685230.15),
+	"12:00.5":    float64(720.5),
+}
+
+// legacyTexts is legacyNumbers' keys, in a stable order, so a draw can index
+// them. Map iteration is random and rapid needs the same index to mean the same
+// text on a replay.
+var legacyTexts = sortedLegacyTexts()
+
+func sortedLegacyTexts() []string {
+	out := make([]string, 0, len(legacyNumbers))
+	for text := range legacyNumbers {
+		out = append(out, text)
+	}
+
+	sort.Strings(out)
+
+	return out
+}
+
+// legacyText returns what YAML 1.1 makes of a plain spelling core reads as a
+// string, and whether it reads it as anything else at all.
+func legacyText(text string) (any, bool) {
+	if b, isBool := legacyBooleans[text]; isBool {
+		return b, true
+	}
+
+	n, isNumber := legacyNumbers[text]
+
+	return n, isNumber
+}
+
+// legacyName is [KeyText] for what a legacy spelling resolves to under YAML
+// 1.1, which is how the library names a key it read that way.
+func legacyName(v any) string {
+	switch n := v.(type) {
+	case bool:
+		return strconv.FormatBool(n)
+	case uint64:
+		return strconv.FormatUint(n, 10)
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case float64:
+		return floatKeyText(n)
+	default:
+		return fmt.Sprintf("%v", n)
+	}
 }
 
 // readings is what an emitter learns about resolution while it writes.
@@ -247,7 +321,7 @@ func (r *readings) sawScalar(text string, plain bool) {
 		return
 	}
 
-	if _, diverges := legacyBooleans[text]; !diverges {
+	if _, diverges := legacyText(text); !diverges {
 		return
 	}
 
@@ -384,12 +458,8 @@ func (r *readings) numberText(v Value) (string, bool) {
 // meaning rather than a wrong value.
 func (r *readings) legacyKey(v Value) string {
 	if n, ok := v.(Str); ok {
-		if b, diverges := legacyBooleans[n.V]; diverges && r.plain[n.V] && !r.split[n.V] {
-			if b {
-				return "true"
-			}
-
-			return "false"
+		if other, diverges := legacyText(n.V); diverges && r.plain[n.V] && !r.split[n.V] {
+			return legacyName(other)
 		}
 	}
 
@@ -438,8 +508,8 @@ func isKeyCollection(v Value) bool {
 func (r *readings) legacy(v Value) any {
 	switch n := v.(type) {
 	case Str:
-		if b, diverges := legacyBooleans[n.V]; diverges && r.plain[n.V] && !r.split[n.V] {
-			return b
+		if other, diverges := legacyText(n.V); diverges && r.plain[n.V] && !r.split[n.V] {
+			return other
 		}
 
 		return n.V

@@ -101,9 +101,10 @@ func TestOneTextWrittenTwoWaysDropsTheReading(t *testing.T) {
 
 // TestASecondReadingOnlyArrivesWithALegacySpelling is the property.
 //
-// A reading is stated for two reasons and no third. Either the document holds
-// one of the sixteen spellings YAML 1.1 reads as a boolean and 1.2 does not,
-// written plain; or it writes a number in a form 1.1 does not read, which
+// A reading is stated for three reasons and no fourth. The document holds one
+// of the sixteen spellings YAML 1.1 reads as a boolean and 1.2 does not,
+// written plain; or one of the nine it reads as a number and 1.2 reads as the
+// text; or it writes a number in a form 1.1 does not read, which
 // Style.NumberForm decides.
 func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
@@ -203,6 +204,13 @@ func holdsLegacySpelling(v yamlgen.Value) bool {
 		"on": true, "On": true, "ON": true,
 		"n": true, "N": true, "no": true, "No": true, "NO": true,
 		"off": true, "Off": true, "OFF": true,
+		// The numeric half: 1.1 reads each of these as a number and 1.2 as the
+		// text. Written out here rather than read from yamlgen.legacyNumbers,
+		// for the reason the booleans above are: a test restating the table is
+		// a test that catches an entry going in without a draw to reach it.
+		"1_000": true, "-1_0": true, "0b1010": true, "+0b11": true,
+		"0x_1F": true, "1:30": true, "190:20:30": true,
+		"685_230.15": true, "12:00.5": true,
 	}
 
 	switch n := v.(type) {
@@ -282,4 +290,74 @@ func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
 				"%q: yamlgen says %v under 1.1 and the library reads %v", w.Text, want, legacy)
 		}
 	}
+}
+
+// TestTheLegacyNumbersMeanUnderElevenWhatTheLibraryReads holds the other half
+// of the table, the spellings YAML 1.1 reads as numbers and 1.2 reads as the
+// text, to the library's own 1.1 reader.
+//
+// The same argument as the test above and the same risk: reading.go's
+// legacyNumbers is written out from §10.3 and §10.4 of the 1.1 specification --
+// the "_" separator, the "0b" prefix, base 60 -- and being wrong there would
+// put a meaning in the corpus that no implementation holds.
+//
+// Each text is asked as a value and as a key, in block and in flow. A key is
+// the harder half: "1:30" carries a ':' that is not the entry's, and the name
+// the key ends up under moves with the reading, so "1:30: v" is keyed "1:30"
+// under core and "90" under 1.1.
+//
+// A text added to legacyNumbers without a row here is caught by
+// TestASecondReadingOnlyArrivesWithALegacySpelling, which restates the whole
+// table and fails on a spelling it does not know.
+func TestTheLegacyNumbersMeanUnderElevenWhatTheLibraryReads(t *testing.T) {
+	for _, tc := range []struct {
+		text  string
+		under any    // what 1.1 reads the text as
+		named string // the name a key resolving to that gets
+	}{
+		{"1_000", uint64(1000), "1000"},
+		{"-1_0", int64(-10), "-10"},
+		{"0b1010", uint64(10), "10"},
+		{"+0b11", uint64(3), "3"},
+		{"0x_1F", uint64(31), "31"},
+		{"1:30", uint64(90), "90"},
+		{"190:20:30", uint64(685230), "685230"},
+		{"685_230.15", 685230.15, "685230.15"},
+		{"12:00.5", 720.5, "720.5"},
+	} {
+		for _, flow := range []bool{false, true} {
+			st := yamlgen.Style{NullSpelling: "null", Quoting: yamlgen.QuotePlain, Flow: flow}
+
+			asValue := yamlgen.Map{Pairs: []yamlgen.Pair{
+				{Key: yamlgen.Str{V: "k"}, Val: yamlgen.Str{V: tc.text}},
+			}}
+			readsAs(t, yamlgen.Write(asValue, st),
+				map[string]any{"k": tc.text}, map[string]any{"k": tc.under})
+
+			asKey := yamlgen.Map{Pairs: []yamlgen.Pair{
+				{Key: yamlgen.Str{V: tc.text}, Val: yamlgen.Str{V: "v"}},
+			}}
+			readsAs(t, yamlgen.Write(asKey, st),
+				map[string]any{tc.text: "v"}, map[string]any{tc.named: "v"})
+		}
+	}
+}
+
+// readsAs checks a written document against both readings: the library reads
+// core on its own and 1.1 under a directive, and yamlgen states the second one
+// only where it differs.
+func readsAs(t *testing.T, w yamlgen.Written, core, under11 any) {
+	t.Helper()
+
+	var got any
+	require.NoError(t, yaml.Unmarshal([]byte(w.Text), &got), "%q", w.Text)
+	assert.Equal(t, core, got, "%q does not read back as the value it was written from", w.Text)
+
+	assert.Equal(t, under11, w.Readings[yamlgen.Reading11],
+		"%q: yamlgen states %v under 1.1", w.Text, w.Readings[yamlgen.Reading11])
+
+	var legacy any
+	require.NoError(t, yaml.Unmarshal([]byte("%YAML 1.1\n---\n"+w.Text), &legacy), "%q", w.Text)
+	assert.Equal(t, under11, legacy,
+		"%q: yamlgen says %v under 1.1 and the library reads %v", w.Text, under11, legacy)
 }

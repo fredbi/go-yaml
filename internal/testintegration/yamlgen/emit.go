@@ -1093,6 +1093,15 @@ var resolving = map[string]struct{}{
 // the empty value. Nothing else in the table is unlocked by it, because
 // plainSafe already refuses every numeric spelling on its leading character.
 func canPlain(s string, strTagged bool) bool {
+	if _, legacy := legacyNumbers[s]; legacy {
+		// Written plain on purpose. plainSafe refuses "1_000" and "1:30" on
+		// their leading digit, and writing them in quotes would make them the
+		// same string under every reading -- which is the one thing they are
+		// drawn not to be. reading.go's legacyNumbers says what 1.1 makes of
+		// each, so the meaning is stated rather than guessed.
+		return true
+	}
+
 	if !plainSafe.MatchString(s) {
 		return false
 	}

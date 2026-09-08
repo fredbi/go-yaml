@@ -747,13 +747,20 @@ func values(depth int) *rapid.Generator[Value] {
 	})
 }
 
-// drawTextual draws a string, and one draw in eight a [Timestamp] or a
-// [Binary] instead.
+// drawTextual draws a string, and one draw in eight a [Timestamp], a [Binary]
+// or a legacy number instead.
 //
 // They share the string's slot for the reason [drawInt] gives for the wide
 // numbers: given a slot each they would be a third of every scalar drawn, and
 // awkwardStrings is what reaches the corners of the presentation axes. One in
-// eight of one slot in six puts a timestamp or a byte string on 1 scalar in 48.
+// sixteen of one slot in six puts each of them on 1 scalar in 96.
+//
+// A legacy number is a [Str] and nothing more -- "1_000" is that text under
+// the core schema, which is what the Value says. What makes it worth a slot is
+// the second answer: 1.1 reads it as the integer 1000, canPlain writes it
+// unquoted so the question is asked, and reading.go's legacyNumbers states
+// both. It is the mirror of Style.NumberForm, which writes an Int in a
+// spelling 1.1 reads back as a string.
 //
 // Each comes back already inside a [Tagged], because neither resolves: an
 // untagged "2001-12-14" is the string "2001-12-14" and an untagged "aGVsbG8="
@@ -767,6 +774,8 @@ func drawTextual(t *rapid.T) Value {
 		return Tagged{Tag: TagTimestamp, V: Timestamp{V: drawTime(t)}}
 	case 1:
 		return Tagged{Tag: TagBinary, V: Binary{V: rapid.SliceOfN(rapid.Byte(), 1, 12).Draw(t, "bytes")}}
+	case 2:
+		return Str{V: rapid.SampledFrom(legacyTexts).Draw(t, "legacynumber")}
 	default:
 		return Str{V: Strings().Draw(t, "string")}
 	}
@@ -911,14 +920,15 @@ func keyFamily(v Value) string {
 		return strings.ToLower(s.V)
 	}
 
-	// YAML 1.1's boolean words belong with the boolean they spell there.
+	// A spelling YAML 1.1 resolves belongs with what it resolves to there.
 	// Style.Version may write "%YAML 1.1" over any document, and under it
-	// "no:" is the key false -- so "no" beside Bool{false} is one key and the
+	// "no:" is the key false and "1_000:" is the key 1000 -- so "no" beside
+	// Bool{false}, and "1_000" beside Int{1000}, are one key each and the
 	// library refuses the document as a duplicate. The style is drawn after
 	// the value and the two are independent on purpose, so the dedupe has to
 	// hold for every style rather than for the one that was drawn.
-	if b, legacy := legacyBooleans[s.V]; legacy {
-		return strconv.FormatBool(b)
+	if other, legacy := legacyText(s.V); legacy {
+		return legacyName(other)
 	}
 
 	// A string's own text, which is also the name this library gives it: a
@@ -954,6 +964,14 @@ func Keys() *rapid.Generator[Value] {
 		// matched ones -- awkwardStrings is what reaches the corners, and a
 		// key drawn as a float reaches none of them.
 		if rapid.IntRange(0, 5).Draw(t, "keykind") > 0 {
+			// One string key in eight, so one key in ten, is a legacy number.
+			// A key is where the spelling is hardest to write: "1:30" holds a
+			// ':' that is not the entry's, and 7.4.2 ends an implicit key at
+			// the first ": ", so the parser has to find the right one.
+			if rapid.IntRange(0, 7).Draw(t, "legacykey") == 0 {
+				return Str{V: rapid.SampledFrom(legacyTexts).Draw(t, "legacykeytext")}
+			}
+
 			return Str{V: Strings().Draw(t, "key")}
 		}
 
