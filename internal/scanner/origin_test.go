@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/internal/scanner"
@@ -29,16 +31,76 @@ import (
 // The ends have to reach the end of the source, less the final line break, which closes the stream instead of
 // opening
 // a token.
+// ⚠️ It reaches what the six workloads hold and no more. None of them writes a
+// multi-line plain scalar whose extents break, so the seven documents that do
+// pass here unnoticed -- ledgers/scanner's extentLedger is what covers those,
+// over the Test Suite and the fuzz seeds. Keep the two apart: this is a pin
+// over a fixed corpus and that is a ledger over one that reshuffles on every
+// regeneration, and a pin standing on shifting ground guards nothing.
+//
+// The loop below ranged an empty literal from 037fcbe until 2026-09-08, so
+// assertOriginsTile was never called. The guard was live when 7022e8a cited it
+// as taking over from printer.PrintTokens; a refactor emptied it three days
+// later.
 func TestOriginsTileTheSource(t *testing.T) {
 	for tc := range originTileCases(t) {
 		t.Run("with "+tc.name, func(t *testing.T) {
 			t.Run("token origins should tile the source", func(t *testing.T) {
-				for _, src := range []string{} {
+				for src := range tc.src {
 					assertOriginsTile(t, src)
+				}
+			})
+
+			t.Run("a token's column should address it", func(t *testing.T) {
+				for src := range tc.src {
+					assertColumnsAddressTheToken(t, src)
 				}
 			})
 		})
 	}
+}
+
+// assertColumnsAddressTheToken checks that a token's Column counts the
+// characters from the start of its line to its Offset, which is the other half
+// of what a position is for: the offset addresses the token in the bytes and
+// the column addresses it on the page, and they have to agree.
+//
+// scanTag stepped over the '!' with progress rather than progressColumn, so
+// "!!str k: v" reported k at offset 6 -- which addresses it -- and column 6,
+// where it is the seventh character. Every token after a tag on that line was
+// one short, and nothing here or anywhere else compared the two.
+func assertColumnsAddressTheToken(t *testing.T, src string) {
+	t.Helper()
+
+	var s scanner.Scanner
+	s.Init([]byte(src))
+
+	// The line each byte falls on, found once: doing it per token walks the
+	// prefix again for every one of them, which is quadratic over a workload.
+	lineStart := make([]int, len(src)+1)
+	start := 0
+	for i := range len(src) {
+		lineStart[i] = start
+		if src[i] == '\n' {
+			start = i + 1
+		}
+	}
+	lineStart[len(src)] = start
+
+	for tk := range s.Tokens() {
+		at := int(tk.Position.Offset())
+		if at < 0 || at > len(src) {
+			continue // an extent that leaves the source: extentLedger's ground, not this one
+		}
+
+		want := int32(utf8.RuneCountInString(src[lineStart[at]:at]) + 1) //nolint:gosec // a line longer than 2^31 characters does not fit in memory
+
+		assert.Equalf(t, want, tk.Position.Column,
+			"a %v at offset %d stands %d characters into its line, so its column is %d: %q",
+			tk.Type, at, want-1, want, src)
+	}
+
+	require.NoError(t, s.Err())
 }
 
 // ================================== Origin tiling test ==================================.

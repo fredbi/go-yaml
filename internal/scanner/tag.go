@@ -30,11 +30,13 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 	}
 
 	ctx.addOriginBuf('!')
-	// The offset counts the bytes the cursor has crossed, so it takes the '!' too.
-	// Left out, it stayed one byte behind for the rest of the document and every token after this one was reported a byte
-	// early. tagPos is taken before the step, where the tag's own text begins.
+	// The offset counts the bytes the cursor has crossed and the column counts the characters, so both take the '!'.
+	// The offset was left out once and stayed a byte behind for the rest of the document; the column was left out with
+	// it and stayed a character behind, so "!!str k: v" reported k at offset 6 -- which addresses it -- and column 6,
+	// where it is the seventh character. Every token after a tag on that line was one short.
+	// tagPos is taken before the step, where the tag's own text begins.
 	tagPos := s.pos()
-	s.progress(ctx, 1) // skip '!' character
+	s.progressColumn(ctx, 1) // skip '!' character
 
 	// A verbatim tag, "!<...>", holds a URI and takes it as written: the characters a shorthand may not contain are
 	// ordinary inside the brackets.

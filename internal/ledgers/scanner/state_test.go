@@ -67,12 +67,12 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// Inside a block scalar it could not: the two sites that rewrite the buffer set it outright, keeping the space that
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
 	// 2 of 2,742 re-baselined 2026-09-08, from 3 of 1,348 measured 2026-09-07.
-	"buf.notSpaceCharPos==trimmed/plain": {0, 318109},
+	"buf.notSpaceCharPos==trimmed/plain": {0, 318110},
 	"buf.notSpaceCharPos==trimmed/block": {2, 2742},
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
-	"buf.notSpaceCharPos<=len(buf)": {0, 320851},
+	"buf.notSpaceCharPos<=len(buf)": {0, 320852},
 
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
@@ -106,7 +106,7 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	//
 	// A count re-baselined without the ratio beside it says nothing about whether the scanner changed, which is why
 	// the ledger records the denominator.
-	"indent.lastIndentLevel==indentLevel": {5400, 158692},
+	"indent.lastIndentLevel==indentLevel": {5399, 158692},
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.

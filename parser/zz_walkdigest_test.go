@@ -128,8 +128,14 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // fixedWalkDigest is what the walk hands over today, over the 417 documents of
 // the YAML Test Suite and the synthetic corpus -- 323 walked and 94 refused.
 //
-// Re-baselined 2026-09-08 with the commit that stopped parseComment handing a
-// node over twice. The counts did not move -- 323 and 94 before and after, so
+// Re-baselined 2026-09-08 with the commit that counted a tag's "!" in the
+// column as well as in the offset. Every token standing after a tag on its line
+// moved one column right, which is where it always addressed: digestVisitor
+// writes the column, so any suite document holding a tag shifts the digest. The
+// counts held at 323 and 94.
+//
+// Re-baselined 2026-09-08 before that, with the commit that stopped parseComment
+// handing a node over twice. The counts did not move -- 323 and 94 before and after, so
 // no document changed between walked and refused -- and every document that
 // shifted the digest carries a comment, since parseComment runs only under
 // WithComments and only on a comment token. What moved is a node behind a
@@ -146,7 +152,7 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // scanner's two tab checks: the counts held there too, and what moved was the
 // message on a document refused either way, since digestVisitor writes
 // "refused: %v" and one of the two messages was retired.
-const fixedWalkDigest = "5a0ee556370eb3621772850c1efc2ef5ab61a20ca170fe41a22fed126389ffa6"
+const fixedWalkDigest = "dc93417847a0027fc02ad4042f12024a4ec02e5923dafe4af7f01ca0db0fb615"
 
 // digestVisitor writes what it is handed, so that anything the walk reads out
 // of a reclaimed cell shows up as a different document.
