@@ -2674,3 +2674,64 @@ func TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType(t *testing.T) {
 		assert.JSONEq(t, `{"226.0":"x"}`, string(out))
 	})
 }
+
+// TestFixedAnAliasKeyIsNamedAsTheNodeItsAnchorNamed closes the last of the
+// property-in-front-of-a-key naming.
+//
+// A float key is named by its canonical YAML spelling, and the ".0" keeps it
+// out of the integers' namespace. An alias in front of the same key made the
+// name Go's %v instead -- "*a1" naming an anchor on ".inf" came back "+Inf" --
+// and the alias never reached a struct field, since no field is tagged with
+// what Go's %v writes.
+//
+// 3.2.2.2 makes an alias node the node its anchor named, so it is named as that
+// node. [ast.KeyName] reads [ast.AliasNode.Target] to do it, and every consumer
+// of the name gets it at once: the decoder, the reflection path and ToJSON all
+// read that one walk.
+//
+// ⚠️ Target became safe to read only on 2026-09-08. A walk hands an anchored
+// node's cells out again once its entry closes, so Target held another part of
+// the document -- an anchor on "1" read "499" with 500 entries in between, and
+// the corruption was per-arena-block, so a string anchor could survive where an
+// integer one did not. ast.Arena.Commit holds those cells for the document now.
+// Before it, this arm handed back nothing rather than a wrong answer, which is
+// why the fix waited.
+//
+// [ast.KeyIdentity] still does not read Target and must not: an identity writes
+// the whole structure out, so following an alias expands the alias graph, which
+// is exponential in a document's width. A name is one scalar, so this cannot.
+func TestFixedAnAliasKeyIsNamedAsTheNodeItsAnchorNamed(t *testing.T) {
+	t.Run("an alias key keeps the spelling its anchor had", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{"a: &a1 .inf\n*a1 : v\n", ".inf"},
+			{"a: &a1 1.0\n*a1 : v\n", "1.0"},
+			{"a: &a1 1e3\n*a1 : v\n", "1000.0"},
+			// The long form too, which used not to save it.
+			{"a: &a1 .inf\n? *a1\n: v\n", ".inf"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Containsf(t, walked, tc.key, "the walk: %q", tc.src)
+
+			var tree map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
+			assert.Containsf(t, tree, tc.key, "the tree: %q", tc.src)
+		}
+	})
+
+	t.Run("an alias key reaches the struct field it names", func(t *testing.T) {
+		type named struct {
+			N any `yaml:"n"`
+		}
+
+		const src = "k: &a1 n\n*a1 : 1\n"
+
+		var got named
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, uint64(1), got.N, "the alias resolves to the key \"n\"")
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, map[string]any{"k": "n", "n": uint64(1)}, walked)
+	})
+}

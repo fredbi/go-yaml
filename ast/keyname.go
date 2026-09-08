@@ -26,11 +26,10 @@ import (
 // The empty string under [token.KeyOther] means no name, which a caller has to
 // answer for itself:
 //
-//   - an alias, because what it names depends on where the caller stands. A
-//     tree reads [AliasNode.Target]; a parse still walking has to have kept the
-//     anchored node's identity as it went.
 //   - a sequence or a mapping, which has no scalar spelling at all. Compare
 //     those with [KeyIdentity].
+//
+// An alias is named as the node its anchor named, through [AliasNode.Target].
 //
 // Three packages named a key from a node before this: ast for [KeyIdentity],
 // the parser for its duplicate check, and codec for the string a Go map or a
@@ -65,7 +64,18 @@ func keyNameAt(n Node, depth int) (string, token.KeyKind) {
 		}
 
 		return nn.Value.Value, token.KeyString
-	case *AliasNode, *SequenceNode, *MappingNode, *MappingValueNode:
+	case *AliasNode:
+		// An alias node is the node its anchor named (3.2.2.2), so it is named
+		// as that node. Reading Target is safe on a walk as well as on a tree
+		// since ast.Arena.Commit holds an anchored node's cells for the
+		// document; before that it read another part of the document, and this
+		// arm handed back nothing rather than a wrong answer.
+		//
+		// A scalar answers in constant time and a collection hands back
+		// nothing, so this cannot expand the way an identity does -- there is
+		// no structure to write out, only a name.
+		return keyNameAt(nn.Target, depth+1)
+	case *SequenceNode, *MappingNode, *MappingValueNode:
 		return "", token.KeyOther
 	}
 

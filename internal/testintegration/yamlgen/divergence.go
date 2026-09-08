@@ -257,50 +257,6 @@ var Ledger = []Divergence{
 		Match:    writesAPropertiedKeyBeforeABlockScalar,
 	},
 	{
-		Name: "decode/an-alias-in-front-of-a-float-key-loses-its-spelling",
-		Pin:  "TestDefectAnAliasInFrontOfAFloatKeyLosesItsSpelling",
-		Reason: "A float key is named by its canonical YAML spelling, and the \".0\" keeps it out of " +
-			"the integers' namespace: `1.0: x` comes back keyed \"1.0\" and `.inf: x` keyed " +
-			"\".inf\". Put an alias or a tag in front of the same key and the name becomes Go's " +
-			"%v, \"1\" and \"+Inf\".\n\n" +
-			"ast.KeyName owns the walk from a node down to the scalar a key is named after, and " +
-			"it stops at an alias on purpose: what an alias names depends on where the caller " +
-			"stands. A tree reads ast.AliasNode.Target; a parse still walking cannot, and keeps " +
-			"the anchored node's identity as it goes instead. codec has neither, so it names the " +
-			"alias node itself and reads no token off it. Both decode paths agree on the wrong " +
-			"name, so this is a naming defect and not a divergence.\n\n" +
-			"The **tag** half closed on 2026-09-08: codec had three node-to-name walks of its own " +
-			"and none looked through a tag. They all call ast.KeyName now, which resolves a tag " +
-			"rather than stripping it -- `!!float 1` is the float 1.0 and is named \"1.0\". That " +
-			"retired three yamlcorpus departures at once.\n\n" +
-			"The **anchor** half of this closed on 2026-09-08: parseAnchor attached the node to " +
-			"ast.AnchorNode.Value after readAnchorValue returned, and readAnchorValue fires a " +
-			"walk's Leave on its way out, so a walking reader was handed the anchor with Value " +
-			"still nil. readAnchorValue attaches it first now, and " +
-			"TestFixedAnAnchoredFloatKeyKeepsItsSpelling holds it. The two halves shared a symptom " +
-			"and not a mechanism.\n\n" +
-			"Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the aliaser " +
-			"began anchoring keys.",
-		Property: Decode | Render | DecodeTyped,
-		Match:    writesAPropertiedKeyNamedTwoWays,
-	},
-	{
-		Name: "decode/an-alias-key-does-not-reach-a-struct-field",
-		Pin:  "TestDefectAnAliasStandingAsAKeyDoesNotReachAStructField",
-		Reason: "`k: &a1 n` over `*a1 : 1` read into a struct whose field is tagged `n` leaves the " +
-			"field at its zero value and reports nothing. The same document into an `any` names the " +
-			"key \"n\" and holds the value, so the alias resolves everywhere except where a field " +
-			"has to be found for it.\n\n" +
-			"A tag on a key does the same and an anchor does not, so it is the two spellings that " +
-			"replace the key node -- an alias standing *as* the key, and a tag in front of it -- " +
-			"that the reflection path does not look through. TestDefectAPropertiedKeyDoesNotReachAStructField " +
-			"holds all three; only the alias half is drawn, since the tagger leaves keys alone.\n\n" +
-			"Reached on 2026-09-08 by TestDecodingIntoAGoTypeGivesTheSameValue, on the first run " +
-			"after aliaser.aliasAKey began appending an alias key.",
-		Property: DecodeTyped,
-		Match:    writesAnAliasKey,
-	},
-	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
 		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
 		Reason: "Under `%YAML 1.1`, a `<<` entry written `? <<` over `: *a` is read as an ordinary key " +
@@ -542,51 +498,6 @@ func writesAsABlockScalar(v Value, st Style) bool {
 	}
 
 	return false
-}
-
-// writesAnAliasKey reports whether an alias stands as a mapping key.
-//
-// The style has no say: an alias is one token wherever it stands.
-func writesAnAliasKey(v Value, _ Style) bool {
-	switch n := v.(type) {
-	case Map:
-		for _, p := range n.Pairs {
-			if _, aliased := p.Key.(Alias); aliased {
-				return true
-			}
-
-			if writesAnAliasKey(p.Key, Style{}) || writesAnAliasKey(p.Val, Style{}) {
-				return true
-			}
-		}
-	case Seq:
-		return slices.ContainsFunc(n.Items, func(item Value) bool { return writesAnAliasKey(item, Style{}) })
-	case Anchored:
-		return writesAnAliasKey(n.V, Style{})
-	case Alias:
-		return writesAnAliasKey(n.V, Style{})
-	case Tagged:
-		return writesAnAliasKey(n.V, Style{})
-	}
-
-	return false
-}
-
-// writesAPropertiedKeyNamedTwoWays reports whether a key standing behind a
-// property has a canonical name Go's %v does not write.
-//
-// Only a float does: [KeyText] gives the float 1 the name "1.0" and %v writes
-// "1", and it gives an infinity ".inf" where %v writes "+Inf". An anchor and an
-// alias both reach it, being the two ways of writing a property in front of a
-// key. Style.ExplicitKeys is the other half -- "? &a1 1.0" over ": x" is named
-// correctly, so it is the implicit key that loses the spelling.
-func writesAPropertiedKeyNamedTwoWays(v Value, st Style) bool {
-	// Style.FlowPairs writes a one-entry mapping inside a flow sequence without
-	// its braces -- the "k: v" in "[k: v]" -- and flowPair writes no "?" there
-	// whatever Style.ExplicitKeys says. So that style keeps the implicit key
-	// the anchored half of this needs, which "&a1 0.0: *a1" inside "[...]"
-	// caught.
-	return holdsAPropertiedKeyNamedTwoWays(v, st.ExplicitKeys && !st.FlowPairs)
 }
 
 func holdsAPropertiedKeyNamedTwoWays(v Value, explicit bool) bool {
