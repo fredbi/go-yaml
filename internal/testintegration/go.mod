@@ -7,6 +7,7 @@ replace github.com/go-openapi/go-yaml => ../..
 require github.com/go-openapi/go-yaml v0.0.0-00010101000000-000000000000
 
 require (
+	github.com/go-openapi/jsonpointer v1.0.0
 	github.com/go-openapi/testify/v2 v2.6.1
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/google/go-cmp v0.7.0
