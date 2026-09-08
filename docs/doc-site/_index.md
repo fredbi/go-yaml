@@ -6,15 +6,21 @@ weight: 1
 ---
 
 
+A YAML 1.2 parser, decoder and encoder for Go, with a syntax tree that keeps
+positions, comments and the source text of every token.
+
 ### Status
 
-Experimental
+Experimental. There is no tagged release and the API still moves — see
+[Status](./about/status/).
 
 ### Getting started
 
 ```cmd
 go get github.com/go-openapi/go-yaml
 ```
+
+Then read [Which layer you need](./getting-started/three-levels/).
 
 ## Licensing
 
