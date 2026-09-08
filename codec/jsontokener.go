@@ -55,7 +55,7 @@ type jsonTokener struct {
 	// keys are the wrappers a mapping key opened with, innermost last. A "?",
 	// an anchor and a tag are all handed over before what they stand on is
 	// parsed, so a key is named when its wrapper closes.
-	keys []ast.Node
+	keys []tokenKeyMark
 	// peek indexes the tag in tags whose first token decides whether it holds a
 	// scalar or a collection, and is -1 where there is none.
 	peek int
@@ -77,6 +77,19 @@ type tokenMapFrame struct {
 	// of merge sources, and -1 where there is none.
 	mergeValue bool
 	mergeSeq   int
+}
+
+// tokenKeyMark is one mapping key open: the wrapper the walk handed over, and
+// the depth it stands at.
+//
+// ⛔ The depth and not the pointer is what closes it. The parse hands its cells
+// out again behind the descent, so a node built inside this key may be the same
+// pointer, and matching on that would close the key early. A wrapper's Leave
+// reports the depth its Enter did, and key wrappers nest strictly, so the depth
+// names exactly one of them.
+type tokenKeyMark struct {
+	node  ast.Node
+	depth int
 }
 
 // tokenTagMark is one tag open: how many tokens had gone over when it opened,

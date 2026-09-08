@@ -364,7 +364,7 @@ func (t *jsonTokener) emitTreeMapping(n *ast.MappingNode, at token.Position) {
 func (t *jsonTokener) enterKey(node ast.Node, at parser.Step) bool {
 	switch n := node.(type) {
 	case *ast.MappingKeyNode, *ast.AnchorNode:
-		t.keys = append(t.keys, node)
+		t.keys = append(t.keys, tokenKeyMark{node: node, depth: at.Depth})
 		t.suppress++
 
 		return true
@@ -382,18 +382,20 @@ func (t *jsonTokener) enterKey(node ast.Node, at parser.Step) bool {
 // closeKey names the entry a wrapper stands as the key of, and reports whether
 // the node was one.
 func (t *jsonTokener) closeKey(node ast.Node, at parser.Step) bool {
-	if n := len(t.keys); n == 0 || t.keys[n-1] != node {
+	n := len(t.keys)
+	if n == 0 || t.keys[n-1].depth != at.Depth {
 		return false
 	}
-	t.keys = t.keys[:len(t.keys)-1]
+	mark := t.keys[n-1]
+	t.keys = t.keys[:n-1]
 	t.suppress--
 
-	name := t.keyName(node)
-	if _, anchored := node.(*ast.AnchorNode); anchored {
+	name := t.keyName(mark.node)
+	if _, anchored := mark.node.(*ast.AnchorNode); anchored {
 		// An anchor does not open a key the way a "?" does: the node under it
 		// is handed over as a value and held to a string afterwards, so it
 		// keeps the digits the document wrote.
-		name = t.wrappedKeyName(node)
+		name = t.wrappedKeyName(mark.node)
 	}
 	if frame := t.frame(); frame != nil {
 		frame.keys = append(frame.keys, name)
