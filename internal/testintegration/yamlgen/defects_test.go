@@ -606,40 +606,102 @@ func TestDefectACommentAboveABlankLineAddsALeadingBreak(t *testing.T) {
 	})
 }
 
-// TestDefectARepeatedCollectionKeyIsSilentlyDropped pins the over-reach.
+// TestDefectACollectionKeySpelledTwoWaysLosesAnEntry pins it.
 //
-// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
-// mappings spelled alike do. `{{a: 0}: 1, {a: 0}: 2}` is a repeated key and
-// should be refused; it reads as {map[a:0]: 2} with the first entry gone and
-// nothing reported.
+// 3.2.1.1 makes two keys equal when they resolve to the same node. Two
+// collection keys that resolve alike and are written differently are one key,
+// and the document holds a duplicate. `[a]: 1` over `[ a ]: 2` reads as
+// {"[a]": 2}: no error, and the 1 is gone.
 //
-// The other side of `913fb19`, which stopped naming every collection key "[" and
-// so stopped checking any of them. Two collection keys that differ are two keys
-// now, which is right; two that do not are still two, which is not. A scalar key
-// repeated is refused as it always was.
-func TestDefectARepeatedCollectionKeyIsSilentlyDropped(t *testing.T) {
-	t.Run("today a repeated collection key drops the first entry", func(t *testing.T) {
+// The duplicate check names a collection key by the source text between the
+// node's first and last token, so two spellings are two names and the repeat is
+// missed. What the walk then builds names the key from what it resolved to --
+// KeyText's Go %v of the sequence -- and those two names are the same, so the
+// map keeps the last entry and the first disappears.
+//
+// So the two namings disagree, and the gap between them is where the value
+// goes. Naming by spelling was chosen in `e842b79` to miss a repeat rather than
+// invent one, which is the safe direction for a *refusal*; this is the other
+// half of that choice, and a space inside a flow sequence is enough to reach
+// it.
+func TestDefectACollectionKeySpelledTwoWaysLosesAnEntry(t *testing.T) {
+	t.Run("today the first entry is dropped and nothing is reported", func(t *testing.T) {
 		for _, tc := range []struct {
 			src  string
 			want map[string]any
 		}{
-			{`{[""]: 1, [""]: 2}` + "\n", map[string]any{"[]": uint64(2)}},
-			{`{{a: 0}: 1, {a: 0}: 2}` + "\n", map[string]any{"map[a:0]": uint64(2)}},
+			// Whitespace alone, in flow and in block.
+			{"{[a]: 1, [ a ]: 2}\n", map[string]any{"[a]": uint64(2)}},
+			{"[a]: 1\n[ a ]: 2\n", map[string]any{"[a]": uint64(2)}},
+			{"? [a]\n: 1\n? [ a ]\n: 2\n", map[string]any{"[a]": uint64(2)}},
+			// A trailing comma, which 7.4 allows and which changes nothing.
+			{"{[a]: 1, [a,]: 2}\n", map[string]any{"[a]": uint64(2)}},
+			// Quoting, which settles presentation and not the node.
+			{`{[a]: 1, ["a"]: 2}` + "\n", map[string]any{"[a]": uint64(2)}},
+			{`{['a']: 1, ["a"]: 2}` + "\n", map[string]any{"[a]": uint64(2)}},
+			// A tag that agrees with what the scalar already resolves to.
+			{"{[1]: x, [!!int 1]: y}\n", map[string]any{"[1]": "y"}},
+			// A mapping key, where the space is inside the entry.
+			{"{{a: 0}: 1, {a: 0 }: 2}\n", map[string]any{"map[a:0]": uint64(2)}},
 		} {
 			var got any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
-			assert.Equalf(t, tc.want, got, "today: the first entry is gone: %q", tc.src)
+			assert.Equalf(t, tc.want, got, "today: one entry short, and no error: %q", tc.src)
 		}
 	})
 
-	t.Run("two that differ are two keys, and a scalar repeat is refused", func(t *testing.T) {
-		var got any
-		require.NoError(t, codec.Unmarshal([]byte(`{{a: 0}: 1, {a: 1}: 2}`+"\n"), &got))
-		assert.Equal(t, map[string]any{"map[a:0]": uint64(1), "map[a:1]": uint64(2)}, got)
+	// The same two documents spelled alike are refused, which is what places
+	// this in the naming rather than in the check.
+	t.Run("spelled alike they are refused", func(t *testing.T) {
+		for _, src := range []string{"{[a]: 1, [a]: 2}\n", "[a]: 1\n[a]: 2\n"} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "already defined", "%q", src)
+		}
+	})
+}
 
-		var dup any
-		err := codec.Unmarshal([]byte("a: 1\na: 2\n"), &dup)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `already defined`)
+// TestDefectTwoBlockCollectionKeysCollide pins it.
+//
+// A collection key written in block is named by its first indicator -- "-" for
+// a sequence and ":" for a mapping -- so every block collection key in one
+// mapping is the same key as every other. `? - a` over `: 1` over `? - b` over
+// `: 2` is refused with `mapping key "-" already defined`, where 3.2.1.1 makes
+// [a] and [b] two keys.
+//
+// The residue of `e842b79`, which fixed the flow half by naming a collection
+// key from the source text between the node's first and last token. A block
+// collection's span reaches only its first indicator, so the name comes back as
+// one character. Before that commit every collection key collided in both
+// spellings, so this is half a fix rather than a new fault.
+func TestDefectTwoBlockCollectionKeysCollide(t *testing.T) {
+	t.Run("today two block collection keys are one key", func(t *testing.T) {
+		for _, tc := range []struct{ src, named string }{
+			{"? - a\n: 1\n? - b\n: 2\n", "-"},
+			{"?\n  a: 0\n: 1\n?\n  b: 0\n: 2\n", ":"},
+		} {
+			var got any
+			err := codec.Unmarshal([]byte(tc.src), &got)
+			require.Errorf(t, err, "%q", tc.src)
+			assert.Containsf(t, err.Error(), `mapping key "`+tc.named+`" already defined`, "%q", tc.src)
+		}
+	})
+
+	// The same keys in flow read, which places this in how the name is taken
+	// rather than in the duplicate check. A block key beside a flow key reads
+	// too, since the two names differ by accident.
+	t.Run("in flow the same two keys read", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{"? [a]\n: 1\n? [b]\n: 2\n", map[string]any{"[a]": uint64(1), "[b]": uint64(2)}},
+			{"? - a\n: 1\n? [b]\n: 2\n", map[string]any{"[a]": uint64(1), "[b]": uint64(2)}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
 	})
 }

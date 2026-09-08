@@ -102,12 +102,14 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
-			// A collection standing as a key. Three open defects live there and
-			// the library refuses all three documents:
+			// A collection standing as a key. Five open defects live there:
 			// TestDefectACollectionKeyWrittenAloneInFlowIsRefused,
-			// TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused, and
-			// TestDefectTwoBareColonLinesInARowAreRefused, which is the pair of
-			// bare ":" lines a forced "?" can produce.
+			// TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused,
+			// TestDefectTwoBareColonLinesInARowAreRefused,
+			// TestDefectTwoBlockCollectionKeysCollide, and
+			// TestDefectACollectionKeySpelledTwoWaysLosesAnEntry. The library
+			// refuses the first four documents and reads the fifth one entry
+			// short.
 			//
 			// Wide on purpose: it holds out every document with a collection
 			// key rather than the three shapes, because they are the same

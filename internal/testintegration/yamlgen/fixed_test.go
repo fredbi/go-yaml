@@ -2001,3 +2001,73 @@ func TestFixedTwoCollectionKeysAreTwoKeys(t *testing.T) {
 		assert.Contains(t, err.Error(), "already defined")
 	})
 }
+
+// TestFixedARepeatedCollectionKeyIsRefused: a collection key written twice in
+// one mapping is a duplicate.
+//
+// 3.2.1.1 makes two keys equal when they resolve to the same node, and two
+// mappings spelled alike do. `913fb19` stopped naming every collection key by
+// its opening character -- which had made every one collide with every other --
+// and stopped checking any of them: `{{a: 0}: 1, {a: 0}: 2}` read as
+// {map[a:0]: 2}, one entry short and nothing reported. `e842b79` names a
+// collection key by the source text between its first and last token, which
+// restores the check.
+//
+// Both spellings and both containers are asserted, because the two arrived by
+// different routes: parseMapKeyValueNode's explicit branch returned before the
+// duplicate check for anything that is not a scalar, so `? [a]` over `: 1`
+// twice read as two entries while `{[a]: 1, [a]: 2}` was already refused.
+//
+// ⚠️ Naming by the source spelling misses a repeat written two ways, and that
+// costs an entry rather than a refusal -- see
+// TestDefectACollectionKeySpelledTwoWaysLosesAnEntry.
+func TestFixedARepeatedCollectionKeyIsRefused(t *testing.T) {
+	t.Run("eight spellings of the repeat are refused", func(t *testing.T) {
+		for _, src := range []string{
+			`{{a: 0}: 1, {a: 0}: 2}` + "\n",
+			`{[""]: 1, [""]: 2}` + "\n",
+			"{[a]: 1, [a]: 2}\n",
+			"{[a, b]: 1, [a, b]: 2}\n",
+			"? [a]\n: 1\n? [a]\n: 2\n",
+			"? {a: 0}\n: 1\n? {a: 0}\n: 2\n",
+			"[a]: 1\n[a]: 2\n",
+			// Mixed: the explicit spelling over the implicit one. This is the
+			// pair the explicit branch's early return let through.
+			"? [a]\n: 1\n[a]: 2\n",
+		} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "already defined", "%q", src)
+		}
+	})
+
+	// The other direction, and the reason the fix is not simply "refuse two
+	// collection keys": collections that differ are different keys, and a
+	// mapping keyed by several of them is an ordinary document. The last is
+	// spec example 2.11.
+	t.Run("collections that differ are still two keys", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			{`{{a: 0}: 1, {a: 1}: 2}` + "\n", map[string]any{"map[a:0]": uint64(1), "map[a:1]": uint64(2)}},
+			{"{[a]: 1, [b]: 2}\n", map[string]any{"[a]": uint64(1), "[b]": uint64(2)}},
+			{"{[a]: 1, [a, b]: 2}\n", map[string]any{"[a]": uint64(1), "[a b]": uint64(2)}},
+			{`{{"": 0}: a, {"": 1}: b}` + "\n", map[string]any{"map[:0]": "a", "map[:1]": "b"}},
+			{
+				"? - Detroit Tigers\n  - Chicago cubs\n: - 2001-07-23\n" +
+					"? [ New York Yankees,\n    Atlanta Braves ]\n" +
+					": [ 2001-07-02, 2001-08-12,\n    2001-08-14 ]\n",
+				map[string]any{
+					"[Detroit Tigers Chicago cubs]":     []any{"2001-07-23"},
+					"[New York Yankees Atlanta Braves]": []any{"2001-07-02", "2001-08-12", "2001-08-14"},
+				},
+			},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}

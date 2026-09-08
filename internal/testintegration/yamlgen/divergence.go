@@ -151,6 +151,24 @@ func (p Property) String() string {
 // shape that diverges and the fix is not immediate; take it out with the fix.
 var Ledger = []Divergence{
 	{
+		Name: "parse/two-block-collection-keys-are-one-key",
+		Pin:  "TestDefectTwoBlockCollectionKeysCollide",
+		Reason: "A collection key written in block is named by its first indicator, so `? - a` over `: 1` " +
+			"over `? - b` over `: 2` is refused with `mapping key \"-\" already defined`. A block " +
+			"mapping key is named \":\" the same way. Every block collection key in a mapping is " +
+			"therefore the same key as every other, and two valid documents become one duplicate.\n\n" +
+			"3.2.1.1 makes two keys equal when they resolve to the same node, and [a] and [b] do not. " +
+			"The same two keys written in flow -- `? [a]` over `: 1` over `? [b]` over `: 2` -- read " +
+			"correctly, which places this in how the name is taken and not in the check.\n\n" +
+			"The residue of `e842b79`, which fixed the flow half: it names a collection key by the source " +
+			"text between the node's first and last token, and a block collection's span reaches only its " +
+			"first indicator. Before it, every collection key collided in both spellings.\n\n" +
+			"The predicate asks for two collection keys and a style that does not write the whole document " +
+			"in flow. It claims every property, because a document that does not parse answers none.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesTwoBlockCollectionKeys,
+	},
+	{
 		Name: "render/a-comment-above-a-blank-line-adds-a-leading-break",
 		Pin:  "TestDefectACommentAboveABlankLineAddsALeadingBreak",
 		Reason: "A sequence entry carrying a comment, with a blank line before its content, renders " +
@@ -746,4 +764,55 @@ func writesACommentAboveABlankLine(_ Value, st Style) bool {
 // style label carried no "?key" at all.
 func writesAnExplicitKey(v Value, st Style) bool {
 	return st.ExplicitKeys || holdsACollectionKey(v)
+}
+
+// writesTwoBlockCollectionKeys reports whether the document puts two collection
+// keys in one mapping and writes at least one of them outside a flow
+// collection.
+//
+// Style.Flow with FlowFrom 0 writes every collection in flow, where the key is
+// named from its own text and the two are two keys. Any other style leaves a
+// block collection key somewhere, and every one of those is named by its first
+// indicator.
+func writesTwoBlockCollectionKeys(v Value, st Style) bool {
+	if st.Flow && st.FlowFrom == 0 {
+		return false
+	}
+
+	return holdsTwoCollectionKeys(v)
+}
+
+// holdsTwoCollectionKeys reports whether any mapping in v has two or more
+// collections standing as keys.
+func holdsTwoCollectionKeys(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		var collections int
+
+		for _, p := range n.Pairs {
+			if isCollection(p.Key) {
+				collections++
+			}
+		}
+
+		if collections >= 2 {
+			return true
+		}
+
+		for _, p := range n.Pairs {
+			if holdsTwoCollectionKeys(p.Key) || holdsTwoCollectionKeys(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsTwoCollectionKeys)
+	case Anchored:
+		return holdsTwoCollectionKeys(n.V)
+	case Alias:
+		return holdsTwoCollectionKeys(n.V)
+	case Tagged:
+		return holdsTwoCollectionKeys(n.V)
+	}
+
+	return false
 }
