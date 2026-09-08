@@ -75,6 +75,28 @@ func breakRules(v yamlgen.Value) []broken {
 		})
 	}
 
+	// TagDuplicateKey and not TagDuplicateAfterResolution: both keys are
+	// written the same way, so a consumer comparing spellings catches it
+	// without resolving anything. A repeat written some *other* way -- tagged,
+	// anchored, aliased, or spelled as YAML 1.1 resolves it -- is the harder
+	// half and needs an emitter that can write a key's properties, which
+	// panics today. See duplicates.go.
+	if repeated, ok := repeatAKey(v); ok {
+		out = append(out, broken{
+			How:   "a duplicate entry appended",
+			Value: repeated,
+			Tags:  []stance.Tag{TagDuplicateKey},
+		})
+	}
+
+	if repeated, ok := repeatACollectionKey(v); ok {
+		out = append(out, broken{
+			How:   "a collection key written twice",
+			Value: repeated,
+			Tags:  []stance.Tag{TagDuplicateKey},
+		})
+	}
+
 	return out
 }
 

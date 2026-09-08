@@ -11,6 +11,7 @@ import (
 	"github.com/go-openapi/go-yaml/internal/testintegration/grammar"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
+	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
 // TestTheBrokenDocumentsAreInvalidWhereTheGrammarCannotTell is the measurement
@@ -70,8 +71,8 @@ func TestEveryBreakIsScoredAsARejection(t *testing.T) {
 	}
 }
 
-// TestBothBreaksAreDrawn checks neither kind quietly stops happening.
-func TestBothBreaksAreDrawn(t *testing.T) {
+// TestEveryBreakIsDrawn checks no kind quietly stops happening.
+func TestEveryBreakIsDrawn(t *testing.T) {
 	seen := map[string]int{}
 
 	for _, e := range yamlcorpus.Generate(1, 1500, 0) {
@@ -80,13 +81,86 @@ func TestBothBreaksAreDrawn(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"alias renamed to nothing", "a key repeated"} {
+	for _, want := range []string{
+		"alias renamed to nothing",
+		"a key repeated",
+		"a duplicate entry appended",
+		"a collection key written twice",
+	} {
 		if seen[want] == 0 {
 			t.Errorf("no document was broken by %q", want)
 		}
 	}
 
 	t.Logf("%v", seen)
+}
+
+// TestADuplicateIsInjectedRatherThanAwaited is the frequency claim.
+//
+// A collision cannot be drawn: drawMap dedupes with keyFamily on purpose, so
+// every duplicate in the corpus is one a rule put there. The rules that put
+// them there have to fire on *every* document that can hold one, or the family
+// is as rare as the draw that would have produced it -- 24 documents in 2000
+// held a collection key at a mapping's head when this was written, which is not
+// a family, it is an anecdote.
+//
+// So both appending rules fire wherever the value holds a mapping, and this
+// says so by counting rather than by sampling.
+func TestADuplicateIsInjectedRatherThanAwaited(t *testing.T) {
+	var mappings, appended, collections int
+
+	for _, e := range yamlcorpus.Generate(3, 600, 0) {
+		switch {
+		case strings.HasSuffix(e.Name, "a duplicate entry appended"):
+			appended++
+		case strings.HasSuffix(e.Name, "a collection key written twice"):
+			collections++
+		case e.Value != nil && holdsAMappingWithAKey(e.Value):
+			mappings++
+		}
+	}
+
+	if mappings == 0 {
+		t.Fatal("no drawn value held a mapping, so nothing below was measured")
+	}
+
+	if appended != mappings || collections != mappings {
+		t.Errorf("%d values hold a mapping, %d got an appended duplicate and %d a repeated "+
+			"collection key: an injection rule that skips one is a family that thins out",
+			mappings, appended, collections)
+	}
+
+	t.Logf("%d drawn values hold a mapping; each yields a duplicate entry and a repeated collection key",
+		mappings)
+}
+
+// holdsAMappingWithAKey reports whether a value holds a mapping an entry can be
+// appended to, which is every mapping with an entry and no merge key.
+func holdsAMappingWithAKey(v yamlgen.Value) bool {
+	switch t := v.(type) {
+	case yamlgen.Map:
+		// A mapping holding a "<<" is skipped and the walk carries on past it,
+		// so this has to carry on too -- see repeatable.
+		if len(t.Pairs) > 0 && !mapHoldsAMergeKey(t) {
+			return true
+		}
+
+		for _, p := range t.Pairs {
+			if holdsAMappingWithAKey(p.Key) || holdsAMappingWithAKey(p.Val) {
+				return true
+			}
+		}
+	case yamlgen.Seq:
+		return slices.ContainsFunc(t.Items, holdsAMappingWithAKey)
+	case yamlgen.Anchored:
+		return holdsAMappingWithAKey(t.V)
+	case yamlgen.Alias:
+		return holdsAMappingWithAKey(t.V)
+	case yamlgen.Tagged:
+		return holdsAMappingWithAKey(t.V)
+	}
+
+	return false
 }
 
 // TestABreakIsNotAByteMutation pins the distinction the file rests on.
@@ -200,4 +274,15 @@ func TestTheLibraryCatchesTheBreaks(t *testing.T) {
 	if caught == 0 {
 		t.Error("none were caught, which would make the family untested rather than passing")
 	}
+}
+
+// mapHoldsAMergeKey reports whether a mapping holds a "<<" entry.
+func mapHoldsAMergeKey(m yamlgen.Map) bool {
+	for _, p := range m.Pairs {
+		if _, isMerge := p.Key.(yamlgen.MergeKey); isMerge {
+			return true
+		}
+	}
+
+	return false
 }
