@@ -870,7 +870,7 @@ func (e *Encoder) encodeAnchor(anchorName string, value ast.Node, fieldValue ref
 func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column int) (ast.Node, error) {
 	node := ast.Mapping(token.New("", "", e.pos(column)), e.isFlowStyle)
 	structType := value.Type()
-	fieldMap, err := structFieldMap(structType)
+	fieldMap, err := structFieldMap(structType, yamlTags)
 	if err != nil {
 		return nil, err
 	}
@@ -878,7 +878,7 @@ func (e *Encoder) encodeStruct(ctx context.Context, value reflect.Value, column 
 	var inlineAnchorValue reflect.Value
 	for i := 0; i < value.NumField(); i++ {
 		field := structType.Field(i)
-		if isIgnoredStructField(field) {
+		if isIgnoredStructField(field, yamlTags) {
 			continue
 		}
 		fieldValue := value.FieldByName(field.Name)

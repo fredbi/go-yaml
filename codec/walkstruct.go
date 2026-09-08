@@ -356,20 +356,20 @@ func (b *typedBuilder) openEntry(top *typedFrame, keyNode ast.Node) bool {
 
 	switch top.kind {
 	case typedStruct:
-		fields, err := structFields(top.dst.Type())
+		fields, err := structFields(top.dst.Type(), b.dec.tagMode())
 		if err != nil {
 			b.fail(err)
 
 			return false
 		}
-		if fields.flat != nil {
-			// The type embeds another, so the name may reach a field of it.
-			at, known := fields.flat[name]
-			if !known {
-				top.skip, top.target = true, reflect.Value{}
+		sf, at, _, known := fields.lookup(name)
+		if !known {
+			top.skip, top.target = true, reflect.Value{}
 
-				return false
-			}
+			return false
+		}
+		if at != nil {
+			// The type embeds another, and the name reaches a field of it.
 			field, err := fieldAt(top.dst, at)
 			if err != nil {
 				b.fail(err)
@@ -377,13 +377,6 @@ func (b *typedBuilder) openEntry(top *typedFrame, keyNode ast.Node) bool {
 				return false
 			}
 			top.skip, top.target = false, field
-
-			return false
-		}
-
-		sf, known := fields.byRenderName[name]
-		if !known {
-			top.skip, top.target = true, reflect.Value{}
 
 			return false
 		}
@@ -597,8 +590,9 @@ func (b *typedBuilder) handled(dst reflect.Value) bool {
 }
 
 // walkableTypes caches which destination types the typed walk can fill, keyed
-// by reflect.Type.
-var walkableTypes sync.Map
+// by reflect.Type, one map per tagMode: the fields a type shows depend on the
+// mode, and so does whether the walk can fill it.
+var walkableTypes [modeCount]sync.Map
 
 // walkableType reports whether a destination of type t can be filled by the
 // walk, looking at the Go type alone.
@@ -608,12 +602,13 @@ var walkableTypes sync.Map
 // destination the walk was never going to fill costs two parses instead of one.
 // Every reason it could give up on the type rather than on the document is
 // therefore settled here, once per type.
-func walkableType(t reflect.Type) bool {
-	if cached, known := walkableTypes.Load(t); known {
+func walkableType(t reflect.Type, mode tagMode) bool {
+	cache := &walkableTypes[mode]
+	if cached, known := cache.Load(t); known {
 		return cached.(bool)
 	}
-	ok := readWalkable(t, map[reflect.Type]bool{})
-	walkableTypes.Store(t, ok)
+	ok := readWalkable(t, map[reflect.Type]bool{}, mode)
+	cache.Store(t, ok)
 
 	return ok
 }
@@ -638,7 +633,7 @@ var (
 	}
 )
 
-func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
+func readWalkable(t reflect.Type, seen map[reflect.Type]bool, mode tagMode) bool {
 	if seen[t] {
 		// A type that holds itself. The cycle says nothing either way, and the
 		// document's depth is capped elsewhere.
@@ -658,14 +653,21 @@ func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
 
 	switch t.Kind() {
 	case reflect.Pointer:
-		return readWalkable(t.Elem(), seen)
+		return readWalkable(t.Elem(), seen, mode)
 	case reflect.Struct:
-		fields, err := structFields(t)
+		fields, err := structFields(t, mode)
 		if err != nil {
 			return false
 		}
 		for _, sf := range fields.fields {
-			if !readWalkable(t.Field(sf.Index).Type, seen) {
+			ft := t.Field(sf.Index).Type
+			if sf.IsInline && inlineTakesUnclaimedEntries(ft) {
+				// The walk meets an entry once and has to place it then,
+				// through an index path readFields.flat names. A map has no
+				// such name, so the tree decoder reads this struct.
+				return false
+			}
+			if !readWalkable(ft, seen, mode) {
 				return false
 			}
 		}
@@ -676,9 +678,9 @@ func readWalkable(t reflect.Type, seen map[reflect.Type]bool) bool {
 			return false
 		}
 
-		return readWalkable(t.Elem(), seen)
+		return readWalkable(t.Elem(), seen, mode)
 	case reflect.Slice:
-		return readWalkable(t.Elem(), seen)
+		return readWalkable(t.Elem(), seen, mode)
 	case reflect.Interface:
 		// An "any" holds whatever the document writes, which valueBuilder
 		// builds. Anything narrower needs a type this walk cannot pick.

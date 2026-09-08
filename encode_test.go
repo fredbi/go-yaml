@@ -1249,7 +1249,10 @@ func TestEncoder_InlineAndConflictKey(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	enc := codec.NewEncoder(&buf)
-	if err := enc.Encode(struct {
+
+	// The refusal is recorded against the type when its fields are first read,
+	// so the encoder makes it as well as the decoder.
+	err := enc.Encode(struct {
 		*base `yaml:",inline"`
 		A     int // conflict
 		C     bool
@@ -1258,19 +1261,14 @@ func TestEncoder_InlineAndConflictKey(t *testing.T) {
 			A: 1,
 			B: "hello",
 		},
-		A: 0, // default value
+		A: 0,
 		C: true,
-	}); err != nil {
-		t.Fatalf("%+v", err)
+	})
+	if err == nil {
+		t.Fatal("a name reaching two fields should be refused")
 	}
-	expect := `
-b: hello
-a: 0
-c: true
-`
-	actual := "\n" + buf.String()
-	if expect != actual {
-		t.Fatalf("inline marshal error: expect=[%s] actual=[%s]", expect, actual)
+	if !strings.Contains(err.Error(), `duplicated key "a"`) {
+		t.Fatalf("unexpected error: %+v", err)
 	}
 }
 
@@ -1405,7 +1403,9 @@ func TestEncoder_MarshalAnchor(t *testing.T) {
 		Host *Host `yaml:",anchor"`
 	}
 	type Queue struct {
-		Name string `yaml:","`
+		// `yaml:","` here named the field the same way an absent tag does, and
+		// v3 refuses a tag with an empty flag.
+		Name string
 		*Host
 	}
 	var doc struct {

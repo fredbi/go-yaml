@@ -149,7 +149,15 @@ roles:
 name: john
 age: 20
 `,
-			ExpectedErr: `Key: 'Inner.Required' Error:Field validation for 'Required' failed on the 'required' tag`,
+			// The field is missing, so there is no entry to point at and the
+			// error goes to the mapping that should have held it. A field
+			// promoted from Inner is reported the same way as one of the outer
+			// struct's own.
+			ExpectedErr: `[2:1] Key: 'Inner.Required' Error:Field validation for 'Required' failed on the 'required' tag
+   1 | ---
+>  2 | name: john
+       ^
+   3 | age: 20`,
 			Instance: &struct {
 				Name  string `yaml:"name" validate:"required"`
 				Age   int    `yaml:"age" validate:"gte=0,lt=120"`

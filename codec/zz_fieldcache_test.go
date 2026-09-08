@@ -26,11 +26,11 @@ type twoFieldsOneName struct {
 func TestStructFieldMapIsReadOncePerType(t *testing.T) {
 	typ := reflect.TypeFor[cachedFields]()
 
-	first, err := structFieldMap(typ)
+	first, err := structFieldMap(typ, yamlTags)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := structFieldMap(typ)
+	second, err := structFieldMap(typ, yamlTags)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestDuplicatedFieldNameIsRefusedEveryTime(t *testing.T) {
 	typ := reflect.TypeFor[twoFieldsOneName]()
 
 	for i := range 3 {
-		fields, err := structFieldMap(typ)
+		fields, err := structFieldMap(typ, yamlTags)
 		if err == nil {
 			t.Fatalf("read %d: the duplicated name was accepted", i)
 		}

@@ -1843,20 +1843,15 @@ c: true
 		A     int
 		C     bool
 	}
-	if err := codec.NewDecoder(strings.NewReader(yml)).Decode(&v); err != nil {
-		t.Fatalf("%+v", err)
+
+	// "a" reaches Base.A and the outer A, and nothing settles which one the
+	// document meant, so go.yaml.in/yaml/v3 refuses the type and so do we.
+	err := codec.NewDecoder(strings.NewReader(yml)).Decode(&v)
+	if err == nil {
+		t.Fatal("a name reaching two fields should be refused")
 	}
-	if v.A != 1 {
-		t.Fatal("failed to decode with inline key")
-	}
-	if v.B != "hello" {
-		t.Fatal("failed to decode with inline key")
-	}
-	if !v.C {
-		t.Fatal("failed to decode with inline key")
-	}
-	if v.Base.A != 0 {
-		t.Fatal("failed to decode with inline key")
+	if !strings.Contains(err.Error(), `duplicated key "a"`) {
+		t.Fatalf("unexpected error: %+v", err)
 	}
 }
 
@@ -1914,7 +1909,7 @@ a:
 }
 
 func TestDecoder_JSONTags(t *testing.T) {
-	var v struct {
+	type tagged struct {
 		A string `json:"a_json"`               // no YAML tag
 		B string `json:"b_json" yaml:"b_yaml"` // both tags
 	}
@@ -1924,17 +1919,38 @@ a_json: a_json_value
 b_json: b_json_value
 b_yaml: b_yaml_value
 `
-	if err := codec.NewDecoder(strings.NewReader(src)).Decode(&v); err != nil {
-		t.Fatalf(`parsing should succeed: %s`, err)
-	}
 
-	if v.A != "a_json_value" {
-		t.Fatalf("v.A should be `a_json_value`, got `%s`", v.A)
-	}
+	t.Run("the default reads no json tag", func(t *testing.T) {
+		var v tagged
+		if err := codec.NewDecoder(strings.NewReader(src)).Decode(&v); err != nil {
+			t.Fatalf(`parsing should succeed: %s`, err)
+		}
 
-	if v.B != "b_yaml_value" {
-		t.Fatalf("v.B should be `b_yaml_value`, got `%s`", v.B)
-	}
+		// A is named "a" here, after its Go name, so nothing in src reaches it.
+		if v.A != "" {
+			t.Fatalf("v.A should be empty, got `%s`", v.A)
+		}
+
+		if v.B != "b_yaml_value" {
+			t.Fatalf("v.B should be `b_yaml_value`, got `%s`", v.B)
+		}
+	})
+
+	t.Run("UseJSONTags reads it", func(t *testing.T) {
+		var v tagged
+		if err := codec.NewDecoder(strings.NewReader(src), codec.UseJSONTags(true)).Decode(&v); err != nil {
+			t.Fatalf(`parsing should succeed: %s`, err)
+		}
+
+		if v.A != "a_json_value" {
+			t.Fatalf("v.A should be `a_json_value`, got `%s`", v.A)
+		}
+
+		// The option adds a name for A and takes none away from B.
+		if v.B != "b_yaml_value" {
+			t.Fatalf("v.B should be `b_yaml_value`, got `%s`", v.B)
+		}
+	})
 }
 
 func TestDecoder_DisallowUnknownField(t *testing.T) {
@@ -2507,25 +2523,6 @@ foo: # comment
 			}
 		})
 	}
-}
-
-func ExampleUnmarshal_jSONTags() {
-	yml := `---
-foo: 1
-bar: c
-`
-	var v struct {
-		A int    `json:"foo"`
-		B string `json:"bar"`
-	}
-	if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(v.A)
-	fmt.Println(v.B)
-	// OUTPUT:
-	// 1
-	// c
 }
 
 func ExampleDecoder_Decode_disallowUnknownField() {

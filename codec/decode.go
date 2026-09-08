@@ -67,6 +67,8 @@ type Decoder struct {
 	useOrderedMap          bool
 	useStringKeys          bool
 	useJSONUnmarshaler     bool
+	useJSONTags            bool
+	useInferredNames       bool
 
 	// walked holds the value of each document, read by walking the source
 	// rather than by building a tree and walking that. src is kept beside it so
@@ -1144,18 +1146,43 @@ func (d *Decoder) convertValue(v reflect.Value, typ reflect.Type, src ast.Node) 
 	return val, nil
 }
 
+// tagMode says which of encoding/json's rules this decoder adds to the `yaml`
+// tag. Neither option set is go.yaml.in/yaml/v3 exactly.
+func (d *Decoder) tagMode() tagMode {
+	mode := yamlTags
+	if d.useJSONTags {
+		mode |= jsonTags
+	}
+	if d.useInferredNames {
+		mode |= inferredNames
+	}
+
+	return mode
+}
+
 func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[string]ast.Node) error {
-	if structType.Kind() == reflect.Pointer {
+	for structType.Kind() == reflect.Pointer {
 		structType = structType.Elem()
 	}
-	structFieldMap, err := structFieldMap(structType)
+	if structType.Kind() == reflect.Map {
+		// A `,inline` map takes every entry no field claims, so a mapping read
+		// into this struct writes nothing unknown.
+		clear(unknownFields)
+
+		return nil
+	}
+	if structType.Kind() != reflect.Struct {
+		return nil
+	}
+
+	structFieldMap, err := structFieldMap(structType, d.tagMode())
 	if err != nil {
 		return err
 	}
 
 	for j := 0; j < structType.NumField(); j++ {
 		field := structType.Field(j)
-		if isIgnoredStructField(field) {
+		if isIgnoredStructField(field, d.tagMode()) {
 			continue
 		}
 
@@ -1765,36 +1792,6 @@ func (d *Decoder) keyToValueNodeMap(ctx context.Context, node ast.Node, ignoreMe
 	return m, nil
 }
 
-func (d *Decoder) setDefaultValueIfConflicted(v reflect.Value, fieldMap StructFieldMap) error {
-	for v.Type().Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-	typ := v.Type()
-	if typ.Kind() != reflect.Struct {
-		return nil
-	}
-	embeddedStructFieldMap, err := structFieldMap(typ)
-	if err != nil {
-		return err
-	}
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		if isIgnoredStructField(field) {
-			continue
-		}
-		structField := embeddedStructFieldMap[field.Name]
-		if !fieldMap.isIncludedRenderName(structField.RenderName) {
-			continue
-		}
-		// if declared same key name, set default value
-		fieldValue := v.Field(i)
-		if fieldValue.CanSet() {
-			fieldValue.Set(reflect.Zero(fieldValue.Type()))
-		}
-	}
-	return nil
-}
-
 // taggedValue is what a tagged node denotes, once ast.TagNode.Resolve has said
 // the tag applies.
 func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resolution) (any, error) {
@@ -2100,12 +2097,20 @@ func (w *writtenFields) has(i int) bool {
 	return word < len(w.rest) && w.rest[word]&(1<<uint(i%64)) != 0
 }
 
-// decodeInlineFields reads the embedded fields of a struct, each from the whole
-// mapping rather than from an entry of it.
+// decodeInlineFields reads the three kinds of `,inline` field an index path
+// cannot place, each from the whole mapping rather than from an entry of it.
 //
-// They are read after the rest: an embedded struct is handed every entry, the
-// ones an outer field has already claimed included, and only the names it knows
-// itself stop counting as unknown.
+// An ordinary embedded struct is not one of them: readFields.flat names every
+// field it promotes and setField writes each entry straight into the field it
+// reaches, so the two decode paths place an entry the same way. What is left
+// here is a map, which takes the entries no field claims and so cannot be known
+// until the mapping ends; a field carrying `,alias`, which takes the value the
+// document's "<<" names; and a field whose type reads its own node, which
+// go.yaml.in/yaml/v3 also hands the whole mapping.
+//
+// A `,inline` map is handed the entries readFields.flat does not name -- the
+// struct's own fields and everything its embedded structs promote. With nothing
+// left over the map stays nil, as v3 leaves it.
 func (d *Decoder) decodeInlineFields(
 	ctx context.Context, dst reflect.Value, src ast.Node, fields *readFields,
 	ignoreMergeKey bool, unknownFields map[string]ast.Node, foundErr *error,
@@ -2133,6 +2138,13 @@ func (d *Decoder) decodeInlineFields(
 
 			continue
 		}
+
+		fieldType := fieldValue.Type()
+		takesUnclaimed := inlineTakesUnclaimedEntries(fieldType)
+		if !takesUnclaimed && !inlineReadsItsOwnNode(fieldType) {
+			// An embedded struct, whose fields setField has already filled.
+			continue
+		}
 		if !fieldValue.CanSet() {
 			field := structType.Field(sf.Index)
 
@@ -2153,8 +2165,19 @@ func (d *Decoder) decodeInlineFields(
 		}
 		mapNode := ast.Mapping(nil, false)
 		for k, v := range entries {
+			if takesUnclaimed {
+				if _, _, _, claimed := fields.lookup(k); claimed {
+					continue
+				}
+			}
 			key := &ast.StringNode{Value: k}
 			mapNode.Values = append(mapNode.Values, ast.MappingValue(nil, key, v))
+		}
+		if takesUnclaimed && len(mapNode.Values) == 0 {
+			// Every entry went to a field, so the map stays nil rather than
+			// becoming an empty one. A caller can then tell a mapping that
+			// wrote nothing else from one that wrote nothing at all.
+			continue
 		}
 
 		newFieldValue, err := d.createDecodedNewValue(ctx, fieldValue.Type(), fieldValue, mapNode)
@@ -2182,11 +2205,74 @@ func (d *Decoder) decodeInlineFields(
 
 			continue
 		}
-		_ = d.setDefaultValueIfConflicted(newFieldValue, fields.fields)
 		fieldValue.Set(newFieldValue)
 	}
 
 	return nil
+}
+
+// located is the field a mapping key names, found in a destination.
+//
+// sf is nil where no field of the type answers to the name. ord is the bit the
+// merge bookkeeping marks, and at is the index path, empty where the field
+// stands in the type itself.
+type located struct {
+	value reflect.Value
+	sf    *StructField
+	ord   int
+	at    []int
+}
+
+// name reports the field as a Go path -- "U.T.A" for a field A promoted from an
+// embedded T of U -- which is how encoding/json names one in a type error.
+func (l located) name(structType reflect.Type) string {
+	if len(l.at) == 0 {
+		return structType.Name() + "." + l.sf.FieldName
+	}
+
+	var b strings.Builder
+	b.WriteString(structType.Name())
+	t := structType
+	for _, step := range l.at {
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		field := t.Field(step)
+		b.WriteByte('.')
+		b.WriteString(field.Name)
+		t = field.Type
+	}
+
+	return b.String()
+}
+
+// fieldFor finds the field a mapping key names.
+//
+// A type that embeds another is read through readFields.flat, which names every
+// field the embedding promotes and holds the index path to reach it; fieldAt
+// fills the pointers along the way. A type that embeds nothing takes the direct
+// lookup and no index path at all, which is the common case and the fast one.
+func fieldFor(dst reflect.Value, fields *readFields, name string) (located, error) {
+	sf, at, ord, known := fields.lookup(name)
+	if !known {
+		return located{}, nil
+	}
+	if at == nil {
+		return located{value: dst.Field(sf.Index), sf: sf, ord: ord}, nil
+	}
+
+	field, err := fieldAt(dst, at)
+	if err != nil {
+		// fieldAt could not make a pointer standing between, which happens
+		// where an embedded pointer is unexported. encoding/json refuses the
+		// same shape.
+		return located{}, fmt.Errorf(
+			"cannot set embedded pointer to unexported struct on the way to %q in %s",
+			name, dst.Type(),
+		)
+	}
+
+	return located{value: field, sf: sf, ord: ord, at: at}, nil
 }
 
 // findEntry returns the value a mapping writes under name, and the entry that
@@ -2245,7 +2331,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 		dst.Set(srcValue)
 		return nil
 	}
-	fields, err := structFields(structType)
+	fields, err := structFields(structType, d.tagMode())
 	if err != nil {
 		return err
 	}
@@ -2266,8 +2352,11 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 	// fields -- read once per type and shared -- and not a map of every entry
 	// the mapping writes.
 	setField := func(name string, keyNode, valueNode, entryNode ast.Node, merged bool) error {
-		sf, named := fields.byRenderName[name]
-		if !named {
+		found, err := fieldFor(dst, fields, name)
+		if err != nil {
+			return err
+		}
+		if found.sf == nil {
 			if unknownFields != nil {
 				if _, seen := unknownFields[name]; !seen {
 					unknownFields[name] = keyNode
@@ -2276,13 +2365,13 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 
 			return nil
 		}
-		if merged && written.has(sf.Index) {
+		if merged && written.has(found.ord) {
 			// The mapping writes this itself, or an earlier "<<" does.
 			return nil
 		}
-		written.mark(sf.Index)
+		written.mark(found.ord)
 
-		fieldValue := dst.Field(sf.Index)
+		fieldValue := found.value
 		if fieldValue.Type().Kind() == reflect.Pointer && src.Type() == ast.NullType {
 			// set nil value to pointer
 			fieldValue.Set(reflect.Zero(fieldValue.Type()))
@@ -2299,7 +2388,7 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 			}
 			var te *yamlerrors.Error
 			if errors.As(err, &te) && errors.Is(te, yamlerrors.ErrTypeMismatch) {
-				te.SetStructField(structType.Name() + "." + sf.FieldName)
+				te.SetStructField(found.name(structType))
 				foundErr = te
 			} else {
 				foundErr = err
@@ -2356,12 +2445,11 @@ func (d *Decoder) decodeStruct(ctx context.Context, dst reflect.Value, src ast.N
 					if !ok {
 						continue
 					}
-					fieldName := fieldErr.StructField()
-					structField, exists := fields.fields[fieldName]
+					renderName, exists := fields.renderNameOf(fieldErr.StructField())
 					if !exists {
 						continue
 					}
-					value, entry := d.findEntry(ctx, src, ignoreMergeKey, structField.RenderName)
+					value, entry := d.findEntry(ctx, src, ignoreMergeKey, renderName)
 					if value != nil {
 						// TODO: to make FieldError message cutomizable
 						return yamlerrors.NewSyntax(fmt.Sprintf("%s", err), validationErrorToken(value, entry))
@@ -3128,7 +3216,7 @@ func (d *Decoder) canWalkTyped(v reflect.Value) bool {
 		return false
 	}
 
-	return walkableType(dst.Type())
+	return walkableType(dst.Type(), d.tagMode())
 }
 
 // buildTree reads the source into a tree, for a decode the walk cannot serve.

@@ -177,6 +177,68 @@ func UseStringKeys() DecodeOption {
 	}
 }
 
+// UseJSONTags reads a struct's fields the way encoding/json does wherever the
+// `yaml` tag leaves off: the `json` tag names a field carrying no `yaml` tag,
+// and an anonymous embedded struct that no tag names has its fields promoted
+// into the outer one.
+//
+// The `yaml` tag always wins, so this adds a way to name a field and takes none
+// away. A type carrying both tags on one field reads the same under the option
+// as without it, and a `yaml:"-"` still hides a field the `json` tag names.
+//
+// Without it the decoder reads the `yaml` tag alone, as go.yaml.in/yaml/v3
+// does, and promotes an embedded struct only where a tag says `,inline`. A type
+// tagged for JSON alone then takes the lowercased Go name for every field, and
+// carries no inline marker anywhere, because encoding/json never needed one.
+// github.com/go-openapi/spec is such a type, and decoding an OpenAPI document
+// into spec.Swagger without this option fills the outer map and leaves every
+// specification in it zero.
+//
+// It does not make the decoder call UnmarshalJSON -- [UseJSONUnmarshaler] does
+// that, converting the document to JSON first. This fills the fields directly,
+// so a type whose UnmarshalJSON does more than assign them (spec.Swagger
+// gathers "x-" keys into its extensions) will not get that.
+//
+// A mapping key matches a field name exactly where it can, and otherwise
+// matches one differing only in case, which is the order encoding/json tries
+// them in. Without the option a key matches exactly or matches nothing, as
+// go.yaml.in/yaml/v3 has it.
+//
+// It names a field the `json` tag names, and leaves a field neither tag names
+// under its lowercased Go name. [UseInferredNames] is what changes that one --
+// though with case-insensitive matching on, both spellings of a Go name reach
+// the field either way, and the option decides which of them an encoder writes.
+//
+// The encoder is not affected and writes `yaml` names, so a document written
+// after being read under this option does not round trip.
+func UseJSONTags(use bool) DecodeOption {
+	return func(d *Decoder) error {
+		d.useJSONTags = use
+
+		return nil
+	}
+}
+
+// UseInferredNames names a field that no tag names after its Go name, verbatim,
+// the way encoding/json does.
+//
+// Without it such a field takes its Go name lowercased, which is what
+// go.yaml.in/yaml/v3 does: a field declared FieldName is written "fieldname",
+// and a document writing "FieldName" reaches nothing. Under the option the two
+// swap over.
+//
+// It changes names and nothing else. Which fields a decode considers, how an
+// anonymous embedded struct is read and how a repeated name is resolved are
+// [UseJSONTags]'s to say, and the two options are independent: a struct with no
+// tags at all reads under this one alone.
+func UseInferredNames(use bool) DecodeOption {
+	return func(d *Decoder) error {
+		d.useInferredNames = use
+
+		return nil
+	}
+}
+
 // UseJSONUnmarshaler if neither `Unmarshaler` nor `GoYAMLUnmarshaler` is implemented
 // and `UnmashalJSON([]byte)error` is implemented, convert the argument from `YAML` to `JSON` and then call it.
 func UseJSONUnmarshaler() DecodeOption {
