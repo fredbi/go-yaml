@@ -1,18 +1,23 @@
+---
+name: doc-site
+description: Documentation Site
+---
+
 # Documentation Site
 
-Hugo-based documentation site for testify, auto-generated from source code.
+Hugo-based documentation site for go-yaml, published to
+https://go-openapi.github.io/go-yaml/.
+
+Every page is hand-written. Nothing is generated from source: the API reference
+is pkg.go.dev, and the site links to it rather than re-rendering the godoc.
 
 ## Running locally
 
 ```bash
-# 1. Generate docs from source
-go generate ./...
-
-# 2. Start Hugo dev server
 cd hack/doc-site/hugo
-./gendoc.sh
+go run gendoc.go
 
-# Visit http://localhost:1313/testify/
+# Visit http://localhost:1313/go-yaml/
 # Auto-reloads on changes to docs/doc-site/
 ```
 
@@ -20,54 +25,55 @@ cd hack/doc-site/hugo
 
 ```
 hack/doc-site/hugo/
-  hugo.yaml              # Main Hugo config
-  metrics.yaml           # Generated metrics (codegen output, merged into site params)
-  testify.yaml           # Version info + build metadata
-  gendoc.sh              # Dev server launcher
-  layouts/               # Custom layout overrides
-  themes/hugo-relearn/   # Relearn documentation theme
+  hugo.yaml               # main Hugo config
+  go-yaml.yaml.template   # version parameters, filled at build time
+  go-yaml.yaml            # generated; not committed
+  metrics.yaml            # conformance scores, merged into site params
+  gendoc.go               # dev server launcher
+  layouts/                # shortcodes and partials overriding the theme
+  themes/hugo-relearn/    # Relearn documentation theme
 
-docs/doc-site/           # Content (mounted by Hugo)
-  api/                   # Generated: domain pages, index, metrics (DO NOT EDIT)
-  usage/                 # Hand-written: USAGE, GENERICS, CHANGES, MIGRATION, etc.
-  project/               # Hand-written: APPROACH, maintainer docs
+docs/doc-site/            # content, mounted by Hugo
+  getting-started/        # install, which layer to use, migrating
+  usage/                  # the codec: Marshal/Unmarshal and its options
+  advanced/               # parser, AST, tokens, YAMLPath, JSON
+  about/                  # the fork, conformance, performance, status
+  project/                # README, licence, contributing
 ```
 
-## Generated vs hand-written content
+## What may go on the site
 
-| Path | Generated? | Notes |
-|------|-----------|-------|
-| `docs/doc-site/api/*.md` | Yes | Domain pages, index, metrics. Regenerate with `go generate` |
-| `docs/doc-site/api/metrics.md` | Yes | Quick index table + API counts |
-| `docs/doc-site/usage/*.md` | No | Hand-written guides |
-| `docs/doc-site/project/*.md` | No | Hand-written project docs |
+**Only what is true of committed code on master.** A page may say a thing is
+not there yet; it may never describe something unbuilt. Plans and open designs
+live in `.claude/plans/`, not here.
 
-## Dynamic counts via Hugo params
+## Conformance numbers
 
-Function and assertion counts are generated into `metrics.yaml` and merged
-into Hugo's `site.Params.metrics`. Use the relearn `siteparam` shortcode
-to reference them in hand-written markdown:
+`metrics.yaml` holds the conformance scores and is merged into
+`site.Params.metrics`. Reference them with the Relearn `siteparam` shortcode
+rather than typing a number into prose:
 
 ```markdown
-We have {{% siteparam "metrics.assertions" %}} assertions across
-{{% siteparam "metrics.domains" %}} domains.
+{{% siteparam "metrics.buckets_matched" %}} of {{% siteparam "metrics.buckets" %}}
+generator buckets agree with the oracle.
 ```
 
-Available params: `metrics.domains`, `metrics.functions`, `metrics.assertions`,
-`metrics.generics`, `metrics.nongeneric_assertions`, `metrics.helpers`, `metrics.others`.
+Available: `metrics.buckets`, `metrics.buckets_matched`, `metrics.cases`,
+`metrics.decoder_scoreable`, `metrics.decoder_passing`, `metrics.tojson_scoreable`,
+`metrics.tojson_passing`, `metrics.oracle_scoreable`, `metrics.oracle_passing`.
 
-Per-domain: `metrics.by_domain.<slug>.count`, `metrics.by_domain.<slug>.name`.
+Version parameters come from `go-yaml.yaml`: `goyaml.goVersion`,
+`goyaml.latestRelease`, `goyaml.versionMessage`, `goyaml.buildTime`.
 
-Hugo math functions (`sub`, `mul`, `add`) are NOT available in markdown content.
-For computed values, add them to the codegen `buildMetrics()` in
-`codegen/internal/generator/doc_generator.go`.
+Hugo math functions (`sub`, `mul`, `add`) are not available in markdown content.
+Add a computed value to `metrics.yaml` instead.
 
-## Adding a new hand-written page
+## Adding a page
 
-1. Create `docs/doc-site/<section>/<FILE>.md` with Hugo front matter
-2. Set `weight:` to control ordering in the sidebar
-3. Use relearn shortcodes: `{{% notice %}}`, `{{% expand %}}`, `{{< tabs >}}`, etc.
-4. Reference API counts with `{{% siteparam "metrics.<key>" %}}`
+1. Create `docs/doc-site/<section>/<name>.md` with Hugo front matter.
+2. Set `weight:` to place it in the sidebar.
+3. Use Relearn shortcodes: `{{% notice %}}`, `{{% expand %}}`, `{{< tabs >}}`, etc.
+4. Link a Go symbol to pkg.go.dev on its first mention in a page.
 
 ## Relearn theme features used
 
@@ -78,3 +84,4 @@ For computed values, add them to the codegen `buildMetrics()` in
 - `{{% icon icon="star" color=orange %}}` -- inline icons
 - `{{% siteparam "key" %}}` -- site param substitution
 - `{{< mermaid >}}` -- diagrams
+- `{{% goversion "go1.25" %}}` -- minimum Go version pill (custom shortcode)
