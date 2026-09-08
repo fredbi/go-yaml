@@ -277,3 +277,27 @@ func TestJSONTokensSpellAKeyAsToJSONDoes(t *testing.T) {
 		})
 	}
 }
+
+func TestJSONTokensRefuseAStreamWhenAskedTo(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src     string
+		refused bool
+	}{
+		"one document":        {"a: 1\n", false},
+		"one past directives": {"%YAML 1.2\n---\na: 1\n", false},
+		"two documents":       {"a: 1\n---\nb: 2\n", true},
+		"an empty first":      {"---\n---\nb: 2\n", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := codec.ToJSONTokens([]byte(tc.src)).OneDocument()
+			for range s.Tokens() { //nolint:revive // the error is what is under test
+			}
+			if tc.refused {
+				assert.Error(t, s.Err())
+
+				return
+			}
+			assert.NoError(t, s.Err())
+		})
+	}
+}

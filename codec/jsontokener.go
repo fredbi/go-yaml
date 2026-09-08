@@ -132,6 +132,12 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 	// it goes over.
 	t.ended = at.Document != t.firstDoc
 	if t.ended {
+		if t.state.oneDocument && at.Document > t.firstDoc {
+			t.fail(yamlerrors.NewNotJSON("a stream of several documents has no single JSON root", node.GetToken()))
+
+			return false
+		}
+
 		return true
 	}
 

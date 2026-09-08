@@ -111,6 +111,9 @@ type JSONTokens struct {
 	// no bound. An alias writes what its anchor names again, so a document a
 	// few hundred bytes long can name more values than there is memory for.
 	budget int
+	// oneDocument says a stream holding more than one document is refused
+	// rather than converted down to its first.
+	oneDocument bool
 
 	// depth counts the objects and arrays open around the token in hand. A
 	// closing token reports the depth it returns to.
@@ -164,6 +167,22 @@ func ToJSONTokens(src []byte, opts ...parser.Option) *JSONTokens {
 // A budget of 0, which is the default, does not bound it.
 func (s *JSONTokens) Budget(tokens int) *JSONTokens {
 	s.budget = tokens
+
+	return s
+}
+
+// OneDocument refuses a stream holding more than one document, and returns the
+// receiver so that it reads in the range statement.
+//
+// Without it a stream converts its first document, which is the one [Unmarshal]
+// reads, and the rest are read without being handed over. A caller building one
+// JSON value has no room for the second and should say so here rather than
+// converting a document the author did not put first.
+//
+// A "%YAML" or "%TAG" line does not count: it opens a document of its own ahead
+// of the one it applies to.
+func (s *JSONTokens) OneDocument() *JSONTokens {
+	s.oneDocument = true
 
 	return s
 }
