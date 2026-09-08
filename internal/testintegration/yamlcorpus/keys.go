@@ -106,8 +106,77 @@ func KeyVocabulary() stance.Vocabulary {
 }
 
 // KeyShapes are the documents.
+//
+// # The ones carrying a meaning
+//
+// Most of these ask a stance question and carry [stance.Shape.Intent] alone.
+// The ones added on 2026-09-08 carry [stance.Shape.Means] instead, because the
+// specification settles them: each is a document some implementation reads
+// wrongly, and the corpus says what it denotes rather than which reading to
+// prefer. Where this library is the one reading it wrongly the shape names the
+// pin, so the gap is written down at both ends.
+//
+// They are here rather than in a family of their own because the construct owns
+// them and the bug history does not. Each is a question about what a key is: an
+// empty one, a nested explicit one, two collections that are two keys.
 func KeyShapes() []stance.Shape {
 	return []stance.Shape{
+		{
+			// The parent node's indentation for an indentation indicator, where
+			// the entry's key is the empty node. 8.1.1.1 counts from the parent,
+			// and the mapping sits at the ':' in column 3 rather than at the
+			// '-' in column 1, so the content is "x\n" and not "  x\n".
+			//
+			// go.yaml.in/yaml/v3 v3.0.5 refuses the document -- it refuses a
+			// bare ':' as an empty key everywhere, `- : x` included -- where
+			// grammar.NewRecognizer accepts it and libfyaml 1.0.0b1 and the
+			// reference parser read it. The specification answers, so this
+			// carries the answer.
+			Name:   "a block scalar under an entry with no key",
+			Src:    []byte("- : |1\n   x\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
+			Means:  []any{map[string]any{"null": "x\n"}},
+		},
+		{
+			// 8.2.2 puts an explicit entry's key at s-l+block-indented(n,
+			// block-out), which is any block node -- a mapping written the long
+			// way included. The same key written any other way reads here, so
+			// it is the nesting of the two '?' and nothing else.
+			Name:   "an explicit key whose own key is explicit",
+			Src:    []byte("?\n  ? a\n  : 0\n: v\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
+			Means:  []any{map[string]any{"map[a:0]": "v"}},
+			Pin:    "TestDefectAnExplicitKeyInsideAnExplicitKeyIsRefused",
+		},
+		{
+			// 3.2.1.1 makes two keys equal when they resolve to the same node,
+			// and two different mappings do not. This library names a collection
+			// key by its opening character while checking for duplicates, so
+			// every collection key in a mapping is the same key as every other.
+			Name:   "two collection keys in one mapping",
+			Src:    []byte("{{\"\": 0}: a, {\"\": 1}: b}\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
+			Means:  []any{map[string]any{"map[:0]": "a", "map[:1]": "b"}},
+			Pin:    "TestDefectTwoCollectionKeysInOneMappingCollide",
+		},
+		{
+			// No Means, and the absence is the claim. 7.4.2 lets a flow entry be
+			// a key with no value and lets that key be any flow node, so the
+			// grammar says this is a document -- and grammar.NewRecognizer and
+			// the reference parser both accept it. Every hand-written
+			// implementation refuses it: this library at a position, and
+			// libfyaml with a Python traceback that says nothing about syntax,
+			// since it cannot hash a collection as a dict key even for
+			// `{{a: 0}: v}`, which we read.
+			//
+			// So the specification's grammar answers and the field does not
+			// agree, which is the 7.4.2 question yamlgen.Strict's entry of the
+			// same name opens. A stance rather than a meaning until somebody
+			// settles whether the published grammar is lax here.
+			Name:   "a collection written as a flow entry's key alone",
+			Src:    []byte("{{\"\": 0}}\n"),
+			Intent: []stance.Tag{TagKeyNotAString},
+		},
 		{
 			Name:   "the same key twice",
 			Src:    []byte("a: 1\na: 2\n"),

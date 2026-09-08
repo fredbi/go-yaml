@@ -19,6 +19,28 @@ type Shape struct {
 	// the same thing as what a tagger reports: comparing the two is how a
 	// generator and a tagger that have drifted apart say so.
 	Intent []Tag
+	// Means is what the specification says the document denotes, and nil where
+	// the specification does not settle it.
+	//
+	// The two are a rule for which field a shape gets rather than a
+	// convenience. Read the specification first: where it answers, that is the
+	// answer and this carries it, and an implementation that disagrees is
+	// wrong. Only where the specification is unclear or ambiguous do the
+	// implementations get a vote, and then the shape carries [Shape.Intent]
+	// alone -- a stance, which says the language leaves the question open.
+	//
+	// So "implementations differ" is not evidence of ambiguity. It is usually
+	// evidence that one of them is wrong, and a corpus saying which is the
+	// whole point of having one.
+	Means any
+	// Pin names the test reproducing what this library does instead, for a
+	// shape whose Means it does not yet produce.
+	//
+	// Empty where the library agrees with the specification, which is most of
+	// them. A shape carrying one is a defect written down as a document rather
+	// than only as a test: the corpus states what the document means, the pin
+	// states what we do, and the gap between them is the work.
+	Pin string
 }
 
 // Around is what a language contributes to the encoding shapes: somewhere to

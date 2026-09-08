@@ -374,7 +374,8 @@ const Reading = yamlgen.ReadingCore
 // leaves these to the tags, which say more about them anyway.
 func Cases() []suite.Case {
 	out := make([]suite.Case, 0,
-		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+len(MergeShapes())+len(DirectiveShapes())+len(ReachShapes()))
+		len(Patterns())+len(Resolutions())+len(TagShapes())+len(KeyShapes())+
+			len(MergeShapes())+len(DirectiveShapes())+len(SeparationShapes())+len(ReachShapes()))
 
 	rec := grammar.NewRecognizer(4096)
 	a := Corpus()
@@ -393,60 +394,23 @@ func Cases() []suite.Case {
 		})
 	}
 
-	for i, s := range TagShapes() {
-		out = append(out, suite.Case{
-			Name:       "shape/tag/" + s.Name,
-			Src:        s.Src,
-			WellFormed: rec.Stream(s.Src).OK,
-			VerdictAt:  stance.Construct.String(),
-			Tags:       names(s.Intent),
-			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
-		})
-	}
-
-	// The reach shapes carry no tags and raise no question. They exist because
-	// the grammar has corners the rest of the corpus does not turn.
-	for i, s := range KeyShapes() {
-		out = append(out, suite.Case{
-			Name:       "shape/key/" + s.Name,
-			Src:        s.Src,
-			WellFormed: rec.Stream(s.Src).OK,
-			VerdictAt:  stance.Construct.String(),
-			Tags:       names(s.Intent),
-			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
-		})
-	}
-
-	for i, s := range MergeShapes() {
-		out = append(out, suite.Case{
-			Name:       "shape/merge/" + s.Name,
-			Src:        s.Src,
-			WellFormed: rec.Stream(s.Src).OK,
-			VerdictAt:  stance.Construct.String(),
-			Tags:       names(s.Intent),
-			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
-		})
-	}
-
-	for i, s := range DirectiveShapes() {
-		out = append(out, suite.Case{
-			Name:       "shape/directive/" + s.Name,
-			Src:        s.Src,
-			WellFormed: rec.Stream(s.Src).OK,
-			VerdictAt:  stance.Construct.String(),
-			Tags:       names(s.Intent),
-			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
-		})
-	}
-
-	for i, s := range ReachShapes() {
-		out = append(out, suite.Case{
-			Name:       "shape/reach/" + s.Name,
-			Src:        s.Src,
-			WellFormed: rec.Stream(s.Src).OK,
-			VerdictAt:  stance.Construct.String(),
-			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
-		})
+	// Every family but the anchors and the resolutions builds a case the same
+	// way, so one helper builds them all: a family wired in without its meaning
+	// was the mistake worth making impossible.
+	for _, fam := range []struct {
+		prefix string
+		shapes []stance.Shape
+	}{
+		{"shape/tag/", TagShapes()},
+		{"shape/key/", KeyShapes()},
+		{"shape/merge/", MergeShapes()},
+		{"shape/directive/", DirectiveShapes()},
+		{"shape/separation/", SeparationShapes()},
+		// The reach shapes carry no tags and raise no question. They exist
+		// because the grammar has corners the rest of the corpus does not turn.
+		{"shape/reach/", ReachShapes()},
+	} {
+		out = append(out, shapeCases(fam.prefix, fam.shapes, rec)...)
 	}
 
 	for i, r := range Resolutions() {
@@ -465,6 +429,44 @@ func Cases() []suite.Case {
 	}
 
 	return out
+}
+
+// shapeCases turns an enumerated family into cases.
+//
+// [stance.Shape.Means] becomes the case's meaning, where the specification
+// settles what the document denotes. A shape leaving it nil states none, and
+// the tags say which question the language leaves open instead.
+func shapeCases(prefix string, shapes []stance.Shape, rec *grammar.Recognizer) []suite.Case {
+	out := make([]suite.Case, 0, len(shapes))
+
+	for i, s := range shapes {
+		out = append(out, suite.Case{
+			Name:       prefix + s.Name,
+			Src:        s.Src,
+			WellFormed: rec.Stream(s.Src).OK,
+			VerdictAt:  stance.Construct.String(),
+			Tags:       names(s.Intent),
+			Meaning:    meaningOfShape(s),
+			Origin:     suite.Origin{Document: i, Mutation: "enumerated"},
+		})
+	}
+
+	return out
+}
+
+// meaningOfShape states what an enumerated shape denotes, and nil where the
+// specification does not settle it.
+func meaningOfShape(s stance.Shape) *suite.Meaning {
+	if s.Means == nil {
+		return nil
+	}
+
+	encoded, err := json.Marshal(s.Means)
+	if err != nil {
+		return nil
+	}
+
+	return &suite.Meaning{Under: Reading, JSON: encoded}
 }
 
 // meaningOfPattern states what an anchor pattern denotes, where it denotes
