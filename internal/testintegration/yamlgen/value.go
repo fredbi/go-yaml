@@ -735,10 +735,16 @@ const mergeOdds = 11
 // of two aliases -- 1.1 admits both, and the sequence is where the earlier-wins
 // half of the rule lives.
 //
-// A key the merged mapping and the own mapping share is not avoided. It is the
-// interesting case rather than a collision to dodge: an own key winning over a
-// merged one is the precedence rule, and reading it the other way round was a
-// real defect.
+// A key the merged mapping and the own mapping share is drawn on purpose, half
+// the time an inline mapping is merged. An own key winning over a merged one is
+// the precedence rule, and reading it the other way round was a real defect.
+//
+// It used to say the collision was "not avoided", which was true and useless:
+// mergeFrom named its keys "merged0" to "merged3" and the mapping's own keys
+// came from Strings(), so 110 merges in 4,000 drawn values shared a key
+// **zero** times. The rule was claimed by a comment and exercised by nothing --
+// the same shape as the whole-valued float, a range that cannot reach the rule
+// above it.
 //
 // from is the pool as it stood before this mapping's children were walked. See
 // the Map case in children for why it cannot be taken afterwards.
@@ -763,13 +769,13 @@ func (a *aliaser) merge(pairs []Pair, from []Anchored) []Pair {
 	// "<<: *b" does, and an implementation that resolves the alias may still
 	// have no path for a mapping that was never anchored. It is also what makes
 	// a merge reachable at all on a document whose anchors all came later.
-	val := a.mergeFrom(from)
+	val := a.mergeFrom(from, pairs)
 
 	if rapid.Bool().Draw(a.t, "mergeseq") {
 		// A sequence of two, which is where the earlier-wins half of the rule
 		// lives. Drawn independently, so an alias and an inline mapping can
 		// stand side by side -- the shape codec.ToJSON writes invalid JSON for.
-		val = Seq{Items: []Value{a.mergeFrom(from), a.mergeFrom(from)}}
+		val = Seq{Items: []Value{a.mergeFrom(from, pairs), a.mergeFrom(from, pairs)}}
 	}
 
 	// In front of the mapping's own entries, which is where a "<<" is usually
@@ -780,13 +786,28 @@ func (a *aliaser) merge(pairs []Pair, from []Anchored) []Pair {
 
 // mergeFrom draws one mapping for a "<<" to merge: an alias to an anchored one
 // where the pool has any, and a small mapping written in place otherwise.
-func (a *aliaser) mergeFrom(from []Anchored) Value {
+//
+// own are the entries the mapping already holds, and half the inline mappings
+// take their key from one of them, so that the merged key and an own key
+// collide and the precedence rule decides the value. Naming them "merged0" to
+// "merged3" alone never collided with anything Strings() draws.
+func (a *aliaser) mergeFrom(from []Anchored, own []Pair) Value {
 	if len(from) > 0 && rapid.Bool().Draw(a.t, "mergealias") {
 		return Alias(rapid.SampledFrom(from).Draw(a.t, "mergefrom"))
 	}
 
+	key := Str{V: "merged" + strconv.Itoa(rapid.IntRange(0, 3).Draw(a.t, "mergedkey"))}
+
+	if len(own) > 0 && rapid.Bool().Draw(a.t, "mergeshares") {
+		// The name the library gives the own key, so the two are one key
+		// however the own one is written: a Float{1} own key is "1.0", and a
+		// merged Str{"1.0"} collides with it.
+		taken := rapid.SampledFrom(own).Draw(a.t, "mergeshared")
+		key = Str{V: KeyText(taken.Key)}
+	}
+
 	return Map{Pairs: []Pair{{
-		Key: Str{V: "merged" + strconv.Itoa(rapid.IntRange(0, 3).Draw(a.t, "mergedkey"))},
+		Key: key,
 		Val: Int{V: rapid.IntRange(-9, 9).Draw(a.t, "mergedvalue")},
 	}}}
 }
