@@ -1237,14 +1237,17 @@ func (p *Parser) parseMapKey(ctx context, g *tokenGroup) (ast.MapKeyNode, error)
 			return nil, yamlerrors.NewSyntax("cannot use this node as a map key", value.GetToken())
 		}
 		key.Value = scalar
-		if _, isScalar := value.(ast.ScalarNode); !isScalar {
-			// A collection used as a key has no path: neither YAMLPath nor
-			// JSON Pointer has syntax that reaches one, so it stays out of the
-			// path map rather than being given an invented address.
-			return key, nil
+		if _, isScalar := value.(ast.ScalarNode); isScalar {
+			keyText := p.mapKeyText(scalar)
+			key.SetPathNode(ctx.withChild(p, keyText).path)
 		}
-		keyText := p.mapKeyText(scalar)
-		key.SetPathNode(ctx.withChild(p, keyText).path)
+		// A collection used as a key has no path: neither YAMLPath nor JSON
+		// Pointer has syntax that reaches one, so it stays out of the path map
+		// rather than being given an invented address. It is still a key, and
+		// 3.2.1.1 still holds it to being written once -- returning early here
+		// skipped the check as well as the path, so "? [a]" over ": 1" twice
+		// read as two entries where the flow spelling "{[a]: 1, [a]: 2}" is
+		// refused.
 		if err := p.validateMapKey(ctx, key, g.Last()); err != nil {
 			return nil, err
 		}
@@ -1351,6 +1354,78 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 	}
 }
 
+// collectionKeyText is the document's own spelling of a collection written as a
+// key, read straight out of the source.
+//
+// The node cannot answer this. mapKeyIdentity runs while the entry is being
+// built, before the collection's own children are hung on it, so n.String()
+// renders the shell -- "[]" for a sequence and "{}" for a mapping -- and every
+// sequence key collided with every other again, which is the fault naming them
+// by their opening character had.
+//
+// The span runs from the node's first token to the end of its last, which is
+// what the tape already recorded. Two spellings of one collection are two names
+// and so two keys, which misses a repeat rather than inventing one.
+func (p *Parser) collectionKeyText(n ast.Node) string {
+	tk := n.GetToken()
+	if tk == nil {
+		return ""
+	}
+
+	from := int(tk.Position.Offset())
+	to := int(lastTokenOf(n).EndOffset())
+	if from < 0 || to > len(p.src) || from >= to {
+		return ""
+	}
+
+	return strings.TrimSpace(p.src[from:to])
+}
+
+// lastTokenOf is the token furthest into the source that n or anything under it
+// holds, which is where the node's text ends.
+func lastTokenOf(n ast.Node) *token.Token {
+	last := n.GetToken()
+
+	var walk func(ast.Node)
+	walk = func(m ast.Node) {
+		if m == nil {
+			return
+		}
+		if tk := m.GetToken(); tk != nil && (last == nil || tk.EndOffset() > last.EndOffset()) {
+			last = tk
+		}
+		switch mm := m.(type) {
+		case *ast.SequenceNode:
+			for _, v := range mm.Values {
+				walk(v)
+			}
+			// End is the ']' of a flow sequence, and nil for a block one.
+			if mm.End != nil && (last == nil || mm.End.EndOffset() > last.EndOffset()) {
+				last = mm.End
+			}
+		case *ast.MappingNode:
+			for _, v := range mm.Values {
+				walk(v)
+			}
+			if mm.End != nil && (last == nil || mm.End.EndOffset() > last.EndOffset()) {
+				last = mm.End
+			}
+		case *ast.MappingValueNode:
+			walk(mm.Key)
+			walk(mm.Value)
+		case *ast.MappingKeyNode:
+			walk(mm.Value)
+		case *ast.TagNode:
+			walk(mm.Value)
+		case *ast.AnchorNode:
+			walk(mm.Value)
+		}
+	}
+	walk(n)
+
+	return last
+}
+
 // unnamedKey reports whether mapKeyIdentity gave up on a key, which it says by
 // handing back no name under [token.KeyOther].
 func unnamedKey(name string, kind token.KeyKind) bool {
@@ -1447,20 +1522,24 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 		// What the alias names is not read here; the load resolves it.
 		return "", token.KeyOther
 	case *ast.SequenceNode, *ast.MappingNode, *ast.MappingValueNode:
-		// A collection used as a key has no name to be had. Two of them repeat
-		// a key when their contents match, which is a comparison of trees and
-		// not of text, and nothing here does it -- the same reason an alias
-		// hands back nothing.
+		// A collection used as a key is named by what it holds, written back
+		// out. 3.2.1.1 makes two keys equal when they resolve to the same node,
+		// and two collections spelled alike do, so "{{a: 0}: 1, {a: 0}: 2}" is
+		// one key written twice.
 		//
-		// Falling through named the key by its own first token, so every
-		// sequence key was "[" and every mapping key "{": "{[a]: 1, [b]: 2}"
-		// was refused as `mapping key "[" already defined`, two keys sharing
-		// not one character. The block spelling reads it, so the two disagreed
-		// as well. The grammar says the document is valid; go.yaml.in/yaml/v3
-		// and libfyaml refuse it after parsing it, for a Go map key and a
-		// Python hash respectively, which is a value model declining and not a
-		// syntax verdict.
-		return "", token.KeyOther
+		// Falling through named the key by its own first token instead, so
+		// every sequence key was "[" and every mapping key "{" and two keys
+		// sharing not one character collided. Handing back nothing was the
+		// other extreme and no better: it stopped the check, and the walking
+		// reader then folded the two entries into one and dropped the first
+		// value without a word.
+		//
+		// The text is the document's own spelling, so two spellings of one
+		// collection -- "{a: 0}" and "{\"a\": 0}" -- are read as two keys. That
+		// misses a repeat rather than inventing one, which is the safe
+		// direction: comparing the resolved trees is what would catch it and
+		// nothing here builds them.
+		return p.collectionKeyText(nn), token.KeyCollection
 	}
 
 	tk := n.GetToken()

@@ -54,6 +54,51 @@ func TestTwoCollectionKeysAreTwoKeys(t *testing.T) {
 		assert.Len(t, got, 1)
 	})
 
+	t.Run("a collection key repeated is refused, in every spelling", func(t *testing.T) {
+		// 913fb19 stopped naming a collection key and so stopped checking it,
+		// and the walking reader then folded two entries into one and dropped
+		// the first value without a word. The check that commit ran to prove it
+		// had not over-reached -- "<<: {a: 1, a: 2}" still refused -- was a
+		// repeat INSIDE the key rather than a repeat OF the key, which is why
+		// it passed while this went out.
+		for _, src := range []string{
+			"{{a: 0}: 1, {a: 0}: 2}\n",
+			"{[a]: 1, [a]: 2}\n",
+			"{[\"\"]: 1, [\"\"]: 2}\n",
+			"{[a, b]: 1, [a, b]: 2}\n",
+			"? [a]\n: 1\n? [a]\n: 2\n",
+			"? {a: 0}\n: 1\n? {a: 0}\n: 2\n",
+			"[a]: 1\n[a]: 2\n",
+			"? [a]\n: 1\n[a]: 2\n",
+		} {
+			var got any
+			err := codec.UnmarshalWithOptions([]byte(src), &got, codec.UseOrderedMap())
+			require.Errorf(t, err, "%q read %v", src, got)
+			assert.ErrorIsf(t, err, yamlerrors.ErrDuplicateKey, "%q", src)
+		}
+	})
+
+	t.Run("and two collections that differ are still two keys", func(t *testing.T) {
+		// The name is the document's own spelling, taken from the source rather
+		// than from the node: mapKeyIdentity runs before a collection's
+		// children are hung on it, so String() renders "[]" and "{}" and every
+		// sequence key collided with every other. The suite caught that --
+		// spec-example-2-11-mapping-between-sequences has two sequence keys.
+		for _, src := range []string{
+			"{{a: 0}: 1, {a: 1}: 2}\n",
+			"{[a]: 1, [b]: 2}\n",
+			"{[a]: 1, [a, b]: 2}\n",
+			"{{\"\": 0}: a, {\"\": 1}: b}\n",
+			"? [a]\n: 1\n? [b]\n: 2\n",
+			"? - Detroit Tigers\n  - Chicago cubs\n: 1\n? [ New York Yankees ]\n: 2\n",
+		} {
+			var got any
+			require.NoErrorf(t,
+				codec.UnmarshalWithOptions([]byte(src), &got, codec.UseOrderedMap()), "%q", src)
+			assert.Lenf(t, got, 2, "%q read %v", src, got)
+		}
+	})
+
 	t.Run("and a scalar key repeated is still refused", func(t *testing.T) {
 		// The skip is for keys mapKeyIdentity gave up on. Everything it can
 		// name is recorded, and a key written empty is one of those: a quoted

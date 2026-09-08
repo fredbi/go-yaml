@@ -26,6 +26,11 @@ const (
 	KeyBool
 	KeyInt
 	KeyFloat
+	// KeyCollection is a sequence or a mapping written as a key. It is a kind
+	// of its own so that the text naming one cannot be read as the text naming
+	// a scalar: KeyName's default arm hands back the scalar's own characters
+	// under KeyOther, and "[a]" is a plain scalar a document may write.
+	KeyCollection
 )
 
 func (k KeyKind) String() string {
@@ -40,6 +45,8 @@ func (k KeyKind) String() string {
 		return "int"
 	case KeyFloat:
 		return "float"
+	case KeyCollection:
+		return "collection"
 	default:
 		return "other"
 	}
