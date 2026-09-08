@@ -449,18 +449,14 @@ func (s *Scanner) scan(ctx *Context) error {
 				s.endsProperty(ctx)
 			}
 
-			if ctx.existsBuffer() && s.lastDelimColumn == 0 {
-				// tab indent for plain text (yaml-test-suite's spec-example-7-12-plain-lines).
+			// The tab counts as indentation in two places: a plain scalar under way at the root, where lastDelimColumn
+			// is 0 (yaml-test-suite's spec-example-7-12-plain-lines), and anywhere the last delimiter stands left of
+			// the cursor.
+			if (ctx.existsBuffer() && s.lastDelimColumn == 0) || s.lastDelimColumn < s.column {
 				s.indentNum++
 				ctx.addOriginBuf(c)
 				s.progress(ctx, 1)
-				continue
-			}
 
-			if s.lastDelimColumn < s.column {
-				s.indentNum++
-				ctx.addOriginBuf(c)
-				s.progress(ctx, 1)
 				continue
 			}
 
@@ -706,11 +702,7 @@ func (s *Scanner) scanMergeKey(ctx *Context) bool {
 }
 
 func (s *Scanner) scanRawFoldedChar(ctx *Context) bool {
-	if !ctx.existsBuffer() {
-		return false
-	}
-
-	if !s.isChangedToIndentStateUp() {
+	if !ctx.existsBuffer() || !s.isChangedToIndentStateUp() {
 		return false
 	}
 

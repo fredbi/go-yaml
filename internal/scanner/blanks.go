@@ -8,8 +8,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-openapi/go-yaml/internal/scanner/swar"
-
-	"github.com/go-openapi/go-yaml/token"
 )
 
 func (s *Scanner) scanWhiteSpace(ctx *Context) bool {
@@ -138,13 +136,7 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 		return true, nil
 	}
 
-	ctx.addBuf(c)
-	ctx.addOriginBuf(c)
-	err := ErrInvalidToken("found character '\t' that cannot start any token", token.Invalid(ctx.origin(), s.pos()))
-	s.progressColumn(ctx, 1)
-	ctx.clear()
-
-	return false, err
+	return false, s.refuse(ctx, c, "found character '\t' that cannot start any token")
 }
 
 // blank fast-scan knobs: after having read 4 leading blanks, assume we are in a deeply nested indented zone, and

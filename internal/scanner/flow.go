@@ -29,16 +29,7 @@ func (s *Scanner) scanFlowDash(ctx *Context) error {
 		return nil
 	}
 
-	ctx.addBuf('-')
-	ctx.addOriginBuf('-')
-	err := ErrInvalidToken(
-		"'-' is not a scalar, and a flow collection has no sequence entries",
-		token.Invalid(ctx.origin(), s.pos()),
-	)
-	s.progressColumn(ctx, 1)
-	ctx.clear()
-
-	return err
+	return s.refuse(ctx, '-', "'-' is not a scalar, and a flow collection has no sequence entries")
 }
 
 // enterFlow records what a flow collection's continuation lines must clear.
@@ -51,14 +42,9 @@ func (s *Scanner) enterFlow() {
 	s.flowIndent = s.contentIndent()
 }
 
+// isFlowMode reports whether the scan stands inside a flow collection, of either kind.
 func (s *Scanner) isFlowMode() bool {
-	if s.startedFlowSequenceNum > 0 {
-		return true
-	}
-	if s.startedFlowMapNum > 0 {
-		return true
-	}
-	return false
+	return s.startedFlowSequenceNum > 0 || s.startedFlowMapNum > 0
 }
 
 func (s *Scanner) scanFlowMapStart(ctx *Context) bool {

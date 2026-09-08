@@ -23,16 +23,7 @@ func (s *Scanner) scanCommentIndicator(ctx *Context) error {
 		return nil
 	}
 
-	ctx.addBuf('#')
-	ctx.addOriginBuf('#')
-	err := ErrInvalidToken(
-		"a comment must be preceded by a space, and a scalar cannot begin with '#'",
-		token.Invalid(ctx.origin(), s.pos()),
-	)
-	s.progressColumn(ctx, 1)
-	ctx.clear()
-
-	return err
+	return s.refuse(ctx, '#', "a comment must be preceded by a space, and a scalar cannot begin with '#'")
 }
 
 // scanComment reads a comment token, and returns false for a '#' that opens no comment.
