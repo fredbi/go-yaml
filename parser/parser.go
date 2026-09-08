@@ -1326,6 +1326,19 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 		return
 	}
 
+	if unnamedKey(name, kind) {
+		// [Parser.mapKeyIdentity] had nothing to say about this key: an alias,
+		// whose target the load resolves, or a collection, whose identity is a
+		// comparison of trees. Recording it would make every such key the same
+		// key, so "{[a]: 1, [b]: 2}" was refused as a repeat of "" -- and,
+		// before that, as a repeat of "[".
+		//
+		// A key written empty is not this: "" from a quoted key comes back as
+		// [token.KeyString] and the empty node as "null", so both are recorded
+		// and both still catch a genuine repeat.
+		return
+	}
+
 	pos, jsonOnly, defined := p.recordMapKey(ctx.keyBase, name, kind, tk.Position)
 	if !defined {
 		return
@@ -1336,6 +1349,12 @@ func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind t
 		open.Duplicates = append(open.Duplicates,
 			ast.DuplicateKey{Name: name, At: tk.Position, FirstAt: pos, JSONNameOnly: jsonOnly})
 	}
+}
+
+// unnamedKey reports whether mapKeyIdentity gave up on a key, which it says by
+// handing back no name under [token.KeyOther].
+func unnamedKey(name string, kind token.KeyKind) bool {
+	return name == "" && kind == token.KeyOther
 }
 
 // openMapping records the mapping being read, and returns what takes it off.
@@ -1426,6 +1445,21 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 		return p.mapKeyIdentity(nn.Value)
 	case *ast.AliasNode:
 		// What the alias names is not read here; the load resolves it.
+		return "", token.KeyOther
+	case *ast.SequenceNode, *ast.MappingNode, *ast.MappingValueNode:
+		// A collection used as a key has no name to be had. Two of them repeat
+		// a key when their contents match, which is a comparison of trees and
+		// not of text, and nothing here does it -- the same reason an alias
+		// hands back nothing.
+		//
+		// Falling through named the key by its own first token, so every
+		// sequence key was "[" and every mapping key "{": "{[a]: 1, [b]: 2}"
+		// was refused as `mapping key "[" already defined`, two keys sharing
+		// not one character. The block spelling reads it, so the two disagreed
+		// as well. The grammar says the document is valid; go.yaml.in/yaml/v3
+		// and libfyaml refuse it after parsing it, for a Go map key and a
+		// Python hash respectively, which is a value model declining and not a
+		// syntax verdict.
 		return "", token.KeyOther
 	}
 
