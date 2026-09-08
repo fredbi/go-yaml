@@ -125,8 +125,11 @@ type Parser struct {
 	lineComments map[*tapeToken]*token.Token
 	// yamlVersion is the version the document being read named, and version the
 	// one to fall back on where it names none.
-	yamlVersion          YAMLVersion
-	version              YAMLVersion
+	yamlVersion YAMLVersion
+	version     YAMLVersion
+	// mergeKeys resolves a bare "<<" as a merge key whatever version is in
+	// force. See [WithMergeKeys].
+	mergeKeys            bool
 	allowDuplicateMapKey bool
 	omitNodePaths        bool
 	jsonCompatible       bool
@@ -761,7 +764,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *tapeToken) (ast.ScalarNode, e
 	}
 	switch tk.Type() {
 	case token.MergeKeyType:
-		if p.schemaInForce() != token.Schema11 {
+		if !p.mergeKeys && p.schemaInForce() != token.Schema11 {
 			// The merge key is tag:yaml.org,2002:merge, a YAML 1.1 type. 1.2
 			// leaves it a tag like any other an application defines, so a bare
 			// "<<" is an ordinary key spelled "<<" and the document reads the

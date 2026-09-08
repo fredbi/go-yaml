@@ -75,6 +75,24 @@ func WithYAMLVersion(v YAMLVersion) Option {
 	}
 }
 
+// WithMergeKeys resolves a bare "<<" as a merge key whatever version the
+// document is read under.
+//
+// The merge key is tag:yaml.org,2002:merge, a YAML 1.1 type. 1.2 defines no
+// such type, so a bare "<<" under 1.2 names an ordinary member spelled "<<" and
+// only "!!merge <<" merges. Documents written for tools that never left 1.1 use
+// the bare spelling and expect it to fold, and reading such a document under
+// [YAML11] to get it changes far more: "0100" becomes 64, "1_000" becomes 1000,
+// "1:30" becomes 90 and "yes" becomes true.
+//
+// This turns that one behavior on without the rest. A scalar still resolves the
+// way the version in force says.
+func WithMergeKeys() Option {
+	return func(p *Parser) {
+		p.mergeKeys = true
+	}
+}
+
 // WithJSONCompatible refuses a document JSON has no spelling for, so a
 // converter fails on the document rather than inventing one.
 //
