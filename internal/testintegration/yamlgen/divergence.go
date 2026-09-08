@@ -265,8 +265,10 @@ var Ledger = []Divergence{
 			"The directive is half of the shape since 8acf11b, which resolves `<<` under the version the " +
 			"document declares: with no directive neither spelling merges and the two agree, so this " +
 			"matches a document declaring 1.1 and no other.\n\n" +
-			"go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow. libfyaml 1.0.0b1 is not an " +
-			"oracle here: it resolves no merge at all and hands `<<` back as a member name.\n\n" +
+			"go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow. libfyaml 1.0.0b1 resolves the " +
+			"merge under a `%YAML 1.1` directive and hands `<<` back as a member name without one -- " +
+			"the same rule this library took in 8acf11b, measured 2026-09-08 -- and it is not an oracle " +
+			"for the long form either way, since it refuses a collection key.\n\n" +
 			"A tag on the mapping makes no difference -- `!foo` and `!!map` over the plain form both " +
 			"merge, over the long form neither does -- so it is the key's presentation and nothing else.\n\n" +
 			"And in flow the two decode paths disagree, which is the worse half. `{? <<: {x: 1}, w: 2}` " +
