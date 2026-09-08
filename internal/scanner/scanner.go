@@ -91,13 +91,15 @@ type Scanner struct {
 	hasSavedPos bool
 }
 
-// Init sets s to read src from its first byte.
+// Init sets s to read src from its first byte, and clears what a previous source left behind.
 //
 // src is not copied.
 // The tokens keep windows into it: a scalar the scan carries through unchanged is a slice of these very bytes.
 // Do not write to src while those tokens are in use.
 //
-// The schema survives an Init. Use [Scanner.SetSchema] to change it.
+// The schema returns to [token.Schema12]. Call [Scanner.SetSchema] after Init, not before it.
+//
+// Init keeps the buffers a previous source grew, and nothing else.
 //
 // A source longer than maxSourceLen is refused, and [Scanner.Err] returns the refusal after the first read.
 func (s *Scanner) Init(src []byte) {
@@ -112,7 +114,7 @@ func (s *Scanner) Init(src []byte) {
 
 // SetSchema selects the YAML schema that plain scalars resolve against.
 //
-// A scanner starts on [token.Schema12] and keeps the schema it was last given across an [Scanner.Init].
+// A scanner starts on [token.Schema12], and [Scanner.Init] puts it back there. Call SetSchema after Init.
 //
 // The scanner needs to know the current schema as it affects how the type of a scalar is determined.
 //
@@ -762,6 +764,8 @@ func (s *Scanner) reset(text string) {
 	s.lookback.Reset()
 	s.ctx.reset(src)
 	s.ctx.lookback = &s.lookback
+	// A schema belongs to the source it was set for, so it does not cross an Init.
+	s.schema = token.Schema12
 	s.ctx.schema = s.schema
 	s.clearState()
 }

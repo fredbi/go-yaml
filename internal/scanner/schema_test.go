@@ -20,8 +20,8 @@ func scalarTypes(t *testing.T, src string, schema token.Schema) map[string]token
 	t.Helper()
 
 	var s scanner.Scanner
-	s.SetSchema(schema)
 	s.Init([]byte(src))
+	s.SetSchema(schema)
 
 	got := make(map[string]token.Type)
 	for tk := range s.Tokens() {
@@ -89,16 +89,20 @@ nothing: null
 	})
 }
 
-// TestSchemaSurvivesInitAndTakesEffectMidScan holds the two things the parser needs of SetSchema: a scanner reused on a
-// second document keeps the schema it was given, and a schema set part way through a scan reaches the scalars that
-// follow it, so the parser can read a "%YAML 1.1" directive and set the schema before pulling the document's
-// first scalar.
-func TestSchemaSurvivesInitAndTakesEffectMidScan(t *testing.T) {
+// TestSchemaResetsOnInitAndTakesEffectMidScan holds the two things the parser needs of SetSchema.
+//
+// A schema belongs to the source it was set for: [Scanner.Init] puts the scanner back on the 1.2 core schema, so a
+// "%YAML 1.1" read in one source cannot reach the next one. The parser sets the schema on the line after every Init,
+// and never relies on one crossing.
+//
+// A schema set part way through a scan reaches the scalars that follow it, which is how the parser reads a
+// "%YAML 1.1" directive and sets the schema before pulling the document's first scalar.
+func TestSchemaResetsOnInitAndTakesEffectMidScan(t *testing.T) {
 	var s scanner.Scanner
 	assert.Equal(t, token.Schema12, s.Schema(), "a scanner starts on the 1.2 core schema")
 
-	s.SetSchema(token.Schema11)
 	s.Init([]byte("a: 0100\n"))
+	s.SetSchema(token.Schema11)
 	types := make(map[string]token.Type)
 	for tk := range s.Tokens() {
 		types[tk.Value] = tk.Type
@@ -107,12 +111,13 @@ func TestSchemaSurvivesInitAndTakesEffectMidScan(t *testing.T) {
 	assert.Equal(t, token.OctetIntegerType, types["0100"])
 
 	s.Init([]byte("b: 0100\n"))
+	assert.Equal(t, token.Schema12, s.Schema(), "Init puts the schema back to the 1.2 core schema")
 	types = make(map[string]token.Type)
 	for tk := range s.Tokens() {
 		types[tk.Value] = tk.Type
 	}
 	require.NoError(t, s.Err())
-	assert.Equal(t, token.OctetIntegerType, types["0100"], "Init keeps the schema the scanner was given")
+	assert.Equal(t, token.IntegerType, types["0100"], "the 1.1 schema did not cross the Init")
 
 	// Mid-scan: read the first scalar under 1.2, then switch.
 	var mid scanner.Scanner
