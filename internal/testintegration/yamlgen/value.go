@@ -488,6 +488,17 @@ func (g *tagger) walk(v Value) Value {
 	case Map:
 		pairs := make([]Pair, 0, len(n.Pairs))
 		for _, p := range n.Pairs {
+			// Keys are left untagged, and the emitter can write a tagged one:
+			// keyIn puts the properties in front of the key and
+			// keyRunsIntoTheColon separates the ":" a tag URI would swallow.
+			// Turning the draw on is held until the parser reads them --
+			// TestDefectATaggedKeyIsMishandled and
+			// TestDefectATagOnAKeyEmptiesAStructField say what it does today,
+			// and a ledger entry wide enough to excuse them would excuse every
+			// document holding a tagged key, which is one drawn node in seven.
+			//
+			// The aliaser anchors keys meanwhile, which reaches the same
+			// emitter path with one open defect rather than a family.
 			pairs = append(pairs, Pair{Key: p.Key, Val: g.walk(p.Val)})
 		}
 
@@ -597,7 +608,7 @@ func (a *aliaser) children(v Value) Value {
 
 		pairs := make([]Pair, 0, len(n.Pairs)+1)
 		for _, p := range n.Pairs {
-			pairs = append(pairs, Pair{Key: p.Key, Val: a.walk(p.Val)})
+			pairs = append(pairs, Pair{Key: a.anchorKey(p.Key), Val: a.walk(p.Val)})
 		}
 
 		return Map{Pairs: a.merge(pairs, from)}
@@ -607,6 +618,36 @@ func (a *aliaser) children(v Value) Value {
 		return v
 	}
 }
+
+// anchorKey gives a key an anchor, sometimes, and never an alias.
+//
+// An anchor leaves the key's name alone -- [KeyText] looks through it -- so
+// "&a1 k: v" is the key "k" and collides with nothing the mapping already
+// holds. An *alias* standing as a key resolves to whatever it names and can
+// collide with a key written out in full, which drawMap's keyFamily dedupe
+// cannot see: yamlcorpus enumerates that collision by hand and its break rules
+// build it on purpose, where a draw would produce it by accident.
+//
+// The key's own children are left alone. Anchoring inside a collection key
+// would put an anchor where the document reads it twice -- once in the key and
+// once in every message naming it -- and drawKeyCollection keeps keys small for
+// the same reason.
+func (a *aliaser) anchorKey(k Value) Value {
+	if rapid.IntRange(0, keyAnchorOdds).Draw(a.t, "keyanchor") != 0 {
+		return k
+	}
+
+	a.n++
+	anchored := Anchored{Name: fmt.Sprintf("a%d", a.n), V: k}
+	a.pool = append(a.pool, anchored)
+
+	return anchored
+}
+
+// keyAnchorOdds is one in N, and lower than anchorOdds: an anchored key is a
+// rarer thing to write than an anchored value, and every one of them adds a
+// name a later alias may take.
+const keyAnchorOdds = 15
 
 // mergeOdds is one in N, over the mappings drawn while the pool holds a
 // mapping to merge from.

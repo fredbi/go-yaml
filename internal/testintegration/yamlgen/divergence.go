@@ -4,6 +4,7 @@
 package yamlgen
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -257,6 +258,44 @@ var Ledger = []Divergence{
 		Match:    writesAnExplicitKeyInsideAnExplicitKey,
 	},
 	{
+		Name: "parse/a-propertied-key-refuses-a-block-scalar-value",
+		Pin:  "TestDefectAPropertiedKeyRefusesABlockScalarValue",
+		Reason: "An entry whose key carries an anchor or a tag and whose value is a block scalar is " +
+			"refused: `&a1 k: >-` over ` x` gives `value is not allowed in this context. map " +
+			"key-value is pre-defined`, and so does `!!str k: |-`. The same key with a plain value, " +
+			"`&a1 k: v`, reads; so does the same key over a block collection, `&a1 k:` over `  a: 1`. " +
+			"Take the property off the key and the block scalar reads.\n\n" +
+			"8.2.2 puts an implicit key at ns-s-block-map-implicit-key, which is a flow node, and a " +
+			"flow node carries its properties. Nothing about the value's spelling is the key's " +
+			"business, and the grammar accepts every one of these -- grammar.NewRecognizer says so, " +
+			"which is why this claims Parses.\n\n" +
+			"Found on 2026-09-08 on the first run after the tagger and the aliaser began walking keys. " +
+			"No document could carry a propertied key before that, so nothing had asked.",
+		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
+		Match:    writesAPropertiedKeyBeforeABlockScalar,
+	},
+	{
+		Name: "decode/an-anchor-on-a-float-key-loses-its-spelling",
+		Pin:  "TestDefectAnAnchorOnAFloatKeyLosesItsSpelling",
+		Reason: "`1.0: x` comes back keyed \"1.0\" and `&a1 1.0: x` keyed \"1\" -- on the walk. Read " +
+			"into a map[string]any the same document keeps the \"1.0\", so the destination decides " +
+			"the key. The anchor names the " +
+			"node and says nothing about its type, so both are the float 1 standing as a key, and a " +
+			"float key is named by its canonical spelling -- the \".0\" is what keeps it out of the " +
+			"integers' namespace. `&a1 1e3: x` loses it the same way, coming back \"1000\" where " +
+			"`1e3: x` gives \"1000.0\".\n\n" +
+			"Only a float, and only the implicit key: `&a1 7`, `&a1 true` and `&a1 1.5` are named " +
+			"correctly, and `? &a1 1.0` over `: x` gives \"1.0\". Flow loses it like block.\n\n" +
+			"The same root as yamlcorpus.Departures' \"a key tagged !!float\", where `!!float 226.0` " +
+			"comes back \"226\": a property in front of the key is not looked through before the key " +
+			"is named. codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds the " +
+			"infinities, where `&a .inf` is named \"+Inf\" on one path and \".inf\" on the other.\n\n" +
+			"Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the aliaser " +
+			"began anchoring keys.",
+		Property: Decode | Render | DecodeTyped,
+		Match:    writesAnAnchoredKeyNamedTwoWays,
+	},
+	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
 		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
 		Reason: "Under `%YAML 1.1`, a `<<` entry written `? <<` over `: *a` is read as an ordinary key " +
@@ -418,6 +457,137 @@ func writesAPropertiedRootBlockScalarAfterASuffix(v Value, st Style) bool {
 			return propertied && isText && blockScalarIn(text.V, st)
 		}
 	}
+}
+
+// writesAPropertiedKeyBeforeABlockScalar reports whether an entry writes a key
+// carrying an anchor or a tag over a block scalar value.
+//
+// Three halves, all the style's and the value's together: Style.Literal and
+// Style.Folded decide whether a string is written as a block scalar at all, a
+// document written entirely in flow has no block scalars to write, and
+// Style.ExplicitKeys writes the entry the long way, which reads.
+func writesAPropertiedKeyBeforeABlockScalar(v Value, st Style) bool {
+	if !st.Literal && !st.Folded {
+		return false
+	}
+
+	if st.Flow && st.FlowFrom == 0 {
+		return false
+	}
+
+	if st.ExplicitKeys {
+		// The long form reads: "? &a1 k" over ": >-" over " x" is the mapping
+		// where "&a1 k: >-" is refused, which places the fault on the implicit
+		// key.
+		return false
+	}
+
+	return holdsAPropertiedKeyOverABlockScalar(v, st)
+}
+
+func holdsAPropertiedKeyOverABlockScalar(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if keyCarriesAProperty(p.Key) && writesAsABlockScalar(p.Val, st) {
+				return true
+			}
+
+			if holdsAPropertiedKeyOverABlockScalar(p.Key, st) ||
+				holdsAPropertiedKeyOverABlockScalar(p.Val, st) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, func(item Value) bool {
+			return holdsAPropertiedKeyOverABlockScalar(item, st)
+		})
+	case Anchored:
+		return holdsAPropertiedKeyOverABlockScalar(n.V, st)
+	case Alias:
+		return holdsAPropertiedKeyOverABlockScalar(n.V, st)
+	case Tagged:
+		return holdsAPropertiedKeyOverABlockScalar(n.V, st)
+	}
+
+	return false
+}
+
+// keyCarriesAProperty reports whether a key is written with an anchor or a tag
+// in front of it.
+func keyCarriesAProperty(k Value) bool {
+	switch k.(type) {
+	case Anchored, Tagged:
+		return true
+	}
+
+	return false
+}
+
+// writesAsABlockScalar reports whether a value reaches the document as a block
+// scalar, looking through the properties that may stand in front of it.
+func writesAsABlockScalar(v Value, st Style) bool {
+	switch n := v.(type) {
+	case Str:
+		return blockScalarIn(n.V, st)
+	case Anchored:
+		return writesAsABlockScalar(n.V, st)
+	case Tagged:
+		return writesAsABlockScalar(n.V, st)
+	}
+
+	return false
+}
+
+// writesAnAnchoredKeyNamedTwoWays reports whether a key carrying an anchor has a
+// canonical name Go's %v does not write.
+//
+// Only a float does: [KeyText] gives the float 1 the name "1.0" and %v writes
+// "1". Style.ExplicitKeys is the other half -- "? &a1 1.0" over ": x" is named
+// correctly, so it is the implicit key that loses the spelling.
+func writesAnAnchoredKeyNamedTwoWays(v Value, st Style) bool {
+	if st.ExplicitKeys {
+		return false
+	}
+
+	return holdsAnAnchoredKeyNamedTwoWays(v)
+}
+
+func holdsAnAnchoredKeyNamedTwoWays(v Value) bool {
+	switch n := v.(type) {
+	case Map:
+		for _, p := range n.Pairs {
+			if namedTwoWays(p.Key) {
+				return true
+			}
+
+			if holdsAnAnchoredKeyNamedTwoWays(p.Key) || holdsAnAnchoredKeyNamedTwoWays(p.Val) {
+				return true
+			}
+		}
+	case Seq:
+		return slices.ContainsFunc(n.Items, holdsAnAnchoredKeyNamedTwoWays)
+	case Anchored:
+		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+	case Alias:
+		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+	case Tagged:
+		return holdsAnAnchoredKeyNamedTwoWays(n.V)
+	}
+
+	return false
+}
+
+// namedTwoWays reports whether a key carries an anchor and is named one thing by
+// KeyText and another by Go's %v of what it decodes to.
+func namedTwoWays(k Value) bool {
+	if _, anchored := k.(Anchored); !anchored {
+		return false
+	}
+
+	node := peelProperties(k)
+
+	return KeyText(node) != fmt.Sprintf("%v", node.Decoded())
 }
 
 // peelProperties returns the node an anchor and a tag decorate.
@@ -628,11 +798,17 @@ func writesAnExplicitKeyInsideAnExplicitKey(v Value, st Style) bool {
 }
 
 // holdsAMappingAsAKey reports whether a mapping stands as a mapping's key.
+//
+// peelProperties, because a key carries an anchor and a tag like any other node
+// since the tagger and the aliaser began walking keys: "&a1 !!map" over a
+// mapping is the same key node as the mapping alone, and asking the type
+// directly missed it. TestEmitParses found that on the first draw of the new
+// axis, reporting a parser fault where the ledger already held the shape.
 func holdsAMappingAsAKey(v Value) bool {
 	switch n := v.(type) {
 	case Map:
 		for _, p := range n.Pairs {
-			if _, isMap := p.Key.(Map); isMap {
+			if _, isMap := peelProperties(p.Key).(Map); isMap {
 				return true
 			}
 

@@ -561,6 +561,10 @@ func (e *emitter) block(v Value, indent, depth int) {
 				e.explicitKey(p.Key, indent, depth)
 			} else {
 				e.buf.WriteString(e.keyIn(p.Key, false))
+
+				if e.keyRunsIntoTheColon(p.Key) {
+					e.buf.WriteString(" ")
+				}
 			}
 
 			e.buf.WriteString(":")
@@ -803,7 +807,12 @@ func (e *emitter) flowPair(v Value) (string, bool) {
 
 	e.feat.add(FeatureFlowPair)
 
-	return e.keyIn(n.Pairs[0].Key, true) + ": " + val, true
+	key := e.keyIn(n.Pairs[0].Key, true)
+	if e.keyRunsIntoTheColon(n.Pairs[0].Key) {
+		key += " "
+	}
+
+	return key + ": " + val, true
 }
 
 func (e *emitter) flowMap(n Map) string {
@@ -812,6 +821,9 @@ func (e *emitter) flowMap(n Map) string {
 	pairs := make([]string, 0, len(n.Pairs))
 	for _, p := range n.Pairs {
 		key := e.keyIn(p.Key, true)
+		if e.keyRunsIntoTheColon(p.Key) {
+			key += " "
+		}
 
 		if e.st.ExplicitKeys {
 			// "{? a: 1}" is the flow spelling of the same entry. The "?" needs
@@ -851,6 +863,32 @@ func (e *emitter) flowMap(n Map) string {
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
 
+// keyRunsIntoTheColon reports whether the ':' after a key would be read as part
+// of the key rather than as the indicator.
+//
+// An anchor name is ns-char+ less the flow indicators and a tag URI is
+// ns-uri-char+, and ':' is in both -- so "*a: 1" names the anchor "a:" and
+// "!!null: 1" names the tag "...null:". A space settles it, and only these
+// shapes need one: every other key ends in a scalar or a flow collection, where
+// the ':' is the indicator by 7.4.2.
+//
+// Asked of the value rather than of the text, because keyIn records features
+// and readings as it writes and cannot be called twice for one key.
+func (e *emitter) keyRunsIntoTheColon(k Value) bool {
+	switch n := k.(type) {
+	case Alias:
+		return true
+	case Anchored, Tagged:
+		_, node := strip(k)
+
+		return writesNothing(node, e.st)
+	default:
+		_ = n
+
+		return false
+	}
+}
+
 // keyIn writes a mapping key.
 //
 // A key is a node, so it is written the way the same node would be written as a
@@ -880,6 +918,36 @@ func (e *emitter) keyIn(k Value, flow bool) string {
 		out, _ := e.inline(k, true)
 
 		return out
+	}
+
+	if alias, isAlias := k.(Alias); isAlias {
+		// An alias standing as a key: "*a : 1". The space before the ':' is
+		// keyRunsIntoTheColon's business, and it is not optional -- an anchor
+		// name may hold a ':', so "*a: 1" names the anchor "a:".
+		e.feat.add(FeatureAlias)
+
+		return "*" + alias.Name
+	}
+
+	switch k.(type) {
+	case Anchored, Tagged:
+		// A key is a node, so it carries an anchor and a tag like any other:
+		// "&a1 k: v", "!!str k: v", "? &a1 !!seq [x]". The properties are
+		// written the way inlineWith writes them for a value, in the order
+		// Style.PropertyOrder asks for.
+		//
+		// A property on a key that writes nothing is the property alone --
+		// "&a1 : v" -- and the space before the ':' is again
+		// keyRunsIntoTheColon's, since a tag URI and an anchor name may both
+		// hold a ':'.
+		p, node := strip(k)
+
+		inner := e.keyIn(node, flow)
+		if inner == "" {
+			return e.propText(p)
+		}
+
+		return e.propText(p) + " " + inner
 	}
 
 	s, ok := k.(Str)

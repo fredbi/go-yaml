@@ -272,6 +272,274 @@ func readTheStream(t *testing.T, src string) []any {
 	}
 }
 
+// TestDefectAnAnchorOnAFloatKeyLosesItsSpelling pins the naming.
+//
+// A float key is named by its canonical spelling, and the ".0" is what keeps it
+// out of the integers' namespace: "1.0: x" comes back keyed "1.0". Put an
+// anchor on the same key and it comes back "1". The anchor names the node and
+// says nothing about its type, so both documents hold the float 1 as a key.
+//
+// Only a float, and only the implicit key. An integer, a boolean and a float
+// that needs its decimals are all named correctly with an anchor, and the long
+// form "? &a1 1.0" over ": x" keeps the spelling.
+//
+// The two decode paths disagree about it, which is the sharper half: reading
+// into an `any` gives "1" and reading into a map[string]any gives "1.0", so the
+// destination decides the key. codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML
+// holds the same split for the infinities, where "&a .inf" is "+Inf" on one
+// path and ".inf" on the other. yamlcorpus.Departures' "a key tagged !!float"
+// is the tag wearing the same fault: a property in front of the key is not
+// looked through before the key is named.
+//
+// Reached on 2026-09-08 by TestRenderPreservesValue, on the first run after the
+// aliaser began anchoring keys.
+func TestDefectAnAnchorOnAFloatKeyLosesItsSpelling(t *testing.T) {
+	t.Run("a bare float key keeps its spelling", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "1.0: x\n", key: "1.0"},
+			{src: "1e3: x\n", key: "1000.0"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+	})
+
+	t.Run("today the walk drops the .0 and the tree keeps it", func(t *testing.T) {
+		// The two decode paths part company, which is the same split
+		// codec.TestDefectAnAnchoredFloatKeyIsNamedByGoAndNotByYAML holds for
+		// the infinities: reading into an `any` walks the token stream and
+		// names the key with Go's %v, reading into a map gathers a tree and
+		// names it by the canonical spelling.
+		for _, tc := range []struct{ src, walked, tree string }{
+			{src: "&a1 1.0: x\n", walked: "1", tree: "1.0"},
+			{src: "{&a1 1.0: x}\n", walked: "1", tree: "1.0"},
+			{src: "&a1 1e3: x\n", walked: "1000", tree: "1000.0"},
+		} {
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.walked: "x"}, walked,
+				"today: the walk names it with Go's %%v: %q", tc.src)
+
+			var tree map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.tree: "x"}, tree,
+				"the tree keeps the canonical spelling: %q", tc.src)
+		}
+	})
+
+	t.Run("and every adjacent key is named correctly", func(t *testing.T) {
+		for _, tc := range []struct{ src, key string }{
+			{src: "&a1 7: x\n", key: "7"},
+			{src: "&a1 true: x\n", key: "true"},
+			{src: "&a1 1.5: x\n", key: "1.5"},
+			// The long form keeps the spelling, which places the fault on the
+			// implicit key.
+			{src: "? &a1 1.0\n: x\n", key: "1.0"},
+		} {
+			var got map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
+		}
+	})
+}
+
+// TestDefectAPropertiedKeyRefusesABlockScalarValue pins the combination.
+//
+// An anchor or a tag on an *implicit* key, over a block scalar value, is refused
+// with "value is not allowed in this context. map key-value is pre-defined".
+// Nothing about how the value is written is the key's business: 8.2.2 puts an
+// implicit key at ns-s-block-map-implicit-key, a flow node, and a flow node
+// carries its properties.
+//
+// Four controls place it exactly. The same key with a plain value reads, the
+// same key over a block collection reads, the same block scalar under a bare key
+// reads, and -- the sharpest -- the same entry written the long way reads:
+// "? &a1 k" over ": >-" over " x" is the mapping, where "&a1 k: >-" is refused.
+//
+// Reached on 2026-09-08 by TestAStreamReadsBackAsItsDocuments, on the first run
+// after the tagger and the aliaser began walking keys.
+func TestDefectAPropertiedKeyRefusesABlockScalarValue(t *testing.T) {
+	t.Run("today a property on the key refuses the block scalar", func(t *testing.T) {
+		for _, src := range []string{
+			"&a1 k: >-\n x\n",
+			"&a1 k: |-\n x\n",
+			"!!str k: >-\n x\n",
+			"&a1 \"k\": &a2 !!str >-\n x\n",
+		} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "value is not allowed in this context", "%q", src)
+		}
+	})
+
+	t.Run("and every adjacent shape reads", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want map[string]any
+		}{
+			// The block scalar under a bare key.
+			{src: "k: >-\n x\n", want: map[string]any{"k": "x"}},
+			// The propertied key over a plain value.
+			{src: "&a1 k: v\n", want: map[string]any{"k": "v"}},
+			{src: "!!str k: v\n", want: map[string]any{"k": "v"}},
+			// The propertied key over a block collection.
+			{src: "&a1 k:\n  a: 1\n", want: map[string]any{"k": map[string]any{"a": uint64(1)}}},
+			{src: "&a1 k:\n  - 1\n", want: map[string]any{"k": []any{uint64(1)}}},
+			// And the same entry written the long way, which is the control
+			// that places the fault on the implicit key: "? &a1 k" over
+			// ": >-" reads where "&a1 k: >-" is refused.
+			{src: "? &a1 k\n: >-\n x\n", want: map[string]any{"k": "x"}},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "%q", tc.src)
+		}
+	})
+}
+
+// TestDefectAPropertiedEmptyKeyIsMishandled pins the three arrangements.
+//
+// No generated document reaches these: the tagger leaves keys untagged until
+// the family is fixed, since a ledger entry wide enough to excuse it would
+// excuse every document holding a tagged key. The emitter can write them --
+// keyIn puts a key's properties in front of it since 2026-09-08 -- so the draw
+// is one line away once the parser reads them.
+//
+// A tag written verbatim on a key that writes nothing swallows the entry: the
+// document comes back as the tagged empty node instead of as a mapping holding
+// it. The shorthand spelling of the same tag reads correctly, and so does the
+// verbatim tag on a key that writes something -- so it is the two spellings
+// parting company over an empty key.
+//
+// Giving the entry a value turns the loss into an error, which is the sharper
+// half: `!<tag:yaml.org,2002:null> : 1` is refused outright.
+//
+// Reached on 2026-09-08 by TestPresentationInvariance, which read two
+// presentations of one value differently once the tagger began walking keys.
+func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
+	t.Run("the shorthand spelling reads the mapping", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte("!!null :\n"), &got))
+		assert.Equal(t, map[string]any{"null": nil}, got)
+	})
+
+	t.Run("and so does the verbatim spelling on a key that writes something", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte("!<tag:yaml.org,2002:null> null:\n"), &got))
+		assert.Equal(t, map[string]any{"null": nil}, got)
+	})
+
+	t.Run("today the verbatim spelling on an empty key gives the scalar", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want any
+		}{
+			{src: "!<tag:yaml.org,2002:null> :\n", want: nil},
+			{src: "!<tag:yaml.org,2002:str> :\n", want: ""},
+			{src: "!<!foo> :\n", want: nil},
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
+			assert.Equalf(t, tc.want, got, "today: the mapping is gone: %q", tc.src)
+		}
+	})
+
+	t.Run("today an entry with a value is refused outright", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte("!<tag:yaml.org,2002:null> : 1\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "value is not allowed in this context")
+
+		err = codec.Unmarshal([]byte("a: 1\n!<tag:yaml.org,2002:null> :\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-map value is specified")
+	})
+
+	t.Run("today a tag ahead of an anchor is refused", func(t *testing.T) {
+		// Style.PropertyOrder writes this one. The other order reads.
+		var got any
+		err := codec.Unmarshal([]byte("!!null &a1 : 1\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "names a kind this node is not")
+
+		require.NoError(t, codec.Unmarshal([]byte("&a1 !!null : 1\n"), &got))
+		assert.Equal(t, map[string]any{"null": uint64(1)}, got)
+	})
+
+	t.Run("today an anchor and a tag together are refused below another entry", func(t *testing.T) {
+		var got any
+		err := codec.Unmarshal([]byte("a: 1\n&a1 !!null : 2\n"), &got)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-map value is specified")
+
+		// Either property alone, in the same position, reads.
+		for _, src := range []string{"a: 1\n!!null : 2\n", "a: 1\n&a1 : 2\n"} {
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"a": uint64(1), "null": uint64(2)}, got, "%q", src)
+		}
+	})
+}
+
+// TestDefectATagOnAKeyEmptiesAStructField pins the destination that loses it.
+//
+// Hand-written for the same reason as TestDefectAPropertiedEmptyKeyIsMishandled:
+// the generator can write a tagged key and does not draw one yet.
+//
+// `!!str x: 1` read into a struct whose field is tagged `x` leaves the field at
+// its zero value and reports nothing. The same document read into an `any` or a
+// map[string]any names the key "x" and holds the value, so the key resolves
+// correctly everywhere except where a field has to be found for it.
+//
+// An anchor does not do it, which places the fault on the tag rather than on
+// properties in general.
+//
+// yamlcorpus.Departures records the naming half of the same root for
+// "!!float 226.0: x", where the key comes back "226", and
+// yamlcorpus.typedPathDefects parks the enumerated shapes. What is new on
+// 2026-09-08 is the reach: the tagger walks keys now, so a generated document
+// carries a tagged key and TestDecodingIntoAGoTypeGivesTheSameValue meets it
+// without anybody writing one by hand.
+func TestDefectATagOnAKeyEmptiesAStructField(t *testing.T) {
+	type target struct {
+		X any `yaml:"x"`
+	}
+
+	t.Run("a bare key fills the field", func(t *testing.T) {
+		var got target
+		require.NoError(t, codec.Unmarshal([]byte("x: 1\n"), &got))
+		assert.Equal(t, uint64(1), got.X)
+	})
+
+	t.Run("an anchor on the key fills it too", func(t *testing.T) {
+		var got target
+		require.NoError(t, codec.Unmarshal([]byte("&a1 x: 1\n"), &got))
+		assert.Equal(t, uint64(1), got.X)
+	})
+
+	t.Run("today a tag on the key leaves it empty", func(t *testing.T) {
+		for _, src := range []string{
+			"!!str x: 1\n",
+			"!!str \"x\": 1\n",
+			"? !!str x\n: 1\n",
+			"&a1 !!str x: 1\n",
+			"!foo x: 1\n",
+			"! x: 1\n",
+		} {
+			var got target
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Nilf(t, got.X, "today: the field is never filled: %q", src)
+
+			// And the same document into a map holds it, which is what makes
+			// this the reflection path rather than the naming.
+			var m map[string]any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &m), "%q", src)
+			assert.Equalf(t, map[string]any{"x": uint64(1)}, m, "%q", src)
+		}
+	})
+}
+
 // TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge pins the two spellings apart.
 //
 // The 1.1 merge type names the key `<<` and says nothing about how it is

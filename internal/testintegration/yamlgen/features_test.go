@@ -523,7 +523,11 @@ func holdsACollectionKey(v yamlgen.Value) bool {
 	switch n := v.(type) {
 	case yamlgen.Map:
 		for _, p := range n.Pairs {
-			switch k := p.Key.(type) {
+			// Peeled, because a key carries an anchor and a tag like any other
+			// node: "&a1 !!map" over a mapping still writes its "?". Asking the
+			// key's own type missed that and reported the label as outrunning
+			// the style.
+			switch k := peelKey(p.Key).(type) {
 			case yamlgen.Seq:
 				if len(k.Items) > 0 {
 					return true
@@ -549,4 +553,18 @@ func holdsACollectionKey(v yamlgen.Value) bool {
 	}
 
 	return false
+}
+
+// peelKey returns the node an anchor and a tag decorate.
+func peelKey(v yamlgen.Value) yamlgen.Value {
+	for {
+		switch n := v.(type) {
+		case yamlgen.Anchored:
+			v = n.V
+		case yamlgen.Tagged:
+			v = n.V
+		default:
+			return v
+		}
+	}
 }

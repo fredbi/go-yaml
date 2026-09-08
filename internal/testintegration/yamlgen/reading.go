@@ -138,6 +138,10 @@ func legacyName(v any) string {
 		return strconv.FormatInt(n, 10)
 	case float64:
 		return floatKeyText(n)
+	case nil:
+		// [KeyText] spells the empty node "null", and Go's %v of a nil any
+		// writes "<nil>", which is no key any document holds.
+		return "null"
 	default:
 		return fmt.Sprintf("%v", n)
 	}
@@ -455,6 +459,24 @@ func (r *readings) numberText(v Value) (string, bool) {
 // the one place where getting it wrong would put a wrong key in a stated
 // meaning rather than a wrong value.
 func (r *readings) legacyKey(v Value) string {
+	switch n := v.(type) {
+	case Anchored:
+		// An anchor names the node and leaves its resolution alone, so an
+		// anchored key is named by what it anchors. Asking the key's own type
+		// instead named "&a1 0o0" from KeyText -- the integer 0 -- where the
+		// library reads the text back under a "%YAML 1.1" directive, which
+		// TestAStreamReadsBackAsItsDocuments caught on the first draw after the
+		// aliaser began anchoring keys.
+		return r.legacyKey(n.V)
+	case Alias:
+		return r.legacyKey(n.V)
+	case Tagged:
+		// A tag settles the type and not the value the spelling resolves to:
+		// "!!int 010" is 8 under 1.1 and 10 under core. legacy() holds that
+		// rule for a value and this asks it rather than keeping a second copy.
+		return legacyName(r.legacy(v))
+	}
+
 	if n, ok := v.(Str); ok {
 		if other, diverges := legacyText(n.V); diverges && r.plain[n.V] && !r.split[n.V] {
 			return legacyName(other)
