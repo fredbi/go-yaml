@@ -1923,6 +1923,247 @@ func TestFixedAMergeSequenceSharingAKeyReadsEverywhere(t *testing.T) {
 	})
 }
 
+// TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12: with no "%YAML 1.1" directive,
+// "<<" is a key spelled "<<" and nothing merges.
+//
+// tag:yaml.org,2002:merge is a YAML 1.1 type. 1.2 dropped it and left "<<" a
+// plain scalar like any other, so the document holds a two-character key --
+// which is how libfyaml 1.0.0b1 reads it in its own 1.2 mode. 8acf11b is where
+// this library started saying so; before it, every document merged.
+//
+// This is the half of the ruling that costs a caller something, so it is
+// pinned over the whole family: the value written as an alias, as a mapping in
+// place, as a sequence, as a scalar and as nothing at all, in block and in
+// flow, over both decode paths. A merge under the core schema would show up
+// here as a key going missing.
+func TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want map[string]any
+	}{
+		{
+			name: "an alias to a mapping",
+			src:  "base: &b {a: 1}\nd:\n  <<: *b\n  c: 2\n",
+			want: map[string]any{
+				"base": map[string]any{"a": uint64(1)},
+				"d":    map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)},
+			},
+		},
+		{
+			name: "a mapping written in place",
+			src:  "d:\n  <<: {a: 1}\n  c: 2\n",
+			want: map[string]any{"d": map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)}},
+		},
+		{
+			name: "the same mapping in flow",
+			src:  "d: {<<: {a: 1}, c: 2}\n",
+			want: map[string]any{"d": map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)}},
+		},
+		{
+			// The key the merge would have brought in stays under "<<" and the
+			// mapping's own "a" keeps its own value, so nothing collides. Under
+			// 1.1 this document is the precedence rule and reads {"a": 9}.
+			name: "a key the merge would have overridden",
+			src:  "base: &b {a: 1}\nd:\n  <<: *b\n  a: 9\n",
+			want: map[string]any{
+				"base": map[string]any{"a": uint64(1)},
+				"d":    map[string]any{"<<": map[string]any{"a": uint64(1)}, "a": uint64(9)},
+			},
+		},
+		{
+			name: "a sequence of mappings",
+			src:  "d:\n  <<: [{a: 1}, {b: 2}]\n",
+			want: map[string]any{"d": map[string]any{
+				"<<": []any{map[string]any{"a": uint64(1)}, map[string]any{"b": uint64(2)}},
+			}},
+		},
+		{
+			// Refused under 1.1 -- "int was used where mapping is expected" --
+			// and read without complaint here, which is the verdict half of the
+			// ruling rather than the value half. See yamlcorpus.TagMergeNonMapping.
+			name: "a scalar, which 1.1 has no merge for",
+			src:  "<<: 1\n",
+			want: map[string]any{"<<": uint64(1)},
+		},
+		{
+			name: "no value at all",
+			src:  "<<:\n",
+			want: map[string]any{"<<": nil},
+		},
+		{
+			name: "the long spelling, which reads the same",
+			src:  "? <<\n: {a: 1}\nc: 2\n",
+			want: map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, src := range []string{tc.src, "%YAML 1.2\n---\n" + tc.src} {
+				var walked any
+				require.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "%q", src)
+				assert.Equalf(t, tc.want, walked, "the walk: %q", src)
+
+				var typed map[string]any
+				require.NoErrorf(t, codec.Unmarshal([]byte(src), &typed), "%q", src)
+				assert.Equalf(t, tc.want, typed, "the tree: %q", src)
+			}
+		})
+	}
+
+	t.Run("a quoted merge key reads the same as a bare one", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.Unmarshal([]byte("\"<<\": {a: 1}\nc: 2\n"), &got))
+		assert.Equal(t, map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)}, got)
+	})
+
+	t.Run("a %YAML 1.2 directive overrides WithYAMLVersion(YAML11)", func(t *testing.T) {
+		// The directive wins over the option in both directions, which is
+		// libfyaml's model and the rule 8acf11b took. Without the directive the
+		// same option merges -- see TestFixedAMergeKeyResolvesUnderYAML11.
+		const src = "%YAML 1.2\n---\nd:\n  <<: {a: 1}\n  c: 2\n"
+
+		var got any
+		require.NoError(t, codec.UnmarshalWithOptions([]byte(src), &got,
+			codec.WithParserOptions(parser.WithYAMLVersion(parser.YAML11))))
+		assert.Equal(t, map[string]any{
+			"d": map[string]any{"<<": map[string]any{"a": uint64(1)}, "c": uint64(2)},
+		}, got)
+	})
+}
+
+// TestFixedAMergeKeyResolvesUnderYAML11: under "%YAML 1.1" a "<<" entry merges,
+// and a "<<" given something that is not a mapping is refused.
+//
+// The other half of 8acf11b's ruling. Three things reach the merge: the
+// directive, parser.WithYAMLVersion(YAML11) on a document that declares no
+// version, and a written "!!merge", which names the type outright and so does
+// not depend on the version at all.
+//
+// The refusals are the part a value comparison would miss. A merging reader has
+// to *reject* "<<: 1", since there is no operation for merging a scalar, so the
+// same bytes are a valid document under 1.2 and an error under 1.1 -- one
+// document, two verdicts, which is what yamlcorpus.TagMergeNonMapping carries.
+func TestFixedAMergeKeyResolvesUnderYAML11(t *testing.T) {
+	t.Run("the directive merges", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			src  string
+			want map[string]any
+		}{
+			{
+				name: "an alias to a mapping",
+				src:  "base: &b {a: 1}\nd:\n  <<: *b\n  c: 2\n",
+				want: map[string]any{
+					"base": map[string]any{"a": uint64(1)},
+					"d":    map[string]any{"a": uint64(1), "c": uint64(2)},
+				},
+			},
+			{
+				name: "a mapping written in place",
+				src:  "d:\n  <<: {a: 1}\n  c: 2\n",
+				want: map[string]any{"d": map[string]any{"a": uint64(1), "c": uint64(2)}},
+			},
+			{
+				// 1.1 says an entry's own keys win over the ones a "<<" brings.
+				name: "the mapping's own key winning",
+				src:  "base: &b {a: 1}\nd:\n  <<: *b\n  a: 9\n",
+				want: map[string]any{
+					"base": map[string]any{"a": uint64(1)},
+					"d":    map[string]any{"a": uint64(9)},
+				},
+			},
+			{
+				// And among the merged, the earlier wins: "a" comes from *x.
+				name: "a sequence of mappings, the earlier winning",
+				src:  "x: &x {a: 1}\nz: &z {a: 2, b: 3}\nd:\n  <<: [*x, *z]\n",
+				want: map[string]any{
+					"x": map[string]any{"a": uint64(1)},
+					"z": map[string]any{"a": uint64(2), "b": uint64(3)},
+					"d": map[string]any{"a": uint64(1), "b": uint64(3)},
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				src := "%YAML 1.1\n---\n" + tc.src
+
+				var walked any
+				require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+				assert.Equal(t, tc.want, walked, "the walk")
+
+				var typed map[string]any
+				require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+				assert.Equal(t, tc.want, typed, "the tree")
+			})
+		}
+	})
+
+	t.Run("WithYAMLVersion(YAML11) merges a document that declares nothing", func(t *testing.T) {
+		var got any
+		require.NoError(t, codec.UnmarshalWithOptions([]byte("d:\n  <<: {a: 1}\n  c: 2\n"), &got,
+			codec.WithParserOptions(parser.WithYAMLVersion(parser.YAML11))))
+		assert.Equal(t, map[string]any{"d": map[string]any{"a": uint64(1), "c": uint64(2)}}, got)
+	})
+
+	t.Run("a written !!merge tag merges under any version", func(t *testing.T) {
+		// The tag names tag:yaml.org,2002:merge itself, and a written tag is
+		// not tied to a spec version -- ast.TagNode.IsMergeKey reads the URI.
+		for _, src := range []string{
+			"!!merge <<: {a: 1}\nc: 2\n",
+			"%YAML 1.2\n---\n!!merge <<: {a: 1}\nc: 2\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"a": uint64(1), "c": uint64(2)}, got, "%q", src)
+		}
+	})
+
+	t.Run("!!merge on anything but a merge key is refused", func(t *testing.T) {
+		for _, src := range []string{
+			"!!merge k: {a: 1}\n",
+			"!!merge \"<<\": {a: 1}\n",
+		} {
+			var got any
+			err := codec.Unmarshal([]byte(src), &got)
+			require.Errorf(t, err, "%q", src)
+			assert.Containsf(t, err.Error(), "could not find merge key", "%q", src)
+		}
+	})
+
+	t.Run("merging something that is not a mapping is refused", func(t *testing.T) {
+		// The message names the type that stood where a mapping was wanted, and
+		// the walk and the tree point at different columns of the same
+		// document, so only the sentence is asserted.
+		//
+		// "<<:" with no value is missing from this list on purpose: the walk
+		// reads it and the tree refuses it, which is
+		// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree.
+		for _, src := range []string{
+			"<<: 1\n",
+			"<<: x\n",
+			"<<: [x]\n",
+			"<<: [[x]]\n",
+			"<<: [{a: 1}, [x]]\n",
+		} {
+			full := "%YAML 1.1\n---\n" + src
+
+			var walked any
+			werr := codec.Unmarshal([]byte(full), &walked)
+			require.Errorf(t, werr, "the walk reads %q", src)
+			assert.Containsf(t, werr.Error(), "where mapping is expected", "%q", src)
+
+			var typed map[string]any
+			terr := codec.Unmarshal([]byte(full), &typed)
+			require.Errorf(t, terr, "the tree reads %q", src)
+			assert.Containsf(t, terr.Error(), "where mapping is expected", "%q", src)
+
+			// And the same bytes under the core schema are an ordinary key
+			// holding an ordinary value.
+			var under12 any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &under12), "%q", src)
+		}
+	})
+}
+
 // TestFixedATabSeparatesAsASpaceDoes: a tab between a node's properties and the
 // node ends the property, exactly as a space does.
 //

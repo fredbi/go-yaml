@@ -259,26 +259,56 @@ var Ledger = []Divergence{
 	{
 		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
 		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
-		Reason: "A `<<` entry written `? <<` over `: *a` is read as an ordinary key named `<<`, where " +
-			"the same entry written `<<: *a` merges. The 1.1 merge type names the key and says nothing " +
-			"about how it is written, and the two are the same key node.\n\n" +
+		Reason: "Under `%YAML 1.1`, a `<<` entry written `? <<` over `: *a` is read as an ordinary key " +
+			"named `<<`, where the same entry written `<<: *a` merges. The 1.1 merge type names the key " +
+			"and says nothing about how it is written, and the two are the same key node.\n\n" +
+			"The directive is half of the shape since 8acf11b, which resolves `<<` under the version the " +
+			"document declares: with no directive neither spelling merges and the two agree, so this " +
+			"matches a document declaring 1.1 and no other.\n\n" +
 			"go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow. libfyaml 1.0.0b1 is not an " +
 			"oracle here: it resolves no merge at all and hands `<<` back as a member name.\n\n" +
 			"A tag on the mapping makes no difference -- `!foo` and `!!map` over the plain form both " +
 			"merge, over the long form neither does -- so it is the key's presentation and nothing else.\n\n" +
-			"And in flow the two decode paths disagree, which is the worse half. `{? <<: {x: 1}, y: 2}` " +
-			"reads {\"<<\": {x: 1}, y: 2} into an `any` and {x: 1, y: 2} into a typed map: the walk does " +
+			"And in flow the two decode paths disagree, which is the worse half. `{? <<: {x: 1}, w: 2}` " +
+			"reads {\"<<\": {x: 1}, w: 2} into an `any` and {x: 1, w: 2} into a typed map: the walk does " +
 			"not merge it and the tree does. In block, `? <<` over `: {x: 1}`, both agree and neither " +
 			"merges. So a caller's answer depends on the destination they chose, which is why this " +
 			"claims DecodeTyped as well.\n\n" +
 			"⚠️ **codec.ToJSON writes malformed output for it**, which is sharper than the " +
 			"disagreement. It walks, so it does not merge -- and it emits the key with no value at " +
-			"all: `{? <<: {x: 1}, y: 2}` converts to `{\"\",\"y\":2}`, which no JSON parser reads. " +
-			"Found by TestToJSONMatchesTheValueConverter once the corpus grew to 3,000 documents.\n\n" +
+			"all: `{? <<: {x: 1}, w: 2}` converts to `{\"\",\"w\":2,\"x\":1}`, which no JSON parser " +
+			"reads. Found by TestToJSONMatchesTheValueConverter once the corpus grew to 3,000 " +
+			"documents.\n\n" +
 			"Found on 2026-09-07 by the merge axis on its first run; the flow half by " +
-			"TestDecodingIntoAGoTypeGivesTheSameValue rather than by the value properties.",
-		Property: Decode | DecodeTyped,
+			"TestDecodingIntoAGoTypeGivesTheSameValue rather than by the value properties. The key " +
+			"beside the merge is `w` and not `y` on purpose: 1.1 resolves `y` to the boolean true, so a " +
+			"document that declares 1.1 to reach the merge has to keep clear of 1.1's other spellings.\n\n" +
+			"Render is claimed because the rendered document is read back and compared against the " +
+			"same stated meaning, so a merge the library does not perform fails there too. It could " +
+			"not before 8acf11b: a merge document set Written.MeansUnclear and every value property " +
+			"returned early on it.",
+		Property: Decode | DecodeTyped | Render,
 		Match:    writesAMergeKeyTheLongWay,
+	},
+	{
+		Name: "decode/a-tab-beside-the-merge-key-suppresses-the-merge",
+		Pin:  "TestDefectATabBesideTheMergeKeySuppressesTheMerge",
+		Reason: "Under `%YAML 1.1`, a tab standing where a space would separate the `<<` from its `:`, or " +
+			"the `:` from the value, stops the entry merging: `<<:<TAB>{m: 1}` and `<<<TAB>: {m: 1}` " +
+			"both come back as a key named `<<`, where `<<: {m: 1}` and `<<:  {m: 1}` merge. Two " +
+			"spaces are fine, so it is the tab and not the width.\n\n" +
+			"6.1 puts a tab in s-white and s-separate-in-line is s-white+, which is the same rule " +
+			"a0182a6 fixed for a node's properties -- `a: !!str<TAB>x` was refused there. The merge key " +
+			"is the same distinction one indicator further on.\n\n" +
+			"Block and flow, an alias and a mapping written in place, all four the same. " +
+			"go.yaml.in/yaml/v3 v3.0.5 merges every one of them.\n\n" +
+			"⚠️ **Older than the version rule.** The tab suppressed the merge on master at 2abdd2f too, " +
+			"where every document merged; no property could see it, because a merge document stated no " +
+			"meaning at all until 8acf11b made the two readings answerable. Found on 2026-09-08, on the " +
+			"first run of TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading after merge documents " +
+			"began carrying a meaning under each reading.",
+		Property: Decode | DecodeTyped | Render,
+		Match:    writesATabBesideAMergeKey,
 	},
 	{
 		Name: "parse/a-document-suffix-mishandles-a-propertied-block-scalar",
@@ -566,33 +596,22 @@ func holdsAMergeKey(v Value) bool {
 //
 // Style.ExplicitKeys decides it for every entry of the document, so the two
 // halves are the style asking for the long form and the value holding a merge.
+//
+// A third half now: the document has to declare "%YAML 1.1", since nothing
+// merges without it and both spellings then agree.
 func writesAMergeKeyTheLongWay(v Value, st Style) bool {
-	return writesAnExplicitKey(v, st) && holdsAMergeKey(v)
+	return st.Version == Reading11Version && writesAnExplicitKey(v, st) && holdsAMergeKey(v)
 }
 
-// sharesAKey reports whether a "<<" value is a sequence holding two mappings
-// that name the same key.
-func sharesAKey(v Value) bool {
-	seq, isSeq := v.(Seq)
-	if !isSeq {
-		return false
-	}
-
-	seen := make(map[string]struct{})
-
-	for _, item := range seq.Items {
-		for _, one := range mergedMappings(item) {
-			for k := range one {
-				if _, held := seen[k]; held {
-					return true
-				}
-
-				seen[k] = struct{}{}
-			}
-		}
-	}
-
-	return false
+// writesATabBesideAMergeKey reports whether a "<<" entry is written with a tab
+// separating it from its ":" or its value.
+//
+// Style.TabSeparation writes the tab for every indicator of the document, so a
+// merge key drawn under it always gets one; the version is the other half,
+// since nothing merges without a "%YAML 1.1" directive and there is then no
+// merge to suppress.
+func writesATabBesideAMergeKey(v Value, st Style) bool {
+	return st.Version == Reading11Version && st.TabSeparation && holdsAMergeKey(v)
 }
 
 // writesAnExplicitKeyInsideAnExplicitKey reports whether a mapping stands as a

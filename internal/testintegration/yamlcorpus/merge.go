@@ -13,8 +13,17 @@ import "github.com/go-openapi/go-yaml/internal/testintegration/stance"
 // "<<" is a YAML 1.1 type, tag:yaml.org,2002:merge, and YAML 1.2 dropped it.
 // So a 1.2 parser reading "<<" as an ordinary key is not being lax and a parser
 // merging is not being lenient -- they are answering different questions
-// correctly. Measured rather than assumed: libfyaml gives {"<<": {...}} and
-// this library gives the merged mapping, and neither is wrong.
+// correctly. Measured rather than assumed: libfyaml 1.0.0b1 gives
+// {"<<": {...}} and go.yaml.in/yaml/v3 v3.0.5 gives the merged mapping, and
+// neither is wrong.
+//
+// These documents declare no version, so this library reads them the way
+// libfyaml does. Since 8acf11b it resolves "<<" under the version the document
+// declares -- the merge happens under "%YAML 1.1", under
+// parser.WithYAMLVersion(YAML11), or where the document writes "!!merge" --
+// which makes it two consumers rather than one. yamlgen.Written carries both
+// answers for a generated merge document, and stance.Table.Reads is how a
+// replay picks between them.
 //
 // There is therefore nothing here for a rule to settle, and a corpus that
 // settled it would be picking a version of the language and calling everyone

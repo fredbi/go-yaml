@@ -101,11 +101,12 @@ func TestOneTextWrittenTwoWaysDropsTheReading(t *testing.T) {
 
 // TestASecondReadingOnlyArrivesWithALegacySpelling is the property.
 //
-// A reading is stated for three reasons and no fourth. The document holds one
-// of the sixteen spellings YAML 1.1 reads as a boolean and 1.2 does not,
-// written plain; or one of the nine it reads as a number and 1.2 reads as the
-// text; or it writes a number in a form 1.1 does not read, which
-// Style.NumberForm decides.
+// A reading is stated for four reasons and no fifth. The document holds one of
+// the sixteen spellings YAML 1.1 reads as a boolean and 1.2 does not, written
+// plain; or one of the nine it reads as a number and 1.2 reads as the text; or
+// it writes a number in a form 1.1 does not read, which Style.NumberForm
+// decides; or it writes a "<<" entry, which 1.1 merges and the core schema
+// hands back as a key named "<<".
 func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		v := yamlgen.Values().Draw(rt, "value")
@@ -122,6 +123,13 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 			return
 		}
 
+		// A merge key is written bare whatever Style.Quoting asks for -- see
+		// yamlgen.MergeKey -- so it explains a second reading on its own and
+		// the quoting check below does not apply to it.
+		if holdsAMergeKey(v) {
+			return
+		}
+
 		if !holdsLegacySpelling(v) {
 			rt.Fatalf("a second reading with no legacy spelling in the value\n%q\n%v", w.Text, w.Readings)
 		}
@@ -130,6 +138,36 @@ func TestASecondReadingOnlyArrivesWithALegacySpelling(t *testing.T) {
 			rt.Fatalf("a second reading under %s, which quotes every string\n%q", st, w.Text)
 		}
 	})
+}
+
+// holdsAMergeKey reports whether v writes a "<<" entry anywhere.
+//
+// Restated here rather than exported from yamlgen, for the reason
+// holdsLegacySpelling restates the tables: a test that reads the generator's
+// own answer back cannot catch the generator being wrong.
+func holdsAMergeKey(v yamlgen.Value) bool {
+	switch n := v.(type) {
+	case yamlgen.Map:
+		for _, p := range n.Pairs {
+			if _, isMerge := p.Key.(yamlgen.MergeKey); isMerge {
+				return true
+			}
+
+			if holdsAMergeKey(p.Key) || holdsAMergeKey(p.Val) {
+				return true
+			}
+		}
+	case yamlgen.Seq:
+		return slices.ContainsFunc(n.Items, holdsAMergeKey)
+	case yamlgen.Anchored:
+		return holdsAMergeKey(n.V)
+	case yamlgen.Alias:
+		return holdsAMergeKey(n.V)
+	case yamlgen.Tagged:
+		return holdsAMergeKey(n.V)
+	}
+
+	return false
 }
 
 // divergentForm reports the number forms YAML 1.1 may not read as core does.

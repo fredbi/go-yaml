@@ -279,36 +279,45 @@ func readTheStream(t *testing.T, src string) []any {
 // merge the same way. It does not: the long form comes back as an ordinary key
 // named "<<".
 //
+// Every document here declares `%YAML 1.1`, which is where the merge lives
+// since 8acf11b. Without the directive neither spelling merges and the two
+// agree, so the defect needs the directive to be reached at all --
+// TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12 holds that half.
+//
+// The key beside the merge is `w` and not `y`: 1.1 resolves `y` to the boolean
+// true, so a document that declares 1.1 to reach the merge has to keep clear of
+// 1.1's other spellings.
+//
 // go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow, and is the oracle
 // that answers here -- libfyaml 1.0.0b1 resolves no merge at all and hands "<<"
 // back as a member name, so it cannot say which spelling is right.
 func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
-	const base = "b: &a {x: 1}\n"
+	const base = "%YAML 1.1\n---\nb: &a {x: 1}\n"
 
 	t.Run("the plain spelling merges", func(t *testing.T) {
 		for _, src := range []string{
-			base + "d:\n  <<: *a\n  y: 2\n",
+			base + "d:\n  <<: *a\n  w: 2\n",
 			// A tag on the mapping changes nothing, which is what makes this
 			// the key's presentation rather than the node's type.
-			base + "d: !foo\n  <<: *a\n  y: 2\n",
-			base + "d: !!map\n  <<: *a\n  y: 2\n",
+			base + "d: !foo\n  <<: *a\n  w: 2\n",
+			base + "d: !!map\n  <<: *a\n  w: 2\n",
 		} {
 			var got map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, map[string]any{"x": uint64(1), "y": uint64(2)}, got["d"], "%q", src)
+			assert.Equalf(t, map[string]any{"x": uint64(1), "w": uint64(2)}, got["d"], "%q", src)
 		}
 	})
 
 	t.Run("today the long spelling does not", func(t *testing.T) {
 		for _, src := range []string{
-			base + "d:\n  ? <<\n  : *a\n  y: 2\n",
-			base + "d: {? <<\n  : *a, y: 2}\n",
-			base + "d: !foo\n  ? <<\n  : *a\n  y: 2\n",
+			base + "d:\n  ? <<\n  : *a\n  w: 2\n",
+			base + "d: {? <<\n  : *a, w: 2}\n",
+			base + "d: !foo\n  ? <<\n  : *a\n  w: 2\n",
 		} {
 			var got map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
 			assert.Equalf(t,
-				map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)},
+				map[string]any{"<<": map[string]any{"x": uint64(1)}, "w": uint64(2)},
 				got["d"], "today: the long spelling is an ordinary key: %q", src)
 		}
 	})
@@ -318,25 +327,25 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 	// it, so two callers reading the same document into different destinations
 	// get different values.
 	t.Run("today the two decode paths disagree in flow", func(t *testing.T) {
-		const src = "{? <<: {x: 1}, y: 2}\n"
+		const src = "%YAML 1.1\n---\n{? <<: {x: 1}, w: 2}\n"
 
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
 		assert.Equal(t,
-			map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)},
+			map[string]any{"<<": map[string]any{"x": uint64(1)}, "w": uint64(2)},
 			walked, "today: the walk does not merge it")
 
 		var typed map[string]any
 		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
 		assert.Equal(t,
-			map[string]any{"x": uint64(1), "y": uint64(2)},
+			map[string]any{"x": uint64(1), "w": uint64(2)},
 			typed, "today: the tree does merge it")
 	})
 
 	t.Run("in block the two paths agree, and neither merges", func(t *testing.T) {
-		const src = "d:\n  ? <<\n  : {x: 1}\n  y: 2\n"
+		const src = "%YAML 1.1\n---\nd:\n  ? <<\n  : {x: 1}\n  w: 2\n"
 
-		want := map[string]any{"d": map[string]any{"<<": map[string]any{"x": uint64(1)}, "y": uint64(2)}}
+		want := map[string]any{"d": map[string]any{"<<": map[string]any{"x": uint64(1)}, "w": uint64(2)}}
 
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
@@ -354,9 +363,20 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 // as a key alone is an entry like any other: `{a: 1, a}` is refused, and so is
 // `{<<: {x: 1}, <<: {y: 2}}`. `{<<: {x: 1}, <<}` is read.
 //
-// What comes back is stranger than the acceptance: the first "<<" merges and
+// Both readings are wrong here, in two different ways, and the bare "<<" is
+// still special-cased under both. Under `%YAML 1.1` the first entry merges and
 // the second becomes a literal key, so the mapping holds both the merged entry
-// and a "<<" named nothing.
+// and a "<<" named nothing. Under the core schema, where 8acf11b makes "<<" an
+// ordinary key, the two entries are one key spelled "<<" twice: the tree
+// refuses the document -- with `duplicate key "<<"` rather than the
+// `mapping key "<<" already defined at` an ordinary repeat gets -- and the walk
+// reads it, keeping the second entry's null and dropping the first entry's
+// mapping. A value goes missing with no error at all, which is the worse half.
+//
+// The quoted spelling is the control. `{"<<": {x: 1}, "<<"}` is refused by both
+// paths under both versions, so the fault sits on the bare "<<" and nothing
+// else -- the scanner types it MergeKeyType whatever the version, and the
+// duplicate check reads that type.
 //
 // Found on 2026-09-07 when yamlcorpus's duplicateAKey landed on a merge key --
 // the merge axis made that reachable for the first time.
@@ -364,21 +384,102 @@ func TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck(t *testing.T) {
 	t.Run("an ordinary key alone is refused, and so are two merge keys with values", func(t *testing.T) {
 		for _, src := range []string{
 			"{a: 1, a}\n",
+			"{\"<<\": {x: 1}, \"<<\"}\n",
 			"{<<: {x: 1}, <<: {y: 2}}\n",
 			"b: &r {x: 1}\nd:\n  <<: *r\n  <<: *r\n",
 		} {
-			var got any
-			assert.Errorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			for _, full := range []string{src, "%YAML 1.1\n---\n" + src} {
+				var got any
+				assert.Errorf(t, codec.Unmarshal([]byte(full), &got), "%q", full)
+			}
 		}
 	})
 
-	t.Run("today a merge key alone is read", func(t *testing.T) {
-		const src = "{<<: {x: 1}, <<}\n"
+	t.Run("today a merge key alone is read under YAML 1.1", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\n{<<: {x: 1}, <<}\n"
 
 		var got any
 		require.NoError(t, codec.Unmarshal([]byte(src), &got))
 		assert.Equal(t, map[string]any{"<<": nil, "x": uint64(1)}, got,
 			"today: the first merges and the second is a literal key")
+	})
+
+	t.Run("today the two paths part company under the core schema", func(t *testing.T) {
+		// Nothing merges here, so the two entries are one key written twice
+		// and the document should be refused on both paths.
+		const src = "{<<: {x: 1}, <<}\n"
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, map[string]any{"<<": nil}, walked,
+			"today: the walk reads it and the first entry's mapping is gone")
+
+		var typed map[string]any
+		err := codec.Unmarshal([]byte(src), &typed)
+		require.Error(t, err, "today: the tree refuses it")
+		assert.Contains(t, err.Error(), `duplicate key "<<"`,
+			"today: and not the `already defined` an ordinary repeat gets")
+	})
+}
+
+// TestDefectATabBesideTheMergeKeySuppressesTheMerge pins the tab.
+//
+// 6.1 puts a tab in s-white and s-separate-in-line is s-white+, so a tab
+// separates an indicator from what follows it exactly as a space does. Beside
+// the merge key it does not: `<<:<TAB>{m: 1}` comes back as a key named "<<"
+// where `<<: {m: 1}` merges, and so does a tab written before the ":". Two
+// spaces merge, so the width is not what decides.
+//
+// The same distinction one indicator earlier is TestFixedATabSeparatesAsASpaceDoes,
+// which a0182a6 closed for an anchor, an alias and a tag shorthand. This is the
+// piece of that family nobody had looked at.
+//
+// Older than the version rule: the tab suppressed the merge on master at
+// 2abdd2f as well, where every document merged. Nothing could see it, because a
+// merge document stated no meaning until 8acf11b made each reading answerable.
+// Found on 2026-09-08 by yamlcorpus's
+// TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading on its first run after
+// that.
+func TestDefectATabBesideTheMergeKeySuppressesTheMerge(t *testing.T) {
+	const base = "%YAML 1.1\n---\n"
+
+	t.Run("a space merges, and so do two", func(t *testing.T) {
+		for _, src := range []string{
+			base + "<<: {m: 1}\nk: 1\n",
+			base + "<<:  {m: 1}\nk: 1\n",
+			base + "<<:\n  m: 1\nk: 1\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"m": uint64(1), "k": uint64(1)}, got, "%q", src)
+		}
+	})
+
+	t.Run("today a tab does not", func(t *testing.T) {
+		for _, src := range []string{
+			// After the ":", in block and in flow.
+			base + "<<:\t{m: 1}\nk: 1\n",
+			base + "{<<:\t{m: 1}, k: 1}\n",
+			// Before the ":".
+			base + "<<\t: {m: 1}\nk: 1\n",
+			// And with the value on the lines below, which is the shape the
+			// corpus drew.
+			base + "<<:\t\n  m: 1\nk: 1\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got,
+				"today: the tab leaves an ordinary key named \"<<\": %q", src)
+		}
+	})
+
+	t.Run("an alias behind the tab is no different", func(t *testing.T) {
+		const src = base + "b: &a {m: 1}\nd:\n  <<:\t*a\n  k: 1\n"
+
+		var got map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got["d"],
+			"today: the alias resolves and the merge does not happen")
 	})
 }
 
@@ -389,6 +490,14 @@ func TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck(t *testing.T) {
 // entry and hands back an empty mapping, the tree refuses the document with
 // "null was used where mapping is expected".
 //
+// Every document declares `%YAML 1.1`, since 8acf11b merges under that version
+// and no other. Without the directive there is no merge to fail: `<<:` is a key
+// named "<<" holding null and both paths agree, which
+// TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12 pins. Every other non-mapping
+// merge -- "<<: 1", "<<: x", "<<: [x]" -- is refused by both paths under 1.1,
+// which TestFixedAMergeKeyResolvesUnderYAML11 pins; null and a "-" inside a
+// flow sequence are the two shapes left over.
+//
 // Whichever answer is right, one document should not have two. yamlcorpus's
 // MergeShapes holds "a merge key with no alias at all" under TagMergeNonMapping
 // for the stance question of what merging a non-mapping means; this is the
@@ -398,13 +507,12 @@ func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
 	// differently rather than the merge. "<<: [{a: 1}, - {b: 2}]" merges both
 	// mappings on the walk and is refused by the tree as "sequence was used
 	// where mapping is expected", so the tree sees a sequence where the walk
-	// sees the mapping. Every other non-mapping merge -- "<<: x", "<<: 1",
-	// "<<: [x]", "<<: [[x]]", "<<: [1]" -- is refused by both.
+	// sees the mapping.
 	//
 	// Reached on 2026-09-07 by a mutation that put a "-" inside a merge
 	// sequence, once the corpus grew to 3,000 drawn documents.
 	t.Run("a '-' inside a flow merge sequence", func(t *testing.T) {
-		const src = "<<: [{a: 1}, - {b: 2}]\n"
+		const src = "%YAML 1.1\n---\n<<: [{a: 1}, - {b: 2}]\n"
 
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
@@ -418,11 +526,13 @@ func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
 	})
 
 	for _, src := range []string{"<<:\n", "<<: null\n", "a:\n  <<:\n"} {
+		full := "%YAML 1.1\n---\n" + src
+
 		var walked any
-		assert.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "today: the walk reads it: %q", src)
+		assert.NoErrorf(t, codec.Unmarshal([]byte(full), &walked), "today: the walk reads it: %q", src)
 
 		var typed map[string]any
-		err := codec.Unmarshal([]byte(src), &typed)
+		err := codec.Unmarshal([]byte(full), &typed)
 		require.Errorf(t, err, "today: the tree refuses it: %q", src)
 		assert.Contains(t, err.Error(), "null was used where mapping is expected")
 	}

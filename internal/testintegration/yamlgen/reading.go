@@ -162,8 +162,8 @@ type readings struct {
 	// what 1.1 makes of it. The booleans above need no style; a number's
 	// spelling is the whole question here.
 	st Style
-	// merged records a "<<" entry, which makes the meaning unclear rather than
-	// changing it. See sawMergeKey.
+	// merged records a "<<" entry, which the two readings disagree about the
+	// way they disagree about "yes". See sawMergeKey.
 	merged bool
 }
 
@@ -298,13 +298,13 @@ func (r *readings) sawNumber(text string) {
 	r.numbers[text] = true
 }
 
-// sawScalar records how one scalar was written.
 // sawMergeKey records that the document writes a "<<" entry.
 //
-// It makes the meaning unclear rather than changing it. What this package says
-// a merge document denotes is what this library reads -- the 1.1 merge, see
-// [Map.Decoded] -- and a conforming 1.2 reader gives "<<" back as an ordinary
-// key instead. Both are right, so the corpus states neither.
+// The readings disagree about it the way they disagree about "yes": the core
+// schema gives "<<" back as an ordinary key, since 1.2 dropped
+// tag:yaml.org,2002:merge, and 1.1 merges. [Map.Decoded] answers for core and
+// [readings.legacy] performs the merge, so a merge document carries two stated
+// meanings rather than none.
 func (r *readings) sawMergeKey() {
 	if r == nil {
 		return
@@ -313,9 +313,7 @@ func (r *readings) sawMergeKey() {
 	r.merged = true
 }
 
-// mergedAMapping reports whether a "<<" entry was written.
-func (r *readings) mergedAMapping() bool { return r != nil && r.merged }
-
+// sawScalar records how one scalar was written.
 func (r *readings) sawScalar(text string, plain bool) {
 	if r == nil {
 		return
@@ -362,11 +360,11 @@ func (r *readings) splitALegacySpelling() bool {
 // under returns what v denotes under a reading, and whether that differs from
 // the core answer.
 func (r *readings) under(v Value) (any, bool) {
-	if r == nil || (len(r.plain) == 0 && len(r.numbers) == 0) {
+	if r == nil || (len(r.plain) == 0 && len(r.numbers) == 0 && !r.merged) {
 		return nil, false
 	}
 
-	if len(r.numbers) > 0 {
+	if r.merged || len(r.numbers) > 0 {
 		return r.legacy(v), true
 	}
 
@@ -501,7 +499,7 @@ func isKeyCollection(v Value) bool {
 }
 
 // legacy rebuilds the decoded value with the divergent plain scalars read as
-// YAML 1.1 reads them.
+// YAML 1.1 reads them, and with a "<<" entry merged.
 //
 // An Alias decodes to what its anchor stands for, so the substitution has to
 // reach through it as well; Decoded already does that and this mirrors it.
@@ -531,12 +529,7 @@ func (r *readings) legacy(v Value) any {
 
 		return out
 	case Map:
-		out := make(map[string]any, len(n.Pairs))
-		for _, p := range n.Pairs {
-			out[r.legacyKey(p.Key)] = r.legacy(p.Val)
-		}
-
-		return out
+		return r.legacyMap(n)
 	case Anchored:
 		return r.legacy(n.V)
 	case Alias:
@@ -576,4 +569,50 @@ func (r *readings) legacy(v Value) any {
 	default:
 		return v.Decoded()
 	}
+}
+
+// legacyMap reads a mapping under YAML 1.1, where a "<<" entry merges rather
+// than standing as a key named "<<".
+//
+// # The merge rule, and why it is written down rather than deferred
+//
+// The 1.1 merge type says an entry's own keys win over the ones a "<<" brings,
+// and that a sequence of mappings merges with the earlier winning. That is a
+// specified rule and not a guess -- go.yaml.in/yaml/v3 v3.0.5 agrees with this
+// library on every resolvable shape -- so modeling it here is the same kind of
+// work as modeling the 1.1 resolution table, and it lets a generated merge
+// document check a *value* rather than only that it parses. The defect it
+// exists to catch was a value defect: a mapping's own key lost outright when
+// the "<<" came second.
+//
+// The merged mappings are read through r.legacy as well, so "<<: {k: yes}"
+// brings in the key k holding true. Merging what Decoded returns would read the
+// document under two schemas at once.
+func (r *readings) legacyMap(m Map) any {
+	out := make(map[string]any, len(m.Pairs))
+
+	var merged []map[string]any
+
+	for _, p := range m.Pairs {
+		if _, isMerge := p.Key.(MergeKey); isMerge {
+			merged = append(merged, r.mergedMappings(p.Val)...)
+
+			continue
+		}
+
+		out[r.legacyKey(p.Key)] = r.legacy(p.Val)
+	}
+
+	// Own entries first, then each merged mapping in turn, and neither
+	// overwrites a key already standing. That is one statement of both halves
+	// of the rule: own keys win, and among the merged the earlier wins.
+	for _, from := range merged {
+		for k, v := range from {
+			if _, held := out[k]; !held {
+				out[k] = v
+			}
+		}
+	}
+
+	return out
 }

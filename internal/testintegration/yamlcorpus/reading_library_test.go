@@ -121,6 +121,21 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
+			// A "<<" the library does not resolve as a merge, under two open
+			// defects: TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge, where
+			// the entry is written "? <<" over ": *a", and
+			// TestDefectATabBesideTheMergeKeySuppressesTheMerge, where a tab
+			// stands beside the "<<" or its ":". The corpus states the merge
+			// and the library hands "<<" back as a key.
+			//
+			// Both spellings, not every merge: a "<<" written plainly with a
+			// space is scored, and the second defect was found by scoring it.
+			if aMergeKeyTheLibraryLeavesAlone(string(c.Src)) {
+				declared++
+
+				continue
+			}
+
 			src, askable := asking(table, c.Src)
 			if !askable {
 				declared++
@@ -224,6 +239,22 @@ func propertyFollowedByTab(src string) bool {
 			if src[j] == ' ' || src[j] == '\n' || src[j] == '\r' {
 				break
 			}
+		}
+	}
+
+	return false
+}
+
+// aMergeKeyTheLibraryLeavesAlone reports whether a "<<" entry is written one of
+// the two ways the library does not resolve as a merge.
+//
+// The long form is "? <<", with a space or a tab after the "?" -- explicitKey
+// writes both. The tab form is a tab touching the "<<" or the ":" after it,
+// which Style.TabSeparation puts there.
+func aMergeKeyTheLibraryLeavesAlone(src string) bool {
+	for _, spelling := range []string{"? <<", "?\t<<", "<<\t", "<<:\t"} {
+		if strings.Contains(src, spelling) {
+			return true
 		}
 	}
 

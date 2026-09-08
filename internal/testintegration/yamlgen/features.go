@@ -140,11 +140,12 @@ const (
 	// FeatureTabSeparation is a tab standing where a space would separate an
 	// indicator from what follows it.
 	FeatureTabSeparation stance.Feature = "presentation/tab-separation"
-	// FeatureMergeKey is a "<<" entry, written bare so that it merges.
+	// FeatureMergeKey is a "<<" entry, written bare so that YAML 1.1 merges it.
 	//
 	// A value feature rather than a presentation one: "<<" is a YAML 1.1 type
 	// and what the document denotes turns on whether the reader implements it,
-	// where every presentation feature leaves the meaning alone.
+	// where every presentation feature leaves the meaning alone. A document
+	// carrying this feature carries two meanings, one per reading.
 	FeatureMergeKey stance.Feature = "value/merge-key"
 	// FeatureChompPadded is a block scalar followed by blank lines its
 	// chomping indicator discards.
@@ -196,7 +197,8 @@ type Written struct {
 	//
 	// Empty for almost every document: the core answer is Value.Decoded() and
 	// the readings only part company where a plain scalar's spelling is one
-	// they resolve differently. See reading.go.
+	// they resolve differently, or where a "<<" entry merges under 1.1 and
+	// stands as an ordinary key under core. See reading.go.
 	Readings map[string]any
 	// Means is what this document denotes, given the version it declares.
 	//
@@ -216,6 +218,10 @@ type Written struct {
 	// "no", and readings tracks a spelling rather than a node, so it cannot
 	// say which occurrence resolved. Guessing would put a wrong meaning in the
 	// corpus, which is the one failure this whole layer exists to avoid.
+	//
+	// A merge key set it too until 8acf11b made the library resolve "<<" under
+	// the version the document declares. Each reading now has an answer of its
+	// own, so both go out instead of neither.
 	MeansUnclear bool
 }
 
@@ -245,18 +251,10 @@ func Write(v Value, st Style) Written {
 		}
 	}
 
-	// Two shapes leave the meaning unstated, for two reasons.
-	//
-	// A merge: what this package says the document denotes is the 1.1 merge
-	// this library performs, and a conforming 1.2 reader hands "<<" back as an
-	// ordinary key. Both are right, so the corpus states neither and carries
-	// the stance tag instead.
-	//
-	// A legacy spelling split between a plain and a quoted occurrence under
-	// "%YAML 1.1": readings tracks a spelling rather than a node, so it cannot
-	// say which occurrence resolved.
-	w.MeansUnclear = e.reads.mergedAMapping() ||
-		(st.Version == Reading11Version && e.reads.splitALegacySpelling())
+	// One shape leaves the meaning unstated: a legacy spelling split between a
+	// plain and a quoted occurrence under "%YAML 1.1". readings tracks a
+	// spelling rather than a node, so it cannot say which occurrence resolved.
+	w.MeansUnclear = st.Version == Reading11Version && e.reads.splitALegacySpelling()
 
 	return w
 }
