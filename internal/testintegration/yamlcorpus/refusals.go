@@ -179,6 +179,15 @@ func Refusals() []Refusal {
 			Src:  "- \t- 1\n", Says: "tab character cannot use as a sequence delimiter",
 		},
 		{
+			// A tab is separation and ends a property, so the alias here names
+			// "x" and not "xy". Nothing anchors "x", which is the refusal.
+			// Until 2026-09-07 the tab joined the name and the message said
+			// could not find alias "xy" -- the same document refused for a
+			// reason that was not the document's.
+			Name: "an alias naming nothing, with a tab after it",
+			Src:  "a: *x\ty\n", Says: `could not find alias "x"`,
+		},
+		{
 			// An anchor alone at the column of a key whose value is empty:
 			// there is no node for it to name and no entry it can open.
 			// Pinned on 2026-09-13, when the byte order mark reshuffled the

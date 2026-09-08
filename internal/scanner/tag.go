@@ -54,7 +54,12 @@ func (s *Scanner) scanTag(ctx *Context) (bool, error) {
 			continue
 		}
 		switch c {
-		case ' ':
+		case ' ', '\t':
+			// s-separate-in-line is s-white+, and s-white is a space or a tab,
+			// so both end a tag shorthand. Only the space did: a tab fell to
+			// the default arm and joined the name, and "a: !!str\tx" was
+			// refused as "found invalid tag character". The grammar reads it,
+			// and so do go.yaml.in/yaml/v3 v3.0.5 and libfyaml 1.0.0b1.
 			ctx.addOriginBuf(c)
 			value := ctx.source(ctx.idx-1, ctx.idx+int32(idx))
 			if err := s.addTag(ctx, value, tagPos); err != nil {

@@ -448,6 +448,13 @@ func (s *Scanner) scan(ctx *Context) error {
 			}
 
 			if s.lastDelimColumn < s.column {
+				if s.isAnchor || s.isAlias {
+					// The tab separates a property from its node, which is what
+					// a space does through scanWhiteSpace. Cutting the token is
+					// the whole of it: without this the anchor name ran on into
+					// the value.
+					s.endsProperty(ctx)
+				}
 				s.indentNum++
 				ctx.addOriginBuf(c)
 				s.progress(ctx, 1)

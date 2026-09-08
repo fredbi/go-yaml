@@ -46,11 +46,25 @@ func (s *Scanner) scanWhiteSpace(ctx *Context) bool {
 		return true
 	}
 
+	s.endsProperty(ctx)
+
+	return true
+}
+
+// endsProperty cuts the token being read and closes an anchor or an alias,
+// which is what s-white does when it stands between a node property and the
+// node.
+//
+// s-separate-in-line is s-white+, and s-white is a space or a tab, so the two
+// characters do the same work here. Only the space did it: the tab branch of
+// the scan loop added the tab to the origin and read on, so "a: &x\ty" left
+// the anchor and the value in one buffer and cut the anchor "xy" -- the value
+// gone, and a later "*x" naming nothing. All three oracles read that document
+// as {a: y}.
+func (s *Scanner) endsProperty(ctx *Context) {
 	s.addBufferedTokenIfExists(ctx)
 	s.isAnchor = false
 	s.isAlias = false
-
-	return true
 }
 
 func (s *Scanner) scanNewLine(ctx *Context, c rune) {
