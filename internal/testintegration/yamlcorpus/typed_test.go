@@ -68,7 +68,12 @@ func TestTheEnumeratedShapesReadIntoAGoType(t *testing.T) {
 				failed := err != nil || !sameNumerically(want, got)
 
 				if yard, unusable := yardstickDefects[s.Name]; unusable && yard.failsFor(shape) {
-					t.Logf("yardstick unusable -- %s into %s: %s", s.Name, shape, yard.why)
+					if !failed {
+						t.Errorf("the two reads agree into %s now, so its yardstick entry is stale: %s -- %s",
+							shape, s.Name, yard.why)
+					} else {
+						t.Logf("yardstick unusable -- %s into %s: %s", s.Name, shape, yard.why)
+					}
 
 					continue
 				}
@@ -149,42 +154,33 @@ var typedPathDefects = map[string]typedDefect{}
 //
 // The inverse of typedPathDefects and worth keeping apart from it: an entry
 // here is not a reason to look at the reflection path.
+//
+// An entry whose two reads have since come to agree is reported, the way a
+// stale typedPathDefects entry is. Three were removed on 2026-09-11 and none
+// of them had failed for weeks: "a key tagged !!binary" closed when 752f09c
+// gave a "!!binary" scalar the string-backed codec.Base64, and the two
+// collection-key entries stopped being reachable at all once the `any` read
+// began refusing a collection key -- the loop skips a document the `any` read
+// refuses before it ever looks here.
 var yardstickDefects = map[string]typedDefect{
-	// A collection key has no Go map key to be. `map[any]any` and
-	// `map[string]any` both refuse the document with `cannot use
-	// map[string]interface {} as a map key: it is not comparable`, and codec.ToJSON
-	// refuses it with `a mapping cannot be a JSON key`. Those are the right
-	// answers: Go cannot hash a map and JSON has no mapping key.
-	//
-	// The `any` read names the key by stringifying it -- "map[:0]" -- which
-	// KeyText's own comment records as a divergence rather than a meaning. So
-	// the two reads differ, the typed one is right, and there is nothing here to
-	// fix in the reflection path.
-	"two collection keys in one mapping": {why: "a collection key is not a Go map key"},
-	// The same, for the one whose key is a mapping written with its own '?'.
-	// The `any` read names it "map[a:0]"; no Go map can hold the mapping, and a
-	// struct field tagged with that name is not what the document says either.
-	"an explicit key whose own key is explicit": {why: "a collection key is not a Go map key"},
-	// A timestamp and a byte string have no canonical YAML spelling of their
-	// own, so ast.KeyName names such a key by the text the document wrote --
-	// "2001-12-14" and "aGVsbG8=". A map[any]any does not name a key at all: it
-	// keeps the time.Time, which is right, and has nowhere to put the []byte,
-	// which it says so. The two reads differ because one names and the other
-	// keeps the type, and neither is the reflection path's fault.
+	// A timestamp has no canonical YAML spelling of its own, so ast.KeyName
+	// names such a key by the text the document wrote -- "2001-12-14". A
+	// map[any]any does not name a key at all: it keeps the time.Time, which is
+	// right. The two reads differ because one names and the other keeps the
+	// type, and neither is the reflection path's fault.
 	//
 	// They used to agree by accident: the `any` read named a timestamp key
 	// "2001-12-14 00:00:00 +0000 UTC", which is Go's printing of the very
 	// time.Time the typed read holds, so the two rendered alike. Naming by the
 	// document's own text ended the coincidence.
+	//
+	// Defect 110 is the same disagreement seen from the other side, and it
+	// rules the `any` path the wrong one: one instant written two legal ways is
+	// two entries there and two here, but "2001-12-14" written twice is two
+	// entries through an `any` and one under UseOrderedMap. This entry goes
+	// when 110 does.
 	"a key tagged !!timestamp": {
 		why:   "a map[any]any keeps the time.Time rather than naming it",
-		fails: []yamlgen.TargetShape{yamlgen.ShapeAnyKeyedMap},
-	},
-	// A map[any]any is keyed on the []byte itself, which Go cannot use as a
-	// map key. A string-keyed destination is named rather than keyed and now
-	// agrees with the `any` read: both give "aGVsbG8=".
-	"a key tagged !!binary": {
-		why:   "a []byte cannot key a map[any]any",
 		fails: []yamlgen.TargetShape{yamlgen.ShapeAnyKeyedMap},
 	},
 	// A duplicate that only collides once an alias is resolved. "k: &a n" over
@@ -211,7 +207,10 @@ var yardstickDefects = map[string]typedDefect{
 	// a map[any]any by KeyText to compare it, which collapses the pair again
 	// and makes the comparison order-dependent -- another reason this document
 	// cannot be scored against the `any` read.
-	"two keys alike in text and different once resolved": {why: "the `any` read merges two keys the typed read keeps apart"},
+	"two keys alike in text and different once resolved": {
+		why:   "the `any` read merges two keys the typed read keeps apart",
+		fails: []yamlgen.TargetShape{yamlgen.ShapeAnyKeyedMap},
+	},
 	// The merge key escaping the duplicate check on one path.
 	// "{<<: {x: 1}, <<}" reads into an `any` as {"<<": null}, with the first
 	// entry's mapping gone and nothing reported, and every typed map refuses it
