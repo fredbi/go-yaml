@@ -317,12 +317,7 @@ func Normalize(v reflect.Value) any {
 
 		return out
 	case reflect.Map:
-		out := make(map[string]any, v.Len())
-		for _, key := range v.MapKeys() {
-			out[keyString(key)] = Normalize(v.MapIndex(key))
-		}
-
-		return out
+		return normalizeMap(v)
 	case reflect.Slice, reflect.Array:
 		out := make([]any, 0, v.Len())
 		for i := range v.Len() {
@@ -333,6 +328,57 @@ func Normalize(v reflect.Value) any {
 	default:
 		return v.Interface()
 	}
+}
+
+// Collision stands in a normalized map where two keys spell the same name.
+//
+// A map[any]any can hold uint64(1) and "1" at once -- two nodes under 3.2.1.1,
+// and the document "1: x" over "\"1\": y" reads into one that way. [keyString]
+// names both "1", because the `any` path names both "1" and the two have to
+// compare.
+//
+// Writing one over the other lost an entry and let Go's map iteration order
+// pick which, so a comparison over such a map passed or failed at random:
+// TestTheEnumeratedShapesReadIntoAGoType agreed on three runs in five and
+// disagreed on the other two, over the same document. Both values are kept
+// here instead, ordered by their %v spelling so that two walks of the same map
+// build the same Collision.
+type Collision struct {
+	Name   string
+	Values []any
+}
+
+func normalizeMap(v reflect.Value) map[string]any {
+	out := make(map[string]any, v.Len())
+
+	var collided map[string][]any
+	for _, key := range v.MapKeys() {
+		name := keyString(key)
+		val := Normalize(v.MapIndex(key))
+
+		if _, taken := out[name]; !taken {
+			out[name] = val
+
+			continue
+		}
+
+		if collided == nil {
+			collided = map[string][]any{}
+		}
+		if _, seen := collided[name]; !seen {
+			collided[name] = []any{out[name]}
+		}
+		collided[name] = append(collided[name], val)
+	}
+
+	for name, values := range collided {
+		sort.Slice(values, func(i, j int) bool {
+			return fmt.Sprintf("%v", values[i]) < fmt.Sprintf("%v", values[j])
+		})
+		out[name] = Collision{Name: name, Values: values}
+	}
+
+	return out
 }
 
 // keyString spells a map key the way [KeyText] spells one.
