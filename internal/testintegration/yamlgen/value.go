@@ -246,12 +246,21 @@ func KeyText(v Value) string {
 		// about a key neither of them got wrong.
 		return base64.StdEncoding.EncodeToString(n.V)
 	default:
-		// A collection used as a key, which Keys() draws one key in 24. The
-		// library renders it with Go's %v and codec.ToJSON writes something
-		// else again, so this names what the library does rather than what the
-		// key denotes -- a divergence, and yamlcorpus.yardstickDefects records
-		// it for the enumerated shape. readings.legacyKey answers the 1.1
-		// half, since %v of the core reading spells "08" as 8.
+		// A collection used as a key, which Keys() draws one key in 24, and a
+		// Timestamp, which drawTextual makes one textual value in eight.
+		//
+		// Neither name is checked against the library. A collection key is
+		// refused outright -- "a sequence cannot be a key in a Go map", and the
+		// mapping twin says the same -- and keysOnACollection sets
+		// Written.MeansUnclear, so the generator states no meaning for the
+		// document at all. A Timestamp key is read, and named by the text the
+		// document wrote where this names it by Go's %v of the time.Time, which
+		// is defect 110's generator half: the two spell one instant differently
+		// and no property compares them. Both wait on the widening that gives
+		// Map.Decoded a resolved key rather than a name.
+		//
+		// readings.legacyKey answers the 1.1 half, since %v of the core reading
+		// spells "08" as 8.
 		return fmt.Sprintf("%v", v.Decoded())
 	}
 }
