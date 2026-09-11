@@ -653,18 +653,11 @@ func mergeEntry(node ast.Node) bool {
 // on the interfaces cannot panic -- the guard is there for a MapSlice a caller
 // built by hand.
 //
-// Two Go values that == tells apart can still be one YAML key, since YAML has
-// one integer type, one float type and one timestamp type:
-//
-//   - two time.Time keys are one key when they name the same instant, whatever
-//     zone each was written in;
-//   - two numbers are one key when their kind and canonical name agree, so
-//     int(1), uint64(1) and a *big.Int holding 1 are one key, and so are
-//     float32(0.5) and 0.5. An integer and a float stay two, as "1" and "1.0"
-//     are.
-//
-// The parser refuses a mapping that writes one such key twice, and a merge or
-// MapSlice.Set has to agree with it.
+// Two Go values that == tells apart can still be one YAML key, and keyIDOf
+// says which: YAML has one integer type, one float type and one timestamp
+// type, so int(1) and uint64(1) are one key, float32(0.5) and 0.5 are one,
+// and so are one instant in two zones. The parser refuses a mapping that
+// writes one such key twice, and a merge or MapSlice.Set has to agree with it.
 func sameMapKey(a, b any) bool {
 	if !hashableKey(a) || !hashableKey(b) {
 		return reflect.DeepEqual(a, b)
@@ -672,21 +665,38 @@ func sameMapKey(a, b any) bool {
 	if a == b {
 		return true
 	}
-	switch at := a.(type) {
+	aKind, aName, aNamed := keyIDOf(a)
+	if !aNamed {
+		return false
+	}
+	bKind, bName, bNamed := keyIDOf(b)
+
+	return bNamed && aKind == bKind && aName == bName
+}
+
+// keyIDOf returns the kind and the name a Go key is compared by in YAML, and
+// whether it is a scalar YAML has a kind for.
+//
+// It is the value side of the identity [ast.ComparedKeyName] gives a key node,
+// and gives the same answer for the value a key node decodes to:
+// TestAKeyNodeAndItsValueHaveOneIdentity holds the two together over the
+// corpus. A string is its text, a Base64 its canonical base64 text, a
+// time.Time its instant in UTC, and a number [numberKey]'s name.
+func keyIDOf(v any) (token.KeyKind, string, bool) {
+	switch k := v.(type) {
+	case nil:
+		return token.KeyNull, "null", true
 	case string:
-		return false
+		return token.KeyString, k, true
+	case bool:
+		return token.KeyBool, strconv.FormatBool(k), true
+	case Base64:
+		return token.KeyBinary, k.Canonical(), true
 	case time.Time:
-		bt, isTime := b.(time.Time)
-
-		return isTime && at.Equal(bt)
+		return token.KeyTimestamp, k.UTC().Format(time.RFC3339Nano), true
 	}
-	aKind, aName, aNumber := numberKey(a)
-	if !aNumber {
-		return false
-	}
-	bKind, bName, bNumber := numberKey(b)
 
-	return bNumber && aKind == bKind && aName == bName
+	return numberKey(v)
 }
 
 // numberKey returns the kind and the canonical name a Go number is keyed by in
@@ -725,11 +735,12 @@ func numberKey(v any) (token.KeyKind, string, bool) {
 }
 
 // comparesByValue reports whether a decoded key can be one YAML key with a key
-// a Go map lookup does not find it under: a time.Time in another zone, or a
-// *big.Int or *big.Float, which == compares by address.
+// a Go map lookup does not find it under: a time.Time in another zone, a
+// *big.Int or *big.Float, which == compares by address, or a Base64 written
+// across lines.
 func comparesByValue(key any) bool {
 	switch key.(type) {
-	case time.Time, *big.Int, *big.Float:
+	case time.Time, *big.Int, *big.Float, Base64:
 		return true
 	default:
 		return false
