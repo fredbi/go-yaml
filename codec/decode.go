@@ -3628,7 +3628,10 @@ func (d *Decoder) isInitialized() bool {
 // order the tree holds, and ReferenceFiles publishes anchors from documents
 // this one never sees.
 func (d *Decoder) canWalk(v reflect.Value) bool {
-	if d.toCommentMap != nil || d.useOrderedMap {
+	// UseStringKeys names every key by its text, which mapKeyNodeToValue does on
+	// the tree. The walk keys a mapping by what each key resolves to, so it
+	// would give "1: a" the key uint64(1) whatever the option says.
+	if d.toCommentMap != nil || d.useOrderedMap || d.useStringKeys {
 		return false
 	}
 	if len(d.referenceFiles) > 0 || len(d.referenceDirs) > 0 || len(d.referenceReaders) > 0 {

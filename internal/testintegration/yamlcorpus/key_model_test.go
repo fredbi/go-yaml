@@ -18,9 +18,9 @@ import (
 //
 // Three behaviors are wanted. The decoder should keep the key's type, the way
 // go.yaml.in/yaml/v3 does, and it does: a mapping holds its keys by what they
-// resolve to once any key is not a string. codec.UseStringKeys should be what
-// turns stringification on, and it turns nothing on. codec.ToJSON has to
-// stringify, because a JSON member name is a string, and it does.
+// resolve to once any key is not a string. codec.UseStringKeys turns
+// stringification on, and it does. codec.ToJSON has to stringify, because a
+// JSON member name is a string, and it does.
 
 func decodeInto(t *testing.T, src string, opts ...codec.DecodeOption) any {
 	t.Helper()
@@ -49,15 +49,24 @@ func TestFixedTheDecoderKeepsTheKeyType(t *testing.T) {
 	}
 }
 
-// TestDefectUseStringKeysTurnsNothingOn is the sharper half.
+// TestFixedUseStringKeysReadsEveryKeyAsText: with the option, every scalar key
+// comes back as the text a map[string]any would hold it under.
 //
-// An option that documents a behavior and does not change one is worse than an
-// absent option: a caller reading the godoc believes the default is the other
-// thing.
-func TestDefectUseStringKeysTurnsNothingOn(t *testing.T) {
-	for _, src := range []string{"true: a\n", "~: a\n", "0.5: a\n", "1: a\n", "a: 1\n"} {
-		assert.Equal(t, decodeInto(t, src), decodeInto(t, src, codec.UseStringKeys()),
-			"today: %q reads the same with and without UseStringKeys", src)
+// A decode into an any goes down the walk, which keys a mapping by what each key
+// resolves to, and it ignored the option: every document read the same with it
+// and without it. The option now sends the decode to the tree, which honors it.
+func TestFixedUseStringKeysReadsEveryKeyAsText(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{src: "true: a\n", want: map[string]any{"true": "a"}},
+		{src: "~: a\n", want: map[string]any{"null": "a"}},
+		{src: "0.5: a\n", want: map[string]any{"0.5": "a"}},
+		{src: "1: a\n", want: map[string]any{"1": "a"}},
+		{src: "a: 1\n", want: map[string]any{"a": uint64(1)}},
+	} {
+		assert.Equal(t, tc.want, decodeInto(t, tc.src, codec.UseStringKeys()), "%q", tc.src)
 	}
 }
 

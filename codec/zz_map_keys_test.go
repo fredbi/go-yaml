@@ -56,6 +56,15 @@ func TestUseStringKeysReadsEveryKeyAsText(t *testing.T) {
 		assert.Equal(t, map[any]any{"1.5": "a", "true": "b"}, into)
 	})
 
+	t.Run("and an any takes a map of strings with the option", func(t *testing.T) {
+		// A decode into an any goes down the walk, which keys a mapping by what
+		// each key resolves to. It ignored the option until the option sent the
+		// decode to the tree.
+		var into any
+		require.NoError(t, codec.UnmarshalWithOptions([]byte(src), &into, codec.UseStringKeys()))
+		assert.Equal(t, map[string]any{"1.5": "a", "true": "b"}, into)
+	})
+
 	t.Run("which is the spelling a map[string]any already gets", func(t *testing.T) {
 		var into map[string]any
 		require.NoError(t, codec.Unmarshal([]byte(src), &into))
