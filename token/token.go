@@ -1642,6 +1642,25 @@ func isLeadingZeroDecimal(value string) bool {
 	return true
 }
 
+// opensADocumentMarker reports whether value, written plain at the start of a
+// line, reads as a "---" or "..." marker: three dashes or three dots followed by
+// a blank or by nothing.
+//
+// A document's own scalar and a key of its top mapping start their line, so
+// "---" encoded plain read back as a document holding null, "..." as an empty
+// stream, and "... x" did not parse. "--- x" was quoted already, only through
+// the "- " rule below.
+func opensADocumentMarker(value string) bool {
+	if !strings.HasPrefix(value, "---") && !strings.HasPrefix(value, "...") {
+		return false
+	}
+	if len(value) == len("---") {
+		return true
+	}
+
+	return value[len("---")] == ' ' || value[len("---")] == '\t'
+}
+
 // IsNeedQuoted checks whether the value needs quote for passed string or not
 func IsNeedQuoted(value string) bool {
 	if value == "" {
@@ -1657,6 +1676,9 @@ func IsNeedQuoted(value string) bool {
 		return true
 	}
 	if value == "-" {
+		return true
+	}
+	if opensADocumentMarker(value) {
 		return true
 	}
 	first := value[0]

@@ -137,6 +137,12 @@ func TestIsNeedQuoted(t *testing.T) {
 		"~",
 		"-",
 		"- --foo",
+		// A document marker, where the scalar starts its line.
+		"---",
+		"...",
+		"... x",
+		"---\tx",
+		"...\tx",
 	}
 	for _, test := range needQuotedTests {
 		assert.Truef(t, token.IsNeedQuoted(test), "expected %q to need quoting", test)
