@@ -2234,8 +2234,9 @@ func (d *Decoder) orderedMapOf(ctx context.Context, seq *ast.SequenceNode) (MapS
 // they read says nothing about the shape a reader that builds the type should
 // require.
 func orderedMapShape(node ast.Node) (*ast.SequenceNode, bool) {
-	seq, isSeq := node.(*ast.SequenceNode)
-	if !isSeq {
+	// The anchor may follow the tag, as in "!!omap &o [{x: 1}]".
+	seq := orderedMapSequence(node)
+	if seq == nil {
 		return nil, false
 	}
 	for _, entry := range seq.Values {
