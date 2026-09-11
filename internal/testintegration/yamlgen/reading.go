@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/go-openapi/go-yaml/codec"
 )
 
 // What a document denotes under a reading other than YAML 1.2's core schema.
@@ -566,6 +568,15 @@ func (r *readings) legacy(v Value) any {
 		// which the scalars inside are none the wiser for -- "!!map" over
 		// "k: 0o0" leaves the 0o0 resolving by spelling, and stopping here
 		// read it as the core schema does under a directive asking for 1.1.
+		//
+		// "!!omap" names the shape as well, the ordered map it builds, and
+		// that map's keys and values read under 1.1 like any others.
+		if n.Tag == TagOMap {
+			if ordered, isOrdered := r.legacyOrderedMap(n.V); isOrdered {
+				return ordered
+			}
+		}
+
 		switch n.V.(type) {
 		case Seq, Map:
 			return r.legacy(n.V)
@@ -651,4 +662,34 @@ func (r *readings) legacyKeyValue(v Value) any {
 	}
 
 	return r.legacy(v)
+}
+
+// legacyOrderedMap is orderedMapDecoded under YAML 1.1: the ordered map a
+// sequence tagged "!!omap" builds, each key and value read as 1.1 reads it, and
+// whether the sequence is the shape the tag names. So "!!omap [{010: a}]" is
+// keyed 8 under a "%YAML 1.1" directive and 10 without one.
+func (r *readings) legacyOrderedMap(v Value) (codec.MapSliceSeq, bool) {
+	seq, isSeq := v.(Seq)
+	if !isSeq {
+		return codec.MapSliceSeq{}, false
+	}
+
+	items := make([]codec.MapItem, 0, len(seq.Items))
+	for _, entry := range seq.Items {
+		m, isMap := entry.(Map)
+		if !isMap || len(m.Pairs) != 1 {
+			return codec.MapSliceSeq{}, false
+		}
+		items = append(items, codec.MapItem{
+			Key:   r.legacyKeyValue(m.Pairs[0].Key),
+			Value: r.legacy(m.Pairs[0].Val),
+		})
+	}
+
+	ordered, err := codec.NewMapSliceSeq(items...)
+	if err != nil {
+		return codec.MapSliceSeq{}, false
+	}
+
+	return ordered, true
 }

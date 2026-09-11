@@ -401,6 +401,41 @@ func readsAs(t *testing.T, w yamlgen.Written, core, under11 any) {
 		"%q: yamlgen says %v under 1.1 and the library reads %v", w.Text, under11, legacy)
 }
 
+// TestAnOrderedMapKeyIsWhatItResolvesTo holds the "!!omap" model to the library
+// under both readings: a codec.MapItem holds the value its key resolves to, so a
+// plain null key is nil, and a plain "yes" key is the string under core and the
+// boolean true under 1.1.
+//
+// TestAStreamReadsBackAsItsDocuments drew a null key inside an "!!omap" on
+// 2026-09-11 and read nil where yamlgen said "null": orderedMapDecoded named
+// the key with KeyText. A draw reaches it only when an "!!omap" entry gets a
+// key that is not a string, so this holds it where the property rarely goes.
+func TestAnOrderedMapKeyIsWhatItResolvesTo(t *testing.T) {
+	omap := yamlgen.Tagged{Tag: yamlgen.TagOMap, V: yamlgen.Seq{Items: []yamlgen.Value{
+		yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Null{}, Val: yamlgen.Bool{V: false}}}},
+		yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "yes"}, Val: yamlgen.Str{V: "v"}}}},
+	}}}
+	doc := yamlgen.Map{Pairs: []yamlgen.Pair{{Key: yamlgen.Str{V: "k"}, Val: omap}}}
+
+	ordered := func(items ...codec.MapItem) codec.MapSliceSeq {
+		seq, err := codec.NewMapSliceSeq(items...)
+		require.NoError(t, err)
+
+		return seq
+	}
+
+	// Indent 2: a zero Style writes the entries' mappings flush under "-", which
+	// no reader takes for the entries' content.
+	w := yamlgen.Write(doc, yamlgen.Style{NullSpelling: "null", Quoting: yamlgen.QuotePlain, Indent: 2})
+	core := map[string]any{"k": ordered(codec.MapItem{Key: nil, Value: false}, codec.MapItem{Key: "yes", Value: "v"})}
+
+	// readsAs holds the library to core and the 1.1 reading to the library, and
+	// never the core meaning yamlgen states, which is the half the draw caught.
+	assert.Equal(t, core, w.Means, "%q: yamlgen states %v under core", w.Text, w.Means)
+	readsAs(t, w, core,
+		map[string]any{"k": ordered(codec.MapItem{Key: nil, Value: false}, codec.MapItem{Key: true, Value: "v"})})
+}
+
 // TestAMergedKeyIsBeatenByTheOwnKeyThatResolvesToIt guards the accepting side
 // of the unique-key work against the merge rule.
 //

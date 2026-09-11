@@ -331,6 +331,11 @@ func (t Tagged) Decoded() any {
 // is not that shape stands as it is written, which is what every implementation
 // does for a tag it passes through, so this reports the shape rather than
 // assuming it.
+//
+// Each key is what it resolves to, as a codec.MapItem holds it: a plain null is
+// nil and 1 is uint64(1). It was KeyText's name until 2026-09-11, when a draw
+// put a null key in an "!!omap" and the stream property read nil where this
+// said "null".
 func orderedMapDecoded(v Value) (codec.MapSliceSeq, bool) {
 	seq, isSeq := v.(Seq)
 	if !isSeq {
@@ -344,7 +349,7 @@ func orderedMapDecoded(v Value) (codec.MapSliceSeq, bool) {
 			return codec.MapSliceSeq{}, false
 		}
 		items = append(items, codec.MapItem{
-			Key:   KeyText(m.Pairs[0].Key),
+			Key:   keyValue(m.Pairs[0].Key),
 			Value: m.Pairs[0].Val.Decoded(),
 		})
 	}
