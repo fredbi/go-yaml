@@ -117,3 +117,29 @@ func (fn visitEach) Visit(n ast.Node) ast.Visitor {
 
 	return fn
 }
+
+// TestASequenceEntryCommentStaysOutOfItsBlockScalar checks where File.String
+// writes the comment on a sequence entry that holds a block scalar.
+//
+// The comment claims the rest of the dash's line, and the entry was written as
+// "- " and the scalar, with the comment after both -- which is after the
+// scalar's last line of content: "- # c" over "  |2-" over "   x" came back as
+// "- |2-" over "   x # c" and read " x # c". The comment stays on the dash's
+// line and the scalar opens the next one, as the document wrote it.
+func TestASequenceEntryCommentStaysOutOfItsBlockScalar(t *testing.T) {
+	for name, src := range map[string]string{
+		"a stated width":           "- # c\n  |2-\n   x\n",
+		"no stated width":          "- # c\n  |-\n   x\n",
+		"an anchor in front":       "- # c\n  &a |-\n   x\n",
+		"a comment on the header":  "- # c\n  |- # own\n   x\n",
+		"a folded scalar":          "- # c\n  >-\n   x\n   y\n",
+		"no comment, for contrast": "- |-\n  x\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(src), parser.WithComments())
+			require.NoError(t, err)
+
+			assertRenderingKeepsTheValue(t, src, f.String())
+		})
+	}
+}

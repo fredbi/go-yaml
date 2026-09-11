@@ -829,12 +829,17 @@ func (r *Renderer) sequence(n *SequenceNode) rendered {
 			}
 		}
 		comment := r.entryLineComment(n, i)
-		if comment != "" && !carriesOwnIndent(value) &&
-			(!r.fitsOnKeyLine(value) || entry.spans || endsOnAComment(value)) {
+		if comment != "" && (carriesOwnIndent(value) ||
+			!r.fitsOnKeyLine(value) || entry.spans || endsOnAComment(value)) {
 			// Everything after the '#' is commented out, so a value that would
-			// share the dash's line goes below it instead. A block scalar is
-			// exempt: its header is all that shares the line, and a comment
-			// after the header is where YAML puts one.
+			// share the dash's line goes below it instead.
+			//
+			// A block scalar goes below it too. Kept on the dash's line, it had
+			// the comment written after the whole entry, which is after its last
+			// line of content: "- # c" over "  |2-" over "   x" came back as
+			// "- |2-" over "   x # c" and read " x # c". Below the dash, a width
+			// its header states counts from the sequence, as Renderer.lifted
+			// has it.
 			//
 			// fitsOnKeyLine says yes to an anchor and a tag, which carry their
 			// own value and decide their own shape, so a property standing on a
@@ -852,7 +857,7 @@ func (r *Renderer) sequence(n *SequenceNode) rendered {
 			// "- &a q # c2 # c1".
 			lines = append(lines,
 				leaf(blank+above+"-"+comment),
-				er.render(value).indentedBy(r.indent))
+				er.lifted(value, r.indent).indentedBy(r.indent))
 
 			continue
 		}
