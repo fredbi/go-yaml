@@ -60,7 +60,15 @@ type Ledger struct {
 	// single token could not name, under the position it was first written at.
 	// It stands beside openMaps and is pushed and popped with it.
 	builtKeys []map[string]token.Position
+
+	// allowRepeats marks each repeat [ast.DuplicateKey.Allowed]. The parser
+	// sets it from its WithAllowDuplicateMapKey option.
+	allowRepeats bool
 }
+
+// AllowRepeats marks every repeat recorded from now on as allowed, so a load
+// keeps one of the entries instead of refusing the document.
+func (l *Ledger) AllowRepeats(on bool) { l.allowRepeats = on }
 
 // Base returns the index the keys of the mapping opening now start at.
 func (l *Ledger) Base() int { return l.keys.Base() }
@@ -118,6 +126,7 @@ func (l *Ledger) RecordBuilt(identity, display string, pos token.Position) {
 // noteDuplicate records dup on the mapping being read, which is the innermost
 // one open.
 func (l *Ledger) noteDuplicate(dup ast.DuplicateKey) {
+	dup.Allowed = l.allowRepeats
 	if n := len(l.openMaps); n > 0 {
 		l.openMaps[n-1].Duplicates = append(l.openMaps[n-1].Duplicates, dup)
 	}

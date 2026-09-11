@@ -34,6 +34,7 @@ func (p *Parser) begin(src []byte) {
 		p.tokens.Recycle()
 	}
 	p.keys.UseJSONNames(p.opts.jsonCompatible)
+	p.keys.AllowRepeats(p.opts.allowDuplicateMapKey)
 
 	// A full scan holds every token it reads. The pin is set once, here, and [Parser.Walk] releases it.
 	p.tokens.Pin()

@@ -18,19 +18,22 @@ import (
 // key can still be read, rendered and linted; what to do about one is the
 // load's. §3.2.1.1 makes it an error, so the load refuses it.
 //
-// parser.WithAllowDuplicateMapKey records none at all, and then the last entry
-// written wins because that is what filling a map does.
+// A repeat marked [ast.DuplicateKey.Allowed], which parser.WithAllowDuplicateMapKey
+// asks for, is not refused: the load keeps one of the entries.
 //
 // A parse under parser.WithJSONCompatible records one more pair: two keys that
 // YAML tells apart and JSON does not, such as "1" and "\"1\"". Those are two
 // keys rather than a repeat, so the complaint is ErrNotJSON.
 func refuseDuplicateKeys(n ast.Node) error {
 	m, ok := n.(*ast.MappingNode)
-	if !ok || len(m.Duplicates) == 0 {
+	if !ok {
+		return nil
+	}
+	d, refused := firstRefusedDuplicate(m)
+	if !refused {
 		return nil
 	}
 
-	d := m.Duplicates[0]
 	if d.JSONNameOnly {
 		return yamlerrors.NewNotJSON(
 			fmt.Sprintf("two keys write the JSON member %q, first defined at [%d:%d]",
@@ -43,6 +46,18 @@ func refuseDuplicateKeys(n ast.Node) error {
 		fmt.Sprintf("mapping key %q already defined at [%d:%d]", d.Name, d.FirstAt.Line, d.FirstAt.Column),
 		keyTokenAt(m, d),
 	)
+}
+
+// firstRefusedDuplicate returns the first repeat the mapping holds that the
+// parse did not allow, and whether there is one.
+func firstRefusedDuplicate(m *ast.MappingNode) (ast.DuplicateKey, bool) {
+	for _, d := range m.Duplicates {
+		if !d.Allowed {
+			return d, true
+		}
+	}
+
+	return ast.DuplicateKey{}, false
 }
 
 // keyTokenAt returns the key the mapping wrote at pos for the complaint to

@@ -173,12 +173,23 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 	}
 }
 
-// TestDuplicateMapKeyAllowed checks that the parse records no repeat under [parser.WithAllowDuplicateMapKey],
-// so the load has nothing to reject.
+// TestDuplicateMapKeyAllowed checks that the parse records a repeat under [parser.WithAllowDuplicateMapKey]
+// all the same, marked [ast.DuplicateKey.Allowed], so every load can tell which entry repeats and keep one.
 func TestDuplicateMapKeyAllowed(t *testing.T) {
-	f, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.WithAllowDuplicateMapKey())
+	const src = "foo: 1\nfoo: 2\n"
+
+	f, err := parser.ParseBytes([]byte(src), parser.WithAllowDuplicateMapKey())
 	require.NoError(t, err)
-	assert.Empty(t, duplicatesOf(f))
+	found := duplicatesOf(f)
+	require.Len(t, found, 1)
+	assert.True(t, found[0].Allowed, "a repeat the parse was told to allow is marked so")
+	assert.Equal(t, 2, int(found[0].At.Line))
+
+	f, err = parser.ParseBytes([]byte(src))
+	require.NoError(t, err)
+	found = duplicatesOf(f)
+	require.Len(t, found, 1)
+	assert.False(t, found[0].Allowed, "without the option a repeat is not allowed")
 }
 
 // TestDuplicateMapKeyIsPerType checks that two keys repeat when they resolve to the same node,

@@ -171,10 +171,6 @@ type anchorIdentity struct {
 //
 // It keeps two strings per anchor and does not retain the node.
 func (p *Parser) keepAnchorIdentity(name string, value ast.Node) {
-	if p.opts.allowDuplicateMapKey {
-		return
-	}
-
 	text, kind := p.mapKeyIdentity(value)
 	identity := ast.KeyIdentityWithAnchors(value, p.anchors.identityOf)
 	if unnamedKey(text, kind) && ast.Unnamed(identity) {

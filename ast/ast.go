@@ -1316,6 +1316,11 @@ type DuplicateKey struct {
 	// and "\"1\"" are an integer and a string, and both write the member "1".
 	// Only a parse under parser.WithJSONCompatible records one.
 	JSONNameOnly bool
+	// Allowed marks a repeat the parse was told to allow, with
+	// parser.WithAllowDuplicateMapKey. A load keeps one of the entries instead
+	// of refusing the document: a decoder filling a map keeps the last, a
+	// converter writing JSON keeps the first.
+	Allowed bool
 }
 
 type MappingNode struct {
@@ -1328,9 +1333,10 @@ type MappingNode struct {
 	// is nearly every mapping of nearly every document, so a document without
 	// duplicates carries nothing for them.
 	//
-	// It is nil as well where the parse was told to allow them with
-	// [github.com/go-openapi/go-yaml/parser.WithAllowDuplicateMapKey]: nothing
-	// is recorded, so tolerating a repeat costs no memory at all.
+	// Where the parse was told to allow them with
+	// [github.com/go-openapi/go-yaml/parser.WithAllowDuplicateMapKey], the
+	// repeats are recorded all the same, each marked [DuplicateKey.Allowed], so
+	// every load can tell which entry repeats and keep one.
 	Duplicates  []DuplicateKey
 	Values      []*MappingValueNode
 	FootComment *CommentGroupNode

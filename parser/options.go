@@ -41,11 +41,12 @@ func WithComments() Option {
 	}
 }
 
-// WithAllowDuplicateMapKey stops the parser recording repeated mapping keys.
+// WithAllowDuplicateMapKey lets a document repeat a mapping key.
 //
-// By default the parser records a repeated key in the Duplicates of the [ast.MappingNode],
-// and the decoder rejects the document with [github.com/go-openapi/go-yaml/errors.ErrDuplicateKey].
-// Under this option nothing is recorded, and a decoder filling a Go map keeps the last entry written.
+// The parser records a repeated key in the Duplicates of the [ast.MappingNode] either way,
+// and by default a load rejects the document with [github.com/go-openapi/go-yaml/errors.ErrDuplicateKey].
+// Under this option each repeat is marked [ast.DuplicateKey.Allowed] and the load keeps one entry:
+// a decoder filling a Go map keeps the last, a converter writing JSON keeps the first.
 func WithAllowDuplicateMapKey() Option {
 	return func(p *Parser) {
 		p.opts.allowDuplicateMapKey = true

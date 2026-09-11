@@ -20,13 +20,9 @@ import (
 // Every entry's key passes through here, including a flow entry written as a key with no value:
 // "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does.
 //
-// Under [WithAllowDuplicateMapKey] nothing is recorded: the mapping carries no Duplicates,
-// and a load filling a Go map keeps the last entry written.
+// Under [WithAllowDuplicateMapKey] the repeat is recorded all the same, marked [ast.DuplicateKey.Allowed],
+// so a load can tell which entry repeats and keep one of them.
 func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind token.KeyKind) {
-	if p.opts.allowDuplicateMapKey {
-		return
-	}
-
 	if unnamedKey(name, kind) {
 		// mapKeyIdentity returned no name: the key is an alias whose target the load resolves,
 		// or a collection, whose identity is a comparison of trees.
@@ -55,11 +51,7 @@ func unnamedKey(name string, kind token.KeyKind) bool {
 // The repeat is recorded with its own position and the position of the entry that first wrote the key,
 // as for a scalar key.
 func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
-	if p.opts.allowDuplicateMapKey || !p.keys.InMapping() {
-		return
-	}
-
-	if key == nil {
+	if !p.keys.InMapping() || key == nil {
 		return
 	}
 	if name, kind := p.mapKeyIdentity(key); !unnamedKey(name, kind) {
