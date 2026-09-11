@@ -8,13 +8,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// YAMLVersion is a version of the YAML specification, as a "%YAML" directive
-// names one and as [WithYAMLVersion] asks for one.
+// YAMLVersion is a version of the YAML specification, as named by a "%YAML" directive or by [WithYAMLVersion].
 //
-// It decides how a plain scalar resolves. 1.1 reads "0100" as 64, "1_000" as
-// 1000, "1:30" as 90 and "yes" as true, where 1.2 reads 100 and the three
-// strings. 1.0 and 1.3 are accepted where a document names them -- the parser
-// reads a 1.x document -- and resolve as 1.1 and 1.2 respectively.
+// The version decides how a plain scalar resolves.
+// 1.1 reads "0100" as 64, "1_000" as 1000, "1:30" as 90 and "yes" as true, where 1.2 reads 100 and three strings.
+// A document may also name 1.0 or 1.3: 1.0 resolves as 1.1, and 1.3 as 1.2.
 type YAMLVersion string
 
 const (
@@ -33,12 +31,10 @@ var yamlVersionMap = map[string]YAMLVersion{
 
 // Schema returns the schema v resolves plain scalars against.
 //
-// 1.0 and 1.1 resolve against [token.Schema11], 1.2 and 1.3 against
-// [token.Schema12]. 1.0 predates the core schema and is read as 1.1.
+// 1.0 and 1.1 resolve against [token.Schema11].
+// 1.2, 1.3, the zero value and any other value resolve against [token.Schema12].
 //
-// Use it where you scan a document alongside a parse and need the same reading
-// of a plain scalar: under 1.1 "yes" resolves to a bool and "0100" to 64, under
-// 1.2 both are strings.
+// Use it to scan a document alongside a parse with the same reading of plain scalars.
 func (v YAMLVersion) Schema() token.Schema {
 	switch v {
 	case YAML10, YAML11:

@@ -12,17 +12,18 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// ParseBytes reads src and returns the file it describes.
+// ParseBytes reads the YAML stream src with a new [Parser] configured with opts.
 //
-// src is not copied. The tree keeps windows into it -- every scalar the scanner
-// carried through unchanged is a slice of these very bytes -- so src must not
-// be written to while the returned file is in use. Copying the document was
-// costing an allocation the size of the document on every parse, held for as
-// long as the tree.
+// src is not copied. The returned [ast.File] keeps slices of it, so do not write to src while the file is in use.
+// On error the file is nil.
 func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
 	return New(opts...).Parse(src)
 }
 
+// Parser reads a YAML stream into an [ast.File].
+//
+// Build one with [New], and use it for one stream: call [Parser.Parse] or [Parser.Walk] once.
+// A Parser is not safe for concurrent use.
 type Parser struct {
 	// tokens holds every token.Token the tree points at, in chunks it can fill
 	// again once the parse has finished reading them. A full scan pins it and
@@ -88,11 +89,9 @@ type Parser struct {
 	refs []*tokenRef
 }
 
-// New returns a parser.
+// New returns a [Parser] configured with opts.
 //
-// It reads nothing here: hand it a document with [Parser.Parse] or
-// [Parser.Walk]. How a document becomes tokens is the parser's own business,
-// and a caller made to say would be tied to it.
+// It reads nothing. Pass a stream to [Parser.Parse] or [Parser.Walk].
 func New(opts ...Option) *Parser {
 	p := &Parser{}
 	for _, opt := range opts {
@@ -102,15 +101,13 @@ func New(opts ...Option) *Parser {
 	return p
 }
 
-// ArenaStats reports what the nodes of the last parse cost.
+// Parse reads the YAML stream src and returns its documents as an [ast.File].
 //
-// Parse reads src through and returns the file it describes.
+// src is not copied. The file keeps slices of it, so do not write to src while the file is in use.
+// On error the file is nil, and the error carries the source around the failure.
 //
-// src is not copied and the tree keeps windows into it, so do not write to src
-// while the returned file is in use. See [ParseBytes].
-//
-// Call it once per parser. A comment is handed to the node that keeps it as the
-// tree is built, and a second call would find none left to hand over.
+// Call Parse once per Parser.
+// The parse attaches each comment to its node as it builds the tree, and a second call finds no comment left to attach.
 func (p *Parser) Parse(src []byte) (*ast.File, error) {
 	p.begin(src)
 

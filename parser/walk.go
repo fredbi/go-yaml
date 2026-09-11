@@ -8,25 +8,25 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// Kind says what sort of collection the walk is in, or has just entered.
+// Kind names the collection around a node handed to a [Visitor].
 type Kind uint8
 
 const (
-	// KindNone is the document's body, which stands in no collection.
+	// KindNone marks a document's body, which is in no collection.
 	KindNone Kind = iota
-	// KindMapping is a mapping, whose entries are keys with values.
+	// KindMapping is a mapping. Its entries are keys, each followed by its value.
 	KindMapping
-	// KindSequence is a sequence, whose entries are values.
+	// KindSequence is a sequence. Its entries are values.
 	KindSequence
-	// KindAnchor is an anchor, which stands around the one node it names.
+	// KindAnchor is an anchor, which encloses the node it names.
 	KindAnchor
-	// KindTag is a tag, which stands around the one node it types.
+	// KindTag is a tag, which encloses the node it types.
 	KindTag
-	// KindKey is a mapping key written with "?", which stands around the one
-	// node it addresses the entry by.
+	// KindKey is a mapping key written with "?", which encloses the key node.
 	KindKey
 )
 
+// String returns the kind's name in lower case: "none" for [KindNone] and for any undefined value.
 func (k Kind) String() string {
 	switch k {
 	case KindMapping:
@@ -44,77 +44,53 @@ func (k Kind) String() string {
 	}
 }
 
-// Step is where the walk stands when it hands something over.
+// Step locates a node handed to a [Visitor].
 //
-// It is the whole of the context a caller needs to write a document out again:
-// what it is inside, how deep, which entry of that, and where it stands in the
-// source. A converter needs nothing else, and so has nothing to hold on to and
-// nothing to ask the arena to keep.
+// It carries what a writer needs to emit the document again:
+// the enclosing collection, the depth, the entry index and the source position.
 type Step struct {
-	// In is the collection around what is being handed over.
+	// In is the collection around the node.
 	In Kind
-	// Depth counts the collections enclosing it. The document's body is 0.
+	// Depth counts the collections enclosing the node. A document's body is at depth 0.
 	Depth int
-	// Index is which entry of In this is, counted from 0. It is what tells a
-	// writer whether a separator goes before this one.
+	// Index is the node's entry number in In, counted from 0.
+	// A writer reads it to decide whether a separator goes before the node.
 	Index int
-	// Key says this node is a mapping's key, and that its value comes next. A
-	// writer needs it: a key and its value are two handovers of one entry, and
-	// nothing about the node itself says which it is.
+	// Key reports that the node is a mapping key and that its value comes next.
+	// A key and its value are two handovers of one entry, and nothing on the node tells them apart.
 	Key bool
-	// At is where the first token of what is handed over stands.
+	// At is the position of the node's first token.
 	At token.Position
-	// Document indexes the document this node belongs to in the Docs of the
-	// [ast.File] the walk returns. A walk hands every document's nodes over in
-	// one run, and a stream's documents are independent -- an anchor and a
-	// "%YAML" directive are both scoped to one -- so this tells them apart.
+	// Document indexes the node's document in the Docs of the [ast.File] that [Parser.Walk] returns.
+	// An anchor and a "%YAML" directive each apply to one document, so use it to tell documents apart.
 	//
-	// A document written as nothing between its markers hands over no node at
-	// all, and the count moves past it anyway: "---" over "---" over "b: 2"
-	// hands over one mapping, at Document 1.
+	// An empty document hands over no node, and the count still moves past it:
+	// "---" over "---" over "b: 2" hands over one mapping, at Document 1.
 	//
-	// ⚠️ Each "%YAML" or "%TAG" line is a document of its own, ahead of the one
-	// it applies to, so "%YAML 1.2" over "---" over "a: 1" puts the mapping at
-	// 1 and two directive lines put it at 2. Counting the documents of a stream
-	// and indexing Docs therefore part company the moment a directive appears.
-	// A caller that wants the nth document a reader would see has to step past
-	// the directives itself, one at a time, testing each node for
-	// [ast.DirectiveNode] -- which is what [codec.ToJSON] does. Reading
-	// Document == 0 as "the first document" converts the directive line and
-	// writes nothing.
+	// Each "%YAML" or "%TAG" line counts as a document of its own, ahead of the one it applies to.
+	// "%YAML 1.2" over "---" over "a: 1" puts the mapping at Document 1, and two directive lines put it at 2.
+	// To find the nth document a reader sees, skip the documents whose node is an [ast.DirectiveNode],
+	// as [github.com/go-openapi/go-yaml/codec.ToJSON] does.
 	Document int
 }
 
-// Visitor is handed each part of a document as the parse reaches it.
+// Visitor receives each node of a document as [Parser.Walk] reaches it.
 //
-// Enter comes before anything the node holds and Leave after all of it, so a
-// writer opens a collection on Enter and closes it on Leave. A scalar takes
-// both, one after the other.
+// Enter comes before the node's content and Leave after it,
+// so a writer opens a collection on Enter and closes it on Leave.
+// A scalar gets Enter, then Leave at once.
 //
-// What is handed over is only good until Leave returns: the parse may reclaim
-// the tokens under it as soon as the walk moves on. Read what is needed while
-// it is there.
+// A node is valid until its Leave returns.
+// The parse reuses the tokens and the node cells behind the walk, so copy what is needed before then.
 //
-// ⛔ Never key on the node pointer. The parse hands its cells out again behind
-// the descent, so two nodes of one document are frequently the same pointer:
-// over 12,597 corpus documents, a map keyed on ast.Node reported 5,226 nodes
-// as handed over twice and every one of them was two different nodes sharing a
-// recycled cell. A map keyed that way merges unrelated nodes silently. Key on
-// the token's offset, or on what the node reads as.
-//
-// Leave of the innermost node at an offset is the last moment that node is
-// still the one the walk named: every deeper node at that offset has already
-// been and gone, and the parse has not yet reclaimed this one. A consumer that
-// holds a node until a later one arrives is reading whatever was written there
-// since -- transform found 610 of 88,473 labeled pieces carrying a node that
-// had moved, a string at offset 7 whose node had become an anchor name 23
-// bytes on. Not a crash and not a nil: another part of the document, read as
-// this one.
+// Do not key a map on the node pointer.
+// Because the parse reuses node cells, two different nodes of one document often share a pointer.
+// Key on the token's offset, or on the node's value.
 type Visitor interface {
-	// Enter is called on a node before anything it holds. Returning false
-	// leaves what it holds unvisited, and Leave is not called for it.
+	// Enter is called before the node's content.
+	// Returning false skips the content, and Leave is not called for the node.
 	Enter(node ast.Node, at Step) bool
-	// Leave is called once everything the node holds has been visited.
+	// Leave is called after the node's content has been visited.
 	Leave(node ast.Node, at Step)
 }
 
@@ -146,30 +122,21 @@ type walkState struct {
 	err error
 }
 
-// Walk reads src through, handing each node to v as the parse reaches it.
+// Walk reads the YAML stream src and hands each node to v as the parse reaches it.
 //
-// ⚠️ The contract is not settled and may change without a deprecation. Three
-// questions are open: [ast.Walk] never reaches SequenceEntryNode, FootComment
-// or ValueHeadComments; parseFootComment writes into an entry the parse had
-// already finished, so the last entry of a block is not handed over until the
-// next non-comment token settles it; and where comments belong in the tree is
-// still being decided. Use [Parser.Parse] where you need a stable API.
+// Walk is experimental: its contract may change without a deprecation.
+// Use [Parser.Parse] for a stable API.
+// The last entry of a block reaches v only once the parse reads the next token that is not a comment.
 //
-// It does not gather: a collection's entries are handed over one at a time and
-// the collection keeps none of them, so what stands at once is the walk's own
-// depth rather than the document.
+// Walk does not build the tree. A collection keeps none of its entries,
+// so the memory a walk holds grows with the depth of the document and not with its length.
+// The returned [ast.File] holds the documents without their bodies, which went to v.
+// On error the file is nil.
 //
-// The tape is let go of as the descent reads past it, so what a node holds is
-// good until Leave returns and no longer. The [ast.File] it returns holds the
-// documents and not their bodies, which went to v: a body kept here would read
-// whatever was written over it.
+// A node is valid until its Leave returns, as [Visitor] describes.
 //
-// An anchor goes over before the node it names and closes after it, with
-// [KindAnchor] as the step's In, so a caller that records what a node writes
-// has the anchor open while the node is written. parseAnchorName pins the tape
-// at the '&' and parseAnchorValue saves the chunks the node covered, so an
-// alias may still read them; releaseDocument gives them back when the document
-// ends.
+// An anchor is handed over before the node it names and left after it, with [KindAnchor] as the step's In,
+// so a writer has the anchor open while it writes the node.
 func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
 	p.walk = &walkState{visitor: v}
 	defer func() { p.walk = nil }()
