@@ -1609,12 +1609,12 @@ func drawFloat(t *rapid.T) Value {
 //
 // # The guard, and why it is not caution
 //
-// A big.Float keeps its exponent in an int32, and this library falls back to a
-// float64 past that and hands back **zero** with nothing reported -- a recorded
-// defect. Drawing a number past the bound would mean generating documents whose
-// meaning the corpus states and the library cannot reach, which is a corpus
-// accusing a library of a defect it has already recorded. So the exponent stays
-// far inside: past float64's 308, nowhere near int32's two billion.
+// Fred ruled on 2026-09-11 that a float whose value has a decimal exponent past
+// ±1000 reads as ±Inf, or as 0 on the small side. Writing such a number out in
+// full decimal, to name a key or to report an overflow, had cost seconds per
+// scalar. Drawing past the bound would state a big.Float meaning for a document
+// the rule reads as an infinity. So the value's exponent stays inside: past
+// float64's 308, short of 1000.
 //
 // The integer side has no such cliff, since a big.Int is bounded only by
 // memory. The digit count is bounded anyway, to keep a document readable.
@@ -1627,9 +1627,13 @@ const (
 	// the library reads as a double. Measured rather than reasoned from the
 	// exponent range.
 	bigFloatMinExp = 330
-	// bigFloatMaxExp is far inside big.Float's int32 exponent, and far inside
-	// the bound where this library stops building one.
-	bigFloatMaxExp = 4900
+	// bigFloatMaxExp keeps the value's exponent inside ±1000.
+	//
+	// 995 and not 1000, because the bound is on the value and not on the
+	// exponent written: bigFloats puts a mantissa of up to four digits in
+	// front, so 9999e995 is 9.999e998. The small side mirrors it, down to
+	// 1e-995.
+	bigFloatMaxExp = 995
 	// bigIntMinDigits keeps every drawn integer past a machine word.
 	//
 	// 21 and not 20, because uint64's maximum is itself twenty digits --

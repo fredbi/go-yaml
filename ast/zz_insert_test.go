@@ -299,10 +299,16 @@ type placement struct {
 // as indentation. seed/10532 writes `"\n"<TAB>: ` over a block scalar, was
 // refused, and now reads as v3 reads it; an entry inserts cleanly at every
 // placement, so the other counts stand.
+//
+// 1776 stays 1776 when the smoke corpus was regenerated as yamlcorpus/46, with
+// bigFloatMaxExp capped at 995, and the documents behind the count changed:
+// every seed reshuffled. 58 -> 56 unreadable at the front and the middle and
+// 192 -> 189 disturbed at the back followed the new documents, and the renderer
+// did not move. An equal count does not mean the same documents.
 var insertionCensus = map[string]placement{
-	"front":  {tested: 1776, unreadable: 58, disturbed: 0},
-	"middle": {tested: 1776, unreadable: 58, disturbed: 17},
-	"back":   {tested: 1776, unreadable: 13, disturbed: 192},
+	"front":  {tested: 1776, unreadable: 56, disturbed: 0},
+	"middle": {tested: 1776, unreadable: 56, disturbed: 17},
+	"back":   {tested: 1776, unreadable: 13, disturbed: 189},
 }
 
 // TestInsertingIntoTheCorpus puts one entry into every document the corpus holds
