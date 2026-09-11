@@ -405,7 +405,7 @@ func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node,
 // A node takes one anchor, and a tag may stand between two: "&x !a" over "&y y" names the scalar twice.
 // secondTag holds the same rule for tags.
 func secondAnchor(value ast.Node) *ast.AnchorNode {
-	if tag, ok := value.(*ast.TagNode); ok && !tag.Implicit {
+	if tag, ok := value.(*ast.TagNode); ok {
 		value = tag.Value
 	}
 	anchor, _ := value.(*ast.AnchorNode)

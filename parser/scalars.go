@@ -178,9 +178,15 @@ func (p *Parser) parseScalarValue(ctx context, tk *group.TapeToken) (ast.ScalarN
 // So is the content of a block scalar, which section 10.2.1.2 types tag:yaml.org,2002:str.
 // The scanner cuts that content as a plain String token, so the inBlockScalar check tells the two apart.
 //
+// Resolution types an untagged scalar only. A written tag types the scalar itself, even a tag that resolves to nothing,
+// so "!a 2001-12-14" is a string with the local tag "!a", and "!!str &x 2001-12-14" a string.
+// parseTagValue marks the scalar its tag stands on, and the isTagged check leaves that scalar alone.
+// A tag on a collection marks no scalar, so a timestamp inside a tagged collection still resolves.
+//
 // ast.ParseTimestamp defines which spellings are timestamps.
 func (p *Parser) resolveTimestamp(ctx context, tk *group.TapeToken, node ast.ScalarNode) ast.Node {
-	if tk.Type() != token.StringType || p.descent.inBlockScalar() || p.schemaInForce() != token.Schema11 {
+	if tk.Type() != token.StringType || p.descent.inBlockScalar() || p.descent.isTagged(tk.RawToken()) ||
+		p.schemaInForce() != token.Schema11 {
 		return node
 	}
 	text, isString := node.(*ast.StringNode)

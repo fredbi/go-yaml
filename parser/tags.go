@@ -79,16 +79,32 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 //
 // A tag on the first key of a block mapping stands inside the mapping node,
 // so "!a" over "!b k: v" types the mapping and its key, and is no second tag.
-// Nor is the implicit tag resolveTimestamp stands on a timestamp, which the document did not write.
 func secondTag(value ast.Node) *ast.TagNode {
 	if anchor, ok := value.(*ast.AnchorNode); ok {
 		value = anchor.Value
 	}
-	if tag, ok := value.(*ast.TagNode); ok && !tag.Implicit {
+	if tag, ok := value.(*ast.TagNode); ok {
 		return tag
 	}
 
 	return nil
+}
+
+// taggedScalar returns the plain scalar a tag stands on, when tk is that scalar or an anchor group naming it,
+// and nil otherwise.
+//
+// A tag written over a mapping stands on the mapping's group, and a tag written on a key sits inside the key's group,
+// so neither hands a key to its enclosing collection's tag.
+func taggedScalar(tk *group.TapeToken) *group.TapeToken {
+	if tk.Group == nil {
+		if tk.Type() != token.StringType {
+			return nil
+		}
+
+		return tk
+	}
+
+	return anchoredScalar(tk)
 }
 
 func (p *Parser) clearTagDirectives() {
@@ -170,6 +186,10 @@ func (p *Parser) tagPrefix(handle, fallback string) string {
 func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, tk *group.TapeToken) (ast.Node, error) {
 	if tk == nil {
 		return p.handNull(ctx, ctx.createImplicitNullToken(group.NewSynthetic(tagRawTk)))
+	}
+	if scalar := taggedScalar(tk); scalar != nil {
+		// The tag types the scalar, so resolveTimestamp leaves it the text it was written with.
+		defer p.descent.enterTagged(scalar.RawToken())()
 	}
 
 	// Match on the URI, not the shorthand:

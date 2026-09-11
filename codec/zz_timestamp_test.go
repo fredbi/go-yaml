@@ -133,6 +133,70 @@ func TestATimestampResolvesUnderTheVersionTheDocumentDeclares(t *testing.T) {
 	})
 }
 
+// TestAWrittenTagKeepsATimestampAString holds that a tag written on a plain scalar stops it resolving as a timestamp.
+//
+// Resolution types an untagged scalar. A written tag types the scalar itself,
+// and a tag that resolves to nothing, the local "!a" or the non-specific "!", leaves it the text it was written with.
+// So under %YAML 1.1 "!a 2001-12-14" is the string "2001-12-14", as libfyaml and go.yaml.in/yaml/v3 read it,
+// and an anchor on either side of the tag changes nothing.
+//
+// A tag on a collection types the collection and not its members, so a plain timestamp inside one still resolves.
+func TestAWrittenTagKeepsATimestampAString(t *testing.T) {
+	const stamp = "2001-12-14"
+	instant := time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		src  string
+		want any
+	}{
+		{"!a 2001-12-14\n", stamp},
+		{"! 2001-12-14\n", stamp},
+		{"!a\n2001-12-14\n", stamp},
+		{"!a &x 2001-12-14\n", stamp},
+		{"&x !a 2001-12-14\n", stamp},
+		{"!!str &x 2001-12-14\n", stamp},
+		{"k: !a 2001-12-14\n", map[string]any{"k": stamp}},
+		{"k: !a &x 2001-12-14\nj: *x\n", map[string]any{"k": stamp, "j": stamp}},
+		{"{k: !a 2001-12-14}\n", map[string]any{"k": stamp}},
+		{"!a 2001-12-14: v\n", map[string]any{stamp: "v"}},
+		{"? !a 2001-12-14\n: v\n", map[string]any{stamp: "v"}},
+		{"{!a 2001-12-14: v}\n", map[string]any{stamp: "v"}},
+
+		// The untagged entry beside it resolves.
+		{"- !a 2001-12-14\n- 2001-12-14\n", []any{stamp, instant}},
+		{"[!a 2001-12-14, 2001-12-14]\n", []any{stamp, instant}},
+
+		// A tag on the collection leaves its members to resolution.
+		{"!a\n2001-12-14: v\n", map[any]any{instant: "v"}},
+		{"!!seq\n- 2001-12-14\n", []any{instant}},
+
+		// A written "!!timestamp" is a timestamp.
+		{"&x !!timestamp 2001-12-14\n", instant},
+	} {
+		t.Run(tc.src, func(t *testing.T) {
+			src := "%YAML 1.1\n---\n" + tc.src
+
+			var v any
+			require.NoError(t, codec.Unmarshal([]byte(src), &v))
+			assert.Equal(t, tc.want, v)
+		})
+	}
+
+	t.Run("and ToJSON writes the text", func(t *testing.T) {
+		got, err := codec.ToJSON([]byte("%YAML 1.1\n---\nk: !a 2001-12-14\n"))
+		require.NoError(t, err)
+		assert.Equal(t, `{"k":"2001-12-14"}`, string(got))
+	})
+
+	t.Run("and the document renders as it was written", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\n!a &x 2001-12-14\n"
+
+		f, err := parser.ParseBytes([]byte(src))
+		require.NoError(t, err)
+		assert.Equal(t, src, f.String())
+	})
+}
+
 // TestTimestampTagDoesNotFollowTheVersion records that an explicit
 // "!!timestamp" resolves under every YAML version.
 //

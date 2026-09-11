@@ -56,6 +56,10 @@ type descentState struct {
 	// and the scanner cuts its content as a plain String token, so nothing inside one may resolve to another type.
 	inLiteral int
 
+	// tagged is the plain scalar a written tag stands on, directly or through one anchor, while parseTagValue reads it.
+	// A written tag types its node, even a tag that resolves to nothing, so resolveTimestamp leaves that scalar a string.
+	tagged *token.Token
+
 	// readingKey counts the keys being read; a key holding another key counts twice.
 	// A walk hands a collection's members over instead of appending them, which leaves the node empty.
 	// Inside a key it appends them after all, so the key can be named by what it holds.
@@ -137,6 +141,17 @@ func (d *descentState) enterLiteral() func() {
 
 // inBlockScalar reports whether the content of a block scalar is being read.
 func (d *descentState) inBlockScalar() bool { return d.inLiteral > 0 }
+
+// enterTagged records the plain scalar a written tag stands on, and returns a func that restores the enclosing one.
+func (d *descentState) enterTagged(tk *token.Token) func() {
+	was := d.tagged
+	d.tagged = tk
+
+	return func() { d.tagged = was }
+}
+
+// isTagged reports whether a written tag stands on tk.
+func (d *descentState) isTagged(tk *token.Token) bool { return tk != nil && tk == d.tagged }
 
 // enterKey records that a mapping key is being read, and returns a func that ends it.
 func (d *descentState) enterKey() func() {

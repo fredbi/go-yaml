@@ -367,10 +367,6 @@ func TestParseKeepsOneTagAndOneAnchorOnANode(t *testing.T) {
 		"!a &x\n!b &y k: v\n",
 		"- !a\n  !b k: v\n",
 		"k: !a\n  !b k2: v\n",
-
-		// Under YAML 1.1 the parse stands a tag the document did not write on a timestamp, and that tag is no second tag.
-		"%YAML 1.1\n---\n!a &x 2001-12-14\n",
-		"%YAML 1.1\n---\n&x !a 2001-12-14\n",
 	} {
 		t.Run(source, func(t *testing.T) {
 			_, err := parser.ParseBytes([]byte(source))
