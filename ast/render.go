@@ -1255,9 +1255,11 @@ func (r *Renderer) literalAt(n *LiteralNode, lift int) string {
 	header := n.Start.Value
 
 	// The content is written at the renderer's own width, so a header that
-	// states a width has to say that one -- carrying the source's over left it
-	// describing a layout that is no longer there, and the value gained a
-	// column on every cycle.
+	// states a width has to say that one: "a: |1" over "  x" comes back as
+	// "a: |2" over "   x", holding the same " x". Carrying the source's digit
+	// over left it describing a layout that is no longer there, and the value
+	// gained a column on every cycle. [Renderer.VerbatimFile] keeps the digit
+	// the document wrote.
 	if statedIndent(header) > 0 {
 		header = restateIndent(header, r.indent+lift)
 	}
