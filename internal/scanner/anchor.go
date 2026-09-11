@@ -11,11 +11,11 @@ import "github.com/go-openapi/go-yaml/token"
 // that one.
 //
 // A '&' arriving with something already buffered is an ordinary character of the plain scalar being read, so this
-// returns false and leaves it to the scalar scan.
+// returns false and leaves it to the scalar scan. So is a '&' inside an anchor or alias name: "&&a" names "&a".
 //
 // [Scanner.validateAnchorName] refuses a '&' naming nothing and one pressed up against a flow collection.
 func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
-	if ctx.existsBuffer() || s.isDirective {
+	if ctx.existsBuffer() || s.isDirective || s.inAnchorName('&') {
 		// A directive's name and parameters are ns-char+, and a '&' in one is
 		// a character of the line, as scanTag reads a '!' there.
 		return false, nil
@@ -45,7 +45,7 @@ func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
 // A '*' arriving with something already buffered is an ordinary character of the plain scalar being read, so this
 // returns false and leaves it to the scalar scan.
 func (s *Scanner) scanAlias(ctx *Context) (bool, error) {
-	if ctx.existsBuffer() || s.isDirective {
+	if ctx.existsBuffer() || s.isDirective || s.inAnchorName('*') {
 		// A '*' in a directive line is a character of its name or a
 		// parameter. Read as an alias, "%*x y" -- a reserved directive, which
 		// 6.8 says to ignore -- was refused with `could not find alias "x"`.
@@ -118,8 +118,12 @@ func anchorNameEnd(src string, start int32) int32 {
 // Each of those opens a token of its own elsewhere, and the scan steps that claim them ask this first.
 //
 // Example: "&@" is an anchor named "@" and not a reserved character.
+//
+// The name runs on only from the character before: the '&' or '*' itself, or a character of the name. isAnchor and
+// isAlias stay set past a ',' or a ']' that ends a name inside a flow collection, so without that test the '*' of the
+// next entry of "[*a,*a]" read as a character of a name and the entry as the plain scalar "*a".
 func (s *Scanner) inAnchorName(c rune) bool {
-	return (s.isAnchor || s.isAlias) && !endsAnchorName(c)
+	return (s.isAnchor || s.isAlias) && !endsAnchorName(c) && !endsAnchorName(s.ctx.previousChar())
 }
 
 func endsAnchorName(c rune) bool {

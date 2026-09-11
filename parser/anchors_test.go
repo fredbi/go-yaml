@@ -151,7 +151,11 @@ func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {
 // Section 5.5 reserves "@" and "`" only at the start of a plain scalar.
 func TestParseAnchorNamesTakeEveryAnchorChar(t *testing.T) {
 	t.Run("as a name, and as the alias that reaches it", func(t *testing.T) {
-		for _, name := range []string{"@", "#", `"`, "'", "`", "%", "@x", "x@", ":"} {
+		for _, name := range []string{
+			"@", "#", `"`, "'", "`", "%", "@x", "x@", ":",
+			// Each of these opens a tag, a block scalar, an anchor or an alias elsewhere.
+			"!", "!x", "!!", "!<!foo>", "|", "|x", ">", ">x", "&", "&x", "*", "*x",
+		} {
 			source := "a: &" + name + " 1\nb: *" + name + "\n"
 
 			f, err := parser.ParseBytes([]byte(source), parser.WithComments())

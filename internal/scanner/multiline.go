@@ -189,7 +189,7 @@ func (s *Scanner) refuseMultiLine(ctx *Context, msg string) error {
 }
 
 func (s *Scanner) scanMultiLineHeader(ctx *Context) (bool, error) {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.inAnchorName(ctx.currentChar()) {
 		return false, nil
 	}
 
