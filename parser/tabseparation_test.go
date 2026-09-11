@@ -107,6 +107,32 @@ func TestATabIsSeparationAndNotIndentation(t *testing.T) {
 		}
 	})
 
+	t.Run("a tab between a key and its ':' separates, whatever the key", func(t *testing.T) {
+		// A quoted key, an alias, a flow collection and a merge key are each cut as a token before the ':' is read,
+		// so the tab is all the separation after them holds. That tab was read as indentation and refused.
+		// go.yaml.in/yaml/v3 reads the first three as {a: b}.
+		for _, tc := range []struct{ src, key string }{
+			{"\"a\"\t: b\n", "a"},
+			{"'a'\t: b\n", "a"},
+			{"\"a\" \t : b\n", "a"},
+			{"x: &a k\n*a\t: b\n", "x"},
+			{"<<\t: {a: 1}\n", "<<"},
+			{"a\t: b\n", "a"},
+			{"- \"a\"\t: b\n", "a"},
+		} {
+			f, err := parser.ParseBytes([]byte(tc.src))
+			require.NoErrorf(t, err, "%q", tc.src)
+			assert.Equalf(t, tc.key, firstKeyOf(f), "%q", tc.src)
+		}
+
+		// A collection key parses as well. go.yaml.in/yaml/v3 refuses these two, for a reason of its own:
+		// it cannot build a Go map keyed by a slice or a map.
+		for _, src := range []string{"[a]\t: b\n", "{a: 1}\t: b\n"} {
+			_, err := parser.ParseBytes([]byte(src))
+			assert.NoErrorf(t, err, "%q", src)
+		}
+	})
+
 	t.Run("and separation elsewhere was always allowed", func(t *testing.T) {
 		for _, src := range []string{"\t{}\n", "\t{a: 1}\n", "[\t1]\n", "[a,\tb]\n", "a: \tb\n", "a:\t1\n"} {
 			_, err := parser.ParseBytes([]byte(src))

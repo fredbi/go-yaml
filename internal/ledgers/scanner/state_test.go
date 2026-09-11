@@ -69,12 +69,12 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
 	// 2 of 2,738 re-baselined 2026-09-10 after 16dd5be, from 2 of 2,744 the same day, 2 of 2,743 and 2 of 2,742 on
 	// 2026-09-09 and 3 of 1,348 on 2026-09-07. The ratio has held at 0.07% across all four.
-	"buf.notSpaceCharPos==trimmed/plain": {0, 318680},
-	"buf.notSpaceCharPos==trimmed/block": {2, 2767},
+	"buf.notSpaceCharPos==trimmed/plain": {0, 318684},
+	"buf.notSpaceCharPos==trimmed/block": {2, 2768},
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
-	"buf.notSpaceCharPos<=len(buf)": {0, 321447},
+	"buf.notSpaceCharPos<=len(buf)": {0, 321452},
 
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
@@ -96,7 +96,7 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// The denominator fell for the first time on 2026-09-10, by 186, and the corpus did not move: 16dd5be ends a plain
 	// scalar at a comment whatever its column, so fewer lines open inside one.
 	"indent.indentNum==column-1/tab":    {11, 11},
-	"indent.indentNum==column-1/spaces": {7, 29870},
+	"indent.indentNum==column-1/spaces": {7, 29872},
 
 	// The indent level a token was given and the level the scanner stands at part company where a block opens, so the
 	// two are not a redundant pair. 5,403 of 158,781, from 5,398 of 158,695, 5,399 of 158,692, 4,213 of 129,685,
@@ -158,9 +158,15 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// 13 disagreed, so 3.4081% -> 3.4084%. scanMergeKey reads the buffer for every merge key it cuts, which adds
 	// 944 buffer reads.
 	//
+	// And once more for a tab between a key cut as a token of its own and its ":". One seed,
+	// "\"\\n\"\t: !\t|2-" over "  null", read that tab as indentation and was refused; it now reads to its end, as
+	// go.yaml.in/yaml/v3 reads it. That one document adds 8 pos() calls and one disagreement, 5,402 of 158,492 ->
+	// 5,403 of 158,500 and 3.4084% -> 3.4088%, and between 1 and 5 buffer reads and line openings to four other
+	// entries, every one of them with its count unchanged.
+	//
 	// A count re-baselined without the ratio beside it says nothing about whether the scanner changed, which is why
 	// the ledger records the denominator.
-	"indent.lastIndentLevel==indentLevel": {5402, 158492},
+	"indent.lastIndentLevel==indentLevel": {5403, 158500},
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.
