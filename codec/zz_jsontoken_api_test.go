@@ -250,13 +250,20 @@ func TestJSONTokensFoldAMerge(t *testing.T) {
 // stand so that a fix on either side reports itself here.
 func TestJSONTokensSpellAKeyAsToJSONDoes(t *testing.T) {
 	for name, tc := range map[string]struct{ src, key string }{
-		"a bare key":         {"1e3: x\n", "1000.0"},
-		"a key under a ?":    {"? 1e3\n: x\n", "1000.0"},
-		"a tagged key":       {"!!float 1e3: x\n", "1000.0"},
-		"an anchored key":    {"&a 1e3: x\n", "1e3"},
-		"an alias as a key":  {"a: &a1 1e3\n*a1 : v\n", "1e3"},
-		"a bare small float": {"0.00003: x\n", "3e-05"},
-		"an anchored one":    {"&a 0.00003: x\n", "0.00003"},
+		"a bare key":      {"1e3: x\n", "1000.0"},
+		"a key under a ?": {"? 1e3\n: x\n", "1000.0"},
+		"a tagged key":    {"!!float 1e3: x\n", "1000.0"},
+		// A tag under an anchor or an alias says what the value is, so the
+		// tagged value names the entry and not the digits.
+		"an anchored tagged key":        {"&a !!float 1e3: x\n", "1000.0"},
+		"an alias to a tagged key":      {"a: &a1 !!float 1e3\n*a1 : v\n", "1000.0"},
+		"a timestamp under a ?":         {"? !!timestamp 2001-12-14\n: x\n", "2001-12-14T00:00:00Z"},
+		"an anchored timestamp":         {"&a !!timestamp 2001-12-14: x\n", "2001-12-14T00:00:00Z"},
+		"an alias to a zoned timestamp": {"a: &a1 !!timestamp 2001-12-14t21:59:43.10-05:00\n*a1 : v\n", "2001-12-14T21:59:43.1-05:00"},
+		"an anchored key":               {"&a 1e3: x\n", "1e3"},
+		"an alias as a key":             {"a: &a1 1e3\n*a1 : v\n", "1e3"},
+		"a bare small float":            {"0.00003: x\n", "3e-05"},
+		"an anchored one":               {"&a 0.00003: x\n", "0.00003"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := codec.ToJSONTokens([]byte(tc.src))

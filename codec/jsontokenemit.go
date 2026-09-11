@@ -478,10 +478,21 @@ func (t *jsonTokener) keyAt(node ast.Node, wrapper token.Position) token.Positio
 // mirrored here so that the token stream says what [ToJSON] says, and both move
 // together when it is fixed. [TestJSONTokensSpellAKeyAsToJSONDoes] pins every
 // row above, so a fix on either side reports itself.
+//
+// A tag under the anchor says what the value is, and [jsonTokener.taggedValue]
+// reads it as ToJSON does: "&a !!float 1e3: x" names the entry 1000.0 and
+// "&a !!timestamp 2001-12-14: x" names it 2001-12-14T00:00:00Z. Read through
+// appendScalarNode instead, the tag was dropped and the key named 1000 and
+// 2001-12-14.
 func (t *jsonTokener) wrappedKeyName(node ast.Node) string {
 	inner := t.throughWrappers(node)
 	if inner == nil {
 		return "null"
+	}
+	if tag, isTag := inner.(*ast.TagNode); isTag {
+		if resolved, ok := t.taggedValue(tag); ok {
+			return unquoted(resolved)
+		}
 	}
 
 	return unquoted(appendScalarNode(nil, inner))
