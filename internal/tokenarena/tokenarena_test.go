@@ -335,6 +335,36 @@ func TestResetGivesTheMemoryBack(t *testing.T) {
 	assert.Equal(t, 4, stats.ChunkSize)
 }
 
+// TestRecycleRefillsEveryChunk checks that Recycle keeps every chunk, live and saved alike,
+// and that the next tokens fill those chunks from sequence 0 without allocating.
+func TestRecycleRefillsEveryChunk(t *testing.T) {
+	a := tokenarena.New[token.Token](4)
+	a.Pin()
+	add(a, 40)
+	a.Save(0, 3)
+	allocated := a.Stats().Allocated
+	require.Equal(t, 10, allocated)
+
+	a.Recycle()
+
+	stats := a.Stats()
+	assert.Zero(t, stats.Tokens)
+	assert.Zero(t, stats.Live)
+	assert.Zero(t, stats.Saved)
+	assert.False(t, stats.Frozen)
+	assert.Equal(t, allocated, stats.Free)
+	assert.Equal(t, 4, stats.ChunkSize)
+
+	held := add(a, 40)
+	stats = a.Stats()
+	assert.Zero(t, stats.Allocated, "a chunk was allocated while recycled ones remained")
+	assert.Equal(t, allocated, stats.Recycled)
+	for i, tk := range held {
+		require.Equal(t, fmt.Sprintf("t%d", i), tk.Value)
+	}
+	assert.Equal(t, "t0", a.At(0).Value)
+}
+
 // TestAllYieldsEveryTokenInOrder checks the walk a full scan reads the stream
 // through.
 func TestAllYieldsEveryTokenInOrder(t *testing.T) {

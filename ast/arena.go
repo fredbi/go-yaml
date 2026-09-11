@@ -353,6 +353,17 @@ func NewArena(n int) *Arena {
 	return &Arena{size: min(max(n/4, minNodeBlock), maxNodeBlock)}
 }
 
+// Reset hands every cell out again from the start of each block,
+// and sizes the blocks allocated from now on for a document of n tokens, as [NewArena] does.
+//
+// Every node the arena handed out before Reset is invalid afterwards: the next node takes its cell.
+// The mapping runs are not recycled, and the next run takes the rest of the block in hand.
+func (a *Arena) Reset(n int) {
+	a.Rewind(Mark{})
+	a.marks = a.marks[:0]
+	a.size = min(max(n/4, minNodeBlock), maxNodeBlock)
+}
+
 func (a *Arena) blockSize() int {
 	if a.size == 0 {
 		return minNodeBlock

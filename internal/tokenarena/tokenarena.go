@@ -502,6 +502,20 @@ func (a *TokenArena[T]) Reset() {
 	*a = TokenArena[T]{chunkSize: a.chunkSize}
 }
 
+// Recycle empties the arena for another stream and puts every chunk it holds on the free list,
+// so the tokens added next fill those chunks instead of new ones. Sequence numbers start again at 0.
+//
+// Every token Add returned before Recycle is invalid afterwards, because its chunk is filled again.
+func (a *TokenArena[T]) Recycle() {
+	for _, l := range []*list[T]{&a.live, &a.saved} {
+		for c := l.popFront(); c != nil; c = l.popFront() {
+			a.free.pushBack(c)
+		}
+	}
+	clear(a.byIndex)
+	*a = TokenArena[T]{chunkSize: a.chunkSize, free: a.free, byIndex: a.byIndex[:0]}
+}
+
 // Stats reports what this arena has done.
 func (a *TokenArena[T]) Stats() Stats {
 	out := a.stats

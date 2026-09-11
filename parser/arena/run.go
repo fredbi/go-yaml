@@ -138,6 +138,26 @@ func (a *Run[T]) Release(dead func(seq int32) bool, poison func([]T)) {
 	a.full = a.full[:kept]
 }
 
+// Recycle takes back every chunk, the one being filled included, and poisons its cells as Release does.
+//
+// Every cell Take handed out before Recycle is invalid afterwards. Under yamlprobe a chunk taken back is set aside
+// and never filled again, as with Release.
+func (a *Run[T]) Recycle(poison func([]T)) {
+	if a.filling != nil {
+		a.full = append(a.full, a.filling)
+		a.filling = nil
+	}
+	for _, c := range a.full {
+		if poison != nil {
+			poison(c.cells[:c.used])
+		}
+		c.used, c.checked, c.unknown = 0, 0, false
+		a.free = append(a.free, c)
+	}
+	clear(a.full)
+	a.full = a.full[:0]
+}
+
 // finished reports whether every cell of the chunk is done with, moving the
 // cursor over the ones that are.
 func (c *runChunk[T]) finished(dead func(seq int32) bool) bool {
