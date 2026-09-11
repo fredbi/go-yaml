@@ -479,10 +479,29 @@ func (p *Parser) newPathNode() *ast.PathNode {
 		return nil
 	}
 	if len(p.pathSlab) == 0 {
-		p.pathSlab = make([]ast.PathNode, pathSlabSize)
+		p.pathSlab = p.nextPathSlab()
 	}
 	n := &p.pathSlab[0]
 	p.pathSlab = p.pathSlab[1:]
 
 	return n
+}
+
+// nextPathSlab returns a slab the previous parse filled, cleared, where Reset kept one, and a new slab otherwise.
+//
+// The setters of ast.PathNode each write only some of its fields, so a reused step must start cleared.
+func (p *Parser) nextPathSlab() []ast.PathNode {
+	if p.pathSlabsUsed < len(p.pathSlabs) {
+		slab := p.pathSlabs[p.pathSlabsUsed]
+		clear(slab)
+		p.pathSlabsUsed++
+
+		return slab
+	}
+
+	slab := make([]ast.PathNode, pathSlabSize)
+	p.pathSlabs = append(p.pathSlabs, slab)
+	p.pathSlabsUsed++
+
+	return slab
 }

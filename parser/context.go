@@ -240,7 +240,12 @@ func (c context) withFlowSequence() context {
 
 func (p *Parser) newContext() context {
 	// The arena is sized from the tokens of the stream, not from its documents: most streams hold one document.
-	p.arena = ast.NewArena(p.tokens.Len())
+	// Reset kept the arena of the previous parse, and its cells are handed out again.
+	if p.arena == nil {
+		p.arena = ast.NewArena(p.tokens.Len())
+	} else {
+		p.arena.Reset(p.tokens.Len())
+	}
 	ctx := context{arena: p.arena, lineComments: p.lineComments}
 
 	root := p.newPathNode()

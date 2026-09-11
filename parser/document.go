@@ -20,12 +20,19 @@ import (
 // parse pulls a document, the reader scans and groups just enough to return it,
 // and the tape can be refilled behind the descent.
 func (p *Parser) begin(src []byte) {
-	if p.opts.chunkSize == 0 {
-		// Sized from the document, so a short document does not pay for a chunk it barely uses.
-		// A size set with WithChunkSize is kept.
-		p.opts.chunkSize = tokenarena.SizeFor(len(src))
+	switch size := p.opts.chunkSize; {
+	case p.tokens == nil:
+		if size == 0 {
+			// Sized from the document, so a short document does not pay for a chunk it barely uses.
+			size = tokenarena.SizeFor(len(src))
+		}
+		p.tokens = tokenarena.New[group.TapeToken](size)
+	case size != 0 && size != p.tokens.Stats().ChunkSize:
+		p.tokens = tokenarena.New[group.TapeToken](size)
+	default:
+		// Reset kept the arena of the previous parse, and its chunks are refilled at the size they have.
+		p.tokens.Recycle()
 	}
-	p.tokens = tokenarena.New[group.TapeToken](p.opts.chunkSize)
 	p.keys.UseJSONNames(p.opts.jsonCompatible)
 
 	// A full scan holds every token it reads. The pin is set once, here, and [Parser.Walk] releases it.
@@ -38,7 +45,11 @@ func (p *Parser) begin(src []byte) {
 	// Estimated from the source length, since counting tokens would mean reading the document through first.
 	// It sizes buffers and nothing else.
 	estimate := max(len(src)/8, 16)
-	p.reader = newReader(&p.scan, p.tokens, estimate, p.opts.keepComments)
+	if p.reader == nil {
+		p.reader = newReader(&p.scan, p.tokens, estimate, p.opts.keepComments)
+	} else {
+		p.reader.reset(p.tokens, p.opts.keepComments)
+	}
 	p.lineComments = p.reader.g.LineComments
 }
 

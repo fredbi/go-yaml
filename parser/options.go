@@ -10,8 +10,7 @@ type Option func(p *Parser)
 
 // options holds the settings the [Option] arguments to [New] write.
 //
-// Parser.begin writes one field: it fills chunkSize from the document's length when no option set it.
-// Nothing else writes these after [New], so every document of a stream is read with the same settings.
+// Nothing writes these after [New] or [Parser.Reset], so every document of a stream is read with the same settings.
 // A document's own %YAML version and TAG handles go to the Parser's yamlVersion and tagHandles fields.
 type options struct {
 	// onComplete receives each node as the parser finishes it. See [WithOnComplete].

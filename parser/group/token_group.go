@@ -348,6 +348,23 @@ func NewGrouper(n int) Grouper {
 	}
 }
 
+// Reset empties the Grouper for another stream, and keeps its cells, its output buffer and its LineComments map.
+//
+// Every token and group the Grouper handed out before Reset is invalid afterwards.
+func (g *Grouper) Reset() {
+	g.leaves.Recycle(poisonLeaves)
+	g.groups.Recycle(poisonGroups)
+	clear(g.grouped[:cap(g.grouped)])
+	clear(g.LineComments)
+	*g = Grouper{
+		block:        g.block,
+		leaves:       g.leaves,
+		groups:       g.groups,
+		grouped:      g.grouped[:0],
+		LineComments: g.LineComments,
+	}
+}
+
 // token returns a cell for a token standing at seq in the stream.
 func (g *Grouper) token(seq int32) *TapeToken {
 	tk := g.leaves.Take(seq)

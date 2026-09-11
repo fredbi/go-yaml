@@ -103,18 +103,27 @@ func TestAResetParserReadsWhatANewOneReads(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 
+			// mixed alternates the two, since a walk leaves the arenas in another state than a parse does.
 			parses := parser.New(opts...)
 			walks := parser.New(opts...)
-			for _, source := range sources {
+			mixed := parser.New(opts...)
+			for i, source := range sources {
 				src := []byte(source.text)
+				wantParse := renderParse(parser.New(opts...).Parse(src))
+				wantWalk := digestWalk(parser.New(opts...), src)
 
 				parses.Reset(opts...)
-				assert.Equalf(t, renderParse(parser.New(opts...).Parse(src)), renderParse(parses.Parse(src)),
-					"%s: Parse after Reset", source.name)
+				assert.Equalf(t, wantParse, renderParse(parses.Parse(src)), "%s: Parse after Reset", source.name)
 
 				walks.Reset(opts...)
-				assert.Equalf(t, digestWalk(parser.New(opts...), src), digestWalk(walks, src),
-					"%s: Walk after Reset", source.name)
+				assert.Equalf(t, wantWalk, digestWalk(walks, src), "%s: Walk after Reset", source.name)
+
+				mixed.Reset(opts...)
+				if i%2 == 0 {
+					assert.Equalf(t, wantParse, renderParse(mixed.Parse(src)), "%s: Parse after a Walk", source.name)
+				} else {
+					assert.Equalf(t, wantWalk, digestWalk(mixed, src), "%s: Walk after a Parse", source.name)
+				}
 			}
 		})
 	}

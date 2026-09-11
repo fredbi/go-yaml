@@ -37,13 +37,14 @@ type Parser struct {
 
 	// tokens holds every token.Token the tree points at, in chunks the arena refills once the parse has read them.
 	// Parse pins it for the whole parse, so no chunk is refilled and every token survives.
+	// Reset keeps it, and begin recycles its chunks for the next parse.
 	tokens *tokenarena.TokenArena[group.TapeToken]
 	// src is the document being read.
 	// parseLiteral takes from it the text a block scalar was written as.
 	src string
 	// lineComments maps a token to the comment closing its line. It is nil unless [WithComments] was passed.
 	lineComments map[*group.TapeToken]*token.Token
-	// opts holds the settings the [Option] arguments to [New] wrote. Only begin changes it, to fill chunkSize.
+	// opts holds the settings the [Option] arguments to [New] or [Parser.Reset] wrote, and nothing changes it after.
 	// A document's own %YAML and %TAG declarations go to yamlVersion and tagHandles.
 	opts options
 
@@ -78,11 +79,15 @@ type Parser struct {
 	// readTo moves the arena's tail with it, because every deeper run holds tokens at or behind its position.
 	body *tokenRef
 
-	// arena allocates the nodes of the current parse.
+	// arena allocates the nodes of the current parse. Reset keeps it, and newContext hands its cells out again.
 	arena *ast.Arena
 
 	// pathSlab provides path trie nodes in blocks, so a document of N keys costs N/pathSlabSize allocations.
-	pathSlab []ast.PathNode
+	// It is the unused rest of the slab in hand. pathSlabs holds every slab allocated since New,
+	// and pathSlabsUsed counts those the current parse has taken, so a parse after Reset refills them.
+	pathSlab      []ast.PathNode
+	pathSlabs     [][]ast.PathNode
+	pathSlabsUsed int
 	// refs holds one token reference per depth of the descent.
 	// They are held by pointer, so growing the slice does not move the references already handed out.
 	refs []*tokenRef
@@ -101,11 +106,12 @@ func New(opts ...Option) *Parser {
 // Reset prepares p to read another stream, configured with opts as [New] configures a new Parser.
 //
 // Options given to New or to an earlier Reset are dropped, so pass every option the next stream needs.
-// Reset may reuse the memory of the previous parse:
-// do not use the [ast.File] that an earlier [Parser.Parse] or [Parser.Walk] returned once Reset has been called.
+// Reset reuses the memory of the previous parse: the next parse refills its tokens, nodes and path steps.
+// Do not use the [ast.File] that an earlier [Parser.Parse] or [Parser.Walk] returned once Reset has been called.
 func (p *Parser) Reset(opts ...Option) {
 	// The key ledger, the descent and anchor stacks and the token references are the parse's own scratch space:
-	// they keep their room, emptied. Every other field starts from zero, as in a new Parser.
+	// they keep their room, emptied. The token arena, the node arena, the reader and the path slabs keep their
+	// memory, which begin and newContext recycle for the next parse. Every other field starts from zero.
 	p.keys.Reset()
 	p.descent.reset()
 	p.anchors.reset()
@@ -119,6 +125,10 @@ func (p *Parser) Reset(opts ...Option) {
 		anchors:    p.anchors,
 		anchorFrom: p.anchorFrom[:0],
 		refs:       p.refs,
+		tokens:     p.tokens,
+		arena:      p.arena,
+		reader:     p.reader,
+		pathSlabs:  p.pathSlabs,
 	}
 	for _, opt := range opts {
 		opt(p)

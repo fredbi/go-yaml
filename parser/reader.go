@@ -76,6 +76,20 @@ func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[group.TapeTok
 	return r
 }
 
+// reset prepares r for another stream over arena, and keeps the grouper's cells and the room r's buffers have grown.
+func (r *reader) reset(arena *tokenarena.TokenArena[group.TapeToken], keepComments bool) {
+	r.g.Reset()
+	clear(r.out[:cap(r.out)])
+	*r = reader{scan: r.scan, arena: arena, g: r.g, out: r.out[:0], keepComments: keepComments}
+
+	switch {
+	case !keepComments:
+		r.g.LineComments = nil
+	case r.g.LineComments == nil:
+		r.g.LineComments = make(map[*group.TapeToken]*token.Token)
+	}
+}
+
 // peek returns the next grouped token without taking it, and fills the buffer when it is empty.
 func (r *reader) peek() (*group.TapeToken, error) {
 	for r.at >= len(r.out) {
