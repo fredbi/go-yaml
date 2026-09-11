@@ -83,10 +83,10 @@ type buildFrame struct {
 	keyIsString bool
 	hasKey      bool
 	merging     bool
-	// broughtTime says a "<<" brought in a time.Time key. An own key at the
-	// same instant then takes that entry's place, since a Go map holds one
-	// instant written in two zones as two keys.
-	broughtTime bool
+	// broughtByValue says a "<<" brought in a key a Go map lookup cannot match
+	// by value -- a time.Time, a *big.Int, a *big.Float. An own key that is one
+	// YAML key with it then takes that entry's place.
+	broughtByValue bool
 	// keyErr is a key this destination cannot hold, kept until the mapping
 	// closes. The parser hangs a mapping's repeated keys on it as it closes, so
 	// reporting an unusable key where it is met would speak over a repeat --
@@ -417,10 +417,10 @@ func (f *buildFrame) put(value any) {
 		f.widen()
 	}
 	key := f.mapKey()
-	if f.broughtTime {
-		// The mapping's own key replaces what a "<<" brought in under it, and
-		// for a timestamp that means the same instant in any zone.
-		if held, found := instantKeyIn(f.anyKeyed, key); found {
+	if f.broughtByValue {
+		// The mapping's own key replaces what a "<<" brought in under it: for a
+		// timestamp the same instant in any zone, for a wide number its value.
+		if held, found := sameKeyIn(f.anyKeyed, key); found {
 			delete(f.anyKeyed, held)
 		}
 	}
@@ -467,7 +467,7 @@ func (f *buildFrame) holds(key any) bool {
 		if _, held := f.anyKeyed[key]; held {
 			return true
 		}
-		_, held := instantKeyIn(f.anyKeyed, key)
+		_, held := sameKeyIn(f.anyKeyed, key)
 
 		return held
 	}
@@ -490,8 +490,8 @@ func (f *buildFrame) bring(key any, value any) {
 	if f.anyKeyed == nil {
 		f.widen()
 	}
-	if isTimeKey(key) {
-		f.broughtTime = true
+	if comparesByValue(key) {
+		f.broughtByValue = true
 	}
 	f.anyKeyed[key] = value
 }

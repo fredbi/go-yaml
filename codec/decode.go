@@ -400,13 +400,14 @@ func newKeyedMap(size int) *keyedMap {
 //
 // A mapping's own entries are written before the ones it merges, so this is
 // where an own key beats a merged one. A timestamp key stands for its instant
-// in any zone, which a Go map lookup does not find.
+// in any zone, and a wide number for its value, neither of which a Go map
+// lookup finds.
 func (k *keyedMap) holds(key any) bool {
 	if k.byKey != nil {
 		if _, stands := k.byKey[key]; stands {
 			return true
 		}
-		_, stands := instantKeyIn(k.byKey, key)
+		_, stands := sameKeyIn(k.byKey, key)
 
 		return stands
 	}
@@ -652,41 +653,101 @@ func mergeEntry(node ast.Node) bool {
 // on the interfaces cannot panic -- the guard is there for a MapSlice a caller
 // built by hand.
 //
-// Two time.Time keys are one key when they name the same instant, whatever
-// zone each was written in: the parser refuses a mapping that writes one
-// instant twice, and a merge or MapSlice.Set has to agree with it.
+// Two Go values that == tells apart can still be one YAML key, since YAML has
+// one integer type, one float type and one timestamp type:
+//
+//   - two time.Time keys are one key when they name the same instant, whatever
+//     zone each was written in;
+//   - two numbers are one key when their kind and canonical name agree, so
+//     int(1), uint64(1) and a *big.Int holding 1 are one key, and so are
+//     float32(0.5) and 0.5. An integer and a float stay two, as "1" and "1.0"
+//     are.
+//
+// The parser refuses a mapping that writes one such key twice, and a merge or
+// MapSlice.Set has to agree with it.
 func sameMapKey(a, b any) bool {
-	if at, isTime := a.(time.Time); isTime {
+	if !hashableKey(a) || !hashableKey(b) {
+		return reflect.DeepEqual(a, b)
+	}
+	if a == b {
+		return true
+	}
+	switch at := a.(type) {
+	case string:
+		return false
+	case time.Time:
 		bt, isTime := b.(time.Time)
 
 		return isTime && at.Equal(bt)
 	}
-	if !hashableKey(a) || !hashableKey(b) {
-		return reflect.DeepEqual(a, b)
+	aKind, aName, aNumber := numberKey(a)
+	if !aNumber {
+		return false
+	}
+	bKind, bName, bNumber := numberKey(b)
+
+	return bNumber && aKind == bKind && aName == bName
+}
+
+// numberKey returns the kind and the canonical name a Go number is keyed by in
+// YAML, and whether v is a number at all. The names are the ones the parser
+// gives the same number written in a document: [token.KeyNameOfFloat] and
+// [token.KeyNameOfBigFloat] for a float, the decimal digits for an integer.
+func numberKey(v any) (token.KeyKind, string, bool) {
+	switch n := v.(type) {
+	case *big.Int:
+		if n == nil {
+			return token.KeyOther, "", false
+		}
+
+		return token.KeyInt, n.String(), true
+	case *big.Float:
+		if n == nil {
+			return token.KeyOther, "", false
+		}
+
+		return token.KeyFloat, token.KeyNameOfBigFloat(n), true
 	}
 
-	return a == b
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return token.KeyInt, strconv.FormatInt(rv.Int(), 10), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return token.KeyInt, strconv.FormatUint(rv.Uint(), 10), true
+	case reflect.Float32:
+		return token.KeyFloat, token.KeyNameOfFloat(rv.Float(), 32), true
+	case reflect.Float64:
+		return token.KeyFloat, token.KeyNameOfFloat(rv.Float(), 64), true
+	default:
+		return token.KeyOther, "", false
+	}
 }
 
-// isTimeKey reports whether a decoded key is a timestamp.
-func isTimeKey(key any) bool {
-	_, isTime := key.(time.Time)
-
-	return isTime
+// comparesByValue reports whether a decoded key can be one YAML key with a key
+// a Go map lookup does not find it under: a time.Time in another zone, or a
+// *big.Int or *big.Float, which == compares by address.
+func comparesByValue(key any) bool {
+	switch key.(type) {
+	case time.Time, *big.Int, *big.Float:
+		return true
+	default:
+		return false
+	}
 }
 
-// instantKeyIn returns the time.Time key of m that names the instant key does,
-// and whether m holds one. It finds nothing for a key that is not a timestamp.
+// sameKeyIn returns the key of m that is one YAML key with key where a Go map
+// lookup cannot find it, and whether m holds one.
 //
-// A scan, and only on a merge: a Go map keys a time.Time by its zone as well as
-// its instant, and 3.2.1.3 compares a timestamp by its canonical form in UTC.
-func instantKeyIn(m map[any]any, key any) (any, bool) {
-	t, isTime := key.(time.Time)
-	if !isTime {
+// A scan, and only on a merge: the decoder builds uint64, int64 and float64
+// keys that == compares by value, and scans only for the keys comparesByValue
+// names.
+func sameKeyIn(m map[any]any, key any) (any, bool) {
+	if !comparesByValue(key) {
 		return nil, false
 	}
 	for held := range m {
-		if other, isTime := held.(time.Time); isTime && other.Equal(t) {
+		if sameMapKey(held, key) {
 			return held, true
 		}
 	}
