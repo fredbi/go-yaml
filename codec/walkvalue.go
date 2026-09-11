@@ -239,7 +239,14 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 			// held untagged. 6.9 gives the node both properties, so the name
 			// stands for the tagged value: "a: !!int &a1 \"5\"" reads 5 at a,
 			// and an alias to a1 reads 5 rather than "5".
-			if name := anchorName(anchor.Name); name != "" && b.named != nil {
+			//
+			// A flow key written alone, "{!!null &a1 null, k: *a1}", hands the
+			// tag over without what it stands on, so the anchor never opened
+			// and this is the only place its name is recorded.
+			if name := anchorName(anchor.Name); name != "" {
+				if b.named == nil {
+					b.named = map[string]any{}
+				}
 				b.named[name] = tagged
 			}
 		}

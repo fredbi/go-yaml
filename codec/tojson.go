@@ -535,6 +535,14 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 		w.out = appendJSONScalar(w.out, jsonScalarOf(t.Value))
 	}
 
+	if anchor, anchored := t.Value.(*ast.AnchorNode); anchored {
+		// 6.9 gives the node both properties, so the name stands for the
+		// tagged value, as the walk records it. A flow key written alone,
+		// "{!!null &a1 null, k: *a1}", hands the tag over without what it
+		// stands on, so the anchor never opened and is recorded only here.
+		w.remember(anchorName(anchor.Name), w.out[mark.at:])
+	}
+
 	// Only while the first document is being written: ToJSON converts that one
 	// and walks the rest, so a later document's shape decides nothing here.
 	if res := t.Resolve(); w.firstEnd < 0 &&

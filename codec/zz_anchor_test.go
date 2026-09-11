@@ -14,19 +14,22 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// The walking reader loses an anchor declared on a flow entry written as a key
+// The walking reader lost an anchor declared on a flow entry written as a key
 // alone, when the entry's tag stands before its anchor.
 //
-// Decoding into an any walks the source, so "{!!null &a1 null, k: *a1}" comes
-// back as `could not find alias "a1"`. Decoding the same bytes into an ordered
-// map builds the tree instead, and the tree holds the anchor: it reads
-// {"null": null, "k": null}. ToJSON walks, so it refuses too.
+// Decoding into an any walks the source, so "{!!null &a1 null, k: *a1}" came
+// back as `could not find alias "a1"`, and ToJSON, which walks too, refused it
+// the same way. The tree holds the anchor: it reads {"null": null, "k": null}.
 //
-// Three things have to be true at once, and changing any one of them makes the
+// The parse hands a flow key written alone over as its outermost property and
+// nothing under it, so the anchor inside the tag never opened. The walk and
+// ToJSON now record that anchor as the tag closes, with the tagged value.
+//
+// Three things had to be true at once, and changing any one of them made the
 // walk agree with the tree: the entry is in a flow *mapping*, it is written as
 // a key with no value, and its tag comes before its anchor. So
 // "{&a1 !!null null, k: *a1}", "{!!str &a1 x: 1, k: *a1}" and
-// "[!!null &a1 null, *a1]" keep the anchor on both paths.
+// "[!!null &a1 null, *a1]" kept the anchor on both paths.
 //
 // The reference parser reports the anchor -- "=VAL &a1 <tag:yaml.org,2002:null>
 // :null" -- and libfyaml 1.0.0b1 and go.yaml.in/yaml/v3 both read the document.
@@ -44,27 +47,49 @@ func treeRead(t *testing.T, src string) any {
 	return v
 }
 
-// TestDefectTheWalkLosesAnAnchorOnATaggedFlowKeyAlone pins today's behavior on
-// both sides of that line.
-func TestDefectTheWalkLosesAnAnchorOnATaggedFlowKeyAlone(t *testing.T) {
-	t.Run("today the walk loses the anchor and the tree keeps it", func(t *testing.T) {
-		for _, tc := range []struct{ src, tree string }{
+// TestFixedTheWalkKeepsAnAnchorOnATaggedFlowKeyAlone holds the walk, ToJSON and
+// the tree to one reading on both sides of that line.
+func TestFixedTheWalkKeepsAnAnchorOnATaggedFlowKeyAlone(t *testing.T) {
+	t.Run("the walk and ToJSON keep the anchor, as the tree does", func(t *testing.T) {
+		for _, tc := range []struct{ src, walked, writes, tree string }{
 			// The "!!null" key is the nil interface and not the text "null":
 			// a MapItem.Key carries what the key resolves to.
-			{src: "{!!null &a1 null, k: *a1}\n", tree: `codec.MapSlice{items:[]codec.MapItem{codec.MapItem{Key:interface {}(nil), Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:interface {}(nil)}}}`},
-			{src: "{!!str &a1 x, k: *a1}\n", tree: `codec.MapSlice{items:[]codec.MapItem{codec.MapItem{Key:"x", Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:"x"}}}`},
+			{
+				src:    "{!!null &a1 null, k: *a1}\n",
+				walked: `map[interface {}]interface {}{interface {}(nil):interface {}(nil), "k":interface {}(nil)}`,
+				writes: `{"null":null,"k":null}`,
+				tree:   `codec.MapSlice{items:[]codec.MapItem{codec.MapItem{Key:interface {}(nil), Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:interface {}(nil)}}}`,
+			},
+			{
+				src:    "{!!str &a1 x, k: *a1}\n",
+				walked: `map[string]interface {}{"k":"x", "x":interface {}(nil)}`,
+				writes: `{"x":null,"k":"x"}`,
+				tree:   `codec.MapSlice{items:[]codec.MapItem{codec.MapItem{Key:"x", Value:interface {}(nil)}, codec.MapItem{Key:"k", Value:"x"}}}`,
+			},
 		} {
 			var got any
-			err := yaml.Unmarshal([]byte(tc.src), &got)
-			require.Errorf(t, err, "today: the walk loses the anchor in %q", tc.src)
-			assert.Contains(t, err.Error(), `could not find alias "a1"`)
+			require.NoErrorf(t, yaml.Unmarshal([]byte(tc.src), &got), "the walk: %q", tc.src)
+			assert.Equalf(t, tc.walked, fmt.Sprintf("%#v", got), "the walk: %q", tc.src)
 
-			_, jerr := codec.ToJSON([]byte(tc.src))
-			require.Errorf(t, jerr, "today: ToJSON walks, so it loses it too: %q", tc.src)
-			assert.Contains(t, jerr.Error(), `could not find alias "a1"`)
+			out, err := codec.ToJSON([]byte(tc.src))
+			require.NoErrorf(t, err, "ToJSON: %q", tc.src)
+			assert.Equalf(t, tc.writes, string(out), "ToJSON: %q", tc.src)
 
 			assert.Equalf(t, tc.tree, fmt.Sprintf("%#v", treeRead(t, tc.src)), "the tree holds the anchor: %q", tc.src)
 		}
+	})
+
+	t.Run("an alias to a tagged anchor names the tagged value on every path", func(t *testing.T) {
+		// 6.9 gives the node both properties, so a1 names 5 and not "5".
+		const src = "a: !!int &a1 \"5\"\nb: *a1\n"
+
+		var got any
+		require.NoError(t, yaml.Unmarshal([]byte(src), &got))
+		assert.Equal(t, map[string]any{"a": uint64(5), "b": uint64(5)}, got, "the walk")
+
+		out, err := codec.ToJSON([]byte(src))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"a":5,"b":5}`, string(out), "ToJSON")
 	})
 
 	t.Run("changing any one of the three makes the walk agree", func(t *testing.T) {
