@@ -80,6 +80,33 @@ func sameValue(want, got any) bool {
 		}
 
 		return true
+	case map[any]any:
+		// A mapping widened by a key that is not a string. Its keys are paired
+		// by sameValue and not looked up: a NaN key never finds itself in a Go
+		// map, and a *big.Int key is a pointer the other side holds its own
+		// copy of.
+		g, ok := got.(map[any]any)
+		if !ok || len(w) != len(g) {
+			return false
+		}
+
+		for wk, wv := range w {
+			found := false
+
+			for gk, gv := range g {
+				if sameValue(wk, gk) && sameValue(wv, gv) {
+					found = true
+
+					break
+				}
+			}
+
+			if !found {
+				return false
+			}
+		}
+
+		return true
 	case []any:
 		g, ok := got.([]any)
 		if !ok || len(w) != len(g) {

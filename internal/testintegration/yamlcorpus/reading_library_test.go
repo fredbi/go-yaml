@@ -12,6 +12,7 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
+	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
 // Scoring the library under each reading it implements.
@@ -158,7 +159,9 @@ func TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading(t *testing.T) {
 				continue
 			}
 
-			encoded, err := json.Marshal(got)
+			// Named as the corpus names each key: a mapping with a key that is
+			// not a string decodes to a map[any]any, which JSON cannot write.
+			encoded, err := json.Marshal(yamlgen.NamedKeys(got))
 			if err != nil {
 				t.Errorf("%s: %s read something JSON cannot write: %v", c.Name, table.Name, err)
 

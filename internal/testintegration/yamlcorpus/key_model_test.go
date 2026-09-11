@@ -16,14 +16,11 @@ import (
 
 // What a decoder hands back for a mapping key that is not a string.
 //
-// Three behaviors are wanted and one is implemented. The decoder should keep
-// the key's type, the way go.yaml.in/yaml/v3 does; codec.UseStringKeys should
-// be what turns stringification on; and codec.ToJSON has to stringify, because
-// a JSON member name is a string. Today all three stringify and the option
-// turns nothing on.
-//
-// Pinned so the fix breaks the tests that say it was broken. Each case states
-// the target beside today's answer.
+// Three behaviors are wanted. The decoder should keep the key's type, the way
+// go.yaml.in/yaml/v3 does, and it does: a mapping holds its keys by what they
+// resolve to once any key is not a string. codec.UseStringKeys should be what
+// turns stringification on, and it turns nothing on. codec.ToJSON has to
+// stringify, because a JSON member name is a string, and it does.
 
 func decodeInto(t *testing.T, src string, opts ...codec.DecodeOption) any {
 	t.Helper()
@@ -34,21 +31,21 @@ func decodeInto(t *testing.T, src string, opts ...codec.DecodeOption) any {
 	return v
 }
 
-// TestDefectTheDecoderStringifiesEveryKey pins the default.
+// TestFixedTheDecoderKeepsTheKeyType: a key that is not a string keeps its type,
+// as yaml.v3 keeps it.
 //
-// want is what yaml.v3 gives and what this decoder should give.
-func TestDefectTheDecoderStringifiesEveryKey(t *testing.T) {
+// Each of these came back as a map[string]any keyed by the name until a mapping
+// widened to a map[any]any on its first key that is not a string.
+func TestFixedTheDecoderKeepsTheKeyType(t *testing.T) {
 	for _, tc := range []struct {
-		src   string
-		today map[string]any
-		want  any
+		src  string
+		want any
 	}{
-		{src: "true: a\n", today: map[string]any{"true": "a"}, want: map[any]any{true: "a"}},
-		{src: "~: a\n", today: map[string]any{"null": "a"}, want: map[any]any{nil: "a"}},
-		{src: "0.5: a\n", today: map[string]any{"0.5": "a"}, want: map[any]any{0.5: "a"}},
+		{src: "true: a\n", want: map[any]any{true: "a"}},
+		{src: "~: a\n", want: map[any]any{nil: "a"}},
+		{src: "0.5: a\n", want: map[any]any{0.5: "a"}},
 	} {
-		assert.Equal(t, tc.today, decodeInto(t, tc.src),
-			"today: %q is stringified; it should keep the type, as %#v", tc.src, tc.want)
+		assert.Equal(t, tc.want, decodeInto(t, tc.src), "%q keeps the key's type", tc.src)
 	}
 }
 
@@ -107,8 +104,9 @@ func TestYAMLv3KeepsTheKeyType(t *testing.T) {
 		require.Len(t, docs, 1)
 		assert.Len(t, docs[0], 2, "yaml.v3 keeps both")
 
-		// ✅ And so does this library since 2026-09-10, by naming the float
-		// "1.0" and the integer "1" rather than both "1".
+		// ✅ And so does this library: it named the float "1.0" and the
+		// integer "1" from 2026-09-10, and holds them as float64(1) and
+		// uint64(1) now.
 		assert.Len(t, decodeInto(t, "1.0: a\n1: b\n"), 2)
 	})
 }

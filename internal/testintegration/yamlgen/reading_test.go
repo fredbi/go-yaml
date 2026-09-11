@@ -342,9 +342,9 @@ func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
 // put a meaning in the corpus that no implementation holds.
 //
 // Each text is asked as a value and as a key, in block and in flow. A key is
-// the harder half: "1:30" carries a ':' that is not the entry's, and the name
-// the key ends up under moves with the reading, so "1:30: v" is keyed "1:30"
-// under core and "90" under 1.1.
+// the harder half: "1:30" carries a ':' that is not the entry's, and the key
+// moves with the reading, so "1:30: v" is keyed by the string "1:30" under core
+// and by the integer 90 under 1.1.
 //
 // A text added to legacyNumbers without a row here is caught by
 // TestASecondReadingOnlyArrivesWithALegacySpelling, which restates the whole
@@ -352,18 +352,17 @@ func TestTheNumberFormsMeanUnder11WhatTheLibraryReads(t *testing.T) {
 func TestTheLegacyNumbersMeanUnderElevenWhatTheLibraryReads(t *testing.T) {
 	for _, tc := range []struct {
 		text  string
-		under any    // what 1.1 reads the text as
-		named string // the name a key resolving to that gets
+		under any // what 1.1 reads the text as, and so the key it is
 	}{
-		{"1_000", uint64(1000), "1000"},
-		{"-1_0", int64(-10), "-10"},
-		{"0b1010", uint64(10), "10"},
-		{"+0b11", uint64(3), "3"},
-		{"0x_1F", uint64(31), "31"},
-		{"1:30", uint64(90), "90"},
-		{"190:20:30", uint64(685230), "685230"},
-		{"685_230.15", 685230.15, "685230.15"},
-		{"12:00.5", 720.5, "720.5"},
+		{"1_000", uint64(1000)},
+		{"-1_0", int64(-10)},
+		{"0b1010", uint64(10)},
+		{"+0b11", uint64(3)},
+		{"0x_1F", uint64(31)},
+		{"1:30", uint64(90)},
+		{"190:20:30", uint64(685230)},
+		{"685_230.15", 685230.15},
+		{"12:00.5", 720.5},
 	} {
 		for _, flow := range []bool{false, true} {
 			st := yamlgen.Style{NullSpelling: "null", Quoting: yamlgen.QuotePlain, Flow: flow}
@@ -378,7 +377,7 @@ func TestTheLegacyNumbersMeanUnderElevenWhatTheLibraryReads(t *testing.T) {
 				{Key: yamlgen.Str{V: tc.text}, Val: yamlgen.Str{V: "v"}},
 			}}
 			readsAs(t, yamlgen.Write(asKey, st),
-				map[string]any{tc.text: "v"}, map[string]any{tc.named: "v"})
+				map[string]any{tc.text: "v"}, map[any]any{tc.under: "v"})
 		}
 	}
 }
@@ -437,12 +436,24 @@ func TestAMergedKeyIsBeatenByTheOwnKeyThatResolvesToIt(t *testing.T) {
 			var got map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &got), "%q", tc.src)
 
-			b, ok := got["b"].(map[string]any)
-			require.Truef(t, ok, "%q", tc.src)
-			assert.Lenf(t, b, 2, "%q read %v", tc.src, b)
+			// A map[any]any where a key is not a string, as "? 1" is not.
+			var b map[any]any
+			switch m := got["b"].(type) {
+			case map[any]any:
+				b = m
+			case map[string]any:
+				b = make(map[any]any, len(m))
+				for key, v := range m {
+					b[key] = v
+				}
+			default:
+				require.Failf(t, "b is not a mapping", "%q read %#v", tc.src, got["b"])
+			}
+
+			assert.Lenf(t, b, 2, "%q read %#v", tc.src, b)
 			assert.Equalf(t, "kept", b["extra"], "the merge-only key is kept: %q", tc.src)
-			for name, v := range b {
-				if name != "extra" {
+			for key, v := range b {
+				if key != "extra" {
 					assert.Equalf(t, "own", v, "the own entry wins: %q", tc.src)
 				}
 			}

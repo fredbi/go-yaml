@@ -100,11 +100,14 @@ func TestTheEnumeratedShapesReadIntoAGoType(t *testing.T) {
 	t.Logf("%d enumerated reads reached the reflection path, %d of them read the same both ways", structs, compared)
 
 	// A floor rather than a count, since a shape added to any family may or may
-	// not be a mapping. It is here so that a change which stops the enumerated
-	// documents reaching the reflection path at all shows up as a failure
-	// rather than as a quieter run.
-	require.GreaterOrEqual(t, structs, 20,
-		"the enumerated shapes have stopped reaching the reflection path")
+	// not be a mapping. It sits at the count measured on 2026-09-11, because a
+	// floor of 20 let the count fall from 162 to 129 unreported when the `any`
+	// read began widening mappings to map[any]any and TargetForDecodedAs built
+	// no target for one. A shape added only raises the count; raise the floor
+	// with it, and lower it only for a shape that stopped reaching the path on
+	// purpose.
+	require.GreaterOrEqual(t, structs, 160,
+		"fewer enumerated shapes reach the reflection path than on 2026-09-11")
 }
 
 // The enumerated documents the reflection path gets wrong, and why.
@@ -162,55 +165,24 @@ var typedPathDefects = map[string]typedDefect{}
 // collection-key entries stopped being reachable at all once the `any` read
 // began refusing a collection key -- the loop skips a document the `any` read
 // refuses before it ever looks here.
+//
+// Two more reported themselves once a mapping with a key that is not a string
+// began to decode into an `any` as a map[any]any. "a key tagged !!timestamp"
+// had the `any` read name the key by its text where a map[any]any keeps the
+// time.Time; both keep the time.Time now. "two keys alike in text and
+// different once resolved" -- "1: x" over "\"1\": y" -- had the `any` read
+// keep one entry where a map[any]any keeps two; both keep two now.
 var yardstickDefects = map[string]typedDefect{
-	// A timestamp has no canonical YAML spelling of its own, so ast.KeyName
-	// names such a key by the text the document wrote -- "2001-12-14". A
-	// map[any]any does not name a key at all: it keeps the time.Time, which is
-	// right. The two reads differ because one names and the other keeps the
-	// type, and neither is the reflection path's fault.
-	//
-	// They used to agree by accident: the `any` read named a timestamp key
-	// "2001-12-14 00:00:00 +0000 UTC", which is Go's printing of the very
-	// time.Time the typed read holds, so the two rendered alike. Naming by the
-	// document's own text ended the coincidence.
-	//
-	// Defect 110 is the same disagreement seen from the other side, and it
-	// rules the `any` path the wrong one: one instant written two legal ways is
-	// two entries there and two here, but "2001-12-14" written twice is two
-	// entries through an `any` and one under UseOrderedMap. This entry goes
-	// when 110 does.
-	"a key tagged !!timestamp": {
-		why:   "a map[any]any keeps the time.Time rather than naming it",
-		fails: []yamlgen.TargetShape{yamlgen.ShapeAnyKeyedMap},
-	},
 	// A duplicate that only collides once an alias is resolved. "k: &a n" over
 	// "*a : 1" over "n: 2" reads into an `any` as {"k": "n", "n": 2}, one
 	// entry short and nothing reported, and every typed map refuses it with
 	// `duplicate key "n"`.
 	//
 	// The check exists and one path skips it, which is what makes this
-	// actionable: map[string]any and map[any]any both refuse the document, and
-	// so do the two spellings of the same collision without an alias --
-	// "1: x" over "\"1\": y". The `any` path catches a duplicate written the
-	// same way ("a: 1" over "a: 2") and misses one that only collides after
-	// resolution. See yamlcorpus.Departures, "two keys alike in text and
-	// different once resolved", which records the `any` half.
+	// actionable: map[string]any and map[any]any both refuse the document. The
+	// `any` path catches a duplicate written the same way ("a: 1" over "a: 2")
+	// and misses one that only collides after an alias resolves.
 	"a key colliding with one an alias resolves to": {why: "the `any` read loses an entry the typed read refuses"},
-	// The same fault without an alias, and the clearest evidence for it. "1: x"
-	// over "\"1\": y" reads into a map[any]any as both keys -- uint64(1) => "x"
-	// and "1" => "y", which is what 3.2.1.1 asks for, since an integer and a
-	// string are two nodes. The `any` path names both "1" and keeps the last,
-	// so it holds one entry and has lost "x".
-	//
-	// So the library preserves both wherever the destination can hold them, and
-	// the merge is the naming rather than the read. yamlgen.Normalize flattens
-	// a map[any]any by KeyText to compare it, which collapses the pair again
-	// and makes the comparison order-dependent -- another reason this document
-	// cannot be scored against the `any` read.
-	"two keys alike in text and different once resolved": {
-		why:   "the `any` read merges two keys the typed read keeps apart",
-		fails: []yamlgen.TargetShape{yamlgen.ShapeAnyKeyedMap},
-	},
 	// The merge key escaping the duplicate check on one path.
 	// "{<<: {x: 1}, <<}" reads into an `any` as {"<<": null}, with the first
 	// entry's mapping gone and nothing reported, and every typed map refuses it
@@ -220,7 +192,6 @@ var yardstickDefects = map[string]typedDefect{
 	// The same fault as the alias collision above, reached by a flow entry
 	// written as a key alone rather than by resolution. `{a: 1, a}` is refused
 	// on both paths, so it is the merge key that escapes and not the spelling.
-	// Departures records both readings.
 	"two merge keys, the second written as a key alone": {why: "the `any` read loses an entry the typed read refuses"},
 }
 

@@ -5,6 +5,7 @@ package yamlgen_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
@@ -15,10 +16,10 @@ import (
 
 // What the generator calls a key, held against what the library calls it.
 //
-// yamlgen.KeyText states the name a key takes when a mapping decodes into an
-// `any`. Every value property compares Written.Means against a decode, and
-// Map.Decoded builds Means through KeyText, so a name this package gets wrong
-// fails a property over a document the library read correctly.
+// yamlgen.KeyText states the name the library gives a key: the key of a
+// string-keyed map and the member name ToJSON writes. The stored corpus names
+// every key through it and yamlgen.SameKey compares keys by it, so a name this
+// package gets wrong puts a wrong answer in the corpus.
 
 // TestABinaryKeyIsNamedByTheCharactersTheDocumentWrote pins both halves of one
 // name.
@@ -63,8 +64,37 @@ func TestABinaryKeyIsNamedByTheCharactersTheDocumentWrote(t *testing.T) {
 
 			var got any
 			require.NoError(t, codec.Unmarshal([]byte(tc.src), &got))
-			assert.Equal(t, map[string]any{tc.want: "v"}, got,
-				"the library names the key the same way")
+			assert.Equal(t, map[any]any{codec.Base64(tc.want): "v"}, got,
+				"the library keys it by the same characters, as a codec.Base64")
 		})
+	}
+}
+
+// TestATimestampKeyIsNamedAsTheLibraryNamesIt holds KeyText's Timestamp case to
+// the library's two names for the key: the key of a string-keyed map and the
+// member name ToJSON writes. Both are RFC 3339 in the zone the document wrote,
+// and a date with no zone is UTC.
+//
+// Keys() draws no Timestamp. aliasAKey puts one in a key position from the
+// anchor pool, where drawTextual makes one textual value in eight, so a table
+// reaches it where a draw rarely does.
+func TestATimestampKeyIsNamedAsTheLibraryNamesIt(t *testing.T) {
+	for _, tc := range []struct {
+		stamp time.Time
+		src   string
+	}{
+		{time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC), "!!timestamp 2001-12-14: v\n"},
+		{time.Date(2001, 12, 15, 2, 59, 43, 100_000_000, time.UTC), "!!timestamp 2001-12-15 2:59:43.10: v\n"},
+		{time.Date(2001, 12, 15, 2, 59, 43, 100_000_000, time.UTC), "!!timestamp \"2001-12-15T02:59:43.1Z\": v\n"},
+	} {
+		key := yamlgen.KeyText(yamlgen.Tagged{Tag: yamlgen.TagTimestamp, V: yamlgen.Timestamp{V: tc.stamp}})
+
+		var named map[string]any
+		require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &named), "%q", tc.src)
+		assert.Equalf(t, map[string]any{key: "v"}, named, "a string-keyed map names it so: %q", tc.src)
+
+		out, err := codec.ToJSON([]byte(tc.src))
+		require.NoErrorf(t, err, "%q", tc.src)
+		assert.JSONEq(t, `{"`+key+`":"v"}`, string(out), "and so does ToJSON: %q", tc.src)
 	}
 }

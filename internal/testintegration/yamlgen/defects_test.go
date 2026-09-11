@@ -184,13 +184,13 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 	t.Run("the shorthand spelling reads the mapping", func(t *testing.T) {
 		var got any
 		require.NoError(t, codec.Unmarshal([]byte("!!null :\n"), &got))
-		assert.Equal(t, map[string]any{"null": nil}, got)
+		assert.Equal(t, map[any]any{nil: nil}, got)
 	})
 
 	t.Run("and so does the verbatim spelling on a key that writes something", func(t *testing.T) {
 		var got any
 		require.NoError(t, codec.Unmarshal([]byte("!<tag:yaml.org,2002:null> null:\n"), &got))
-		assert.Equal(t, map[string]any{"null": nil}, got)
+		assert.Equal(t, map[any]any{nil: nil}, got)
 	})
 
 	t.Run("today the verbatim spelling on an empty key gives the scalar", func(t *testing.T) {
@@ -227,7 +227,7 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 		assert.Contains(t, err.Error(), "does not support this kind of node")
 
 		require.NoError(t, codec.Unmarshal([]byte("&a1 !!null : 1\n"), &got))
-		assert.Equal(t, map[string]any{"null": uint64(1)}, got)
+		assert.Equal(t, map[any]any{nil: uint64(1)}, got)
 	})
 
 	t.Run("today an anchor and a tag together are refused below another entry", func(t *testing.T) {
@@ -239,7 +239,7 @@ func TestDefectAPropertiedEmptyKeyIsMishandled(t *testing.T) {
 		// Either property alone, in the same position, reads.
 		for _, src := range []string{"a: 1\n!!null : 2\n", "a: 1\n&a1 : 2\n"} {
 			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, map[string]any{"a": uint64(1), "null": uint64(2)}, got, "%q", src)
+			assert.Equalf(t, map[any]any{"a": uint64(1), nil: uint64(2)}, got, "%q", src)
 		}
 	})
 }
@@ -502,10 +502,10 @@ func TestDefectTwoBareColonLinesInARowAreRefused(t *testing.T) {
 	t.Run("each neighbor reads", func(t *testing.T) {
 		for _, tc := range []struct {
 			src  string
-			want map[string]any
+			want any
 		}{
-			{"a:\n: v\n", map[string]any{"a": nil, "null": "v"}},
-			{"? a\n: 1\n: v\n", map[string]any{"a": uint64(1), "null": "v"}},
+			{"a:\n: v\n", map[any]any{"a": nil, nil: "v"}},
+			{"? a\n: 1\n: v\n", map[any]any{"a": uint64(1), nil: "v"}},
 			{"? a\n:\nk: v\n", map[string]any{"a": nil, "k": "v"}},
 			{"? a\n:\n", map[string]any{"a": nil}},
 		} {

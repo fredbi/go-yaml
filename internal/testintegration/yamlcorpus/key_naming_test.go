@@ -27,6 +27,11 @@ import (
 // Naming per type is what makes uniqueness per type expressible: a float always
 // carries its ".0", so it never lands in the integers' namespace and 1 beside
 // 1.0 is two keys rather than a collision.
+//
+// Into an `any`, a mapping holds its keys by what they resolve to once any key
+// is not a string, so 1 and 1.0 are uint64(1) and float64(1) there. The names
+// are what a string-keyed destination holds and what ToJSON writes, and the
+// tests below read them through [named].
 
 func read(t *testing.T, src string) any {
 	t.Helper()
@@ -35,6 +40,16 @@ func read(t *testing.T, src string) any {
 	require.NoError(t, codec.NewDecoder(bytes.NewReader([]byte(src))).Decode(&v), "%q", src)
 
 	return v
+}
+
+// named reads src into a map[string]any, which holds every key by its name.
+func named(t *testing.T, src string) map[string]any {
+	t.Helper()
+
+	var m map[string]any
+	require.NoError(t, codec.NewDecoder(bytes.NewReader([]byte(src))).Decode(&m), "%q", src)
+
+	return m
 }
 
 func refuses(t *testing.T, src string) string {
@@ -77,7 +92,7 @@ func TestFixedAKeyIsNamedByItsType(t *testing.T) {
 		{src: ".NaN: a\n", key: ".nan"},
 		{src: ".NAN: a\n", key: ".nan"},
 	} {
-		assert.Contains(t, read(t, tc.src), tc.key, "%q should be keyed %q", tc.src, tc.key)
+		assert.Contains(t, named(t, tc.src), tc.key, "%q should be keyed %q", tc.src, tc.key)
 	}
 }
 
@@ -106,10 +121,10 @@ func TestFixedTwoKeysOfOneTypeAndNameConflict(t *testing.T) {
 // which is what go.yaml.in/yaml/v3 does and what 3.2.1.1 requires. libfyaml
 // merges them, and is lax here.
 func TestFixedTwoTypesAreTwoKeys(t *testing.T) {
-	got := read(t, "1.0: a\n1: b\n")
-
-	assert.Equal(t, map[string]any{"1.0": "a", "1": "b"}, got,
+	assert.Equal(t, map[any]any{float64(1): "a", uint64(1): "b"}, read(t, "1.0: a\n1: b\n"),
 		"a float and an integer of equal value are two keys")
+	assert.Equal(t, map[string]any{"1.0": "a", "1": "b"}, named(t, "1.0: a\n1: b\n"),
+		"and two names")
 
 	t.Run("and the infinities keep their sign", func(t *testing.T) {
 		assert.Len(t, read(t, ".inf: a\n-.inf: b\n"), 2)
@@ -126,10 +141,10 @@ func TestFixedTwoTypesAreTwoKeys(t *testing.T) {
 // 226.0 and is named "226.0", where stripping the tag would have read the
 // token "226" and named it after an integer.
 func TestFixedAnExplicitFloatTagOnAKeyKeepsItsFloatness(t *testing.T) {
-	assert.Contains(t, read(t, "226.0: x\n"), "226.0", "untagged, the float keeps its name")
-	assert.Contains(t, read(t, "!!float 226.0: x\n"), "226.0",
+	assert.Contains(t, named(t, "226.0: x\n"), "226.0", "untagged, the float keeps its name")
+	assert.Contains(t, named(t, "!!float 226.0: x\n"), "226.0",
 		"the tag costs the key nothing")
-	assert.Contains(t, read(t, "!!float 226: x\n"), "226.0",
+	assert.Contains(t, named(t, "!!float 226: x\n"), "226.0",
 		"and a whole number under !!float is named as the float it is")
 
 	t.Run("the other tags name a key correctly", func(t *testing.T) {
@@ -139,7 +154,7 @@ func TestFixedAnExplicitFloatTagOnAKeyKeepsItsFloatness(t *testing.T) {
 			{src: "!!bool True: x\n", key: "true"},
 			{src: "!!null ~: x\n", key: "null"},
 		} {
-			assert.Contains(t, read(t, tc.src), tc.key, "%q", tc.src)
+			assert.Contains(t, named(t, tc.src), tc.key, "%q", tc.src)
 		}
 	})
 }
@@ -177,7 +192,7 @@ func TestFixedAnExplicitIntTagOnAKeyKeepsItsBase(t *testing.T) {
 		{src: "!!int &a 0x10: v\n", key: "16"},
 		{src: "&a !!int 0x10: v\n", key: "16"},
 	} {
-		assert.Contains(t, read(t, tc.src), tc.key, "%q should be keyed %q", tc.src, tc.key)
+		assert.Contains(t, named(t, tc.src), tc.key, "%q should be keyed %q", tc.src, tc.key)
 	}
 
 	t.Run("and the tagged spelling collides with the untagged one", func(t *testing.T) {
@@ -221,7 +236,7 @@ func TestAnIntegerTagReadsTheBaseTheSchemaTyped(t *testing.T) {
 	} {
 		assert.Containsf(t, refuses(t, tc.body+"\n"), "as !!int",
 			"%q is no integer under the 1.2 core schema", tc.body)
-		assert.Containsf(t, read(t, under11+tc.body+"\n"), tc.key11,
+		assert.Containsf(t, named(t, under11+tc.body+"\n"), tc.key11,
 			"%q should be keyed %q under 1.1", tc.body, tc.key11)
 	}
 
@@ -233,8 +248,8 @@ func TestAnIntegerTagReadsTheBaseTheSchemaTyped(t *testing.T) {
 	})
 
 	t.Run("and a leading zero follows the schema rather than the tag", func(t *testing.T) {
-		assert.Contains(t, read(t, "!!int 017: v\n"), "17", "1.2 reads a leading zero as decimal")
-		assert.Contains(t, read(t, under11+"!!int 017: v\n"), "15", "1.1 reads it as octal")
+		assert.Contains(t, named(t, "!!int 017: v\n"), "17", "1.2 reads a leading zero as decimal")
+		assert.Contains(t, named(t, under11+"!!int 017: v\n"), "15", "1.1 reads it as octal")
 	})
 }
 

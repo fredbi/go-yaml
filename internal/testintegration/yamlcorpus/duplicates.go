@@ -242,15 +242,14 @@ func isACollectionKey(v yamlgen.Value) bool {
 
 // holdsTheKey reports whether a mapping holds the key the walk was sent to find.
 //
-// Compared by the name the library gives it rather than by identity: the walk
-// rebuilds the tree as it goes, so the node aRepeatableKey returned is not the
-// node the walk holds. yamlgen.KeyText is the same naming the duplicate check
-// itself uses, so a match here is a collision there.
+// Compared as the parser's duplicate check compares, through yamlgen.SameKey,
+// and not by identity: the walk rebuilds the tree as it goes, so the node
+// aRepeatableKey returned is not the node the walk holds. A match here is a
+// collision there. Comparing yamlgen.KeyText alone took Int{1} and Str{"1"}
+// for one key, and the parser keeps them as two.
 func holdsTheKey(m yamlgen.Map, target yamlgen.Value) bool {
-	name := yamlgen.KeyText(target)
-
 	for _, p := range m.Pairs {
-		if yamlgen.KeyText(p.Key) == name {
+		if yamlgen.SameKey(p.Key, target) {
 			return true
 		}
 	}

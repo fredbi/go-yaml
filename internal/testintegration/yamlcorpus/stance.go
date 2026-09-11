@@ -224,18 +224,6 @@ type Departure struct {
 	Departs func(got any, err error) bool
 }
 
-// departsMapping is the common shape of a [Departure.Departs]: the document
-// reads, it reads into a mapping, and the mapping is wrong in a stated way.
-func departsMapping(got any, err error, wrong func(map[string]any) bool) bool {
-	if err != nil {
-		return false
-	}
-
-	m, mapping := got.(map[string]any)
-
-	return mapping && wrong(m)
-}
-
 // Key identity is a declared position, and the one place this library overrules
 // the yardstick.
 //
@@ -263,50 +251,18 @@ func departsMapping(got any, err error, wrong func(map[string]any) bool) bool {
 // None of them appears anywhere in the four hundred documents of the YAML Test
 // Suite. That is the argument for the patterns in one sentence.
 //
-// One entry stands. Every other has been fixed rather than argued away: a cycle
+// None stands. Every entry has been fixed rather than argued away: a cycle
 // decoding to nil and an alias naming an earlier document's anchor on
 // 2026-08-27, a flow entry written as a key alone that the duplicate check did
 // not see on 2026-09-03, on 2026-09-07 a version directive missing the root
-// scalar and a document carrying two directives, and on 2026-09-10 both merge
-// key entries -- "{a: 1, <<}" under 1.1 and "{<<: {x: 1}, <<}" under either
+// scalar and a document carrying two directives, on 2026-09-10 both merge key
+// entries -- "{a: 1, <<}" under 1.1 and "{<<: {x: 1}, <<}" under either
 // version, which Fred ruled on 2026-09-08 and which parser.refuseMergeKeyAlone
-// and the StringNode arm of Parser.mapKeyIdentity settle.
-var Departures = []Departure{
-	{
-		// Anchored on the resolution shape rather than on "a key that is a
-		// boolean", which is `true: a` alone and reads correctly. The
-		// departure needs the second key.
-		Pattern: "two keys alike in text and different once resolved",
-		Kind:    Value,
-		Observed: `"1: x" beside "\"1\": y" comes back as the single entry {"1": "y"}, ` +
-			`and so do "true: a" beside "\"true\": b" and "~: a" beside "\"null\": b"`,
-		Because: "3.2.1.1: a key is equal to another when they resolve to the same node, and a boolean " +
-			"is not a string. Naming a key by the canonical spelling of its type is what makes 1 and " +
-			"1.0 two keys, and it puts every typed key in the strings' namespace at the same time -- " +
-			"so the map cannot hold both and one value is dropped with nothing reported. Refusing " +
-			"them as a duplicate would be wrong too: they are two keys, not one",
-		Corroborated: "split, and the split is worth stating. libfyaml 1.0.0b1 keeps both nodes -- its " +
-			`JSON has a repeated member name, which is the same loss one step later. ` +
-			"go.yaml.in/yaml/v3 v3.0.5 refuses the document as a duplicate, so it names keys the way " +
-			"this library does and merges the two the way this library used to. Only libfyaml holds " +
-			"both, and the reading here rests on 3.2.1.1 rather than on a majority.\n\n" +
-			"📌 This library already has the check and runs it on one path only, which is what " +
-			"makes the entry actionable. Measured on 2026-09-13: `1: x` over `\"1\": y` into a " +
-			"map[string]any or a map[any]any is refused with `duplicate key \"1\"`, and into an " +
-			"`any` it reads. So does the same collision reached through an alias -- `k: &a n` over " +
-			"`*a : 1` over `n: 2` loses an entry into an `any` and is refused by both maps. A " +
-			"duplicate written the same way, `a: 1` over `a: 2`, is refused on every path, so it is " +
-			"the resolution step the `any` path skips rather than the check being absent.\n\n" +
-			"\U0001f4cc A map[any]any keeps both, which settles where the loss is. Measured on " +
-			"2026-09-13: `1: x` over `\"1\": y` read into a map[any]any holds uint64(1) => \"x\" " +
-			"*and* \"1\" => \"y\", two nodes and two keys exactly as 3.2.1.1 asks. So the library " +
-			"preserves the distinction wherever the destination can hold it, and what merges them " +
-			"is naming a key by the canonical spelling of its type -- not the read",
-		Departs: func(got any, err error) bool {
-			return departsMapping(got, err, func(m map[string]any) bool { return len(m) == 1 })
-		},
-	},
-}
+// and the StringNode arm of Parser.mapKeyIdentity settle -- and last "two keys
+// alike in text and different once resolved": "1: x" beside "\"1\": y" came
+// back as the single entry {"1": "y"}, and a mapping that widens to a
+// map[any]any on a key that is not a string holds uint64(1) and "1" as two.
+var Departures = []Departure{}
 
 // GoYAMLParser is the same library asked the question it actually answers at
 // parsing: is this a document.

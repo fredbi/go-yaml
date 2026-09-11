@@ -982,7 +982,7 @@ func TestFixedANonStringKeyNoLongerZeroesAWholeStruct(t *testing.T) {
 	t.Run("the same documents read into an any", func(t *testing.T) {
 		var got any
 		require.NoError(t, yaml.Unmarshal([]byte("1: a\nname: x\n"), &got))
-		assert.Equal(t, map[string]any{"1": "a", "name": "x"}, got)
+		assert.Equal(t, map[any]any{uint64(1): "a", "name": "x"}, got)
 	})
 
 	t.Run("and a string-keyed document reads into the struct", func(t *testing.T) {
@@ -1072,8 +1072,8 @@ func TestFixedATagTypesItsScalarWhateverItsSpelling(t *testing.T) {
 // the keys inside it, as an untagged mapping does.
 //
 // The tag stands on the mapping; each key is a node of its own and resolves on
-// its own, so "!foo" over "False: 1" is keyed by "false" -- the canonical
-// spelling of the boolean -- and not by the text "False". The scanner used to
+// its own, so "!foo" over "False: 1" is keyed by the boolean false and not by
+// the text "False". The scanner used to
 // force the token after a tag it did not recognize to a string, and the token
 // after a tag that opens a block mapping is that mapping's first key.
 func TestFixedATaggedBlockMappingResolvesItsKeys(t *testing.T) {
@@ -1087,14 +1087,14 @@ func TestFixedATaggedBlockMappingResolvesItsKeys(t *testing.T) {
 	} {
 		var got any
 		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		assert.Equal(t, map[string]any{"false": uint64(1)}, got, "%q", src)
+		assert.Equal(t, map[any]any{false: uint64(1)}, got, "%q", src)
 	}
 }
 
 // TestFixedAKeyAfterALongTagOnAnEmptyValueResolves: an entry whose value is a
 // tag with nothing after it no longer stops the next key from resolving.
 //
-// "a: !<tag:yaml.org,2002:null>" over "False: 1" is keyed by "false", as
+// "a: !<tag:yaml.org,2002:null>" over "False: 1" is keyed by the boolean false, as
 // "a: !!null" over the same line always was. The scanner's rule reached past
 // the tag's own node to whatever token came next, and where the tag stood alone
 // at the end of a line that token was the following key.
@@ -1106,7 +1106,7 @@ func TestFixedAKeyAfterALongTagOnAnEmptyValueResolves(t *testing.T) {
 	} {
 		var got any
 		require.NoError(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
-		assert.Equal(t, map[string]any{"a": nil, "false": uint64(1)}, got, "%q", src)
+		assert.Equal(t, map[any]any{"a": nil, false: uint64(1)}, got, "%q", src)
 	}
 }
 
@@ -1398,7 +1398,7 @@ func TestFixedAQuotedExplicitKeyTakesABlockScalarValue(t *testing.T) {
 		// The branch the fix moved: "&a :" cuts the key into tokens and the
 		// value's lines are measured from the '&', not from the name after it.
 		for src, want := range map[string]any{
-			"&a :\n":              map[string]any{"null": nil},
+			"&a :\n":              map[any]any{nil: nil},
 			"\"a\": >-\n  x\n":    map[string]any{"a": "x"},
 			"a: >-\n  x\n":        map[string]any{"a": "x"},
 			"? \"a\"\n: [1]\n":    map[string]any{"a": []any{uint64(1)}},
@@ -1696,18 +1696,18 @@ func TestFixedAMappingKeyWrittenEmptyIsRead(t *testing.T) {
 	t.Run("every position", func(t *testing.T) {
 		for src, want := range map[string]any{
 			// The three that were refused.
-			"a:\n: 2\n":                           map[string]any{"a": nil, "null": uint64(2)},
-			"k: &a1\n: 1\n":                       map[string]any{"k": nil, "null": uint64(1)},
-			"false: !!bool false\n: &a1 !!null\n": map[string]any{"false": false, "null": nil},
+			"a:\n: 2\n":                           map[any]any{"a": nil, nil: uint64(2)},
+			"k: &a1\n: 1\n":                       map[any]any{"k": nil, nil: uint64(1)},
+			"false: !!bool false\n: &a1 !!null\n": map[any]any{false: false, nil: nil},
 			// The three that always read.
-			": a\n":           map[string]any{"null": "a"},
-			"a: 1\n: 2\n":     map[string]any{"a": uint64(1), "null": uint64(2)},
-			"- k: 1\n  : 2\n": []any{map[string]any{"k": uint64(1), "null": uint64(2)}},
+			": a\n":           map[any]any{nil: "a"},
+			"a: 1\n: 2\n":     map[any]any{"a": uint64(1), nil: uint64(2)},
+			"- k: 1\n  : 2\n": []any{map[any]any{"k": uint64(1), nil: uint64(2)}},
 			// An anchored value with content, and nested.
-			"k: &a1 x\n: 1\n":   map[string]any{"k": "x", "null": uint64(1)},
-			"a:\n: 2\nb: 3\n":   map[string]any{"a": nil, "null": uint64(2), "b": uint64(3)},
-			"x:\n  a:\n  : 2\n": map[string]any{"x": map[string]any{"a": nil, "null": uint64(2)}},
-			"k: |\n  x\n: 1\n":  map[string]any{"k": "x\n", "null": uint64(1)},
+			"k: &a1 x\n: 1\n":   map[any]any{"k": "x", nil: uint64(1)},
+			"a:\n: 2\nb: 3\n":   map[any]any{"a": nil, nil: uint64(2), "b": uint64(3)},
+			"x:\n  a:\n  : 2\n": map[string]any{"x": map[any]any{"a": nil, nil: uint64(2)}},
+			"k: |\n  x\n: 1\n":  map[any]any{"k": "x\n", nil: uint64(1)},
 		} {
 			wellFormed(t, src)
 
@@ -1727,8 +1727,8 @@ func TestFixedAMappingKeyWrittenEmptyIsRead(t *testing.T) {
 			"!!str foo: 1\n": map[string]any{"foo": uint64(1)},
 			"&a1 x: 1\n":     map[string]any{"x": uint64(1)},
 			// Inside a flow collection a ':' may stand on its own line.
-			"{a: 1, : 2}\n": map[string]any{"a": uint64(1), "null": uint64(2)},
-			"{: 1}\n":       map[string]any{"null": uint64(1)},
+			"{a: 1, : 2}\n": map[any]any{"a": uint64(1), nil: uint64(2)},
+			"{: 1}\n":       map[any]any{nil: uint64(1)},
 		} {
 			var got any
 			require.NoErrorf(t, yaml.Unmarshal([]byte(src), &got), "%q", src)
@@ -2585,14 +2585,20 @@ func TestFixedAnAnchoredFloatKeyKeepsItsSpelling(t *testing.T) {
 	})
 
 	t.Run("an anchored float key keeps it, on both decode paths", func(t *testing.T) {
-		for _, tc := range []struct{ src, key string }{
-			{src: "&a1 1.0: x\n", key: "1.0"},
-			{src: "{&a1 1.0: x}\n", key: "1.0"},
-			{src: "&a1 1e3: x\n", key: "1000.0"},
+		for _, tc := range []struct {
+			src, key string
+			val      float64
+		}{
+			{src: "&a1 1.0: x\n", key: "1.0", val: 1},
+			{src: "{&a1 1.0: x}\n", key: "1.0", val: 1},
+			{src: "&a1 1e3: x\n", key: "1000.0", val: 1000},
 		} {
+			// Into an `any` the key is the float64 itself: a key that is not a
+			// string widens the mapping to a map[any]any. The name is what a
+			// string-keyed destination holds.
 			var walked any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-			assert.Equalf(t, map[string]any{tc.key: "x"}, walked, "the walk: %q", tc.src)
+			assert.Equalf(t, map[any]any{tc.val: "x"}, walked, "the walk: %q", tc.src)
 
 			var tree map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
@@ -2666,9 +2672,11 @@ func TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType(t *testing.T) {
 			{"!!str 226.0: x\n", "226.0"},
 			{"!!bool True: x\n", "true"},
 			{"!!null ~: x\n", "null"},
-			// A tag naming a kind leaves the node to speak for itself, so the
-			// key is the text the document wrote.
-			{"!!timestamp 2001-12-14: x\n", "2001-12-14"},
+			// A timestamp is named in RFC 3339 in its own zone, as ToJSON
+			// writes it, and a date with no zone is UTC.
+			{"!!timestamp 2001-12-14: x\n", "2001-12-14T00:00:00Z"},
+			// A tag the key walk does not resolve leaves the node to speak for
+			// itself, so the key is the text the document wrote.
 			{"!!binary aGVsbG8=: x\n", "aGVsbG8="},
 		} {
 			var got map[string]any
@@ -2676,14 +2684,15 @@ func TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType(t *testing.T) {
 			assert.Equalf(t, map[string]any{tc.key: "x"}, got, "%q", tc.src)
 		}
 
-		// The two destinations name a byte string alike. They did not: a
-		// map[string]any was keyed on the resolved value, and a []byte is not
-		// comparable, so the document was refused where the same bytes read
-		// into an any gave {"aGVsbG8=": "x"}. Neither destination has to hold
-		// the []byte -- both are keyed by a string.
+		// The two destinations key a byte string by the same characters. They
+		// did not: a map[string]any was keyed on the resolved value, and a
+		// []byte is not comparable, so the document was refused where the same
+		// bytes read into an any gave {"aGVsbG8=": "x"}. An any holds the key
+		// as a codec.Base64, whose text is those characters. A codec.Base64 is
+		// not a string to a type switch, so the mapping widens to a map[any]any.
 		var walked any
 		require.NoError(t, codec.Unmarshal([]byte("!!binary aGVsbG8=: x\n"), &walked))
-		assert.Equal(t, map[string]any{"aGVsbG8=": "x"}, walked)
+		assert.Equal(t, map[any]any{codec.Base64("aGVsbG8="): "x"}, walked)
 
 		// A collection key is still refused into a string-keyed map, and
 		// should be: its only name is the spelling Go prints.
@@ -2739,16 +2748,21 @@ func TestFixedATagOnAKeyReachesAStructFieldAndKeepsItsType(t *testing.T) {
 // is exponential in a document's width. A name is one scalar, so this cannot.
 func TestFixedAnAliasKeyIsNamedAsTheNodeItsAnchorNamed(t *testing.T) {
 	t.Run("an alias key keeps the spelling its anchor had", func(t *testing.T) {
-		for _, tc := range []struct{ src, key string }{
-			{"a: &a1 .inf\n*a1 : v\n", ".inf"},
-			{"a: &a1 1.0\n*a1 : v\n", "1.0"},
-			{"a: &a1 1e3\n*a1 : v\n", "1000.0"},
+		for _, tc := range []struct {
+			src, key string
+			val      float64
+		}{
+			{"a: &a1 .inf\n*a1 : v\n", ".inf", math.Inf(1)},
+			{"a: &a1 1.0\n*a1 : v\n", "1.0", 1},
+			{"a: &a1 1e3\n*a1 : v\n", "1000.0", 1000},
 			// The long form too, which used not to save it.
-			{"a: &a1 .inf\n? *a1\n: v\n", ".inf"},
+			{"a: &a1 .inf\n? *a1\n: v\n", ".inf", math.Inf(1)},
 		} {
+			// Into an `any` the key is the float64 its anchor named; the name
+			// is what the string-keyed map below holds.
 			var walked any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-			assert.Containsf(t, walked, tc.key, "the walk: %q", tc.src)
+			assert.Containsf(t, walked, tc.val, "the walk: %q", tc.src)
 
 			var tree map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &tree), "%q", tc.src)
@@ -2865,7 +2879,7 @@ func TestFixedABlankLineBeforeASequenceEntrySettles(t *testing.T) {
 	})
 
 	t.Run("the value survives every rendering", func(t *testing.T) {
-		want := map[string]any{"": nil, "null": []any{nil}}
+		want := map[any]any{"": nil, nil: []any{nil}}
 
 		text := src
 		for range 3 {

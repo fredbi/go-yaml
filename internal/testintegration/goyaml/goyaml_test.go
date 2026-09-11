@@ -33,13 +33,15 @@ func TestGoYAMLReadsAWholeStream(t *testing.T) {
 // TestTheThreeReadingsOnAWholeValuedFloatKey is what the third source was added
 // for, kept as a regression test now the departure is closed.
 //
-//	this library  map[string]any{"1.0": "a"}      named by type since 2026-09-10
+//	this library  map[any]any{float64(1): "a"}    the key keeps its type
 //	libfyaml      {"1.0": "a"}                    stringified, the float kept
-//	yaml.v3       map[any]any{float64(1): "a"}    not stringified at all
+//	yaml.v3       map[any]any{float64(1): "a"}    the key keeps its type
 //
-// yaml.v3 still declines the question rather than answering it, and keeps every
-// key's type -- float64(1) for "1.0", int(1) for "1". That is why Load hands
-// back Go values: asking it for JSON reports ErrNotJSON and hides the answer.
+// This library named the key by type from 2026-09-10 -- map[string]any{"1.0":
+// "a"} -- and holds it as the float64 once a mapping widens on a key that is
+// not a string. yaml.v3 keeps every key's type -- float64(1) for "1.0", int(1)
+// for "1". That is why Load hands back Go values: asking it for JSON reports
+// ErrNotJSON and hides the answer.
 func TestTheThreeReadingsOnAWholeValuedFloatKey(t *testing.T) {
 	const src = "1.0: a\n"
 
@@ -47,8 +49,8 @@ func TestTheThreeReadingsOnAWholeValuedFloatKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, docs, 1)
 
-	assert.Equal(t, map[string]any{"1.0": "a"}, decodedByUs(t, src),
-		"this library names the key by the canonical spelling of its type")
+	assert.Equal(t, map[any]any{float64(1): "a"}, decodedByUs(t, src),
+		"this library keeps the key's type, as yaml.v3 does")
 
 	keyed, ok := docs[0].(map[string]any)
 	assert.False(t, ok, "yaml.v3 does not key it by a string, got %#v", keyed)

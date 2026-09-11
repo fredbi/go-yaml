@@ -16,7 +16,9 @@ import (
 
 	"pgregory.net/rapid"
 
+	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/codec"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // Value is a logical YAML value: what a document means, with nothing said about
@@ -156,37 +158,27 @@ type Pair struct {
 	Val Value
 }
 
-// KeyText is what this library makes of a key when it decodes a mapping into an
-// `any`: the canonical spelling of the key's type.
+// KeyText is the name this library gives a key: the canonical spelling of the
+// key's type. It is the key of a string-keyed map, the member name ToJSON
+// writes, and the text the duplicate check compares.
 //
-// Measured, and the measurement is the whole reason this is a function rather
-// than a field. Decoding into an `any` always produces a map[string]any, and
-// the key is stringified **from the value the scalar resolves to** rather than
-// from the text that was written: ":", "~:", "Null:", "NULL:" and
-// "!!null null:" all arrive as "null", and "1:", "01:", "1.0:" and "0x1:" all
-// arrive as "1".
+// The name comes from the value the scalar resolves to and not from the text
+// that was written: ":", "~:", "Null:", "NULL:" and "!!null null:" are all
+// "null", and "1:", "01:" and "0x1:" are all "1". That makes a key
+// presentation-invariant, and it lets the generator draw a key of any scalar
+// kind and still state what the document means.
 //
-// That is what makes a key presentation-invariant, and it is why the generator
-// can draw a key of any scalar kind and still state what the document means.
+// A name is not the whole of a key. A mapping decoded into an `any` holds its
+// keys by what they resolve to once any key is not a string -- see
+// [Map.Decoded] -- so Int{1} and Str{"1"}, both named "1", are two keys,
+// uint64(1) and "1". The duplicate check tells them apart by kind. Compare two
+// keys with [SameKey], not by their names.
 //
-// ⚠️ Two tags break that rule at the library, and this follows them: !!binary
-// and !!timestamp are named by the characters the document wrote, because
-// ast.TaggedKeyName resolves !!str, !!null, !!bool, !!int and !!float and
-// leaves the rest to the scalar underneath. So "!!binary AA==" is the key
-// "AA==" rather than the byte, and "!!timestamp 2001-12-14" and
-// "!!timestamp \"2001-12-14\"" are one key while the same instant written in
-// another form is a different one. The Binary case below spells that out; the
-// Timestamp one cannot, since the form is Style.TimeForm's and Map.Decoded
-// takes no Style.
-//
-// ⚠️ Naming per type puts every typed key into the strings' namespace, and a
-// map[string]any cannot hold a key twice -- so Str{"1.0"} and Float{1.0} are
-// two keys that this library collapses into one, silently. keyFamily keeps the
-// generator out of that; yamlcorpus.Departures records it.
-// It also means two keys can collide after resolution while looking nothing
-// alike -- Int{1} and Str{"1"} are both "1" -- which the library refuses as a
-// duplicate and [yamlcorpus.Departures] records as wrong. drawMap keeps out of
-// that; breakRules produces it on purpose.
+// A !!binary key is named by the characters the document wrote:
+// ast.TaggedKeyName hands a tag it does not resolve back to the scalar under
+// it, so "!!binary AA==" is the key "AA==" and not the byte. A !!timestamp key
+// is named in RFC 3339 in its own zone, as ToJSON writes it, and the duplicate
+// check compares it in UTC.
 func KeyText(v Value) string {
 	switch n := v.(type) {
 	case MergeKey:
@@ -245,19 +237,24 @@ func KeyText(v Value) string {
 		// rendering of []byte{0}, so the generator and the library disagreed
 		// about a key neither of them got wrong.
 		return base64.StdEncoding.EncodeToString(n.V)
-	default:
-		// A collection used as a key, which Keys() draws one key in 24, and a
-		// Timestamp, which drawTextual makes one textual value in eight.
+	case Timestamp:
+		// RFC 3339 in the zone the value holds, which is how
+		// ast.TaggedKeyName names a "!!timestamp" key and how ToJSON writes
+		// one. drawTime draws in UTC, and every TimeForm reads back in UTC --
+		// TimeNoZone and TimeDate by the rule that a missing zone is UTC -- so
+		// the name ends in "Z".
 		//
-		// Neither name is checked against the library. A collection key is
+		// Keys() draws no Timestamp. One arrives through aliasAKey, from the
+		// anchor pool, where drawTextual makes one textual value in eight.
+		return n.V.Format(time.RFC3339Nano)
+	default:
+		// A collection used as a key, which Keys() draws one key in 24.
+		//
+		// The name is not checked against the library. A collection key is
 		// refused outright -- "a sequence cannot be a key in a Go map", and the
 		// mapping twin says the same -- and keysOnACollection sets
 		// Written.MeansUnclear, so the generator states no meaning for the
-		// document at all. A Timestamp key is read, and named by the text the
-		// document wrote where this names it by Go's %v of the time.Time, which
-		// is defect 110's generator half: the two spell one instant differently
-		// and no property compares them. Both wait on the widening that gives
-		// Map.Decoded a resolved key rather than a name.
+		// document at all.
 		//
 		// readings.legacyKey answers the 1.1 half, since %v of the core reading
 		// spells "08" as 8.
@@ -379,6 +376,12 @@ func (a Alias) Decoded() any { return a.V.Decoded() }
 // Decoded returns what Unmarshal into an `any` produces for this mapping under
 // the core schema, where a "<<" entry is an ordinary entry keyed "<<".
 //
+// A map[string]any while every key resolves to a string, and a map[any]any
+// keyed by what each key resolves to from the first key that does not. That is
+// the rule codec's keyedMap applies, and [keyedMap] here copies it: Int{1} and
+// Str{"1"} are two keys, uint64(1) and "1". A "!!binary" key widens the mapping
+// too, because a codec.Base64 is not a string to a type switch.
+//
 // YAML 1.2 dropped tag:yaml.org,2002:merge, so the merge happens under a
 // "%YAML 1.1" directive, under parser.WithYAMLVersion(YAML11), or where the
 // document writes "!!merge" -- and this library resolves it that way since
@@ -391,13 +394,141 @@ func (a Alias) Decoded() any { return a.V.Decoded() }
 // merging reader and a 1.2 reader were both right; they still are, and each of
 // them now has a meaning to be scored against.
 func (m Map) Decoded() any {
-	out := make(map[string]any, len(m.Pairs))
+	out := newKeyedMap(len(m.Pairs))
 
 	for _, p := range m.Pairs {
-		out[KeyText(p.Key)] = p.Val.Decoded()
+		out.put(keyValue(p.Key), p.Val.Decoded())
 	}
 
-	return out
+	return out.value()
+}
+
+// keyValue returns what a mapping decoded into an `any` holds a key by: what
+// the key resolves to.
+//
+// Two keys keep their name. A "<<" is the string "<<" under the core schema. A
+// collection is named by [KeyText], because a []any or a map cannot key a Go
+// map -- inserting one panics -- and the library refuses such a key, so
+// keysOnACollection has the generator state no meaning for the document.
+func keyValue(v Value) any {
+	if _, isMerge := v.(MergeKey); isMerge || isKeyCollection(v) {
+		return KeyText(v)
+	}
+
+	return v.Decoded()
+}
+
+// keyedMap builds a mapping as codec's keyedMap does: a map[string]any while
+// every key is a string, widened to a map[any]any on the first key that is not.
+// The keys already written go over as they stand.
+type keyedMap struct {
+	byName map[string]any
+	byKey  map[any]any
+}
+
+func newKeyedMap(size int) *keyedMap {
+	return &keyedMap{byName: make(map[string]any, size)}
+}
+
+// holds reports whether the mapping already holds key.
+func (k *keyedMap) holds(key any) bool {
+	if k.byKey != nil {
+		_, held := k.byKey[key]
+
+		return held
+	}
+
+	name, isString := key.(string)
+	if !isString {
+		return false
+	}
+
+	_, held := k.byName[name]
+
+	return held
+}
+
+// put writes value under key, widening the mapping where key is not a string.
+func (k *keyedMap) put(key, value any) {
+	if name, isString := key.(string); isString && k.byKey == nil {
+		k.byName[name] = value
+
+		return
+	}
+
+	if k.byKey == nil {
+		k.byKey = make(map[any]any, len(k.byName)+1)
+		for name, held := range k.byName {
+			k.byKey[name] = held
+		}
+		k.byName = nil
+	}
+
+	k.byKey[key] = value
+}
+
+// value returns the mapping under whichever key type it settled on.
+func (k *keyedMap) value() any {
+	if k.byKey != nil {
+		return k.byKey
+	}
+
+	return k.byName
+}
+
+// eachEntry calls fn with every entry of a mapping [keyedMap.value] returned.
+func eachEntry(m any, fn func(key, value any)) {
+	switch t := m.(type) {
+	case map[string]any:
+		for key, value := range t {
+			fn(key, value)
+		}
+	case map[any]any:
+		for key, value := range t {
+			fn(key, value)
+		}
+	}
+}
+
+// SameKey reports whether the parser's duplicate check takes a and b for one
+// key: the same kind and the same [KeyText], with a timestamp compared as its
+// instant in UTC through ast.CanonicalKeyName.
+//
+// The name alone is not enough. Int{1} and Str{"1"} are both named "1", and a
+// mapping holds them as two keys, uint64(1) and "1".
+func SameKey(a, b Value) bool {
+	ka, kb := keyKind(a), keyKind(b)
+
+	return ka == kb && ast.CanonicalKeyName(KeyText(a), ka) == ast.CanonicalKeyName(KeyText(b), kb)
+}
+
+// keyKind returns the kind the parser's duplicate check files a key under.
+//
+// A "!!binary" key is a string there: ast.TaggedKeyName does not resolve the
+// tag and hands the key back to the scalar under it.
+func keyKind(v Value) token.KeyKind {
+	switch n := v.(type) {
+	case Anchored:
+		return keyKind(n.V)
+	case Alias:
+		return keyKind(n.V)
+	case Tagged:
+		return keyKind(n.V)
+	case Null:
+		return token.KeyNull
+	case Bool:
+		return token.KeyBool
+	case Int, BigInt:
+		return token.KeyInt
+	case Float, BigFloat:
+		return token.KeyFloat
+	case Timestamp:
+		return token.KeyTimestamp
+	case Str, Binary, MergeKey:
+		return token.KeyString
+	default:
+		return token.KeyOther
+	}
 }
 
 // mergedMappings returns the mappings a "<<" entry's value brings in, in the
@@ -410,18 +541,17 @@ func (m Map) Decoded() any {
 // A method on readings rather than a function on Value, because the merge is
 // the 1.1 reading: the scalars inside a merged mapping resolve under 1.1 too,
 // so "<<: {k: yes}" brings in the key k holding true.
-func (r *readings) mergedMappings(v Value) []map[string]any {
+func (r *readings) mergedMappings(v Value) []any {
 	switch n := v.(type) {
 	case Anchored:
 		return r.mergedMappings(n.V)
 	case Alias:
 		return r.mergedMappings(n.V)
 	case Map:
-		one, _ := r.legacy(n).(map[string]any)
-
-		return []map[string]any{one}
+		// A map[string]any or a map[any]any, as [keyedMap] settled it.
+		return []any{r.legacy(n)}
 	case Seq:
-		out := make([]map[string]any, 0, len(n.Items))
+		out := make([]any, 0, len(n.Items))
 		for _, item := range n.Items {
 			out = append(out, r.mergedMappings(item)...)
 		}
@@ -1187,12 +1317,13 @@ func drawMapValue(t *rapid.T, depth int) Value {
 // they are two keys and KeyText says so. This library refuses the document
 // anyway -- "mapping key \"NULL\" already defined" -- because it compares keys
 // by the text that was written and NullSpelling may well have written the same
-// letters. That is the departure yamlcorpus records as "two keys alike in text
-// and different once resolved", and drawing a document that trips it would mean
-// every such draw failing on a defect the corpus already states. breakRules
-// produces the collision on purpose instead.
+// letters. Drawing a document that trips it would mean every such draw failing
+// on a refusal the corpus already states. breakRules produces the collision on
+// purpose instead.
 //
-// Int{1} and Str{"1"} need no widening: KeyText already calls both "1".
+// Int{1} and Str{"1"} need no widening: KeyText already calls both "1", so the
+// generator draws one of them per mapping, though the library holds both as
+// uint64(1) and "1".
 func keyFamily(v Value) string {
 	s, text := v.(Str)
 	if !text {

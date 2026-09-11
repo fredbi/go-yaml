@@ -43,8 +43,8 @@ import (
 func TestConsensusOnAWholeValuedFloatKey(t *testing.T) {
 	const src = "1.0: a\n1: b\n"
 
-	t.Run("this library keeps both, naming them by type", func(t *testing.T) {
-		assert.Equal(t, map[string]any{"1.0": "a", "1": "b"}, decodeInto(t, src))
+	t.Run("this library keeps both, as a float64 and a uint64", func(t *testing.T) {
+		assert.Equal(t, map[any]any{float64(1): "a", uint64(1): "b"}, decodeInto(t, src))
 	})
 
 	t.Run("the reference parser sees two", func(t *testing.T) {

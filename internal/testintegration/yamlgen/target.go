@@ -134,11 +134,11 @@ func TargetForDecoded(v any) Target { return TargetForDecodedAs(v, ShapePlain) }
 // TargetForDecodedAs builds the destination the shape asks for.
 //
 // [ShapePointers] and [ShapeAnyKeyedMap] are the two destinations a document
-// cannot suggest on its own: the `any` path always gives a map[string]any with
-// the key named by [KeyText], so nothing in the read says "this caller wanted
-// pointers" or "this caller wanted the key's own type". They are drawn beside
-// the value and the style, and the property reads one document into whichever
-// came up.
+// cannot suggest on its own: the `any` path gives a map[string]any, or a
+// map[any]any once a key is not a string, and nothing in the read says "this
+// caller wanted pointers" or "this caller wanted a map[any]any for every
+// mapping". They are drawn beside the value and the style, and the property
+// reads one document into whichever came up.
 func TargetForDecodedAs(v any, shape TargetShape) Target {
 	t := Target{Shape: shape}
 	t.Type = t.typeOfDecoded(v)
@@ -167,9 +167,42 @@ func (t *Target) typeOfDecoded(v any) reflect.Type {
 		return reflect.SliceOf(t.decodedItemType(n))
 	case map[string]any:
 		return t.decodedMapType(n)
+	case map[any]any:
+		// A mapping the `any` path widened on a key that is not a string. A
+		// destination names its keys as a string-keyed map does, by KeyText's
+		// rule, which is how every mapping reached one before the widening.
+		// Without this arm every widened reading built no target at all, and
+		// the enumerated shapes reaching the reflection path fell from 162 to
+		// 129 with nothing reported.
+		named, distinct := keyedByName(n)
+		if !distinct && t.Shape != ShapeAnyKeyedMap {
+			// Two keys take one name -- uint64(1) and "1" -- and no struct
+			// field or map[string]any entry holds both.
+			t.Fallbacks++
+
+			return anyKeyType
+		}
+
+		return t.decodedMapType(named)
 	default:
 		return anyType
 	}
+}
+
+// keyedByName returns m keyed by the name each key takes in a string-keyed map,
+// and whether every key took a name of its own.
+func keyedByName(m map[any]any) (map[string]any, bool) {
+	out := make(map[string]any, len(m))
+
+	for key, value := range m {
+		name := keyString(reflect.ValueOf(key))
+		if _, taken := out[name]; taken {
+			return out, false
+		}
+		out[name] = value
+	}
+
+	return out, true
 }
 
 func (t *Target) decodedItemType(items []any) reflect.Type {
@@ -254,6 +287,19 @@ func nameable(keys []string) bool {
 	}
 
 	return true
+}
+
+// NamedKeys returns v with every mapping keyed by name, as a map[string]any, so
+// encoding/json can write it.
+//
+// A mapping decoded into an `any` widens to a map[any]any on its first key that
+// is not a string, and encoding/json refuses a map[any]any. The stored corpus
+// and every comparison against it name each key by [KeyText]'s rule, so a
+// mapping whose keys are all strings encodes as it did before the widening. It
+// is [Normalize] applied to a decoded value, which holds no struct for
+// Normalize to turn into a map.
+func NamedKeys(v any) any {
+	return Normalize(reflect.ValueOf(v))
 }
 
 // Normalize turns a value read into a Go type back into the shape [Value.Decoded]
@@ -408,8 +454,13 @@ func keyString(v reflect.Value) string {
 	}
 
 	if v.CanInterface() {
-		// A *big.Int, a *big.Float and a time.Time all name themselves, and
-		// KeyText's default names them by Go's %v, which is the same string.
+		// A time.Time is named in RFC 3339 in its own zone, as KeyText names a
+		// Timestamp and ToJSON writes one. Its String is Go's own layout.
+		if stamp, ok := reflect.TypeAssert[time.Time](v); ok {
+			return stamp.Format(time.RFC3339Nano)
+		}
+
+		// A *big.Int and a *big.Float name themselves through String.
 		if s, ok := reflect.TypeAssert[interface{ String() string }](v); ok {
 			return s.String()
 		}

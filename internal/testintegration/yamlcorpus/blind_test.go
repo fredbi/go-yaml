@@ -14,6 +14,7 @@ import (
 	"github.com/go-openapi/go-yaml/internal/testintegration/stance"
 	"github.com/go-openapi/go-yaml/internal/testintegration/suite"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlcorpus"
+	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -172,7 +173,7 @@ func TestBlindReplay(t *testing.T) {
 			continue
 		}
 
-		if got, merr := json.Marshal(value); merr != nil || !bytes.Equal(got, c.Meaning.JSON) {
+		if got, merr := json.Marshal(yamlgen.NamedKeys(value)); merr != nil || !bytes.Equal(got, c.Meaning.JSON) {
 			note("the value differs", c)
 		}
 	}

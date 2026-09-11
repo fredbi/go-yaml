@@ -4,6 +4,7 @@
 package yamlcorpus_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -13,46 +14,36 @@ import (
 	"github.com/go-openapi/go-yaml/internal/testintegration/libfyaml"
 )
 
-// What is left after the key naming rule landed.
+// What the key naming rule left open, and what closed it.
 //
-// Naming a key by the canonical spelling of its type is what makes 1 and 1.0
-// two keys. It also puts every typed key into the strings' namespace, and a
-// map[string]any cannot hold a key twice -- so a typed key and the string that
-// spells it collapse, and the value goes with nothing reported.
+// Naming a key by the canonical spelling of its type makes 1 and 1.0 two keys.
+// It also put every typed key into the strings' namespace, and a map[string]any
+// cannot hold a key twice -- so a typed key and the string that spells it
+// collapsed, and a value went with nothing reported. A mapping widens to a
+// map[any]any on its first key that is not a string now, and holds both.
 
-// TestDefectATypedKeyCollapsesIntoTheStringThatSpellsIt pins the gap.
+// TestFixedATypedKeyStandsBesideTheStringThatSpellsIt: a typed key and the
+// string that spells it are two keys and two entries.
 //
-// Refusing these would be wrong too: they are two keys and not one, so the
-// answer is a key model that can hold both rather than a better error.
-func TestDefectATypedKeyCollapsesIntoTheStringThatSpellsIt(t *testing.T) {
+// Refusing these would have been wrong too: they are two keys and not one, so
+// the answer was a key model that can hold both.
+func TestFixedATypedKeyStandsBesideTheStringThatSpellsIt(t *testing.T) {
 	for _, tc := range []struct {
 		src  string
-		key  string
-		lost string
+		want map[any]any
 	}{
-		{src: "1: a\n\"1\": b\n", key: "1", lost: "a"},
-		{src: "1.0: a\n\"1.0\": b\n", key: "1.0", lost: "a"},
-		{src: "true: a\n\"true\": b\n", key: "true", lost: "a"},
-		{src: "~: a\n\"null\": b\n", key: "null", lost: "a"},
+		{src: "1: a\n\"1\": b\n", want: map[any]any{uint64(1): "a", "1": "b"}},
+		{src: "1.0: a\n\"1.0\": b\n", want: map[any]any{float64(1): "a", "1.0": "b"}},
+		{src: "true: a\n\"true\": b\n", want: map[any]any{true: "a", "true": "b"}},
+		{src: "~: a\n\"null\": b\n", want: map[any]any{nil: "a", "null": "b"}},
 	} {
-		got := read(t, tc.src)
-		assert.Len(t, got, 1, "today: %q comes back as one entry", tc.src)
-		assert.Equal(t, "b", got.(map[string]any)[tc.key],
-			"today: %q keeps the last and %q is gone", tc.src, tc.lost)
+		assert.Equal(t, tc.want, read(t, tc.src), "%q is two entries", tc.src)
 	}
 
-	t.Run("three keys, two entries", func(t *testing.T) {
-		got := read(t, "1: a\n1.0: b\n\"1\": c\n")
-		assert.Equal(t, map[string]any{"1": "c", "1.0": "b"}, got,
-			"today: an int, a float and a string are three keys and two entries")
-	})
-
-	t.Run("it was a refusal before the naming rule", func(t *testing.T) {
-		// Worth stating: the old behavior reported "mapping key \"1\" already
-		// defined", which was wrong for a different reason -- it called two
-		// keys one. Trading a wrong refusal for a silent loss is not a
-		// regression in correctness, and it is one in reporting.
-		assert.Len(t, read(t, "1: a\n\"1\": b\n"), 1)
+	t.Run("three keys, three entries", func(t *testing.T) {
+		assert.Equal(t, map[any]any{uint64(1): "a", float64(1): "b", "1": "c"},
+			read(t, "1: a\n1.0: b\n\"1\": c\n"),
+			"an int, a float and a string are three keys")
 	})
 }
 
@@ -80,15 +71,27 @@ func TestFixedAPositiveInfinityIsOneKeyHoweverItIsSpelled(t *testing.T) {
 	})
 
 	t.Run("where the quoted spelling stays a string", func(t *testing.T) {
-		assert.Equal(t, map[string]any{".inf": "b", "+.inf": "a"},
+		assert.Equal(t, map[any]any{math.Inf(1): "b", "+.inf": "a"},
 			read(t, "\"+.inf\": a\n.inf: b\n"),
 			"a quoted +.inf is text, so it is a key of its own")
 	})
 
 	t.Run("and a NaN takes no sign at all", func(t *testing.T) {
-		assert.Equal(t, map[string]any{".nan": "b", "+.nan": "a"},
-			read(t, "+.nan: a\n.nan: b\n"),
+		got, ok := read(t, "+.nan: a\n.nan: b\n").(map[any]any)
+		require.True(t, ok, "the NaN key widens the mapping")
+		require.Len(t, got, 2)
+		assert.Equal(t, "a", got["+.nan"],
 			"1.2 spells a NaN `\\.nan | \\.NaN | \\.NAN` with no sign, so +.nan is a string")
+
+		// A NaN key never finds itself in a Go map, so the entries are walked.
+		var nans int
+		for key, value := range got {
+			if f, isFloat := key.(float64); isFloat && math.IsNaN(f) {
+				nans++
+				assert.Equal(t, "b", value)
+			}
+		}
+		assert.Equal(t, 1, nans, ".nan is the float")
 	})
 }
 

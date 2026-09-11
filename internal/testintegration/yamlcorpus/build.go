@@ -237,8 +237,12 @@ func meaningOfEntry(e Entry, wellFormed bool) *suite.Meaning {
 	// declare which schema reads it: yamlgen.Style.Version writes a
 	// "%YAML 1.1" line, and "yes" is the boolean true under it. Nil where the
 	// generator will not say what the document means.
+	//
+	// Through yamlgen.NamedKeys, here and below: a mapping with a key that is
+	// not a string decodes to a map[any]any, which encoding/json refuses, and
+	// the corpus names each key as KeyText does.
 	if e.Means != nil && wellFormed {
-		encoded, err := json.Marshal(e.Means)
+		encoded, err := json.Marshal(yamlgen.NamedKeys(e.Means))
 		if err != nil {
 			return nil
 		}
@@ -250,7 +254,7 @@ func meaningOfEntry(e Entry, wellFormed bool) *suite.Meaning {
 		return nil
 	}
 
-	encoded, err := json.Marshal(e.Value.Decoded())
+	encoded, err := json.Marshal(yamlgen.NamedKeys(e.Value.Decoded()))
 	if err != nil {
 		return nil
 	}
@@ -272,7 +276,7 @@ func readingsOfEntry(e Entry, core *suite.Meaning) []suite.Meaning {
 	out := []suite.Meaning{*core}
 
 	for _, name := range slices.Sorted(maps.Keys(e.Readings)) {
-		encoded, err := json.Marshal(e.Readings[name])
+		encoded, err := json.Marshal(yamlgen.NamedKeys(e.Readings[name]))
 		if err != nil {
 			return nil
 		}

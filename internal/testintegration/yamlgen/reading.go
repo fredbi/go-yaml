@@ -615,17 +615,15 @@ func (r *readings) legacy(v Value) any {
 // brings in the key k holding true. Merging what Decoded returns would read the
 // document under two schemas at once.
 //
-// ⚠️ The fold matches by name, because the answer is a map[string]any and a
-// name is all it can hold. 3.2.1.1 matches by node, so a merged Str{"1.0"} and
-// an own Float{1} are two keys and this cannot say so -- and neither can the
-// library, whose MapSlice.Key holds the text for every key. Stream 2's defect
-// 69 records the library half. [aliaser.mergeFrom] draws no such pair for that
-// reason: a stated meaning resting on the name would put
-// yamlcorpus.Departures' naming in the corpus as the answer.
+// The fold matches by what each key resolves to under 1.1, which is what
+// codec's keyedMap holds: a merged Str{"1.0"} and an own Float{1} are two keys,
+// "1.0" and float64(1), as 3.2.1.1 has it. The mapping widens to a map[any]any
+// as [Map.Decoded] does, on the first key that is not a string, whether it is
+// the mapping's own or a merged one. [aliaser.mergeFrom] draws no such pair.
 func (r *readings) legacyMap(m Map) any {
-	out := make(map[string]any, len(m.Pairs))
+	out := newKeyedMap(len(m.Pairs))
 
-	var merged []map[string]any
+	var merged []any
 
 	for _, p := range m.Pairs {
 		if _, isMerge := p.Key.(MergeKey); isMerge {
@@ -634,19 +632,30 @@ func (r *readings) legacyMap(m Map) any {
 			continue
 		}
 
-		out[r.legacyKey(p.Key)] = r.legacy(p.Val)
+		out.put(r.legacyKeyValue(p.Key), r.legacy(p.Val))
 	}
 
 	// Own entries first, then each merged mapping in turn, and neither
 	// overwrites a key already standing. That is one statement of both halves
 	// of the rule: own keys win, and among the merged the earlier wins.
 	for _, from := range merged {
-		for k, v := range from {
-			if _, held := out[k]; !held {
-				out[k] = v
+		eachEntry(from, func(key, value any) {
+			if !out.holds(key) {
+				out.put(key, value)
 			}
-		}
+		})
 	}
 
-	return out
+	return out.value()
+}
+
+// legacyKeyValue is [keyValue] under YAML 1.1: what the key resolves to there,
+// so a plain "yes:" is the key true. A collection keeps the name legacyKey gives
+// it, for the reason keyValue gives.
+func (r *readings) legacyKeyValue(v Value) any {
+	if isKeyCollection(v) {
+		return r.legacyKey(v)
+	}
+
+	return r.legacy(v)
 }
