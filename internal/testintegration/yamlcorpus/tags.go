@@ -463,11 +463,11 @@ func TagShapes() []stance.Shape {
 			Intent: []stance.Tag{TagSecondary, TagKindMismatch},
 		},
 		{
-			// The one refusal with no parser-side evidence behind it. Each
-			// mapping of an omap holds exactly one key, so the parser records
-			// no repeat and codec.refuseDuplicateKeys has nothing to read; the
-			// check is written in the loader instead, and says so: "mapping key
-			// x is written twice in an !!omap".
+			// Each mapping of an omap holds one key, so the repeat crosses two
+			// entries. The parser keeps one key set per "!!omap" and records
+			// the repeat in the sequence's ast.SequenceNode.Duplicates, with
+			// the entry's index, and every reader refuses it from that record
+			// with the mapping message: `mapping key "x" already defined`.
 			Name:   "an omap key written twice across two entries",
 			Src:    []byte("!!omap [{x: 1}, {x: 2}]\n"),
 			Intent: []stance.Tag{TagSecondary, TagOMapNotASequenceOfPairs, TagDuplicateAfterResolution},

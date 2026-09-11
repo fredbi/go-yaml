@@ -36,8 +36,8 @@ import "github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 //
 // Refused by a strict consumer, and not by every consumer. libfyaml 1.0.0b1
 // reads every one of them and keeps the last; this library refuses them by
-// default and reads them under codec.AllowDuplicateMapKey, which records
-// nothing and lets the last entry win. A table saying so stands Either on the
+// default and reads them under codec.AllowDuplicateMapKey, which records each
+// repeat as allowed and lets the decoder keep the last entry. A table saying so stands Either on the
 // tag and stance.Table.Expect leaves the document unscored -- see KeyRules,
 // which sets that out and declines to settle enforcement.
 

@@ -142,13 +142,13 @@ var GoYAML = stance.Table{
 		// codec.MapSliceSeq and refuses every shape the type definition does
 		// not name -- an element that is not a mapping, an element holding two
 		// entries, the tag over a mapping -- with "!!omap names a sequence of
-		// one-entry mappings", and a key written twice across two entries with
-		// "mapping key x is written twice in an !!omap". Measured on master at
-		// 3a00098.
+		// one-entry mappings". Measured on master at 3a00098.
 		//
-		// The last of those is the only refusal in this table with no
-		// parser-side evidence behind it: each mapping of an omap holds one
-		// key, so the parser records no repeat and the check is the loader's.
+		// A key written twice across two entries is refused with the mapping
+		// message, `mapping key "x" already defined`: the parser keeps one key
+		// set per "!!omap" and records the repeat in the sequence's
+		// ast.SequenceNode.Duplicates, with the entry's index, and every reader
+		// refuses it from that record.
 		TagOMapNotASequenceOfPairs: stance.Refuses,
 
 		// And a tag over the wrong kind of node, from 878bc41: "!!seq does not
@@ -239,9 +239,10 @@ type Departure struct {
 // different tags, different nodes and so different keys, so libfyaml is lax
 // here rather than the rule wrong.
 //
-// A repeat is recorded by the parse and refused by the load, and
-// parser.WithAllowDuplicateMapKey records none at all -- then the last entry
-// written wins. Refusing "7" beside "007" and "~" beside "null" turns away
+// A repeat is recorded by the parse and refused by the load.
+// parser.WithAllowDuplicateMapKey records it too, marked allowed, and the load
+// reads it: the decoder keeps the last entry, and ToJSON and the token emitter
+// keep the first. Refusing "7" beside "007" and "~" beside "null" turns away
 // documents every implementation reads today. That is deliberate: there is no
 // legitimate document that writes both, and a caller who has one reaches for
 // the option.
