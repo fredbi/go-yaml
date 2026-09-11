@@ -1994,7 +1994,7 @@ func (d *Decoder) keyToNodeMap(ctx context.Context, node ast.Node, ignoreMergeKe
 	if err != nil {
 		return nil, err
 	}
-	keyMap := map[string]struct{}{}
+	keyMap := map[any]struct{}{}
 	keyToNodeMap := map[string]ast.Node{}
 	var merged []map[string]ast.Node
 	mapIter := mapNode.MapRange()
@@ -3096,17 +3096,25 @@ func (d *Decoder) decodeMapItem(ctx context.Context, dst *MapItem, src ast.Node)
 	return nil
 }
 
-func (d *Decoder) validateDuplicateKey(keyMap map[string]struct{}, key interface{}, keyNode ast.Node) error {
-	k, ok := key.(string)
-	if !ok {
+// validateDuplicateKey refuses two entries that land on one key of the Go
+// destination, which the parse does not see: "1: a" and "\"1\": b" are two YAML
+// keys and one key of a map[string]T, and "1: a" and "1.0: b" are two YAML keys
+// and one key of a map[float64]T.
+//
+// Every comparable key counts, not only a string: a float-keyed destination
+// kept the last of two keys that resolve to one float and dropped the other
+// with nothing reported. Under AllowDuplicateMapKey the last one stands, as for
+// a repeat the parse records.
+func (d *Decoder) validateDuplicateKey(keyMap map[any]struct{}, key any, keyNode ast.Node) error {
+	if key != nil && !reflect.TypeOf(key).Comparable() {
 		return nil
 	}
 	if !d.allowDuplicateMapKey {
-		if _, exists := keyMap[k]; exists {
-			return yamlerrors.NewDuplicateKey(fmt.Sprintf(`duplicate key "%s"`, k), keyNode.GetToken())
+		if _, exists := keyMap[key]; exists {
+			return yamlerrors.NewDuplicateKey(fmt.Sprintf(`duplicate key "%v"`, key), keyNode.GetToken())
 		}
 	}
-	keyMap[k] = struct{}{}
+	keyMap[key] = struct{}{}
 	return nil
 }
 
@@ -3221,7 +3229,7 @@ func (d *Decoder) decodeMap(ctx context.Context, dst reflect.Value, src ast.Node
 	mapValue := reflect.MakeMap(mapType)
 	keyType := mapValue.Type().Key()
 	valueType := mapValue.Type().Elem()
-	keyMap := map[string]struct{}{}
+	keyMap := map[any]struct{}{}
 	// A mapping read under a merge is the fold getMapNode makes of "<<: [a, b]",
 	// so two entries alike in it are the sequence doing its job -- the earlier
 	// mapping wins -- and not the repeated key 3.2.1.1 refuses.

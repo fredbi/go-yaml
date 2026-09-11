@@ -88,6 +88,45 @@ func TestUseStringKeysReadsEveryKeyAsText(t *testing.T) {
 	})
 }
 
+// TestTwoKeysOnOneGoKeyAreRefusedWhateverTheKeyType covers two YAML keys that
+// land on one key of the destination. The parse sees two keys, so the decoder is
+// the one to refuse them, and it compared only string keys: "1: a" and "1.0: b"
+// into a map[float64]string read {1: "b"}, "a" dropped with nothing reported.
+func TestTwoKeysOnOneGoKeyAreRefusedWhateverTheKeyType(t *testing.T) {
+	const src = "1: a\n1.0: b\n"
+
+	t.Run("a float-keyed destination refuses them", func(t *testing.T) {
+		var into map[float64]string
+		err := codec.Unmarshal([]byte(src), &into)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, yamlerrors.ErrDuplicateKey), "unexpected kind: %v", err)
+		assert.Contains(t, err.Error(), `duplicate key "1"`)
+	})
+
+	t.Run("as a string-keyed one refuses two keys under one name", func(t *testing.T) {
+		var into map[string]string
+		err := codec.Unmarshal([]byte("1: a\n\"1\": b\n"), &into)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, yamlerrors.ErrDuplicateKey), "unexpected kind: %v", err)
+	})
+
+	t.Run("and AllowDuplicateMapKey keeps the last", func(t *testing.T) {
+		var into map[float64]string
+		require.NoError(t, codec.UnmarshalWithOptions([]byte(src), &into, codec.AllowDuplicateMapKey()))
+		assert.Equal(t, map[float64]string{1: "b"}, into)
+	})
+
+	t.Run("a destination with room for both reads both", func(t *testing.T) {
+		var named map[string]string
+		require.NoError(t, codec.Unmarshal([]byte(src), &named))
+		assert.Equal(t, map[string]string{"1": "a", "1.0": "b"}, named)
+
+		var anyKeyed map[any]string
+		require.NoError(t, codec.Unmarshal([]byte(src), &anyKeyed))
+		assert.Equal(t, map[any]string{uint64(1): "a", float64(1): "b"}, anyKeyed)
+	})
+}
+
 // TestANullKeyIsTheWordNull records that every path addresses a null key by
 // "null", not by the empty string.
 //
