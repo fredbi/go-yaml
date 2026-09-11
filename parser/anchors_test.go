@@ -56,6 +56,15 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 			source: "- &a\n- a\n",
 			want:   "- &a\n- a\n",
 		},
+		// The next token stands left of the '-', so the entry ends and the anchor names the empty node.
+		"as a nested sequence entry before a key further out": {
+			source: "k:\n  - &a\nb: 1\n",
+			want:   "k:\n- &a\nb: 1\n",
+		},
+		"as a nested sequence entry before a comment and a key further out": {
+			source: "k:\n  - &a\n  # c\nb: 1\n",
+			want:   "k:\n- &a\n# c\nb: 1\n",
+		},
 	}
 
 	for name, test := range tests {

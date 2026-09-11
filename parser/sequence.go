@@ -179,18 +179,6 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *group.TapeToken) (ast.No
 		return p.handNull(ctx, ctx.insertNullToken(seqTk))
 	}
 
-	if tk.Line() == seqLine && tk.GroupType() == group.TokenGroupAnchorName &&
-		ctx.nextNotCommentToken().Column() < seqCol {
-		// An anchor ending the entry's line, followed by a token before the column of the '-'.
-		group := group.NewTokenGroup(group.TokenGroupAnchor, []*group.TapeToken{tk, ctx.createImplicitNullToken(tk)})
-		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
-		if err != nil {
-			return nil, err
-		}
-		ctx.goNext()
-		return anchor, nil
-	}
-
 	value, err := p.parseToken(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err
