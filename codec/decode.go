@@ -426,6 +426,74 @@ func kindOfKey(node ast.Node) string {
 	}
 }
 
+// keyedMap is a mapping being built for an `any` destination.
+//
+// It holds map[string]any while every key is a string, which is nearly every
+// mapping, and widens to map[any]any on the first key that resolves to anything
+// else -- an integer, a float, a null, a Base64, a time.Time. So a key keeps
+// what it resolves to rather than the text that spells it, and "1: a" beside
+// "\"1\": b" stays two entries where naming both "1" left one.
+//
+// valueBuilder.buildFrame does the same for the walk, and the two have to
+// agree: a document read through either comes back the same way.
+type keyedMap struct {
+	byName map[string]any
+	byKey  map[any]any
+}
+
+func newKeyedMap(size int) *keyedMap {
+	return &keyedMap{byName: make(map[string]any, size)}
+}
+
+// holds reports whether the mapping already writes key.
+func (k *keyedMap) holds(key any) bool {
+	if k.byKey != nil {
+		_, stands := k.byKey[key]
+
+		return stands
+	}
+	name, isString := key.(string)
+	if !isString {
+		return false
+	}
+	_, stands := k.byName[name]
+
+	return stands
+}
+
+// put writes value under key, widening the mapping where the key is not a
+// string.
+func (k *keyedMap) put(key any, value any) {
+	if name, isString := key.(string); isString && k.byKey == nil {
+		k.byName[name] = value
+
+		return
+	}
+	if k.byKey == nil {
+		k.widen()
+	}
+	k.byKey[key] = value
+}
+
+// widen moves the mapping to map[any]any. The keys already written are strings
+// and go over as they stand.
+func (k *keyedMap) widen() {
+	k.byKey = make(map[any]any, len(k.byName)+1)
+	for name, value := range k.byName {
+		k.byKey[name] = value
+	}
+	k.byName = nil
+}
+
+// value is the mapping, under whichever key type it settled on.
+func (k *keyedMap) value() any {
+	if k.byKey != nil {
+		return k.byKey
+	}
+
+	return k.byName
+}
+
 // setToMapValue fills m from node.
 //
 // merged says the entries come from a "<<" rather than from the mapping
@@ -435,7 +503,7 @@ func kindOfKey(node ast.Node) string {
 // rule keyToNodeMap applies for a struct, and this path did not: "x: 9" over
 // "<<: *a" took the merged x, and "<<: [*a, *b]" took b's where the merge spec
 // gives it to a.
-func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string]any, merged bool) error {
+func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m *keyedMap, merged bool) error {
 	d.stepIn()
 	defer d.stepOut()
 	if d.isExceededMaxDepth() {
@@ -456,11 +524,11 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 				return err
 			}
 		} else {
-			key, err := d.mapKeyNodeToString(ctx, n.Key)
+			key, err := d.mapKeyNodeToValue(ctx, n.Key)
 			if err != nil {
 				return err
 			}
-			if _, stands := m[key]; stands && merged {
+			if merged && m.holds(key) {
 				return nil
 			}
 
@@ -468,7 +536,7 @@ func (d *Decoder) setToMapValue(ctx context.Context, node ast.Node, m map[string
 			if err != nil {
 				return err
 			}
-			m[key] = v
+			m.put(key, v)
 		}
 	case *ast.MappingNode:
 		return eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
@@ -979,13 +1047,13 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 				}
 				return m, nil
 			}
-			m := make(map[string]any)
+			m := newKeyedMap(0)
 			for iter.Next() {
 				if err := d.setToMapValue(ctx, iter.KeyValue(), m, true); err != nil {
 					return nil, err
 				}
 			}
-			return m, nil
+			return m.value(), nil
 		}
 		if d.useOrderedMap {
 			key, err := d.mapKeyNodeToValue(ctx, n.Key)
@@ -1028,13 +1096,13 @@ func (d *Decoder) nodeToValue(ctx context.Context, node ast.Node) (any, error) {
 			}
 			return m, nil
 		}
-		m := make(map[string]interface{}, len(n.Values))
+		m := newKeyedMap(len(n.Values))
 		if err := eachEntryOwnFirst(n, func(value ast.Node, isMerge bool) error {
 			return d.setToMapValue(ctx, value, m, isMerge)
 		}); err != nil {
 			return nil, err
 		}
-		return m, nil
+		return m.value(), nil
 	case *ast.SequenceNode:
 		v := make([]interface{}, 0, len(n.Values))
 		for _, value := range n.Values {

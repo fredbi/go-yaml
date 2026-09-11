@@ -67,10 +67,22 @@ type buildFrame struct {
 	at   parser.Step
 
 	// mapping
-	m       map[string]any
-	key     string
-	hasKey  bool
-	merging bool
+	//
+	// m holds a mapping whose keys are all strings, which is nearly all of
+	// them. anyKeyed replaces it on the first key that resolves to anything
+	// else -- an integer, a float, a null, a Base64, a time.Time -- so the key
+	// keeps the value it resolves to rather than the text that spells it, and
+	// two keys alike in text stay two entries.
+	m        map[string]any
+	anyKeyed map[any]any
+	// key is the arena's copy of the name the entry is written under, keyValue
+	// what the key resolves to, and keyIsString which of the two a widened
+	// mapping writes.
+	key         string
+	keyValue    any
+	keyIsString bool
+	hasKey      bool
+	merging     bool
 	// keyErr is a key this destination cannot hold, kept until the mapping
 	// closes. The parser hangs a mapping's repeated keys on it as it closes, so
 	// reporting an unusable key where it is met would speak over a repeat --
@@ -169,7 +181,7 @@ func (b *valueBuilder) Leave(node ast.Node, at parser.Step) {
 
 			return
 		}
-		b.deliver(frame.m, node, frame.at)
+		b.deliver(frame.value(), node, frame.at)
 	case frameSequence:
 		b.deliver(frame.seq, node, frame.at)
 	case frameProperty:
@@ -353,7 +365,7 @@ func (b *valueBuilder) deliver(v any, node ast.Node, at parser.Step) {
 
 					return
 				}
-				top.key, top.hasKey = b.strs.clone(name), true
+				top.keyed(b.strs.clone(name), v)
 
 				return
 			}
@@ -363,7 +375,7 @@ func (b *valueBuilder) deliver(v any, node ast.Node, at parser.Step) {
 
 				return
 			}
-			top.m[top.key] = v
+			top.put(v)
 			top.key, top.hasKey = "", false
 
 			return
@@ -375,6 +387,95 @@ func (b *valueBuilder) deliver(v any, node ast.Node, at parser.Step) {
 	}
 
 	b.docs = append(b.docs, v)
+}
+
+// keyed records the key an entry is being written under, and whether it is a
+// string.
+//
+// The name is kept for a string key so the arena's copy is the one the map
+// holds; keyValue carries what the key resolves to for every other type, which
+// is what the mapping is widened to hold.
+func (f *buildFrame) keyed(name string, value any) {
+	f.key, f.hasKey = name, true
+	_, f.keyIsString = value.(string)
+	f.keyValue = value
+}
+
+// put writes value under the key the frame is holding, widening the mapping
+// where the key is not a string.
+func (f *buildFrame) put(value any) {
+	if f.keyIsString && f.anyKeyed == nil {
+		f.m[f.key] = value
+
+		return
+	}
+	if f.anyKeyed == nil {
+		f.widen()
+	}
+	f.anyKeyed[f.mapKey()] = value
+}
+
+// mapKey is the key a widened mapping is written under: the arena's copy of the
+// name for a string, and what the key resolves to for anything else.
+func (f *buildFrame) mapKey() any {
+	if f.keyIsString {
+		return f.key
+	}
+
+	return f.keyValue
+}
+
+// widen moves a mapping from map[string]any to map[any]any, which happens on
+// the first key that is not a string.
+//
+// The keys already written are strings and go over as they stand. A document
+// whose keys are all strings never reaches this, and keeps the map a caller has
+// always been handed.
+func (f *buildFrame) widen() {
+	f.anyKeyed = make(map[any]any, len(f.m)+1)
+	for key, value := range f.m {
+		f.anyKeyed[key] = value
+	}
+	f.m = nil
+}
+
+// value is the mapping the frame built, under whichever key type it settled on.
+func (f *buildFrame) value() any {
+	if f.anyKeyed != nil {
+		return f.anyKeyed
+	}
+
+	return f.m
+}
+
+// holds reports whether the mapping already writes key, which a "<<" asks
+// before bringing one in.
+func (f *buildFrame) holds(key any) bool {
+	if f.anyKeyed != nil {
+		_, held := f.anyKeyed[key]
+
+		return held
+	}
+	name, isString := key.(string)
+	if !isString {
+		return false
+	}
+	_, held := f.m[name]
+
+	return held
+}
+
+// bring writes what a "<<" names under key, where the mapping holds none.
+func (f *buildFrame) bring(key any, value any) {
+	if _, isString := key.(string); isString && f.anyKeyed == nil {
+		f.m[key.(string)] = value
+
+		return
+	}
+	if f.anyKeyed == nil {
+		f.widen()
+	}
+	f.anyKeyed[key] = value
 }
 
 // merge folds what a "<<" names into the mapping holding it.
@@ -391,8 +492,14 @@ func (b *valueBuilder) merge(top *buildFrame, v any, node ast.Node) {
 	switch t := v.(type) {
 	case map[string]any:
 		for key, value := range t {
-			if _, held := top.m[key]; !held {
-				top.m[key] = value
+			if !top.holds(key) {
+				top.bring(key, value)
+			}
+		}
+	case map[any]any:
+		for key, value := range t {
+			if !top.holds(key) {
+				top.bring(key, value)
 			}
 		}
 	case []any:
@@ -494,6 +601,33 @@ func (b *valueBuilder) taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 	}
 }
 
+// oneEntryOf is the single entry a mapping holds, and whether it is a mapping
+// holding exactly one.
+//
+// A mapping the walk built is a map[string]any while its keys are all strings
+// and a map[any]any once one is not, so both are read here -- "!!omap [:]"
+// holds a null key and arrives as the second.
+func oneEntryOf(value any) (MapItem, bool) {
+	switch m := value.(type) {
+	case map[string]any:
+		if len(m) != 1 {
+			return MapItem{}, false
+		}
+		for key, v := range m {
+			return MapItem{Key: key, Value: v}, true
+		}
+	case map[any]any:
+		if len(m) != 1 {
+			return MapItem{}, false
+		}
+		for key, v := range m {
+			return MapItem{Key: key, Value: v}, true
+		}
+	}
+
+	return MapItem{}, false
+}
+
 // orderedMapOfWalked folds what an "!!omap" node built into a [MapSliceSeq].
 //
 // The walk has already built the sequence and each of its mappings, so this
@@ -501,11 +635,9 @@ func (b *valueBuilder) taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 // holds and is lenient the same way: a sequence that is not one-entry mappings
 // stands as it is written.
 //
-// It parts company with the tree over the key's type. The walk names every key
-// with mapKeyString, so "!!omap [{1: a}]" reads uint64(1) on the tree and "1"
-// here -- the same difference a plain mapping has on the two paths, since the
-// walk builds map[string]any and the tree builds a MapSlice under
-// UseOrderedMap.
+// The key keeps the value it resolves to, as it does on the tree: a mapping
+// widens to map[any]any on the first key that is not a string, so
+// "!!omap [{1: a}]" reads uint64(1) here as well and "!!omap [:]" reads nil.
 func orderedMapOfWalked(value any, n *ast.TagNode) (any, error) {
 	seq, isSeq := value.([]any)
 	if !isSeq {
@@ -514,20 +646,18 @@ func orderedMapOfWalked(value any, n *ast.TagNode) (any, error) {
 
 	var m MapSlice
 	for _, entry := range seq {
-		one, isMapping := entry.(map[string]any)
-		if !isMapping || len(one) != 1 {
+		one, isMapping := oneEntryOf(entry)
+		if !isMapping {
 			return nil, notAnOrderedMap(n.Value)
 		}
-		for key, v := range one {
-			if m.index(key) >= 0 {
-				return nil, yamlerrors.NewDuplicateKey(
-					fmt.Sprintf("mapping key %v is written twice in an !!omap", key),
-					n.Value.GetToken(),
-				)
-			}
-			if err := m.Set(key, v); err != nil {
-				return nil, err
-			}
+		if m.index(one.Key) >= 0 {
+			return nil, yamlerrors.NewDuplicateKey(
+				fmt.Sprintf("mapping key %v is written twice in an !!omap", one.Key),
+				n.Value.GetToken(),
+			)
+		}
+		if err := m.Set(one.Key, one.Value); err != nil {
+			return nil, err
 		}
 	}
 

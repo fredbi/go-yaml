@@ -97,9 +97,13 @@ func TestANullKeyIsTheWordNull(t *testing.T) {
 			require.NoError(t, codec.Unmarshal([]byte(src), &into))
 			assert.Equal(t, map[string]any{"null": "a"}, into)
 
+			// An `any` keeps what the key resolves to, and a null resolves to
+			// nothing rather than to the four characters that spell it, so the
+			// mapping widens. The word is the name a string-keyed destination
+			// gives it, above, and the member name JSON writes, below.
 			var asAny any
 			require.NoError(t, codec.Unmarshal([]byte(src), &asAny))
-			assert.Equal(t, map[string]any{"null": "a"}, asAny)
+			assert.Equal(t, map[any]any{nil: "a"}, asAny)
 
 			converted, err := codec.ToJSON([]byte(src))
 			require.NoError(t, err)
@@ -109,15 +113,16 @@ func TestANullKeyIsTheWordNull(t *testing.T) {
 
 	t.Run("so it stays apart from the empty key", func(t *testing.T) {
 		const src = "null: a\n\"\": b\n"
-		want := map[string]any{"null": "a", "": "b"}
 
 		var into map[string]any
 		require.NoError(t, codec.Unmarshal([]byte(src), &into))
-		assert.Equal(t, want, into)
+		assert.Equal(t, map[string]any{"null": "a", "": "b"}, into)
 
+		// Two entries either way: named, they are "null" and ""; resolved, they
+		// are nil and the empty string.
 		var asAny any
 		require.NoError(t, codec.Unmarshal([]byte(src), &asAny))
-		assert.Equal(t, want, asAny)
+		assert.Equal(t, map[any]any{nil: "a", "": "b"}, asAny)
 	})
 
 	t.Run("and two null keys are the duplicate they are", func(t *testing.T) {

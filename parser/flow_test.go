@@ -220,32 +220,32 @@ func TestParseEmptyNodeInAFlowCollection(t *testing.T) {
 		"an anchor alone in a flow mapping": {
 			source: "{&a}\n",
 			want:   "{&a :}\n",
-			value:  map[string]any{"null": nil},
+			value:  map[any]any{nil: nil},
 		},
 		"an anchor alone before another entry": {
 			source: "{&a, b: 1}\n",
 			want:   "{&a :, b: 1}\n",
-			value:  map[string]any{"null": nil, "b": uint64(1)},
+			value:  map[any]any{nil: nil, "b": uint64(1)},
 		},
 		"an anchor alone after another entry": {
 			source: "{b: 1, &a}\n",
 			want:   "{b: 1, &a :}\n",
-			value:  map[string]any{"null": nil, "b": uint64(1)},
+			value:  map[any]any{nil: nil, "b": uint64(1)},
 		},
 		"a pair with neither side": {
 			source: "[:]\n",
 			want:   "[:]\n",
-			value:  []any{map[string]any{"null": nil}},
+			value:  []any{map[any]any{nil: nil}},
 		},
 		"a pair with neither side, before an entry": {
 			source: "[:, a]\n",
 			want:   "[:, a]\n",
-			value:  []any{map[string]any{"null": nil}, "a"},
+			value:  []any{map[any]any{nil: nil}, "a"},
 		},
 		"a pair with neither side, after an entry": {
 			source: "[a, :]\n",
 			want:   "[a, :]\n",
-			value:  []any{"a", map[string]any{"null": nil}},
+			value:  []any{"a", map[any]any{nil: nil}},
 		},
 		"a pair with no value": {
 			source: "[a:]\n",

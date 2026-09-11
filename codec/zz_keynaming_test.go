@@ -4,6 +4,7 @@
 package codec_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -75,13 +76,17 @@ import (
 // does, so the integer 1 and the string "1" are two entries under two keys
 // rather than two under one name.
 //
-// So two rows are left. map[string]any refusing the pair is right -- a Go map
-// cannot hold both -- which leaves one defect: an `any` keeps a single entry
-// and reports nothing, because it decodes into a map[string]any that has
-// already lost one key before anything can complain.
+// ✅ An `any` keeps both since the mapping built for one widens: it holds
+// map[string]any while every key is a string and moves to map[any]any on the
+// first key that is not, so the integer 1 and the string "1" are two entries
+// under the values they resolve to. It kept one and reported nothing before,
+// having lost a key inside the map before anything could complain.
+//
+// So one row is left, and it is not a defect: map[string]any refuses the pair,
+// which is right, since a Go map keyed by a string cannot hold both.
 
-// TestDefectATypedKeyIsNamedIntoTheStringsNamespace pins all five.
-func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
+// TestFixedATypedKeyKeepsItsOwnNamespace pins all five.
+func TestFixedATypedKeyKeepsItsOwnNamespace(t *testing.T) {
 	for name, tc := range map[string]struct {
 		src string
 		// merged is the one name the two keys land on wherever a destination
@@ -118,10 +123,10 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 				assert.Contains(t, err.Error(), `duplicate key "`+tc.merged+`"`)
 			})
 
-			t.Run("today an `any` keeps one entry and reports nothing", func(t *testing.T) {
+			t.Run("an `any` keeps both, under the values they resolve to", func(t *testing.T) {
 				var got any
 				require.NoError(t, codec.Unmarshal([]byte(tc.src), &got))
-				assert.Equal(t, map[string]any{tc.merged: "y"}, got)
+				assert.Equal(t, map[any]any{tc.resolved: "x", tc.merged: "y"}, got)
 			})
 
 			t.Run("an ordered map keeps both entries, under the keys they resolve to", func(t *testing.T) {
@@ -166,20 +171,43 @@ func TestDefectATypedKeyIsNamedIntoTheStringsNamespace(t *testing.T) {
 // happened to them, and the difference-keyed differOnlyByAFloatKeySpelling.
 func TestFixedAnAnchoredFloatKeyIsNamedByYAMLOnBothPaths(t *testing.T) {
 	t.Run("an anchor leaves the name alone", func(t *testing.T) {
-		for _, tc := range []struct{ src, name string }{
-			{"&a .inf: c\n", ".inf"},
-			{"&a .nan: c\n", ".nan"},
-			{"&a 1e3: c\n", "1000.0"},
-			{"&a 1.0: c\n", "1.0"},
+		for _, tc := range []struct {
+			src, name string
+			resolved  float64
+		}{
+			{"&a .inf: c\n", ".inf", math.Inf(1)},
+			{"&a 1e3: c\n", "1000.0", 1000},
+			{"&a 1.0: c\n", "1.0", 1},
 		} {
-			var walked any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-
+			// A string-keyed destination names the key, and the name is the
+			// one being pinned here: the anchor does not change it.
 			var typed map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
-
-			assert.Equalf(t, map[string]any{tc.name: "c"}, walked, "the walk: %q", tc.src)
 			assert.Equalf(t, map[string]any{tc.name: "c"}, typed, "the tree: %q", tc.src)
+
+			// An `any` keeps what the key resolves to, so the mapping widens.
+			var walked any
+			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
+			assert.Equalf(t, map[any]any{tc.resolved: "c"}, walked, "the walk: %q", tc.src)
+		}
+	})
+
+	t.Run("and a NaN key is held but cannot be looked up", func(t *testing.T) {
+		// NaN is not equal to itself, so a Go map keyed by one never gives the
+		// entry back. The value is there and a range reaches it.
+		// go.yaml.in/yaml/v3 v3.0.5 builds the same map for the same document.
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte("&a .nan: c\n"), &typed))
+		assert.Equal(t, map[string]any{".nan": "c"}, typed)
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte("&a .nan: c\n"), &walked))
+		widened, ok := walked.(map[any]any)
+		require.True(t, ok)
+		require.Len(t, widened, 1)
+		for key, value := range widened {
+			assert.True(t, math.IsNaN(key.(float64)))
+			assert.Equal(t, "c", value)
 		}
 	})
 
@@ -190,7 +218,7 @@ func TestFixedAnAnchoredFloatKeyIsNamedByYAMLOnBothPaths(t *testing.T) {
 	// with nothing reported. unwrapKeyNode does not unwrap an ast.TagNode, and
 	// naming a tagged key wants the tag resolved rather than stripped.
 
-	t.Run("without the anchor the two agree, and on YAML's spelling", func(t *testing.T) {
+	t.Run("a string-keyed destination names every one of them the same way", func(t *testing.T) {
 		for _, tc := range []struct{ src, name string }{
 			{".inf: c\n", ".inf"},
 			{".nan: c\n", ".nan"},
@@ -198,14 +226,15 @@ func TestFixedAnAnchoredFloatKeyIsNamedByYAMLOnBothPaths(t *testing.T) {
 			{"&a true: c\n", "true"},
 			{"&a x: c\n", "x"},
 		} {
-			var walked any
-			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &walked), "%q", tc.src)
-
 			var typed map[string]any
 			require.NoErrorf(t, codec.Unmarshal([]byte(tc.src), &typed), "%q", tc.src)
-
-			assert.Equalf(t, map[string]any{tc.name: "c"}, walked, "%q", tc.src)
 			assert.Equalf(t, map[string]any{tc.name: "c"}, typed, "%q", tc.src)
 		}
+	})
+
+	t.Run("and a string key leaves the mapping keyed by string", func(t *testing.T) {
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte("&a x: c\n"), &walked))
+		assert.Equal(t, map[string]any{"x": "c"}, walked)
 	})
 }

@@ -49,9 +49,11 @@ func TestAnExplicitKeyReadsWhereTheGrammarAllowsIt(t *testing.T) {
 			want: map[string]any{"l": "v"},
 		},
 		{
+			// The key is the integer 1, so the mapping is keyed by any: only a
+			// mapping whose keys are all strings stays a map[string]any.
 			name: "an empty key, and the next line is a fresh entry",
 			src:  "?\n 1\n",
-			want: map[string]any{"1": nil},
+			want: map[any]any{uint64(1): nil},
 		},
 		{
 			name: "the whole entry indented, key and ':' alike",

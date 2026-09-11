@@ -266,7 +266,8 @@ func TestStreamSwitchesFromWalkToTree(t *testing.T) {
 // Keyed on the source text and not on the corpus name, because a regeneration
 // renames every seed. A held-out document that starts agreeing fails, so the
 // entry reports the fix instead of outliving it.
-var walkStreamHoldOuts = map[string]string{
-	"%TAG !x! tag:yaml.org,2002:\r---\r&a1 !x!pairs\r- !x!omap [:]\r": "defect 109: a null key in an " +
-		"!!omap is named \"null\" by the walk and nil by the tree",
-}
+//
+// Empty since defect 109 closed: the walk kept a key's text where the tree kept
+// what it resolved to, and the two now build the same mapping. Kept for the
+// next entry, which should not have to write the mechanism again.
+var walkStreamHoldOuts = map[string]string{}

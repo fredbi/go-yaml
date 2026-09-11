@@ -81,32 +81,32 @@ func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 		"the indicator followed by a space": {
 			source: "? \n",
 			want:   "?\n:\n",
-			value:  map[string]any{"null": nil},
+			value:  map[any]any{nil: nil},
 		},
 		"the indicator followed by a line break": {
 			source: "?\n",
 			want:   "?\n:\n",
-			value:  map[string]any{"null": nil},
+			value:  map[any]any{nil: nil},
 		},
 		"the indicator ending the stream": {
 			source: "?",
 			want:   "?\n:\n",
-			value:  map[string]any{"null": nil},
+			value:  map[any]any{nil: nil},
 		},
 		"with a value on the line below": {
 			source: "?\n: v\n",
 			want:   "?\n: v\n",
-			value:  map[string]any{"null": "v"},
+			value:  map[any]any{nil: "v"},
 		},
 		"as a sequence entry": {
 			source: "- ?\n",
 			want:   "- ?\n  :\n",
-			value:  []any{map[string]any{"null": nil}},
+			value:  []any{map[any]any{nil: nil}},
 		},
 		"beside an entry that has a key": {
 			source: "a: 1\n? \n: 2\n",
 			want:   "a: 1\n?\n: 2\n",
-			value:  map[string]any{"a": uint64(1), "null": uint64(2)},
+			value:  map[any]any{"a": uint64(1), nil: uint64(2)},
 		},
 	}
 

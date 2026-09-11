@@ -3206,11 +3206,14 @@ func TestDecoder_Canonical(t *testing.T) {
   ? !!null "" : !!null "",
 }
 `
+	// The "!!null" key resolves to nil, so the mapping is keyed by any: a key
+	// keeps the value it resolves to, and only a mapping whose keys are all
+	// strings comes back as a map[string]any.
 	var v interface{}
 	if err := yaml.Unmarshal([]byte(yml), &v); err != nil {
 		t.Fatalf("%+v", err)
 	}
-	m, ok := v.(map[string]interface{})
+	m, ok := v.(map[any]any)
 	if !ok {
 		t.Fatalf("failed to decode canonical yaml: %+v", v)
 	}
@@ -3220,7 +3223,7 @@ func TestDecoder_Canonical(t *testing.T) {
 	if m["implicit"] != "entry" {
 		t.Fatalf("failed to decode canonical yaml: %+v", m)
 	}
-	if m["null"] != nil {
+	if value, held := m[nil]; !held || value != nil {
 		t.Fatalf("failed to decode canonical yaml: %+v", m)
 	}
 }
