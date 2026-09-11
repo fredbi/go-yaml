@@ -99,10 +99,13 @@ type Scanner struct {
 //
 // The schema returns to [token.Schema12]. Call [Scanner.SetSchema] after Init, not before it.
 //
-// Init keeps the buffers a previous source grew, and nothing else.
+// Init calls [Scanner.Reset] first, so it keeps the buffers a previous source grew and nothing else:
+// a Scanner reused for another source starts from the state of a new one, wherever the previous scan stopped.
 //
 // A source longer than maxSourceLen is refused, and [Scanner.Err] returns the refusal after the first read.
 func (s *Scanner) Init(src []byte) {
+	s.Reset()
+
 	// One buffer, two types, and neither conversion copies.
 	// The scan holds a string because token.Token.Value is a string: a scalar carried through unchanged is a slice of
 	// this one. Context.reset takes the bytes back out for the swar word loads, which cannot read a string.
@@ -741,25 +744,28 @@ func (s *Scanner) scanSequence(ctx *Context) (bool, error) {
 	return true, nil
 }
 
-// reset prepares a scanner to tokenize text without judging whether text is a stream at all.
+// Reset clears the Scanner of its source and of every state the last scan left,
+// and keeps the room its buffers have grown. It scans nothing until [Scanner.Init] gives it a source.
+func (s *Scanner) Reset() {
+	s.ctx.Reset()
+	*s = Scanner{quoted: s.quoted[:0], ctx: s.ctx}
+}
+
+// reset sets the state a scan of text starts from, on a Scanner that Reset has cleared,
+// without judging whether text is a stream at all.
 //
 // The source is scanned as it was handed in.
 // The scan steps over a byte order mark where one stands, so every offset addresses the text the caller wrote.
 // A token points into that same text, since it holds a window on the source and copies nothing.
 func (s *Scanner) reset(text string) {
-	src := text
 	s.line = 1
 	s.column = 1
 	s.isFirstCharAtLine = true
-	s.deepIndent = false
-	s.err = nil
-	s.lookback.Reset()
-	s.ctx.reset(src)
+	s.ctx.reset(text)
 	s.ctx.lookback = &s.lookback
 	// A schema belongs to the source it was set for, so it does not cross an Init.
 	s.schema = token.Schema12
 	s.ctx.schema = s.schema
-	s.clearState()
 }
 
 func (s *Scanner) clearState() {

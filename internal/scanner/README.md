@@ -49,7 +49,7 @@ directly. There is a `TODO` at the site.
 
 `Scanner.ctx`: the scanner context is used at a cursor
 	
-> The context is held by value; Init resets it. No pooling is needed.
+> The context is held by value. `Scanner.Reset` clears it and keeps its buffers, and `Init` calls `Reset` first.
 
 ## `context.go`
 

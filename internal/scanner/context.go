@@ -120,22 +120,23 @@ func (c *Context) keyStartColumn() int32 {
 	return column
 }
 
+// Reset clears the context of its source and of every state a scan left,
+// and keeps the room its buffers have grown: pending, and the cursor's buf and originCopy.
+func (c *Context) Reset() {
+	clear(c.pending[:cap(c.pending)])
+	*c = Context{
+		cursor:  cursor{buf: c.buf[:0], originCopy: c.originCopy[:0]},
+		pending: c.pending[:0],
+	}
+}
+
+// reset points a context that Reset has cleared at src.
 func (c *Context) reset(src string) {
-	c.idx = 0
-	c.originStart, c.originEnd = 0, 0
 	c.size = int32(len(src))
 	c.src = src
 	// The bytes Init was handed, taken back out of the string it made of them. Neither hop copies, and both views stay
 	// valid for as long as the caller leaves src alone.
 	c.raw = unsafe.Slice(unsafe.StringData(src), len(src))
-	// pending keeps the room it holds: it never grows past a token or two, so a Scanner reading a second document carries
-	// nothing worth dropping and makes one allocation fewer.
-	c.rewind()
-	c.yield = nil
-	c.stopped = false
-	c.forgetTokens()
-	c.resetBuffer()
-	c.mstate = nil
 }
 
 func (c *Context) breakMultiLine() {
