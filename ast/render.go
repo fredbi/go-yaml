@@ -90,6 +90,10 @@ type Renderer struct {
 	// hoisted is the block scalar whose comment group the node opening its
 	// line has already written above that line. See [Renderer.unhoisted].
 	hoisted *LiteralNode
+	// atMargin says the node being rendered starts in column 0: a document's own
+	// scalar, or a key of the block mapping that is a document's own node. A
+	// plain scalar there reading "--- x" or "..." opens or closes a document.
+	atMargin bool
 }
 
 // defaultRenderer and bareRenderer back the String methods of the composite
@@ -372,6 +376,8 @@ func (r *Renderer) mapping(n *MappingNode) rendered {
 
 func (r *Renderer) mappingValue(n *MappingValueNode) rendered {
 	key := leaf(r.bare().inline(n.Key))
+	// The key may stand in column 0; nothing after it does.
+	r = r.withMargin(false)
 
 	// A blank line before an entry is the author's, not the layout's: it groups
 	// entries, and no amount of re-rendering should lose it. Unlike a column, it
@@ -709,6 +715,8 @@ func (r *Renderer) fitsOnKeyLine(n Node) bool {
 }
 
 func (r *Renderer) mappingKey(n *MappingKeyNode) rendered {
+	r = r.withMargin(false)
+
 	var above string
 	if lit, group := r.unhoisted(n.Value); lit != nil {
 		above = r.commentGroup(group) + "\n"
@@ -995,6 +1003,7 @@ func (r *Renderer) prefixedAt(marker string, value Node, own *CommentGroupNode, 
 	if value == nil {
 		return marker
 	}
+	r = r.withMargin(false)
 
 	text := r.String(value)
 	if lift > 0 {
@@ -1061,7 +1070,58 @@ func (r *Renderer) startsBlock(n Node) bool {
 // so a block scalar written one column in states a width of two. See
 // [Renderer.lifted].
 func (r *Renderer) documentBody(n Node) rendered {
+	switch node := n.(type) {
+	case *StringNode:
+		r = r.withMargin(true)
+	case *MappingNode:
+		if !r.flowsInline(node.IsFlowStyle) {
+			r = r.withMargin(true)
+		}
+	}
+
 	return r.lifted(n, 1)
+}
+
+// withMargin returns a Renderer whose next node starts in column 0 or not. See
+// [Renderer.atMargin].
+func (r *Renderer) withMargin(on bool) *Renderer {
+	if r.atMargin == on {
+		return r
+	}
+
+	margin := *r
+	margin.atMargin = on
+
+	return &margin
+}
+
+// isQuoted reports whether n was read from a quoted scalar.
+func isQuoted(n *StringNode) bool {
+	return n.Token != nil &&
+		(n.Token.Type == token.SingleQuoteType || n.Token.Type == token.DoubleQuoteType)
+}
+
+// startsWithDocumentMarker reports whether value, written plain at the start of
+// a line, reads as a "---" or "..." marker: three dashes or three dots followed
+// by a blank or by nothing.
+//
+// An indented "    ---" over "false" is the plain scalar "--- false", which
+// written back in column 0 read as a document holding false, and a root key
+// "  --- x" came back as "--- x: 1", which does not parse.
+func startsWithDocumentMarker(value string) bool {
+	if !strings.HasPrefix(value, "---") && !strings.HasPrefix(value, "...") {
+		return false
+	}
+	if len(value) == len("---") {
+		return true
+	}
+
+	switch value[len("---")] {
+	case ' ', '\t', '\n', '\r':
+		return true
+	default:
+		return false
+	}
 }
 
 // lifted renders n with the start of its line lift columns in from the
@@ -1421,6 +1481,16 @@ func restateIndent(header string, width int) string {
 func (r *Renderer) stringNode(n *StringNode) string {
 	header := blockScalarHeader(n)
 	if header == "" {
+		if r.atMargin && !isQuoted(n) && startsWithDocumentMarker(n.Value) {
+			// Single quotes keep the value and its type: a scalar opening with
+			// "---" or "..." resolves to a string either way.
+			quoted := "'" + strings.ReplaceAll(n.Value, "'", "''") + "'"
+			if r.comments && !n.Comment.Blank() {
+				return addCommentString(quoted, n.Comment)
+			}
+
+			return quoted
+		}
 		if !r.comments {
 			return n.stringWithoutComment()
 		}
