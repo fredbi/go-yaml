@@ -12,28 +12,17 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// byteOrderMark is U+FEFF, written as an escape because Go refuses one in the
-// source text of a file.
+// byteOrderMark is U+FEFF, written as an escape because the Go compiler rejects one inside a source file.
 const byteOrderMark = "\ufeff"
 
-// TestAByteOrderMarkOpensAPrefixOrNothing holds where 5.2 admits the mark.
+// TestAByteOrderMarkOpensAPrefixOrNothing checks where section 5.2 admits a byte order mark.
 //
-// l-document-prefix is `c-byte-order-mark? l-comment*` and l-yaml-stream takes
-// those prefixes one after another, so a run of marks opens a stream and
-// anything else in front of one puts it inside a line, where nb-char excludes
-// it.
+// l-document-prefix is c-byte-order-mark? l-comment*, and l-yaml-stream takes those prefixes one after another,
+// so a run of marks may open a stream.
+// Anything else in front of a mark puts it inside a line, where nb-char excludes it.
 //
-// checkByteOrderMark asked Scanner.column, and the column does not answer this:
-// a space advances it through progressColumn and a tab does not, since the tab
-// branch of the scan loop calls progress, which moves the cursor and leaves the
-// column alone. So " \ufeff" was refused and "\t\ufeff" was read -- and read as
-// nothing, with no error and no content, so a caller could not tell that
-// document from an empty one. Of the three implementations ours was the only
-// one that lost the byte: go.yaml.in/yaml/v3 v3.0.5 refuses it and libfyaml
-// 1.0.0b1 reads the mark as the document's content.
-//
-// Context.opensADocumentPrefix reads the source instead, which is the question
-// the production asks.
+// Context.opensADocumentPrefix reads the source to decide, because the scanner's column does not count a tab:
+// " \ufeff" and "\t\ufeff" must both be rejected.
 func TestAByteOrderMarkOpensAPrefixOrNothing(t *testing.T) {
 	t.Run("anything in front of it on the line refuses it", func(t *testing.T) {
 		for _, src := range []string{
@@ -51,9 +40,7 @@ func TestAByteOrderMarkOpensAPrefixOrNothing(t *testing.T) {
 	})
 
 	t.Run("a mark opening the stream reads, and so does a run of them", func(t *testing.T) {
-		// grammar.NewRecognizer accepts each of these and so does
-		// go.yaml.in/yaml/v3. A run is a run of prefixes, which is why
-		// documentOpensAtMark steps over one.
+		// A run of marks is a run of prefixes, so documentOpensAtMark steps over each.
 		for _, src := range []string{
 			byteOrderMark + "\n",
 			byteOrderMark + "a: 1\n",
@@ -74,8 +61,7 @@ func TestAByteOrderMarkOpensAPrefixOrNothing(t *testing.T) {
 	})
 
 	t.Run("a mark inside a quoted scalar is content", func(t *testing.T) {
-		// nb-json takes it like any other character, so the quoted readers keep
-		// it and never reach checkByteOrderMark.
+		// nb-json takes it like any other character, so the quoted readers keep it and never reach checkByteOrderMark.
 		_, err := parser.ParseBytes([]byte("a: \"x" + byteOrderMark + "y\"\n"))
 		assert.NoError(t, err)
 	})

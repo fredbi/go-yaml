@@ -12,20 +12,16 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestRejectsMalformedDocuments covers the constructs YAML forbids that the
-// parser used to take.
+// TestRejectsMalformedDocuments checks that each construct YAML forbids is rejected.
 //
-// Accepting too much is the worse direction to be wrong in: a document another
-// implementation refuses passes through here unremarked, and is handed on as if
-// it were sound. Each case below is paired with the nearest well-formed
-// document, so that a fix which over-corrects fails too.
+// Each case pairs the invalid document with the nearest well-formed one, which must parse,
+// so a fix that rejects too much fails as well.
 func TestRejectsMalformedDocuments(t *testing.T) {
 	tests := map[string]struct {
 		invalid string
 		valid   string
 	}{
-		// A comment starts a line or follows a space. Pressed up against what
-		// came before, there is nothing to separate it from.
+		// A comment starts a line or follows white space.
 		"comment after a quoted scalar": {
 			invalid: "key: \"value\"# comment\n",
 			valid:   "key: \"value\" # comment\n",
@@ -44,8 +40,7 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "key: [a#b]\n",
 		},
 
-		// A flow collection has no sequence entries, and '-' alone is not a
-		// scalar there.
+		// A flow collection holds no block sequence entries, and '-' alone is not a scalar there.
 		"dash as a flow sequence entry": {
 			invalid: "[-]\n",
 			valid:   "[-a]\n",
@@ -55,21 +50,20 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "- [-a, -b]\n",
 		},
 
-		// A tag shorthand cannot hold a ',': it has to be percent-encoded. A
-		// verbatim tag holds a URI and takes it as written.
+		// A tag shorthand cannot hold a ',', which must be percent-encoded.
+		// A verbatim tag holds a URI as written.
 		"comma in a tag shorthand": {
 			invalid: "- !!str, xxx\n",
 			valid:   "- !<tag:yaml.org,2002:str> xxx\n",
 		},
 
-		// A TAG directive defines a handle for the one document that follows.
+		// A TAG directive defines a handle for the next document only.
 		"tag handle used past its document": {
 			invalid: "%TAG !p! tag:example.com,2011:\n--- !p!A\na: b\n--- !p!B\nc: d\n",
 			valid:   "%TAG !p! tag:example.com,2011:\n--- !p!A\na: b\n",
 		},
 
-		// A construct carrying on to the next line is marked as one value by
-		// being indented under what introduced it.
+		// A construct continued on the next line must be indented past what introduced it.
 		"flow collection not indented past its key": {
 			invalid: "flow: [a,\nb]\n",
 			valid:   "flow: [a,\n b]\n",
@@ -82,19 +76,15 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			invalid: "quoted: \"a\nb\nc\"\n",
 			valid:   "quoted: \"a\n b\n c\"\n",
 		},
-		// The same rule where the key was never written. The ':' is where the
-		// entry begins, so a token level with it opens the next entry, and "1"
-		// opens nothing. This was the one shape of it that got through: the
-		// key written out, "k:\n1\n", and the empty key carrying a property,
-		// ": &a\n1\n", were both refused already.
+		// The same rule with the key left out.
+		// The entry begins at the ':', so a token level with it opens the next entry, and "1" opens nothing.
 		"value level with an empty key": {
 			invalid: ":\n1\n",
 			valid:   ":\n  1\n",
 		},
 
-		// ns-anchor-name is one character or more, and it ends at a flow
-		// indicator. A collection opening straight onto it is a node with no
-		// separation in front of it.
+		// ns-anchor-name holds one character or more and ends at a flow indicator.
+		// A collection opening straight after it has no separation in front of it.
 		"anchor with no name": {
 			invalid: "& e\n",
 			valid:   "&a e\n",
@@ -108,8 +98,8 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "[&a {1: 2}]\n",
 		},
 
-		// A directive opens a line and nothing else does, so a '%' anywhere
-		// else is not one -- and it cannot open a plain scalar either.
+		// A '%' opens a directive only at the start of a line.
+		// Anywhere else it opens no directive, and it cannot open a plain scalar either.
 		"percent sign as a value": {
 			invalid: " k: %\n",
 			valid:   " k: a%b\n",
@@ -123,10 +113,9 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "%YAML 1.2\n---\nk: 1\n",
 		},
 
-		// A plain scalar cannot open on an indicator. Inside one they are
-		// ordinary characters, and inside a flow collection they are claimed
-		// before a scalar could begin -- so an anchor on an empty node keeps
-		// working there.
+		// A plain scalar cannot open on an indicator, though indicators are ordinary characters inside one.
+		// Inside a flow collection the indicator ends the entry before a scalar can begin,
+		// so an anchor on the empty node parses there.
 		"closing brace as a whole document": {
 			invalid: "}\n",
 			valid:   "{}\n",
@@ -148,9 +137,8 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			valid:   "[&a]\n",
 		},
 
-		// A block scalar header takes one indentation indicator and one
-		// chomping indicator, in either order, and either may be left out. Two
-		// of either is not a header.
+		// A block scalar header takes one indentation indicator and one chomping indicator,
+		// in either order, and either may be left out. Two of either is not a header.
 		"two chomping indicators": {
 			invalid: "|--\n",
 			valid:   "|-\n",
@@ -163,18 +151,14 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 			invalid: "|12\n  a\n",
 			valid:   "|1\n  a\n",
 		},
-		// The comment after a header is separated from it, like every other
-		// comment. Pressed up against the indicators it starts nothing.
+		// A comment after a header needs white space before it, like every other comment.
 		"comment touching a block scalar header": {
 			invalid: "|-#\n",
 			valid:   "|- #\n",
 		},
 
-		// A numeric escape takes hexadecimal digits, and how many is fixed by
-		// which escape it is. Only the count used to be checked, so an escape
-		// with the wrong characters in it decoded to some other character
-		// rather than being refused -- the one kind of laxity nothing
-		// downstream is in a position to notice.
+		// A numeric escape takes hexadecimal digits, and the escape fixes how many.
+		// An escape holding any other character is rejected, not decoded to another character.
 		"escaped 8-bit character with no hex digits": {
 			invalid: `"\xZZ"` + "\n",
 			valid:   `"\x41"` + "\n",
@@ -204,9 +188,9 @@ func TestRejectsMalformedDocuments(t *testing.T) {
 	}
 }
 
-// TestAcceptsDocumentsAtTheRoot covers the exemption the indentation rules
-// need: a construct that is the document itself has nothing around it, so its
-// further lines have nothing to be indented past.
+// TestAcceptsDocumentsAtTheRoot checks that a construct at the document's root may continue at any indentation.
+//
+// Nothing encloses it, so its further lines have nothing to be indented past.
 func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 	sources := map[string]string{
 		"flow mapping at the root":   "{\n? explicit: entry,\nimplicit: entry,\n}\n",
@@ -224,17 +208,12 @@ func TestAcceptsDocumentsAtTheRoot(t *testing.T) {
 	}
 }
 
-// TestParseRefusesWhatIsNotAStream covers the source itself rather than what it
-// says.
+// TestParseRefusesWhatIsNotAStream checks that the parser rejects a source that is not a YAML character stream.
 //
-// c-printable is the set of characters a YAML stream may hold, so the control
-// characters below x20 other than tab, line feed and carriage return are not
-// YAML however they arrive. A stream is Unicode too, and a byte belonging to no
-// character is not one: it used to be turned into U+FFFD on the way in, so the
-// byte was gone and nothing had said so.
+// c-printable excludes the control characters below x20 other than tab, line feed and carriage return.
+// A stream is Unicode too, so a byte that belongs to no character is rejected, not replaced with U+FFFD.
 //
-// Escapes are unaffected. They are the mechanism the spec provides for writing
-// these characters down, and what they produce is a value rather than source.
+// Escapes are unaffected: they write these characters into a value, not into the source.
 func TestParseRefusesWhatIsNotAStream(t *testing.T) {
 	invalid := map[string]string{
 		"a NUL as the whole document":  "\x00\n",
@@ -268,14 +247,11 @@ func TestParseRefusesWhatIsNotAStream(t *testing.T) {
 	}
 }
 
-// TestParseDropsAByteOrderMarkOpeningTheStream covers a mark written by an
-// editor at the head of a file.
+// TestParseDropsAByteOrderMarkOpeningTheStream checks that a byte order mark at the head of the stream is dropped.
 //
-// nb-char is c-printable less b-char and c-byte-order-mark, so a mark is not a
-// character any node may hold: it marks an l-document-prefix and nothing else.
-// Read as an ordinary character it became part of whatever came next -- the
-// key of the first entry, or the '%' of a directive, which then stopped being
-// one. The document it opens is refused for the same reason.
+// nb-char is c-printable less b-char and c-byte-order-mark, so no node may hold a mark:
+// it marks an l-document-prefix and nothing else.
+// Read as an ordinary character, it would join the next token: the first key, or the '%' of a directive.
 func TestParseDropsAByteOrderMarkOpeningTheStream(t *testing.T) {
 	const mark = "\ufeff"
 
@@ -288,7 +264,7 @@ func TestParseDropsAByteOrderMarkOpeningTheStream(t *testing.T) {
 		"before a comment":         {mark + "# c\na: 1\n", "# c\na: 1\n"},
 		"before a directive":       {mark + "%YAML 1.2\n---\na: 1\n", "%YAML 1.2\n---\na: 1\n"},
 
-		// l-document-prefix is a run, so more than one is a run of them.
+		// l-yaml-stream opens on any number of l-document-prefix, so two marks in a row are both dropped.
 		"twice over": {mark + mark + "a: 1\n", "a: 1\n"},
 	}
 
@@ -301,18 +277,12 @@ func TestParseDropsAByteOrderMarkOpeningTheStream(t *testing.T) {
 	}
 }
 
-// TestParseTabWhereIndentationBelongs covers a tab opening a line at the root.
+// TestParseTabWhereIndentationBelongs checks a tab opening a line at the root.
 //
-// s-indent(n) is s-space x n, so block structure is introduced by spaces and
-// nothing else and a tab cannot stand in for them. A tab is separation rather
-// than indentation, though, and a flow node or a scalar at the root is reached
-// through s-separate -- so the same tab that makes "\tfoo: 1" invalid leaves
-// "\t{}" a perfectly good document.
+// s-indent(n) is n spaces, so only spaces introduce block structure, and "\tfoo: 1" is invalid.
+// A tab is separation, though, and a flow node or a scalar at the root follows s-separate, so "\t{}" is valid.
 //
-// The distinction was lost at the root, where the entry has no enclosing level
-// to be measured against: a tab there was read as the indentation it may not
-// be. It survived for a quoted key longest, since the check it slipped past
-// read the origin buffer and a quoted scalar resets it.
+// The quoted-key cases matter because a quoted scalar resets the origin buffer that the check reads.
 func TestParseTabWhereIndentationBelongs(t *testing.T) {
 	invalid := map[string]string{
 		"a tab before a quoted key at the root": "\t\"\": a\n",
@@ -349,11 +319,10 @@ func TestParseTabWhereIndentationBelongs(t *testing.T) {
 	}
 }
 
-// TestParseWhitespaceOnlyLines covers a line that holds nothing but whitespace.
+// TestParseWhitespaceOnlyLines checks that a line holding only white space is a blank line, whatever it holds.
 //
-// It is a blank line however it is spelled. A tab cannot be indentation and is
-// refused where one is expected, which is right -- but on a line of its own
-// there is no indentation to refuse, only a gap between the entries around it.
+// A tab cannot be indentation, but a line holding only a tab has no indentation to reject:
+// it is a gap between the entries around it.
 func TestParseWhitespaceOnlyLines(t *testing.T) {
 	valid := map[string]string{
 		"a line holding one tab":            "foo: 1\n\t\nbar: 2\n",
@@ -369,7 +338,7 @@ func TestParseWhitespaceOnlyLines(t *testing.T) {
 		})
 	}
 
-	// And a tab that does stand in for indentation is still refused.
+	// A tab standing in for indentation is still rejected.
 	invalid := map[string]string{
 		"a tab before a mapping entry":  "foo: 1\n\tbar: 2\n",
 		"a tab before a sequence entry": "foo:\n\t- a\n",
@@ -383,14 +352,11 @@ func TestParseWhitespaceOnlyLines(t *testing.T) {
 	}
 }
 
-// TestParseValueMustBeIndentedPastItsKey covers a value written level with the
-// key it belongs to.
+// TestParseValueMustBeIndentedPastItsKey checks that a value written level with its key is rejected.
 //
-// An entry's value goes further in than its key. Level with the key, a token
-// can only open the next entry: another key, or the '-' of a block sequence,
-// which by convention sits at its own key's column. Anything else has nowhere
-// to belong, and reading it as the value made "a:\nb" the mapping {a: b} where
-// every other implementation refuses the document.
+// A value goes further in than its key. Level with the key, a token can only open the next entry:
+// another key, or the '-' of a block sequence, which by convention sits at its key's column.
+// Any other token there belongs nowhere.
 func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 	invalid := map[string]string{
 		"a plain scalar level with the key": "a:\nb\n",
@@ -399,10 +365,7 @@ func TestParseValueMustBeIndentedPastItsKey(t *testing.T) {
 		"an alias level with it":            "k: &x 1\na:\n*x\n",
 		"nested one level in":               "top:\n  a:\n  b\n",
 
-		// A property standing on the key's line names a block node, which is
-		// indented past the key like any other value. The property used to
-		// swallow whatever came next whatever column it sat at, so "k: &a\n1"
-		// read as {k: 1}.
+		// A property on the key's line names a block node, which must be indented past the key like any other value.
 		"an anchor on the key's line":    "k: &a\n1\n",
 		"a tag on the key's line":        "k: !!str\n1\n",
 		"an anchor under an empty key":   ": &a\n1\n",

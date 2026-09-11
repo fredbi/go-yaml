@@ -12,12 +12,9 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseCommentsAroundDirectives covers comment lines written between a
-// directive and the '---' that opens the document.
+// TestParseCommentsAroundDirectives covers comment lines between a directive and the '---' that opens the document.
 //
-// They belong to neither, and the parser used to refuse the whole document over
-// them -- but only when it was reading comments, so the same source parsed or
-// failed depending on the mode.
+// Such comments belong to neither, and the document must parse whether or not comments are read.
 func TestParseCommentsAroundDirectives(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -58,8 +55,8 @@ func TestParseCommentsAroundDirectives(t *testing.T) {
 	}
 }
 
-// TestParseDirectiveWithoutDocument keeps the check the comment handling had to
-// step around: a directive still has to be followed by a document.
+// TestParseDirectiveWithoutDocument checks that a directive not followed by a "---" document is rejected,
+// even with a comment after it.
 func TestParseDirectiveWithoutDocument(t *testing.T) {
 	sources := map[string]string{
 		"nothing after it":     "%YAML 1.2\n",

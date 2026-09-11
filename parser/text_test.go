@@ -14,9 +14,10 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// A caller that reads numbers as text -- validating them rather than converting
-// them, as a lexer built on this parser would -- reads the document's own bytes
-// and copies nothing.
+// TestScalarTextReachesTheAST checks that a scalar's Text and Bytes are the document's own bytes,
+// wherever the scanner did not rewrite them.
+//
+// A caller that reads numbers as text, to validate them instead of converting them, then copies nothing.
 func TestScalarTextReachesTheAST(t *testing.T) {
 	const src = "int: 1234567890\n" +
 		"float: 3.25\n" +
@@ -29,10 +30,9 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 		"escaped: \"needs\\ta copy\"\n" +
 		"block: |\n  first\n  second\n"
 
-	// ParseBytes does not copy the document: it reads the caller's bytes
-	// through nocopy.String, so a scalar the scanner carried through unchanged
-	// is a window into that very slice. This is what says the copy is gone --
-	// it fails the moment a parse allocates a string of its own.
+	// Parse does not copy the document: it reads the caller's bytes through nocopy.String,
+	// so a scalar the scanner did not rewrite is a window into that slice.
+	// indexIn fails the check as soon as a parse allocates a string of its own.
 	data := []byte(src)
 	base := uintptr(unsafe.Pointer(&data[0]))
 	indexIn := func(b []byte) int {
@@ -79,15 +79,14 @@ func TestScalarTextReachesTheAST(t *testing.T) {
 	assert.Equal(t, "needs\ta copy", text["escaped"])
 	assert.Equal(t, "first\nsecond\n", text["block"])
 
-	// The caller's own bytes, for everything the scanner did not have to
-	// rewrite.
+	// Every scalar the scanner did not rewrite is a window into the caller's slice.
 	for _, key := range []string{"int", "float", "hex", "bool", "inf", "null", "plain", "quoted"} {
 		assert.Truef(t, inSource[key], "%s: %q should be a window into the caller's slice", key, text[key])
 	}
-	// Losing the quotes is not a rewrite: the text between them is the caller's
-	// own bytes and "quoted" is checked above with the rest. An escape stands
-	// for a character the document did not write, and a block scalar has the
-	// indentation cut from each of its lines, so those two are copies.
+	// Dropping the quotes is not a rewrite:
+	// the text between them is the caller's own bytes, and "quoted" is checked above.
+	// An escape stands for a character the document did not write,
+	// and a block scalar has the indentation cut from each line, so those two are copies.
 	assert.False(t, inSource["escaped"], "an escaped scalar cannot be the caller's own bytes")
 	assert.False(t, inSource["block"], "a block scalar cannot be the caller's own bytes")
 }

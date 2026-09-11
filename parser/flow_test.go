@@ -13,13 +13,10 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseFlowKeyLineBreaks covers where a flow mapping's key may end and its
-// ':' may begin.
+// TestParseFlowKeyLineBreaks checks where a flow mapping's key may end and its ':' may begin.
 //
-// A flow mapping's key is under no single-line restriction: it may span lines,
-// and a line break before the ':' is ordinary separation. A pair written inside
-// a flow sequence is a different thing -- an implicit key -- and is held to the
-// stricter rule.
+// A flow mapping's key may span lines, and a line break before its ':' is ordinary separation.
+// A pair written inside a flow sequence is an implicit key, and must fit on one line with its ':'.
 func TestParseFlowKeyLineBreaks(t *testing.T) {
 	valid := map[string]string{
 		"colon on the line after the key": "{foo\n: bar}\n",
@@ -31,8 +28,7 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 		"key spanning lines":        "- { multi\n  line: value}\n",
 		"key spanning lines nested": "{ matches\n% : 20 }\n",
 
-		// A mapping's key may still take the next line for its ':', whatever
-		// the key is made of.
+		// A mapping's key may take the next line for its ':', whatever the key is made of.
 		"quoted key and colon on separate lines":     "{ \"key\"\n  : value }\n",
 		"collection key and colon on separate lines": "{ {a: 1}\n  : value }\n",
 	}
@@ -45,8 +41,8 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 	}
 
 	invalid := map[string]string{
-		// A single-pair entry in a flow sequence is an implicit key, which has
-		// to fit on one line with its ':'. Quoting the key does not exempt it.
+		// A single-pair entry in a flow sequence is an implicit key, which must fit on one line with its ':'.
+		// Quoting the key does not exempt it.
 		"implicit key followed by a newline":          "[ key\n  : value ]\n",
 		"quoted implicit key followed by a newline":   "[ \"key\"\n  : value ]\n",
 		"quoted implicit key with an adjacent value":  "[ \"key\"\n  :value ]\n",
@@ -62,13 +58,11 @@ func TestParseFlowKeyLineBreaks(t *testing.T) {
 	}
 }
 
-// TestParseAdjacentValuesInFlow covers a ':' written with no space in front of
-// its value.
+// TestParseAdjacentValuesInFlow checks a ':' written with no space before its value.
 //
-// The spec allows it only after a JSON-like key -- a quoted scalar or a flow
-// collection -- which is what makes "{a: 1}" and JSON's own "{"a":1}" both
-// readable by the same parser. After a plain scalar the ':' belongs to the
-// scalar, so [ a:b ] holds one entry and not a pair.
+// The spec allows it only after a JSON-like key (a quoted scalar or a flow collection),
+// so the parser reads JSON's own {"a":1} as well as "{a: 1}".
+// After a plain scalar the ':' belongs to the scalar, so [ a:b ] holds one entry and not a pair.
 func TestParseAdjacentValuesInFlow(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -79,14 +73,12 @@ func TestParseAdjacentValuesInFlow(t *testing.T) {
 		"quoted key in a flow mapping":      {"{\"a\":1}\n", "{\"a\": 1}\n"},
 		"several in one collection":         {"[\"a\":1, [b]:2]\n", "[\"a\": 1, [b]: 2]\n"},
 
-		// Not after a plain scalar: the ':' belongs to the scalar. In a
-		// sequence that leaves one entry; in a mapping it leaves one key with
-		// no value, which is written back with the ':' that says so.
+		// After a plain scalar the ':' belongs to the scalar.
+		// In a sequence that leaves one entry, and in a mapping one key with no value, rendered with a ':' after it.
 		"plain key in a flow sequence": {"[ a:b ]\n", "[a:b]\n"},
 		"plain key in a flow mapping":  {"{ a:b }\n", "{a:b:}\n"},
 
-		// A ':' in front of what ends the entry closes the key wherever it is
-		// written: a plain scalar cannot hold one.
+		// A ':' right before the end of the entry closes the key, since a plain scalar cannot hold it there.
 		"absent value before a brace": {"{a:}\n", "{a:}\n"},
 		"absent value before a comma": {"{a:, b: 1}\n", "{a:, b: 1}\n"},
 	}
@@ -104,14 +96,11 @@ func TestParseAdjacentValuesInFlow(t *testing.T) {
 	}
 }
 
-// TestParseFlowCollectionsAsKeys covers a flow collection used as a mapping
-// key, nested inside another one used the same way.
+// TestParseFlowCollectionsAsKeys checks a flow collection used as a mapping key,
+// nested inside another one used the same way.
 //
-// Once "[b]: d" is grouped as an entry, the group reports the type of the token
-// it opens with -- a '['. The search for where the enclosing key begins counted
-// that as one more open bracket with no ']' to match it, and gave up on the
-// document; a collection used as a key was readable only at the outermost
-// level.
+// Once "[b]: d" is grouped as an entry, the group reports the type of its first token, a '['.
+// The search for the start of the enclosing key must not count that '[' as an open bracket with no ']' to match.
 func TestParseFlowCollectionsAsKeys(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -137,11 +126,10 @@ func TestParseFlowCollectionsAsKeys(t *testing.T) {
 	}
 }
 
-// TestParseFlowComments covers comments written inside a flow collection.
+// TestParseFlowComments checks comments written inside a flow collection.
 //
-// They used to be refused in one position, dropped in another, and in a third
-// written back onto the collection's single line -- where everything after them
-// is commented out, including the bracket that closes the collection.
+// A comment runs to the end of its line, so a flow collection holding one renders over several lines.
+// On the collection's single line, the comment would hide everything after it, including the closing bracket.
 func TestParseFlowComments(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -163,8 +151,7 @@ func TestParseFlowComments(t *testing.T) {
 			source: "[ a, b\n# comment\n]\n",
 			want:   "[\n  a,\n  b\n  # comment\n]\n",
 		},
-		// On the ',' line the comment was written about the entry the ',' comes
-		// after, and stays with it.
+		// A comment on the ',' line belongs to the entry before the ',', and stays with it.
 		"on the comma's line in a sequence": {
 			source: "[ a, # comment\n  b ]\n",
 			want:   "[\n  a, # comment\n  b\n]\n",
@@ -173,8 +160,7 @@ func TestParseFlowComments(t *testing.T) {
 			source: "{ a: 1, # comment\n  b: 2 }\n",
 			want:   "{\n  a: 1, # comment\n  b: 2\n}\n",
 		},
-		// Nothing to carry, so nothing changes: the collection stays on the one
-		// line it is meant to occupy.
+		// Without a comment the collection stays on one line.
 		"none at all": {
 			source: "{a: 1, b: 2}\n",
 			want:   "{a: 1, b: 2}\n",
@@ -191,8 +177,7 @@ func TestParseFlowComments(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			// What is written has to read back, and to the same text again:
-			// the layout it moved to is a layout the parser accepts.
+			// The rendered text must read back to the same text.
 			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
@@ -200,17 +185,13 @@ func TestParseFlowComments(t *testing.T) {
 	}
 }
 
-// TestParseEmptyNodeInAFlowCollection covers the entries a flow collection may
-// hold that carry no scalar of their own.
+// TestParseEmptyNodeInAFlowCollection checks the flow collection entries that carry no scalar of their own.
 //
-// Two productions: c-ns-flow-map-empty-key-entry, an entry whose key is e-node,
-// and ns-flow-pair, which a flow sequence admits as an entry and whose value may
-// be e-node as well. Both were refused -- "{&a}" as "could not find flow mapping
-// end token '}'" and "[:]" as "could not find '[' character corresponding to
-// ']'".
+// Two productions admit them: c-ns-flow-map-empty-key-entry, an entry whose key is e-node,
+// and ns-flow-pair, which a flow sequence admits as an entry and whose value may be e-node as well.
 //
-// Each rendered form below is one the recognizer compiled from
-// yaml-spec-1.2.json accepts, and each reads back to the same text.
+// The recognizer compiled from yaml-spec-1.2.json accepts each rendered form below,
+// and each reads back to the same text.
 func TestParseEmptyNodeInAFlowCollection(t *testing.T) {
 	tests := map[string]struct {
 		source string

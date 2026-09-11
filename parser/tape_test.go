@@ -14,16 +14,13 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// TestTokenArenaOnTheCorpus reports what the tape would hold on each document.
+// TestTokenArenaOnTheCorpus logs what the tape holds on each corpus document with a simulated tail.
 //
-// The parser is not reading through it yet, so the tail is simulated: it lags
-// the token being added by a fixed number of tokens, standing for how far back
-// a descent still needs what it has read. Real tails are set by the descent and
-// bounded by the widest open level, which TestStressShape puts at 3 to 50,000.
+// The test fills the tape by hand, and the tail lags the token being added by a fixed number of tokens,
+// standing for how far back a descent still needs what it has read.
+// A real descent sets the tail, and the widest open level bounds it.
 //
-// The figure to read is chunks allocated. The store the parser uses today
-// allocates one block per 512 tokens and holds every one of them; this holds
-// what the lag needs and fills the rest again. Run with -v for the table.
+// It asserts only that each document scans. Run with -v for the table; the column to read is allocated.
 func TestTokenArenaOnTheCorpus(t *testing.T) {
 	ordinary := readCorpus(t, corpusDir())
 	stress := readCorpus(t, stressDir())
@@ -60,8 +57,8 @@ func TestTokenArenaOnTheCorpus(t *testing.T) {
 	}
 }
 
-// TestTokenArenaHoldsTheLagAndNoMore checks the tape's working set follows the
-// lag rather than the document, which is the whole claim.
+// TestTokenArenaHoldsTheLagAndNoMore checks that the tape's working set follows the lag
+// and not the length of the document.
 func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 	w := corpusByName(t, "golang_source")
 
@@ -79,8 +76,8 @@ func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 
 	stats := arena.Stats()
 
-	// The lag needs lag/size chunks, the head needs one, and rounding needs
-	// another. Anything beyond that is the tape failing to reclaim.
+	// The lag needs lag/size chunks, the head needs one, and rounding needs another.
+	// More than that means the tape does not reclaim.
 	want := lag/size + 2
 	require.LessOrEqual(t, stats.Allocated, want,
 		"%d tokens through a %d-token lag should hold %d chunks, not %d",
@@ -94,12 +91,11 @@ func TestTokenArenaHoldsTheLagAndNoMore(t *testing.T) {
 		stats.Tokens, size, lag, stats.Allocated, stats.Bytes/1024, stats.Recycled)
 }
 
-// TestAFullScanRecyclesNothing checks the parser's own use of the arena.
+// TestAFullScanRecyclesNothing checks that [Parser.Parse] keeps every chunk of the tape live.
 //
-// The parser pins before it reads a token and never gives the pin back, so the
-// tail may be set as the descent goes and nothing is reclaimed. Every chunk
-// stays live, which is what makes the trees identical to the parser that held a
-// slice of every token before the tape replaced it.
+// Parse pins the arena before it reads a token and never releases the pin,
+// so the tail may move with the descent and nothing is reclaimed.
+// The tree then keeps every token it points at.
 func TestAFullScanRecyclesNothing(t *testing.T) {
 	all := readCorpus(t, corpusDir())
 
@@ -124,8 +120,7 @@ func TestAFullScanRecyclesNothing(t *testing.T) {
 	}
 }
 
-// tokenize is the scan alone, for the measurements above that fill a tape by
-// hand rather than through a parse.
+// tokenize scans src alone, for the tests above that fill a tape by hand instead of through a parse.
 func tokenize(tb testing.TB, src string) token.Tokens {
 	tb.Helper()
 
@@ -144,7 +139,7 @@ func tokenize(tb testing.TB, src string) token.Tokens {
 	return tokens
 }
 
-// corpusByName returns one document of the corpus.
+// corpusByName returns one document of the corpus, and skips the test when the corpus lacks it.
 func corpusByName(t *testing.T, name string) corpusDoc {
 	t.Helper()
 

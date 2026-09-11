@@ -13,12 +13,10 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseAnchorsOnEmptyScalars covers an anchor with nothing after it.
+// TestParseAnchorsOnEmptyScalars checks that an anchor with nothing after it names the empty node,
+// in each position a value may be absent, and that the document renders back unchanged.
 //
-// Such an anchor names the empty node -- "a: &x" is a valid document and *x
-// resolves to null. Refusing it made an anchor the one thing that could not be
-// attached to an absent value, which the YAML Test Suite exercises in every
-// position a value may be absent in.
+// "a: &x" is a valid document, and *x resolves to null.
 func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -40,9 +38,8 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 			source: "? &e\n: &a\n",
 			want:   "? &e\n: &a\n",
 		},
-		// The space before the ':' is not decoration: ':' is a legal anchor
-		// character, so "&a: a" anchors the name "a:" over the scalar a and is
-		// not a mapping at all.
+		// The space before the ':' matters: ':' is a legal anchor character,
+		// so "&a: a" anchors the name "a:" over the scalar a and is not a mapping.
 		"as a mapping key": {
 			source: "&a : a\n",
 			want:   "&a : a\n",
@@ -67,7 +64,7 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			// And it settles: what was written reads back to the same text.
+			// The rendering reads back to the same text.
 			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
@@ -75,14 +72,8 @@ func TestParseAnchorsOnEmptyScalars(t *testing.T) {
 	}
 }
 
-// TestParseAnchorsOnFlowCollectionKeys covers a property written before a flow
-// collection used as a mapping key.
-//
-// It is the key's: "&k [a, b]: v" names the sequence. The key was taken to
-// begin at its '[', which left the anchor outside it and attached to the
-// mapping the entry belongs to -- silently, so the document still parsed and
-// resolved *k to the wrong node, and outright refused as a second anchor when
-// the mapping already carried one.
+// TestParseAnchorsOnFlowCollectionKeys checks that a property written before a flow collection used as a mapping key
+// belongs to the key: "&k [a, b]: v" anchors the sequence, not the mapping holding the entry.
 func TestParseAnchorsOnFlowCollectionKeys(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -127,8 +118,8 @@ func TestParseAnchorsOnFlowCollectionKeys(t *testing.T) {
 	}
 }
 
-// TestParseAnchorsStillNeedANameAndOneValue keeps the checks that the empty
-// value had to be threaded past.
+// TestParseAnchorsStillNeedANameAndOneValue checks that an anchor without a name, two anchors in a row,
+// and a block sequence after an anchor on the same line are rejected.
 func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {
 	sources := map[string]string{
 		"no name":               "a: &\n",
@@ -144,19 +135,11 @@ func TestParseAnchorsStillNeedANameAndOneValue(t *testing.T) {
 	}
 }
 
-// TestParseAnchorNamesTakeEveryAnchorChar: an anchor or alias name may hold any
-// ns-anchor-char, including the characters that open a token elsewhere.
+// TestParseAnchorNamesTakeEveryAnchorChar checks that an anchor or alias name may hold any ns-anchor-char,
+// including the characters that open a token elsewhere.
 //
-// ns-anchor-char is ns-char less the flow indicators, so "@", "`", "#", a quote
-// and a "%" are all name characters. Each was refused, with a different message
-// and by a different scan step: 5.5 reserves "@" and "`" against *starting a
-// plain scalar* and scanReservedChar applied that anywhere; "#" went to the
-// comment rule, the quotes opened a quoted scalar, and "%" went to
-// scanPlainFirst. Four faults behind one shape.
-//
-// grammar.NewRecognizer accepts every one of them, the reference parser passes
-// them and libfyaml 1.0.0b1 reads them; go.yaml.in/yaml/v3 v3.0.5 refuses them
-// all and is the outlier.
+// ns-anchor-char is ns-char less the flow indicators, so "@", "`", "#", a quote and a "%" are all name characters.
+// Section 5.5 reserves "@" and "`" only at the start of a plain scalar.
 func TestParseAnchorNamesTakeEveryAnchorChar(t *testing.T) {
 	t.Run("as a name, and as the alias that reaches it", func(t *testing.T) {
 		for _, name := range []string{"@", "#", `"`, "'", "`", "%", "@x", "x@", ":"} {
@@ -173,9 +156,7 @@ func TestParseAnchorNamesTakeEveryAnchorChar(t *testing.T) {
 	})
 
 	t.Run("a flow indicator still ends the name", func(t *testing.T) {
-		// ns-anchor-char excludes them, so an anchor opening on one names
-		// nothing. grammar.NewRecognizer, the reference parser and libfyaml all
-		// refuse these too.
+		// ns-anchor-char excludes the flow indicators, so an anchor opening on one has no name.
 		for _, source := range []string{"a: &[ 1\n", "a: &] 1\n", "a: &{ 1\n", "a: &} 1\n", "a: &, 1\n"} {
 			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
 			require.Errorf(t, err, "%q", source)
@@ -184,9 +165,8 @@ func TestParseAnchorNamesTakeEveryAnchorChar(t *testing.T) {
 	})
 
 	t.Run("and the same characters still open their own token elsewhere", func(t *testing.T) {
-		// A "#" inside a plain scalar is ordinary text either way -- a comment
-		// needs a space before it -- so the shape that reaches the comment rule
-		// is one pressed against a token already emitted.
+		// A "#" inside a plain scalar is ordinary text, because a comment needs a space before it.
+		// The comment rule applies to a "#" pressed against a token already cut, as after a quoted scalar.
 		for source, says := range map[string]string{
 			"a: @x\n":      "'@' is a reserved character",
 			"a: `x\n":      "'`' is a reserved character",

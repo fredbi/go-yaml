@@ -15,9 +15,8 @@ import (
 
 // TestParseTagsOnEmptyScalars covers a scalar tag with nothing after it.
 //
-// Such a tag marks the empty node, exactly as an anchor with nothing after it
-// names it. What follows the tag is the next entry of the collection around it,
-// not the tag's value, and reading it as one is what used to fail.
+// Such a tag marks the empty node, as an anchor with nothing after it names it.
+// What follows the tag is the next entry of the enclosing collection, not the tag's value.
 func TestParseTagsOnEmptyScalars(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -55,7 +54,7 @@ func TestParseTagsOnEmptyScalars(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			// And it settles: what was written reads back to the same text.
+			// It settles: the rendered text parses and renders to the same text.
 			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
@@ -63,13 +62,12 @@ func TestParseTagsOnEmptyScalars(t *testing.T) {
 	}
 }
 
-// TestParseEmptyKeysCarryingProperties covers a key that is nothing but an
-// anchor, an alias or a tag, in the positions such a key may appear in.
+// TestParseEmptyKeysCarryingProperties covers a key that is nothing but an anchor, an alias or a tag,
+// in the positions such a key may appear in.
 //
-// Nested in a block collection these used to be refused. The key is cut into
-// tokens before the ':' is reached, and the scanner then had no column to
-// measure the following lines against, so the line below the entry was read as
-// a continuation of its value rather than as the next entry.
+// The key is cut into tokens before the ':' is reached.
+// The test catches a scanner left with no column to measure the following lines against,
+// which reads the line below the entry as a continuation of its value instead of the next entry.
 func TestParseEmptyKeysCarryingProperties(t *testing.T) {
 	sources := map[string]string{
 		"anchored, at the top level":       "&a : a\n",
@@ -98,13 +96,12 @@ func TestParseEmptyKeysCarryingProperties(t *testing.T) {
 	}
 }
 
-// TestRenderPropertyKeysKeepTheirSeparator covers the space between such a key
-// and its ':'.
+// TestRenderPropertyKeysKeepTheirSeparator covers the space between such a key and its ':'.
 //
-// ':' is a legal character in an anchor name, an alias name and a tag, so a key
-// that ends on one absorbs a ':' written straight after it: "&a: v" anchors the
-// name "a:" over the scalar v, where "&a : v" anchors the empty key of a
-// mapping. Dropping the space changes what the document means.
+// ':' is a legal character in an anchor name, an alias name and a tag,
+// so a key that ends on one absorbs a ':' written straight after it.
+// "&a: v" anchors the name "a:" over the scalar v, where "&a : v" anchors the empty key of a mapping.
+// Dropping the space changes the document's meaning.
 func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -133,22 +130,17 @@ func TestRenderPropertyKeysKeepTheirSeparator(t *testing.T) {
 	}
 }
 
-// TestParseTagOnTheEmptyNodeInAFlowCollection covers a tag standing against the
-// punctuation of the collection it is written in.
+// TestParseTagOnTheEmptyNodeInAFlowCollection covers a tag standing against the punctuation of its collection.
 //
-// ns-flow-node admits c-ns-properties followed by e-scalar, so "!" with a ']'
-// after it is the non-specific tag on the empty node. Two things stopped that
-// from being read. isFlowType, which keeps a tag from being grouped with the
-// token after it, listed the openers and '}' but not ']' or ',': "[!]" grouped
-// the tag with the ']', and the sequence then ran to the end of the stream
-// looking for a closer it had already passed. And scanTag treated '}' as a
-// character no tag may hold instead of ending the tag there, and swallowed ']'
-// into the tag's name.
+// ns-flow-node admits c-ns-properties followed by e-scalar,
+// so "!" with a ']' after it is the non-specific tag on the empty node.
+// The test catches a tag grouped with the ']' after it, which runs the sequence to the end of the stream,
+// and a ']' or a '}' read into the tag's name.
 //
-// The null a tag stands on when nothing follows it is implicit, so the renderer
-// writes nothing for it and the document comes back as it went in. Written out
-// as "null" it read back as the *string* "null", since a tag that resolves to
-// nothing leaves its scalar as text.
+// The null a tag stands on when nothing follows it is implicit,
+// so the renderer writes nothing for it and the document comes back as it went in.
+// Written out as "null", it would read back as the string "null",
+// because a tag that resolves to nothing leaves its scalar as text.
 func TestParseTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -175,9 +167,9 @@ func TestParseTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	}
 }
 
-// TestDecodeTagOnTheEmptyNodeInAFlowCollection pins the values, which is where
-// the resolved and unresolved tags part company: "!" and a local tag leave the
-// empty node unresolved, which is null, and "!!str" makes it the empty string.
+// TestDecodeTagOnTheEmptyNodeInAFlowCollection holds the decoded values, where resolved and unresolved tags differ.
+//
+// "!" and a local tag leave the empty node unresolved, which is null, and "!!str" makes it the empty string.
 func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -199,21 +191,17 @@ func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 	}
 }
 
-// TestParseRefusesATagTheGrammarRefuses covers the tag shapes YAML 1.2 has no
-// production for.
+// TestParseRefusesATagTheGrammarRefuses covers the tag shapes YAML 1.2 has no production for.
 //
-// The scanner read a tag through to whatever ended it and never looked at the
-// characters. Three shapes came back as ordinary tags and resolved to !!str,
-// so "!<> x" decoded to "x" and nothing said the tag was not one:
+// The test catches a scanner that reads a tag through to whatever ends it without checking its characters,
+// so that "!<> x" decodes to "x" with no error. The productions are:
 //
 //	c-verbatim-tag  ::= "!" "<" ns-uri-char+ ">"
 //	ns-uri-char     ::= "%" ns-hex-digit ns-hex-digit | ns-word-char | ...
 //	ns-tag-char     ::= ns-uri-char - "!" - c-flow-indicator
 //
-// So a verbatim tag takes at least one URI character, a "%" stands only in
-// front of two hexadecimal digits, and neither "<" nor ">" is a character any
-// tag may hold. Checked against grammar.NewRecognizer, which reads the
-// specification's own grammar and refuses all of these.
+// A verbatim tag takes at least one URI character, a "%" stands only in front of two hexadecimal digits,
+// and neither "<" nor ">" is a character any tag may hold.
 func TestParseRefusesATagTheGrammarRefuses(t *testing.T) {
 	for source, want := range map[string]string{
 		"k: !<> x\n":    "must name a URI",
@@ -233,12 +221,9 @@ func TestParseRefusesATagTheGrammarRefuses(t *testing.T) {
 	}
 }
 
-// TestParseKeepsEveryTagTheGrammarAdmits is the other half, and the reason the
-// check above is written from the productions rather than from the three
-// documents that started it.
+// TestParseKeepsEveryTagTheGrammarAdmits holds the other side: every tag shape the productions admit parses.
 //
-// A local tag especially: sixteen YAML Test Suite cases carry one, and it is
-// how CloudFormation writes "!Ref" and GitLab CI writes "!reference".
+// A local tag matters most: CloudFormation writes "!Ref" with one, and GitLab CI writes "!reference".
 func TestParseKeepsEveryTagTheGrammarAdmits(t *testing.T) {
 	for _, source := range []string{
 		"k: ! x\n",                               // the non-specific tag
@@ -262,14 +247,11 @@ func TestParseKeepsEveryTagTheGrammarAdmits(t *testing.T) {
 	}
 }
 
-// TestParseKeepsATagThatEndsWhereTheDocumentDoes covers a tag with no break
-// after it.
+// TestParseKeepsATagThatEndsWhereTheDocumentDoes covers a tag with no break after it.
 //
-// The scanner emits the tag token on whatever character ends the tag -- a
-// space, a break, a flow indicator. A tag running to the end of the source ends
-// on none of them, so the loop fell out and the token was never made: "k: !!str"
-// with no closing break parsed to "k:" and the tag was gone, with nothing
-// reported. The grammar reads all of these.
+// The scanner emits the tag token on the character that ends the tag: a space, a break or a flow indicator.
+// A tag running to the end of the source ends on none of them.
+// The test catches the token going missing, so that "k: !!str" with no closing break parses to "k:" with no error.
 func TestParseKeepsATagThatEndsWhereTheDocumentDoes(t *testing.T) {
 	for source, want := range map[string]string{
 		"k: !!str":           "k: !!str\n",
@@ -289,18 +271,11 @@ func TestParseKeepsATagThatEndsWhereTheDocumentDoes(t *testing.T) {
 
 // TestParseReadsATagNamingAnotherKind covers "!!seq 5" and its relatives.
 //
-// The grammar puts no constraint on which tag stands on which node, so these
-// are YAML 1.2 and grammar.NewRecognizer reads them. The parse used to refuse
-// them with "could not find map", "value is not allowed in this context" or
-// "unexpected scalar value type" -- none of which names the tag, and each of
-// which put the document out of reach of a consumer that only wanted to read or
-// reformat it.
+// The grammar puts no constraint on which tag stands on which node, so these documents are YAML 1.2.
+// The parse builds the node the document wrote and keeps the tag on it, so the document renders as written.
 //
-// The parse builds the node the document wrote and the tag stays on it, so the
-// document renders as it was written. What the tag made of the node is
-// [github.com/go-openapi/go-yaml/ast.TagNode.Resolve]'s to report, and the load
-// refuses it -- see TestLaxTagsDoesNotExcuseAKindMismatch, which holds that the
-// refusal stands whatever the tag policy.
+// [github.com/go-openapi/go-yaml/ast.TagNode.Resolve] reports the mismatch, and the load rejects the document.
+// TestLaxTagsDoesNotExcuseAKindMismatch holds that the load rejects it under any tag policy.
 func TestParseReadsATagNamingAnotherKind(t *testing.T) {
 	for _, source := range []string{
 		"k: !!seq 5\n",
@@ -320,12 +295,11 @@ func TestParseReadsATagNamingAnotherKind(t *testing.T) {
 	}
 }
 
-// TestParseReadsACollectionTagBeforeAnAnchor covers the shape that made the
-// refusal above worth removing rather than rewording.
+// TestParseReadsACollectionTagBeforeAnAnchor covers a collection tag and an anchor written in either order.
 //
-// A tag and an anchor stand in either order and mean the same. "a: !!seq &a1
-// [1]" was refused outright, because the token after the tag was the anchor and
-// not the "[" the tag insisted on.
+// A tag and an anchor stand in either order with the same meaning.
+// With the tag first, the token after the tag is the anchor and not the "[" the tag types,
+// and the test catches a parse that rejects "a: !!seq &a1 [1]" for it.
 func TestParseReadsACollectionTagBeforeAnAnchor(t *testing.T) {
 	for _, source := range []string{
 		"a: !!seq &a1 [1]\n",
@@ -341,11 +315,10 @@ func TestParseReadsACollectionTagBeforeAnAnchor(t *testing.T) {
 	}
 }
 
-// TestParseKeepsTheTagOnAnEmptyCollection holds the line between a tag standing
-// on nothing and one standing on a node of another kind.
+// TestParseKeepsTheTagOnAnEmptyCollection holds the line between a tag standing on nothing
+// and one standing on a node of another kind.
 //
-// "k: !!seq" left the value out, which is the tag's own default and not a
-// mismatch, so it must not be caught by the change above.
+// "k: !!seq" leaves the value out, which gives the tag's own default and is not a mismatch.
 func TestParseKeepsTheTagOnAnEmptyCollection(t *testing.T) {
 	for _, source := range []string{"k: !!seq\n", "k: !!map\n", "k: !!seq\nj: 1\n", "[!!seq]\n"} {
 		t.Run(source, func(t *testing.T) {
@@ -355,19 +328,14 @@ func TestParseKeepsTheTagOnAnEmptyCollection(t *testing.T) {
 	}
 }
 
-// TestParseReadsAScalarUnderATagThatResolvesToNothing: a document whose tag
-// names no type this library reads is a document, not an error.
+// TestParseReadsAScalarUnderATagThatResolvesToNothing covers a tag naming no type this library reads.
 //
-// The scalar under such a tag keeps the text it was written with, so "!thing 1"
-// holds the string "1". parseTagValue builds that string and used to leave the
-// cursor on the scalar it had just read, so the next thing to look at the
-// stream found a token where the entry had already ended and refused the
-// document with "value is not allowed in this context".
+// The scalar under such a tag keeps the text it was written with, so "!thing 1" holds the string "1".
+// The test catches parseTagValue leaving the cursor on the scalar it built,
+// which makes the parse reject the document with "value is not allowed in this context".
 //
-// Only a "%TAG !!" line reached it before 2026-09-11: repointing the secondary
-// handle takes "!!seq" out of tag:yaml.org,2002: and leaves it naming
-// !local-seq, which resolves to nothing while still being spelled like a tag
-// the grouping joins to its scalar.
+// A "%TAG !!" line repoints the secondary handle, so "!!seq" names !local-seq,
+// which resolves to nothing while the grouping still joins it to its scalar.
 func TestParseReadsAScalarUnderATagThatResolvesToNothing(t *testing.T) {
 	for _, source := range []string{
 		"v: !!foo 1\n",
@@ -390,22 +358,14 @@ func TestParseReadsAScalarUnderATagThatResolvesToNothing(t *testing.T) {
 	}
 }
 
-// TestParseReadsAnAnchorNamingNothingInAFlowCollection: an anchor with nothing
-// after it, under a tag naming a scalar type, inside a flow collection.
+// TestParseReadsAnAnchorNamingNothingInAFlowCollection covers an anchor with nothing after it,
+// under a tag naming a scalar type, inside a flow collection.
 //
-// "{a: !!str &x}" was refused with `could not find flow mapping end token '}'`
-// and "{a: !!str &x, b: 1}" at the comma with `',' or '}' must be specified`,
-// so whatever read the anchor read the entry separator behind it. The anchor
-// names the empty node, which takes the tag's own default, and the flow
-// collection carries on.
+// The anchor names the empty node, which takes the tag's own default, and the flow collection carries on.
+// The test catches a parse that reads the "}" or the "," behind the anchor as part of its value,
+// and then rejects "{a: !!str &x}" for a missing '}'.
 //
-// The order of the two properties decided it -- "{a: &x !!str}" read -- and so
-// did the tag: "{a: !foo &x}" read, because a tag the schema does not resolve
-// leaves parseTagValue by another branch, and "{a: !!seq &x}" read as a
-// collection tag. In block context "a: !!str &x" over "b: 1" always read.
-//
-// anchorNamesNothing asks endsValue of the token after the anchor's name, which
-// is the test the tag's own next token already got.
+// anchorNamesNothing applies endsValue to the token after the anchor's name, the same test the token after a tag gets.
 func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
 	for _, source := range []string{
 		"{a: !!str &x}\n",
@@ -415,8 +375,8 @@ func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
 		"{a: !!bool &x}\n",
 		"[!!str &x]\n",
 		"[!!str &x, 1]\n",
-		// The spellings that read before, held here so a fix cannot trade one
-		// for another.
+		// Neighboring spellings: the other property order, an unresolved tag, a collection tag, block context.
+		// They are held so that a fix cannot trade one for another.
 		"{a: &x !!str}\n",
 		"{a: !foo &x}\n",
 		"{a: !!seq &x}\n",
@@ -448,26 +408,17 @@ func TestParseReadsAnAnchorNamingNothingInAFlowCollection(t *testing.T) {
 	})
 }
 
-// TestParseReadsATaggedMappingEntryOnTheTagsOwnLine: a mapping entry may begin
-// on the line its tag is written on, and the tag stands over that entry.
+// TestParseReadsATaggedMappingEntryOnTheTagsOwnLine covers a mapping entry that begins on its tag's line,
+// with the tag standing over that entry.
 //
-// "!!str &a [1]: v" was refused with `value is not allowed in this context`,
-// the caret on the anchor. The grouping hands "&a [1]" and its ":" over as a
-// map key, and parseTagValue read any map key as the next entry of the
-// collection around the tag -- so the tag took the empty node and the whole
-// mapping was left unparsed. It asks tagStandsOver now, which is
-// opensNextEntry with a carve-out for a "-".
+// The grouping hands "&a [1]" and its ":" over as a map key group, and only a tag written first meets it.
+// The test catches parseTagValue reading that group as the next entry of the enclosing collection,
+// which leaves the tag on the empty node and the mapping unparsed.
+// tagStandsOver is opensNextEntry with an exception for a "-".
 //
-// The order of the two properties decided it, and the parse was where that
-// showed: "&a !!str [1]: v" parsed on master and "!!str &a [1]: v" did not.
-// The key position is the cause and the order was the symptom -- only a tag
-// written first meets the map key group -- so the fix collapses the two into
-// one answer rather than settling which order is right.
-//
-// The document is a kind mismatch and the decoder still reports one, at the
-// tag: "!!str" names a scalar and the node is a mapping, which is the same
-// answer "!!str [1]: v" has always given. That is resolution and not syntax,
-// and the two are settled at their own layers.
+// The document is still a kind mismatch: "!!str" names a scalar and the node is a mapping.
+// The parser checks syntax and the decoder checks resolution,
+// so the parser accepts the document and the decoder reports the mismatch at the tag, as for "!!str [1]: v".
 func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 	t.Run("the parser reads them", func(t *testing.T) {
 		for _, source := range []string{
@@ -475,16 +426,14 @@ func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 			"!!seq &a [1]: v\n",
 			"!!str &a {a: 1}: v\n",
 			"!!map &a [1]: v\n",
-			// Read on master too, where the same document with the tag
-			// written first did not.
+			// The same entry with the anchor written first.
 			"&a !!str [1]: v\n",
-			// The same shapes with a tag on its own line over a block
-			// collection, which reported the complaint one line down.
+			// A tag on its own line over a block collection.
 			"!!str\nb: 1\n",
 			"!!str\n- 1\n",
 			"a: !!str\n- 1\n",
 			"- !!str\n  - 1\n",
-			// These always read, and still do.
+			// Neighboring shapes, held so that a fix cannot trade one for another.
 			"!foo &a [1]: v\n",
 			"!!str [1]: v\n",
 			"&a [1]: v\n",
@@ -499,12 +448,9 @@ func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 	})
 
 	t.Run("a tag naming a kind its node is not is reported at the tag", func(t *testing.T) {
-		// ⚠️ "!!str &a [1]: v" is not here, and its spelling without the anchor
-		// is. Both are refused; the anchored one is refused for being a
-		// collection in key position rather than for the tag, because the walk
-		// that reads an any strips a key's properties before naming it and the
-		// naming speaks first. The two spellings of one document give two
-		// messages, which is worth having written down.
+		// "!!str &a [1]: v" is left out, and its spelling without the anchor is here.
+		// The decoder rejects both, but the anchored one for a collection in key position:
+		// decoding into an any strips a key's properties before naming the key, and the naming fails first.
 		for _, source := range []string{
 			"!!str [1]: v\n",
 			"!!str\nb: 1\n", "!!str\n- 1\n", "a: !!str\n- 1\n",
@@ -517,9 +463,8 @@ func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 	})
 
 	t.Run("a tag naming the kind it stands on reads", func(t *testing.T) {
-		// The four keyed on a sequence parse and do not decode -- a collection
-		// has no text to name an entry by -- so they are asserted below, where
-		// the parse is the question this test asks.
+		// These documents are keyed on a collection, which has no text to name an entry by.
+		// They parse but do not decode, so this loop checks the parse alone.
 		for _, source := range []string{
 			"!!seq &a [1]: v\n",
 			"!!map &a [1]: v\n",
@@ -546,9 +491,7 @@ func TestParseReadsATaggedMappingEntryOnTheTagsOwnLine(t *testing.T) {
 	})
 
 	t.Run("a block sequence still may not open on the tag's own line", func(t *testing.T) {
-		// 8.2.1 keeps a "-" off the line a node's properties are written on.
-		// grammar.NewRecognizer refuses these, and so do libfyaml 1.0.0b1, the
-		// reference parser and go.yaml.in/yaml/v3.
+		// Section 8.2.1 keeps a "-" off the line a node's properties are written on.
 		for _, source := range []string{"!!int - 8\n", "---\n!!int - 23\n"} {
 			_, err := parser.ParseBytes([]byte(source), parser.WithComments())
 			require.Errorf(t, err, "%q", source)

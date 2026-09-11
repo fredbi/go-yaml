@@ -14,18 +14,17 @@ import (
 	"github.com/go-openapi/go-yaml/ast"
 )
 
-// TestPropertiesComposeIntoOneNode parses one document for each state the
-// property machine passes through, and holds the tree each one builds.
+// TestPropertiesComposeIntoOneNode parses one document for each state the property machine passes through,
+// and checks the tree each one builds.
 //
-// group.propState has eight states, and stageProperties joins an anchor, an
-// alias and a tag standing before a node into the one node they belong to. Each
-// state records how much of that has been read: "a: &x !!str 1" builds an anchor
-// over a tag over a scalar, and "a: !!str &x 1" builds a tag over an anchor over
-// the same scalar, because the tag tags what the anchor names.
+// group.propState has eight states, and stageProperties joins an anchor, an alias and a tag standing before a node
+// into the node they belong to. Each state records how much of that has been read:
+// "a: &x !!str 1" builds an anchor over a tag over a scalar,
+// and "a: !!str &x 1" builds a tag over an anchor over the same scalar,
+// because the tag types the node the anchor names.
 //
-// Each case names the node type the value composes to and the text the whole
-// document renders back to. Seven of the eight round-trip byte for byte; a tag
-// alone on its line is written back with the mapping indented under it.
+// Each case names the node type the value composes to and the text the whole document renders back to.
+// Seven of the eight round-trip byte for byte; a tag alone on its line renders with the mapping indented under it.
 func TestPropertiesComposeIntoOneNode(t *testing.T) {
 	t.Parallel()
 
@@ -102,9 +101,8 @@ func propertyTestCases() iter.Seq[propertyCase] {
 			values: []ast.Node{&ast.AnchorNode{}},
 		},
 		{
-			// The tag tags what the anchor names, so the tag is outermost here
-			// and the two documents build different trees from the same three
-			// tokens.
+			// The tag types the node the anchor names, so the tag is outermost here,
+			// and the two documents build different trees from the same three tokens.
 			state:  "propTagSawAnchor, propTagHaveAnchor",
 			src:    "a: !!str &x 1\n",
 			want:   "a: !!str &x 1\n",

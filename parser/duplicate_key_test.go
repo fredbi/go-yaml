@@ -15,12 +15,12 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestDuplicateMapKeyIsReportedPerMapping checks that a key written twice in
-// one mapping is refused, and that two mappings holding the same key are not.
+// TestDuplicateMapKeyIsReportedPerMapping checks that the parse records a key written twice in one mapping,
+// and records nothing for two mappings holding the same key.
 //
-// The keys of a mapping are compared against each other and against no others,
-// so every shape a mapping comes in has to hold its own set: block and flow,
-// nested one in the other, repeated down a sequence, and written with '?'.
+// A mapping's keys are compared with each other and with no others.
+// The cases cover each shape a mapping comes in: block and flow, one nested in the other,
+// repeated down a sequence, and written with '?'.
 func TestDuplicateMapKeyIsReportedPerMapping(t *testing.T) {
 	tests := map[string]struct {
 		src       string
@@ -97,10 +97,8 @@ func TestDuplicateMapKeyIsReportedPerMapping(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			// The parse reads the document and records the repeat rather than
-			// refusing: a document that cannot be parsed cannot be linted or
-			// rendered either, and 3.2.1.1 leaves what to do about a repeat to
-			// whoever loads it. codec refuses it there.
+			// The parse records a repeat and returns no error:
+			// section 3.2.1.1 leaves the repeat to the loader, and codec rejects it there.
 			f, err := parser.ParseBytes([]byte(test.src))
 			require.NoError(t, err)
 
@@ -135,13 +133,13 @@ func (w duplicateWalker) Visit(n ast.Node) ast.Visitor {
 	return w
 }
 
-// TestDuplicateMapKeyIsFoundPastTheScanLimit checks the index a large mapping
-// switches to. A mapping of a handful of keys compares them in a slice; the
-// repeated key here sits beyond that point, and beyond it in both directions.
+// TestDuplicateMapKeyIsFoundPastTheScanLimit checks the index a large mapping switches to.
 //
-// The position the error reports is checked with it. The index keeps where a
-// key was written rather than the node it was written on, so the line and
-// column are the only thing left to get wrong.
+// A mapping of a few keys compares them in a slice.
+// Here the first writing of the repeated key falls on either side of the point where key.Set spills into its index,
+// and the repeat past it.
+//
+// The recorded lines are checked too: the index keeps the position a key was written at, not its node.
 func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 	const keys = 200
 
@@ -175,22 +173,19 @@ func TestDuplicateMapKeyIsFoundPastTheScanLimit(t *testing.T) {
 	}
 }
 
-// TestDuplicateMapKeyAllowed checks that the option records nothing at all, so
-// that tolerating a repeat costs no memory and the load has nothing to refuse.
+// TestDuplicateMapKeyAllowed checks that the parse records no repeat under [parser.WithAllowDuplicateMapKey],
+// so the load has nothing to reject.
 func TestDuplicateMapKeyAllowed(t *testing.T) {
 	f, err := parser.ParseBytes([]byte("foo: 1\nfoo: 2\n"), parser.WithAllowDuplicateMapKey())
 	require.NoError(t, err)
 	assert.Empty(t, duplicatesOf(f))
 }
 
-// TestDuplicateMapKeyIsPerType covers the half of 3.2.1.1 that says which keys
-// are the same key.
+// TestDuplicateMapKeyIsPerType checks that two keys repeat when they resolve to the same node,
+// as section 3.2.1.1 defines.
 //
-// Two keys are equal when they resolve to the same node, so the type is half a
-// key's identity and its canonical text the other half. Comparing the
-// characters alone read "7" and "007" as two keys where they are one integer
-// written twice, and "1" and "\"1\"" as one where they are a number and a
-// string.
+// A key's identity is its type and its canonical text,
+// so "7" and "007" are one integer written twice, and "1" and "\"1\"" are a number and a string.
 func TestDuplicateMapKeyIsPerType(t *testing.T) {
 	for name, test := range map[string]struct {
 		src       string
@@ -225,26 +220,17 @@ func TestDuplicateMapKeyIsPerType(t *testing.T) {
 	}
 }
 
-// TestDuplicateMapKeyUnderATagFollowsTheResolvedName checks that a key under a
-// tagged mapping is compared by what it resolves to, in both of the ways a
-// mapping records its keys.
+// TestDuplicateMapKeyUnderATagFollowsTheResolvedName checks that a key under a tagged mapping
+// is compared by what it resolves to, both below and past the point where key.Set spills into its index.
 //
-// Three pieces of work meet here and none of them has a test for the
-// combination. The scanner types a scalar by the tag's URI rather than by the
-// characters the tag was written with, so "!!map", "!<tag:yaml.org,2002:map>"
-// and a local "!foo" all leave the keys under them to resolve. key.Set scans a
-// mapping's keys up to its spill threshold of 64 and builds a hash index past
-// it. And the key
-// rules say two keys are equal when they resolve to the same node, so "False"
-// and "false" are one key and "1" and "\"1\"" are two.
+// The scanner types a scalar by the tag's URI, so "!!map", "!<tag:yaml.org,2002:map>" and a local "!foo"
+// all leave the keys under them to resolve.
+// key.Set scans a mapping's keys up to its spill threshold of 64, and builds a hash index past it.
+// Two keys are equal when they resolve to the same node, so "False" and "false" are one key and "1" and "\"1\"" two.
 //
-// The index inherits the resolution for free because the set's key filter
-// reads the kind
-// from token.KeyName, the way the map it replaced did -- the optimization made
-// the lookup cheaper without hardcoding any typing. That is worth a test rather
-// than a comment: a later index that compared the written characters would pass
-// every other test in this file, since none of them reaches the spill with a key
-// whose name is not its text.
+// The index reads each key's kind from token.KeyName, as the scan does.
+// An index that compared the written characters would pass every other test in this file,
+// since none of them reaches the spill with a key whose name differs from its text.
 func TestDuplicateMapKeyUnderATagFollowsTheResolvedName(t *testing.T) {
 	// wide writes a tagged mapping of n ordinary keys, with first written above
 	// them and last below, so the pair straddles the spill into the index.
@@ -275,7 +261,7 @@ func TestDuplicateMapKeyUnderATagFollowsTheResolvedName(t *testing.T) {
 		"two integers":         {src: "!foo\n1: a\n2: b\n"},
 		"a number and a quote": {src: "!foo\n1: a\n\"1\": b\n"},
 
-		// Past the spill, where the index answers instead of the scan.
+		// Past the spill, the index finds the repeat instead of the scan.
 		"a repeat past the spill":          {src: wide("k0: first\n", "k0: again\n", 80), duplicate: true},
 		"no repeat past the spill":         {src: wide("", "", 80)},
 		"a resolved repeat past the spill": {src: wide("False: 1\n", "false: 2\n", 80), duplicate: true},
@@ -295,14 +281,11 @@ func TestDuplicateMapKeyUnderATagFollowsTheResolvedName(t *testing.T) {
 	}
 }
 
-// TestWideMappingsAreToldApart checks that two wide mappings hold their own
-// keys, which is what the index a wide mapping spills into has to get right.
+// TestWideMappingsAreToldApart checks that two wide mappings each hold their own keys in key.Set's index.
 //
-// TestDuplicateMapKeyIsFoundPastTheScanLimit covers a wide mapping on its own,
-// and every mapping in it starts its keys at the bottom of the key stack. These
-// do not: a nested one starts partway up, and two siblings start at the same
-// place one after the other, so a key the first left behind would be read as a
-// repeat in the second.
+// In TestDuplicateMapKeyIsFoundPastTheScanLimit every mapping starts its keys at the bottom of the key stack.
+// Here a nested mapping starts partway up, and two siblings start at the same place one after the other,
+// so a key the first left behind would read as a repeat in the second.
 func TestWideMappingsAreToldApart(t *testing.T) {
 	const wide = 200
 

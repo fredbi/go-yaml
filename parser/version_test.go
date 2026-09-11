@@ -16,13 +16,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// TestYAMLVersionResolvesScalars checks what a plain scalar means under each
-// version, through the option and through a "%YAML" directive.
+// TestYAMLVersionResolvesScalars checks how a plain scalar resolves under each version,
+// set through the option and through a "%YAML" directive.
 //
-// The two schemas disagree about more than they agree on here, and every case
-// is a value a document could reasonably hold. The scanner resolves the scalar
-// and records the answer in the token's type; nothing downstream is told which
-// version was in force, and TestSchemaReachesTheNode is where that is checked.
+// The scanner resolves the scalar and records the result in the token's type.
+// TestSchemaReachesTheNode in package ast checks that the type reaches the node.
 func TestYAMLVersionResolvesScalars(t *testing.T) {
 	for _, tc := range []struct {
 		text     string
@@ -52,21 +50,15 @@ func TestYAMLVersionResolvesScalars(t *testing.T) {
 	}
 }
 
-// TestYAMLVersionIsScopedToItsDocument checks that a "%YAML" directive reaches
-// the whole of the document it opens and none of the next.
+// TestYAMLVersionIsScopedToItsDocument checks that a "%YAML" directive applies to the whole document it opens
+// and to none of the next.
 //
-// A document is independent of its neighbors, which is what this package
-// already holds an anchor and a "%TAG" handle to: "a: &x 1" over "---" over
-// "b: *x" is refused, and a handle declared for one document is not defined for
-// the next. The version was the one declaration that spanned the stream.
+// A document is independent of its neighbors, as for anchors and "%TAG" handles:
+// "a: &x 1" over "---" over "b: *x" is rejected, and a handle declared for one document is undefined in the next.
 //
-// How far the scanner has run ahead when the scope ends depends on the marker,
-// and it is why the cases below are spelled out rather than folded into one.
-// After "---" the next document's scalars are usually still uncut and setting
-// the schema back is enough; after "..." the grouping has read the whole of the
-// next document to know the "..." closed anything, so [Parser.endVersionScope]
-// reads those tokens again. The "..." over "---" pair happened to work before
-// either was written, because the second marker leaves the scalar uncut.
+// How far the scanner has run ahead when the scope ends depends on the marker, so the cases below cover each marker.
+// After "---" the next document's scalars are usually still uncut, and resetting the schema is enough.
+// After "..." the grouping has already read the next document, and Parser.endVersionScope retypes its tokens.
 func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
 	t.Run("the next document is read under the core schema", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -101,8 +93,7 @@ func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
 	})
 
 	t.Run("a bare scalar is the next document's whole body", func(t *testing.T) {
-		// The token the descent has not taken is the body itself here, so the
-		// retyping has to reach it and not merely what follows it.
+		// Here the first token the descent has not taken is the body itself, so the retyping must reach it.
 		for _, src := range []string{
 			"%YAML 1.1\n---\na: 1\n...\nyes\n",
 			"%YAML 1.1\n---\na: 1\n---\nyes\n",
@@ -118,8 +109,8 @@ func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
 	})
 
 	t.Run("WithYAMLVersion is the caller's and still reaches every document", func(t *testing.T) {
-		// The option says what a document means where it declares nothing, so
-		// ending a directive's scope must not end the option's.
+		// The option sets the version of a document that declares none,
+		// so the end of a directive's scope leaves the option in force.
 		assert.Equal(t, []any{uint64(10), uint64(10)},
 			everyFirstValue(t, "a: 012\n---\nb: 012\n", parser.WithYAMLVersion(parser.YAML11)))
 	})
@@ -127,8 +118,7 @@ func TestYAMLVersionIsScopedToItsDocument(t *testing.T) {
 	testVersionScopeReachesALongBody(t)
 }
 
-// everyFirstValue is [firstValue] for each document of a stream that holds a
-// mapping value.
+// everyFirstValue returns the first mapping value of each document of the stream that holds one.
 func everyFirstValue(t *testing.T, src string, opts ...parser.Option) []any {
 	t.Helper()
 
@@ -148,8 +138,7 @@ func everyFirstValue(t *testing.T, src string, opts ...parser.Option) []any {
 }
 
 func testVersionScopeReachesALongBody(t *testing.T) {
-	// Far enough into the body that the scanner cannot have read it all before
-	// the parser reached the directive.
+	// The body runs to 200 entries, beyond what the scanner reads before the parser reaches the directive.
 	var long strings.Builder
 	long.WriteString("%YAML 1.1\n---\n")
 	for i := range 200 {
@@ -163,8 +152,8 @@ func testVersionScopeReachesALongBody(t *testing.T) {
 		`"..." closes the directive's scope, so the next document is 1.2 again`)
 }
 
-// firstValue is the first mapping value of the first document that holds one. A
-// "%YAML" directive opens a document of its own, ahead of the one it applies to.
+// firstValue returns the first mapping value of the first document that holds one.
+// A "%YAML" directive opens a document of its own, ahead of the one it applies to, so the first document may hold none.
 func firstValue(t *testing.T, src string, opts ...parser.Option) any {
 	t.Helper()
 
@@ -186,13 +175,11 @@ func firstValue(t *testing.T, src string, opts ...parser.Option) any {
 	return nil
 }
 
-// TestVersionSchemaMatchesTheParse checks [parser.YAMLVersion.Schema] against
-// what a parse of the same version resolves.
+// TestVersionSchemaMatchesTheParse checks [parser.YAMLVersion.Schema]
+// against what a parse of the same version resolves.
 //
-// transform reads the schema through this method and scans a document beside a
-// parse with it. The two used to be separate switch statements, one in each
-// package, so a change to either resolved a plain scalar differently in a
-// transform from in a parse and nothing failed.
+// transform scans a document beside a parse with the schema this method returns,
+// so the two must resolve a plain scalar the same way.
 func TestVersionSchemaMatchesTheParse(t *testing.T) {
 	t.Parallel()
 
@@ -212,8 +199,7 @@ func TestVersionSchemaMatchesTheParse(t *testing.T) {
 
 			require.Equal(t, version.want, version.v.Schema())
 
-			// "yes" is a bool under 1.1 and a string under 1.2, so the parse
-			// says which schema it used.
+			// "yes" is a bool under 1.1 and a string under 1.2, so the token type shows which schema the parse used.
 			f, err := parser.New(parser.WithYAMLVersion(version.v)).Parse([]byte("a: yes\n"))
 			require.NoError(t, err)
 

@@ -12,12 +12,10 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseDoesNotCrash collects inputs that used to bring the parser down.
+// TestParseDoesNotCrash checks that the parser returns on reduced inputs that panicked it.
 //
-// Each entry is a reduced input, and each is also a seed in
-// testdata/fuzzseeds so that fuzzing keeps the surrounding shape covered. What
-// the parser answers for these is secondary -- an error is a perfectly good
-// answer -- as long as it answers.
+// The test checks only that the parse returns: an error is an acceptable answer.
+// Keep a seed of each input under testdata/fuzz/FuzzParserParseBytes, so fuzzing covers the shapes around it.
 func TestParseDoesNotCrash(t *testing.T) {
 	tests := map[string]struct {
 		source string

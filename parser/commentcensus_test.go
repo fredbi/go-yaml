@@ -17,24 +17,19 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// staleCommentCeiling is how many comments the parse may stage against a token
-// and then never claim, over the documents it accepts. It is 0, and a parse
-// that leaves one behind has dropped it.
+// staleCommentCeiling is the number of comments the parse may record against a token and never take,
+// over the documents it accepts. It is 0: a parse that leaves one behind has dropped it.
 //
-// ⚠️ It counts one route out of several, and an earlier version of this comment
-// said it counted "the comments the parse read and attached to nothing", which
-// it does not. TestRenderingKeepsTheCommentsItWasGiven in ast/ counts what
-// comes back from a rendering and is the measure of loss; this one says where
-// the parse dropped what it dropped.
+// It counts one route of loss out of several.
+// TestRenderingKeepsTheCommentsItWasGiven in package ast counts what a rendering returns, and measures loss overall;
+// this count locates where the parse dropped a comment.
 //
-// comment.staged minus comment.taken separates kept from lost on every route
-// measured: a head comment, a line comment, a foot comment on a block or flow
-// collection, a comment on a "---", and the two the grouping stages against a
-// group token -- the comment on a flow collection's opening bracket and the one
-// closing a flow key's line, which were the last two to be lost.
+// comment.staged minus comment.taken separates kept from lost on every route:
+// a head comment, a line comment, a foot comment on a block or flow collection, a comment on a "---",
+// and the two the grouping records against a group token,
+// on a flow collection's opening bracket and closing a flow key's line.
 //
-// A comment left in the index also holds the token it points at, and the tape
-// chunk that token sits in, until the parse ends.
+// A comment left in the index also keeps the token it points at, and that token's tape chunk, until the parse ends.
 
 const (
 	staleCommentCeiling  = 0
@@ -43,14 +38,11 @@ const (
 	commentedDocuments = 6691
 )
 
-// TestNoCommentIsReadAndThenDropped counts, for every document the parse
-// accepts, the comments it read and attached to nothing.
+// TestNoCommentIsReadAndThenDropped counts, over every accepted document that holds a comment,
+// the comments the parse recorded against a token and never took, and the head comments it wrote over.
 //
-// It needs the probe: a walk over the tree can say a comment is missing and
-// cannot say where it went, and ast.Node.GetComment does not even say that
-// reliably -- it returns a sequence entry's line comment and a mapping entry's
-// head comment, and reaches neither MappingValueNode.LineComment nor any
-// FootComment.
+// It needs the probe: a walk over the tree finds a comment missing but not where it went,
+// and ast.Node.GetComment reaches neither MappingValueNode.LineComment nor any FootComment.
 func TestNoCommentIsReadAndThenDropped(t *testing.T) {
 	require.True(t, probe.Enabled, "this test needs -tags yamlprobe")
 
@@ -97,14 +89,12 @@ func TestNoCommentIsReadAndThenDropped(t *testing.T) {
 	mustHold(t, "head comments written over", overwrote, overwroteHeadCeiling, accepted, commentedDocuments)
 }
 
-// mustHold checks a measured count against the recorded one: exactly where the
-// same documents were measured, and as a ceiling where more were.
+// mustHold checks a measured count against the recorded one:
+// exactly when the same number of documents was measured, and as a ceiling when more were.
 //
-// The exact side is the ratchet. A ceiling alone passes when a count falls, so a
-// fix that stops the parse dropping a comment would leave the old number
-// standing and over-stating the loss from then on. Where the denominator moved a
-// fall cannot be read -- fewer losses over more documents says nothing by itself
-// -- so a ceiling is the honest bound there.
+// The exact check fails on a fall as well as a rise, so a fix that stops the parse dropping a comment
+// forces the recorded number down.
+// When the document count moves, a fall cannot be credited to the parse, so only the ceiling applies.
 func mustHold(t *testing.T, what string, got int64, recorded, accepted, acceptedRecorded int) {
 	t.Helper()
 

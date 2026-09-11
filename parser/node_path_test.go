@@ -34,12 +34,10 @@ func (v pathCollector) Visit(n ast.Node) ast.Visitor { v(n); return v }
 
 // TestNodePathsAreRendered checks the path every node reports.
 //
-// The paths are a trie of steps rather than a string per node, so the check
-// that matters is the rendering: a step into a mapping, a step into a sequence,
-// and a key holding a character YAMLPath reads as syntax.
+// The paths are stored as a trie of steps, so the test checks the rendering:
+// a step into a mapping, a step into a sequence, and a key holding a character YAMLPath reads as syntax.
 //
-// The first entry of each want is the *ast.DocumentNode, which carries no path
-// and never has.
+// The first entry of each want is the *ast.DocumentNode, which carries no path.
 func TestNodePathsAreRendered(t *testing.T) {
 	tests := map[string]struct {
 		src  string
@@ -101,7 +99,7 @@ func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 
 	assert.Equal(t, with.String(), without.String(), "the document should render the same either way")
 
-	// every node but the *ast.DocumentNode, which carries no path either way
+	// Every node but the *ast.DocumentNode, which carries no path either way.
 	for _, p := range paths(t, src)[1:] {
 		assert.NotEmpty(t, p)
 	}
@@ -110,8 +108,8 @@ func TestOmitNodePathsSilencesGetPath(t *testing.T) {
 	}
 }
 
-// TestSetPathOverridesTheRecordedPath checks that a path handed in by a caller
-// reads back exactly, rather than being folded into the trie.
+// TestSetPathOverridesTheRecordedPath checks that a path set by a caller reads back exactly,
+// and is not folded into the trie.
 func TestSetPathOverridesTheRecordedPath(t *testing.T) {
 	f, err := parser.ParseBytes([]byte("foo: 1\n"))
 	require.NoError(t, err)

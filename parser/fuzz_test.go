@@ -14,9 +14,8 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// parseModes covers the two settings a caller can choose between. Comments
-// change which tokens reach the parser, so they are a distinct code path rather
-// than a presentation option.
+// parseModes holds the two comment settings a caller can choose between.
+// WithComments changes which tokens reach the parser, so each setting runs its own code path.
 var parseModes = map[string][]parser.Option{
 	"default":  nil,
 	"comments": {parser.WithComments()},
@@ -37,13 +36,10 @@ func FuzzParserParseBytes(f *testing.F) {
 
 			require.NotNilf(t, file, "%s: neither a file nor an error for %q", name, src)
 
-			// Rendering an accepted document must not panic. Several reports
-			// arrive this way -- a document parses, and String on some node of
-			// the result brings the process down.
+			// Rendering an accepted document must not panic.
 			rendered := file.String()
 
-			// Parsing is a pure function of its input. The same source and mode
-			// must give the same answer every time.
+			// Parsing is a pure function of its input: the same source and mode must give the same answer every time.
 			again, err := parser.ParseBytes([]byte(src), opts...)
 			require.NoErrorf(t, err, "%s: parse is not stable for %q", name, src)
 			assert.Equalf(t, rendered, again.String(), "%s: rendering is not stable for %q", name, src)
@@ -51,12 +47,10 @@ func FuzzParserParseBytes(f *testing.F) {
 	})
 }
 
-// FuzzParserWalk exercises the AST rather than the parse, by visiting every node
-// of every document that parses and rendering it on its own.
+// FuzzParserWalk exercises the AST, by visiting every node of every document that parses and rendering each on its own.
 //
-// This is the shape of the reports that come from tooling: a consumer walks the
-// tree looking for positions or values, and calls String on a node the library
-// itself never renders in isolation.
+// Tooling that walks the tree for positions or values calls String on nodes the library never renders in isolation,
+// and this target covers that use.
 func FuzzParserWalk(f *testing.F) {
 	addSuiteSeeds(f)
 
@@ -88,8 +82,8 @@ type visitorFunc func(ast.Node) ast.Visitor
 
 func (fn visitorFunc) Visit(node ast.Node) ast.Visitor { return fn(node) }
 
-// addSuiteSeeds seeds a fuzz target with every document of the YAML Test Suite,
-// valid and invalid alike, plus the reduced inputs from reports we track.
+// addSuiteSeeds seeds a fuzz target with fuzzseeds.All: every document of the YAML Test Suite,
+// valid and invalid alike, and the reduced inputs of bug reports.
 func addSuiteSeeds(f *testing.F) {
 	f.Helper()
 

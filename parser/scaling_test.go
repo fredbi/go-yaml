@@ -14,33 +14,24 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// The sizes to compare. Sixteen times as many entries is enough separation to
-// tell a constant from a growing one, and small enough to stay fast.
+// scalingSmall and scalingLarge are the sizes compared.
+// Sixteen times as many entries separates a constant per-entry cost from a growing one, and still runs fast.
 const (
 	scalingSmall = 500
 	scalingLarge = 8000
 
-	// How much the per-entry cost may grow between those two sizes. A linear
-	// parser holds it flat; measured, it moves by about a tenth, which is the
-	// allocator's own size classes rather than the algorithm. The recursive
-	// parseMap moved it by a factor of nine over the same range, so anything
-	// near this bound is a real regression rather than noise.
+	// scalingTolerance bounds how much the per-entry cost may grow between the two sizes.
+	// A linear parse keeps the ratio near 1, and a parse quadratic in the entries would grow it sixteenfold.
 	scalingTolerance = 2.0
 )
 
-// TestParseScalesLinearlyInWidth guards the property that a mapping's parse
-// cost is proportional to the number of entries, not to their square.
+// TestParseScalesLinearlyInWidth checks that a flat mapping or sequence costs a constant amount per entry to parse.
 //
-// parseMap used to recurse once per sibling entry, building a whole
-// MappingNode at every level and discarding it to keep only its values, so a
-// mapping of N keys cost N recursions and slice concatenations summing to
-// O(N^2). It was invisible on small fixtures and severe on the wide, shallow
-// mappings a large OpenAPI paths: section produces.
+// A parse that handles sibling entries by recursion, or concatenates their slices, costs O(N^2) for N entries.
+// Small fixtures hide it, and a wide mapping such as a large OpenAPI paths: section exposes it.
 //
-// The measurement is bytes allocated per entry rather than time. Allocation is
-// what the defect actually multiplied, and it is deterministic -- the same
-// numbers on a busy CI runner as on an idle workstation, which a timing
-// threshold could not promise.
+// The test compares bytes allocated per entry, not time.
+// Allocation is deterministic, so the bound holds on a busy CI runner as on an idle workstation.
 func TestParseScalesLinearlyInWidth(t *testing.T) {
 	for name, generate := range map[string]func(int) string{
 		"mapping":  corpus.FlatMap,

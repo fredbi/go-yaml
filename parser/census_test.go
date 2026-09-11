@@ -18,21 +18,17 @@ import (
 
 // TestGroupCensus counts the groups one document builds, by kind.
 //
-// It reads the document through newReader, walks every group.TokenGroup the
-// tokens reach, and logs a table: how many groups of each group.TokenGroupType,
-// how many members they hold between them, and what their cells weigh at 32
-// bytes each. It asserts nothing. Read the table before changing what
-// group.Grouper spends its allocations on, so the change starts on the kind a
-// document is actually made of.
+// It reads the document through newReader, walks every group.TokenGroup the tokens reach, and logs a table:
+// the count of each group.TokenGroupType, the members those groups hold, and their cells' size at 32 bytes each.
+// It asserts nothing. Read the table before changing what group.Grouper allocates,
+// so the change starts on the kinds a document is made of.
 //
-// Set CENSUS_YAML to the document. A name ending in ".gz" is decompressed, so
-// the workloads read the corpus where it lies:
+// Set CENSUS_YAML to the document. A name ending in ".gz" is decompressed, so the workloads are read in place:
 //
 //	CENSUS_YAML=../internal/analysis/workloads/testdata/citm_catalog.yaml.gz \
 //	    go test -v -run TestGroupCensus ./parser/
 //
-// testcorpus.Dir names that directory, and readCorpus in corpus_test.go reads
-// all seven of them.
+// testcorpus.Dir names that directory.
 func TestGroupCensus(t *testing.T) {
 	path := os.Getenv("CENSUS_YAML")
 	if path == "" {
@@ -115,8 +111,8 @@ func TestGroupCensus(t *testing.T) {
 		wrappers, wrappers*16/1024, raw.Len(), raw.Len()*16/1024)
 }
 
-// readCensusSource reads the document CENSUS_YAML names, decompressing it where
-// the name says it is gzipped. The workload corpus is stored that way.
+// readCensusSource reads the document CENSUS_YAML names, and decompresses it when the name ends in ".gz",
+// as the workload corpus is stored.
 func readCensusSource(t *testing.T, path string) []byte {
 	t.Helper()
 

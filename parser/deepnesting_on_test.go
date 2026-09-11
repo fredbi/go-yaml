@@ -15,47 +15,37 @@ import (
 	"github.com/go-openapi/go-yaml/internal/probe"
 )
 
-// shiftedCounter is what group.Grouper.releaseWindow adds up: the elements it
-// moves out of the key window on each call, plus the openers it takes the move
-// off. A parse that hands nothing on records nothing.
+// shiftedCounter names the probe counter group.Grouper.releaseWindow adds to:
+// the elements it moves out of the key window on each call, plus the openers it adjusts.
+// A parse that hands nothing on adds nothing.
 const shiftedCounter = "grouper.keyWindow.shifted"
 
-// TestWindowShiftStaysLinear holds the work the key window does on a document
-// of nothing but open brackets to a constant per token.
+// TestWindowShiftStaysLinear bounds the key window's work on a document of nested flow sequences
+// to eight elements per bracket.
 //
-// group.Grouper.releaseWindow used to copy the whole window onto itself and
-// take zero off every opener whenever nothing could be handed on, which is
-// every token while a flow collection is open. That is one token of work per
-// token held, so 400,000 brackets -- an 800 KB document -- took 67 seconds and
-// a gigabyte.
+// While a flow collection is open, group.Grouper.releaseWindow can hand nothing on,
+// and it returns early instead of shifting the whole window onto itself.
+// Without that return every token shifts every token held, so the count grows with the square of the depth
+// and passes the bound at these depths.
 //
-// This reads the counter and not the clock. A ratio of two wall times failed
-// about one run in three on a busy machine while nothing was wrong; a count is
-// the same on every machine. With the early return in place the bracket
-// document records zero, and with it taken out the counter reads 3,001,000 at
-// depth 1,000 and 48,004,000 at 4,000 -- sixteen times the work for four times
-// the input, which is the shape being guarded against.
+// The test reads a probe counter instead of the clock, so its result does not depend on the machine's load.
 func TestWindowShiftStaysLinear(t *testing.T) {
 	for _, depth := range []int{25_000, 100_000} {
 		src := []byte(strings.Repeat("[", depth) + strings.Repeat("]", depth))
 
 		shifted := shiftedBy(t, src)
 
-		// Eight per token is loose on purpose: the bound is watching for an
-		// exponent, and a change that legitimately moves a few elements per
-		// token should not have to come here. Quadratic clears it by five
-		// orders of magnitude at these depths.
+		// The bound is loose on purpose: it catches quadratic growth,
+		// and a change that moves a few elements per token still passes.
 		require.LessOrEqualf(t, shifted, int64(8*depth),
 			"%d brackets moved %d elements through the key window", depth, shifted)
 	}
 }
 
-// TestWindowShiftCountsAFlatMapping records that the counter fires at all.
+// TestWindowShiftCountsAFlatMapping checks that the counter fires, within the same bound.
 //
-// TestWindowShiftStaysLinear asserts an upper bound, and a counter that is
-// never written passes it. A flat mapping hands every entry on as it is read,
-// so it moves about two elements per entry and reports a number the bound
-// above would not have caught.
+// TestWindowShiftStaysLinear asserts an upper bound, which a counter that is never written passes.
+// A flat mapping hands every entry on as it is read, so the counter must be positive.
 func TestWindowShiftCountsAFlatMapping(t *testing.T) {
 	const entries = 4_000
 
@@ -74,8 +64,8 @@ func TestWindowShiftCountsAFlatMapping(t *testing.T) {
 // shiftedBy parses src and returns what the parse added to shiftedCounter.
 //
 // The count is a delta because the registry is one map for the whole process,
-// so a test running alongside cannot make this one fail. Neither test here
-// calls t.Parallel, which would put two parses inside one delta.
+// so a test running alongside cannot make this one fail.
+// Neither test here calls t.Parallel, which would put two parses inside one delta.
 func shiftedBy(t *testing.T, src []byte) int64 {
 	t.Helper()
 

@@ -13,12 +13,11 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseKeys covers the mapping keys YAML allows that are not plain
-// scalars: absent keys, keys named explicitly with '?', and collections.
+// TestParseKeys covers the mapping keys YAML allows that are not plain scalars:
+// absent keys, keys named explicitly with '?', and collections.
 //
-// Each case asserts the shape of the key rather than only that the document
-// parses -- "accepted" is a weak claim when the alternative is accepting it
-// with the value silently dropped, which is what an earlier attempt did.
+// Each case asserts the key's node type, not only that the document parses:
+// a parse can accept a document and still drop the entry's value.
 func TestParseKeys(t *testing.T) {
 	tests := map[string]struct {
 		source  string
@@ -85,8 +84,7 @@ func TestParseKeys(t *testing.T) {
 	}
 }
 
-// TestParseKeysRejected covers keys YAML does not allow, which a strict parser
-// has to refuse rather than interpret.
+// TestParseKeysRejected covers keys YAML does not allow, which the parser must reject.
 func TestParseKeysRejected(t *testing.T) {
 	tests := map[string]string{
 		"collection key spanning lines": "[23\n]: 42\n",

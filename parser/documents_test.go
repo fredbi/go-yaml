@@ -14,13 +14,12 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestParseBlockScalarAtTheDocumentRoot covers a block scalar that is the whole
-// document.
+// TestParseBlockScalarAtTheDocumentRoot covers a block scalar that is the whole document.
 //
-// Nothing encloses it, so its content has no level to be indented past and may
-// start at column 1 -- which is the spec's own bare-documents example. The
-// scanner held such a header to the same level as one written under a key, and
-// refused its content for not being indented past a level that is not there.
+// Nothing encloses it, so its content has no level to be indented past and may start at column 1,
+// as in the specification's bare-documents example.
+// The test catches a scanner that holds such a header to the level of one written under a key,
+// and rejects its content for not being indented past a level that is not there.
 func TestParseBlockScalarAtTheDocumentRoot(t *testing.T) {
 	valid := map[string]string{
 		"literal with content at column 1":  "|\n1\n",
@@ -43,14 +42,11 @@ func TestParseBlockScalarAtTheDocumentRoot(t *testing.T) {
 	})
 }
 
-// TestParseEmptyDocumentsKeepTheirStream covers a document with nothing in it
-// between two others.
+// TestParseEmptyDocumentsKeepTheirStream covers a document with nothing in it between two others.
 //
-// It is a document like any other, and so is everything after it. One "---"
-// straight after another used to end the parse: the empty document was
-// returned and the rest of the stream was dropped without a word, so
-// "a: 1\n---\n---\nb: 2\n" came back as two documents and the second value
-// was simply gone.
+// An empty document is a document like any other, and so is everything after it.
+// The test catches a parse that ends at one "---" straight after another and drops the rest of the stream,
+// so that "a: 1\n---\n---\nb: 2\n" comes back as two documents.
 func TestParseEmptyDocumentsKeepTheirStream(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -66,9 +62,8 @@ func TestParseEmptyDocumentsKeepTheirStream(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			// Without ParseComments the comment is not even a token, which is
-			// how the drop went unnoticed: the shape it needs is two markers
-			// with nothing between them.
+			// Without WithComments the comment is not a token,
+			// so the case with a comment between the markers becomes two markers with nothing between them.
 			for _, mode := range []struct {
 				name string
 				opts []parser.Option
@@ -81,13 +76,10 @@ func TestParseEmptyDocumentsKeepTheirStream(t *testing.T) {
 	}
 }
 
-// TestParseDocumentsAfterASuffix covers what may follow the "..." that ends a
-// document.
+// TestParseDocumentsAfterASuffix covers what may follow the "..." that ends a document.
 //
-// It takes the rest of its line, where only a comment may follow it. The next
-// line starts a new document, and that document may be a bare one: any scalar
-// written there used to be refused as content belonging to the document that
-// had just ended.
+// Only a comment may follow the "..." on its own line. The next line starts a new document, which may be a bare one.
+// The test catches a scalar on that line rejected as content of the document that has just ended.
 func TestParseDocumentsAfterASuffix(t *testing.T) {
 	valid := map[string]string{
 		"a scalar on the next line":       "a\n...\nb\n",
@@ -120,10 +112,9 @@ func TestParseDocumentsAfterASuffix(t *testing.T) {
 
 // TestParseExplicitKeyComments covers a comment written on the "?" line.
 //
-// It belongs to the key. The group that holds an explicit key ends on the key
-// itself rather than on a ':', and the comment was carried over to the value as
-// though it had been written after one -- so it came back on both lines, and
-// the document gained a comment every time it was read and written.
+// The comment belongs to the key. The group holding an explicit key ends on the key and not on a ':'.
+// The test catches the comment carried over to the value as though written after a ':',
+// which renders it on both lines and adds a comment each time the document is read and written.
 func TestParseExplicitKeyComments(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -157,7 +148,7 @@ func TestParseExplicitKeyComments(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, test.want, file.String())
 
-			// And it settles: a second cycle adds nothing.
+			// It settles: a second parse and render adds nothing.
 			reread, err := parser.ParseBytes([]byte(test.want), parser.WithComments())
 			require.NoErrorf(t, err, "cannot read back %q", test.want)
 			assert.Equal(t, test.want, reread.String())
@@ -165,22 +156,13 @@ func TestParseExplicitKeyComments(t *testing.T) {
 	}
 }
 
-// TestAnExplicitEntryKeepsBothComments: a comment on the ":" line and a head
-// comment above the "?" both reach the tree.
+// TestAnExplicitEntryKeepsBothComments holds a comment on the ":" line and a head comment above the "?" in the tree.
 //
-// They were one slot and two comments. The ":" line comment had two places and
-// each is occupied by something else in a document that writes one: on the
-// value it becomes a head comment, since the value begins on a later line, and
-// collides with a head comment written under the ":"; on BaseNode.Comment it
-// collides with a head comment written above the "?". A fix on either side lost
-// the other's comment, which is why the entry has a slot of its own now.
+// The ":" line comment goes to the entry's own LineComment.
+// On the value it would collide with a head comment written under the ":",
+// and on BaseNode.Comment with a head comment written above the "?".
 //
-// ⚠️ This asserts the tree and not the rendered text. ast.Renderer writes an
-// entry's Comment above the entry and reads nothing from LineComment, so the
-// ":" line comment reaches the page only while it is also in Comment -- see
-// setEntryLineComment's bridge. The renderer change that writes LineComment
-// after the ":" is what puts it back on the line it was written on, and this
-// test is what says the parse has it to write.
+// The test asserts the tree and not the rendered text.
 func TestAnExplicitEntryKeepsBothComments(t *testing.T) {
 	for name, tc := range map[string]struct {
 		source string
@@ -199,7 +181,7 @@ func TestAnExplicitEntryKeepsBothComments(t *testing.T) {
 		},
 		"the ':' line alone, so the head slot stays empty": {
 			source: "? k\n: # c\n",
-			head:   "", // the renderer reads LineComment, so nothing bridges it
+			head:   "", // LineComment alone holds the ':' line comment.
 			line:   "# c",
 		},
 	} {
@@ -221,9 +203,8 @@ func TestAnExplicitEntryKeepsBothComments(t *testing.T) {
 		})
 	}
 
-	// An entry written the short way has nowhere to lose one: its line comment
-	// goes on the value node, whose own slot is free. Kept so that a change to
-	// the long form cannot quietly move the short one.
+	// An entry written the short way puts its line comment on the value node, whose own slot is free.
+	// It is held so that a change to the long form cannot move the short one.
 	t.Run("the short spelling is untouched", func(t *testing.T) {
 		entry := firstMappingEntry(t, "# h\na: v # c\n")
 
@@ -236,8 +217,7 @@ func TestAnExplicitEntryKeepsBothComments(t *testing.T) {
 	})
 }
 
-// firstMappingEntry parses src with comments and returns the first entry of the
-// mapping at its root.
+// firstMappingEntry parses src with comments and returns the first entry of the mapping at its root.
 func firstMappingEntry(t *testing.T, src string) *ast.MappingValueNode {
 	t.Helper()
 
@@ -259,27 +239,19 @@ func firstMappingEntry(t *testing.T, src string) *ast.MappingValueNode {
 	}
 }
 
-// TestACommentAfterTheExplicitKeyIndicatorIsKept: a comment closing the "?"s
-// own line reaches the tree and the rendered text.
+// TestACommentAfterTheExplicitKeyIndicatorIsKept holds a comment closing a "?" line through a parse and a render.
 //
-// stageLineComments runs before anything is grouped, so such a comment is
-// recorded against the bare "?" token. By the time parseMapKey reaches the key
-// the "?" has been wrapped twice -- once with the body naming the key, once
-// with the entry's ":" -- and the token handed over is the outer wrapper, so
-// the lookup found nothing. A group reports the type it opens with, which is
-// why a type test cannot tell the two apart and only the identity can.
+// stageLineComments records such a comment against the bare "?" token, before anything is grouped.
+// By the time parseMapKey reaches the key, the "?" has been wrapped twice,
+// once with the key's body and once with the entry's ":", so the token in hand is the outer wrapper.
+// A group reports the type it opens with, so only pointer identity tells the wrapper from the "?".
 //
-// The comment goes on the node the key names, which is where the renderer
-// writes one: "? a # note" already keeps its comment that way, since there the
-// comment closes the scalar's line and is recorded against the scalar. So
-// "? # c" over "  k" comes back as "? k # c", the short spelling's placement,
-// and a key that cannot share its "?"s line keeps the comment where it was.
+// The comment goes on the key's node, where the renderer writes it, as for "? a # note".
+// So "? # c" over "  k" comes back as "? k # c",
+// and a key that cannot share the line of its "?" keeps the comment where it was written.
 //
-// 8.2.2 gives c-l-block-map-explicit-key(n) the shape "?"
-// s-l+block-indented(n,block-out) and s-l-comments sits inside it, so the
-// spelling is the document's to write: grammar.NewRecognizer accepts
-// "? # c" over "  k" over ": v" and the reference parser emits eight events
-// for it.
+// Section 8.2.2 gives c-l-block-map-explicit-key(n) the shape "?" s-l+block-indented(n,block-out),
+// and s-l-comments sits inside it, so the document may write the comment there.
 func TestACommentAfterTheExplicitKeyIndicatorIsKept(t *testing.T) {
 	for name, tc := range map[string]struct{ source, renders string }{
 		"a scalar key, so the comment moves onto its line": {
@@ -294,8 +266,7 @@ func TestACommentAfterTheExplicitKeyIndicatorIsKept(t *testing.T) {
 			source:  "? #\n  ? \"\"\n  :\n:\n",
 			renders: "? #\n  ? \"\"\n  :\n:\n",
 		},
-		// The shapes that kept their comment before, so the fix cannot have
-		// moved them.
+		// Neighboring shapes, held so that a fix cannot move them.
 		"the comment closing the key's own line": {
 			source:  "? k # c\n: v\n",
 			renders: "? k # c\n: v\n",
@@ -312,16 +283,14 @@ func TestACommentAfterTheExplicitKeyIndicatorIsKept(t *testing.T) {
 			once := f.String()
 			assert.Equal(t, tc.renders, once)
 
-			// It settled in two renderings before, losing the comment on the
-			// second: the first wrote "? #" and the parse of that held none.
+			// A second parse and render leaves the text unchanged.
 			g, err := parser.ParseBytes([]byte(once), parser.WithComments())
 			require.NoErrorf(t, err, "%q", once)
 			assert.Equalf(t, once, g.String(), "%q renders to %q and then moves", tc.source, once)
 		})
 	}
 
-	// The YAML Test Suite says it too: the document writes eight comments and
-	// seven reached the rendered text.
+	// A YAML Test Suite document with comments on the "?" line, the ":" line and a "-" line keeps all three.
 	t.Run("a suite document stops losing one", func(t *testing.T) {
 		const src = "? # lala\n - seq1\n: # lala\n - #lala\n  seq2\n"
 
@@ -331,17 +300,11 @@ func TestACommentAfterTheExplicitKeyIndicatorIsKept(t *testing.T) {
 	})
 }
 
-// TestFixedAMarkerKeepsTheCommentClosingItsLine.
+// TestFixedAMarkerKeepsTheCommentClosingItsLine renders a comment on a "---" or "..." line back on that line.
 //
-// A "---" and a "..." are not nodes, so nothing asked for the comment staged
-// against them and it stayed in the index: "--- # c1" rendered as "---", and
-// "%YAML 1.2" over "---" over "Document" over "... # Suffix" lost the suffix.
-// ast.DocumentNode.StartComment and EndComment claim them.
-//
-// Two slots and not the inherited BaseNode.Comment, because one document may
-// carry both at once. A comment written *above* a "---" is a different thing
-// again -- it introduces the document and reaches its body -- and already
-// rendered correctly.
+// A marker is not a node, so no node takes its comment: ast.DocumentNode.StartComment and EndComment hold them.
+// One document may carry both, so it has two slots and does not use the inherited BaseNode.Comment.
+// A comment written above a "---" is different: it introduces the document and reaches its body.
 func TestFixedAMarkerKeepsTheCommentClosingItsLine(t *testing.T) {
 	const bom = "\ufeff"
 
@@ -375,23 +338,17 @@ func TestFixedAMarkerKeepsTheCommentClosingItsLine(t *testing.T) {
 	})
 }
 
-// TestFixedARootNodeKeepsBothItsComments.
+// TestFixedARootNodeKeepsBothItsComments keeps a head comment and a line comment on the document body.
 //
-// A mapping entry and a sequence entry each have two comment fields, so a head
-// comment above one and a line comment after it both survive. A node with no
-// entry around it -- the whole document body -- had one, ast.BaseNode.Comment,
-// and setHeadComment assigns: "# c1" over "831 # c2" kept "# c1" and dropped
-// the property comment, and rendered what was left in the property comment's
-// place.
+// A mapping entry and a sequence entry each have two comment fields, so both comments survive there.
+// A node with no entry around it has one, ast.BaseNode.Comment, and SetComment assigns it,
+// so the test catches "# c1" over "831 # c2" losing one of the two.
 //
-// ast.BaseNode.HeadComment means "above this node" for every node type, and
-// Renderer.withHeadComment writes it there. It is written only where Comment is
-// already taken, which is what makes it safe: Comment is where a head comment
-// already renders correctly on a mapping, on a sequence and on a block under a
-// key, and hoisting those moved comments the older field placed correctly.
+// ast.BaseNode.HeadComment holds the comment above a node for every node type, and Renderer.withHeadComment writes it.
+// attachComment writes HeadComment where Comment is taken or renders beside the node.
+// On a mapping, a sequence and a block under a key, Comment renders above the node and keeps the head comment.
 //
-// Over the Test Suite and the fuzz seeds, head comments written over fall from
-// 7 to 0 -- see TestNoCommentIsReadAndThenDropped.
+// TestNoCommentIsReadAndThenDropped counts overwritten head comments across the corpus.
 func TestFixedARootNodeKeepsBothItsComments(t *testing.T) {
 	for _, src := range []string{
 		"# c1\n831 # c2\n",
@@ -425,22 +382,15 @@ func TestFixedARootNodeKeepsBothItsComments(t *testing.T) {
 	})
 }
 
-// TestFixedAnIndentedCommentBetweenAKeyAndItsColonIsKept.
+// TestFixedAnIndentedCommentBetweenAKeyAndItsColonIsKept keeps a comment between an explicit key and its ":".
 //
-// A comment written between an explicit key and its ":" survived only at column
-// 1. endsExplicitKeyBody ends the body at a token whose column is not past the
-// "?", so a comment written further in was taken for part of the body, grouped
-// with the key and never reached a node: "? key" over "  # comment" over
-// ": value" lost it, where the same comment at column 1 ended the body and was
-// read as the ":" line's head comment.
+// endsExplicitKeyBody ends the body at a token whose column is not past the "?".
+// The test catches a comment written further in taken for part of the body,
+// grouped with the key and never reaching a node, as in "? key" over "  # comment" over ": value".
 //
-// A comment is not a node, so it is held aside rather than added to the body,
-// and handed on after the key. Where more of the body follows it goes back
-// where it was written, which is what keeps a comment inside a block collection
-// under the key in its place.
-//
-// Four documents of the corpus that were refused now parse, all four accepted
-// by grammar.NewRecognizer, and none stops parsing.
+// A comment is not a node, so it is held aside and handed on after the key.
+// Where more of the body follows it, the comment goes back where it was written,
+// so a comment inside a block collection under the key keeps its place.
 func TestFixedAnIndentedCommentBetweenAKeyAndItsColonIsKept(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
 		// The comment stands between the key and the value, so it is written
@@ -449,8 +399,7 @@ func TestFixedAnIndentedCommentBetweenAKeyAndItsColonIsKept(t *testing.T) {
 		{src: "? key\n # comment\n: value\n", want: "? key\n:\n  # comment\n  value\n"},
 		{src: "? key\n  # comment\n: value\n", want: "? key\n:\n  # comment\n  value\n"},
 		{src: "? key\n    # comment\n: value\n", want: "? key\n:\n  # comment\n  value\n"},
-		// A multi-line plain key, whose comment ends it -- see the scanner's
-		// TestFixedAPlainScalarEndsAtAComment.
+		// A multi-line plain key, which the comment ends: see the scanner's TestFixedAPlainScalarEndsAtAComment.
 		{src: "?\n  a\n      - b\n# c\n: v\n", want: "? a - b\n:\n  # c\n  v\n"},
 		{src: "?\n  a\n      - b\n  # c\n: v\n", want: "? a - b\n:\n  # c\n  v\n"},
 		{src: "?\n  a\n      - b\n      # c\n: v\n", want: "? a - b\n:\n  # c\n  v\n"},

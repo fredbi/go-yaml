@@ -12,27 +12,12 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// TestATabSeparatesAPropertyFromItsNode is the same rule as
-// TestATabIsSeparationAndNotIndentation, one construct further in.
+// TestATabSeparatesAPropertyFromItsNode applies the rule of TestATabIsSeparationAndNotIndentation
+// to the separation between a node property and its node.
 //
-// s-separate-in-line is s-white+ and s-white is a space or a tab, so the two
-// characters do the same work between a node property and the node it carries.
-// Three readers decided what ends a name and only one of them knew that:
-//
-//   - scanWhiteSpace cut the token and cleared isAnchor and isAlias, which is
-//     why "a: &x y" was always right;
-//   - the scan loop's tab branch added the tab to the origin and read on, so
-//     "a: &x\ty" ran the anchor name into the value and cut "&xy" -- the value
-//     gone, and a later "*x" naming nothing, which takes the whole document
-//     down;
-//   - scanTag switched on ' ' and let '\t' fall to the arm that appends, so
-//     "a: !!str\tx" was refused as "found invalid tag character".
-//
-// Scanner.endsProperty is the one thing a space did that a tab did not, and
-// both call it now.
-//
-// grammar.NewRecognizer reads every document here, and so do
-// go.yaml.in/yaml/v3 v3.0.5 and libfyaml 1.0.0b1.
+// s-separate-in-line is s-white+, and s-white is a space or a tab,
+// so a tab ends an anchor name, an alias name or a tag exactly as a space does.
+// Scanner.endsProperty decides where a property ends, for both characters.
 func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 	t.Run("after an anchor", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -44,7 +29,7 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 			{"a: &x\t[1]\n", map[string]any{"a": []any{uint64(1)}}},
 			{"- &x\ty\n", []any{"y"}},
 
-			// The space spelling, kept so a fix to the tab cannot move it.
+			// The space spelling, as a control.
 			{"a: &x y\n", map[string]any{"a": "y"}},
 		} {
 			var got any
@@ -54,8 +39,7 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 	})
 
 	t.Run("and the anchor is still named, so an alias finds it", func(t *testing.T) {
-		// This is the half that made the defect cost a document rather than a
-		// value: the anchor was cut as "xy", so "*x" named nothing.
+		// The tab ends the anchor name, so "*x" finds the anchor "x".
 		var got any
 		require.NoError(t, codec.Unmarshal([]byte("a: &x\ty\nb: *x\n"), &got))
 		assert.Equal(t, map[string]any{"a": "y", "b": "y"}, got)
@@ -89,24 +73,16 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 	})
 
 	t.Run("at the root of a document, where no delimiter stands before it", func(t *testing.T) {
-		// The two indentation tests in the scan loop's tab branch both consume
-		// the tab and read on, and at the root lastDelimColumn is 0 with the
-		// anchor's name in the buffer, so "&a1\t>-" took the first of them:
-		// the name ran on into the header and the anchor was cut as "a1>-".
-		// The block scalar was then never opened and " , a" read as a plain
-		// scalar, refused for beginning with a ','.
-		//
-		// Asking whether a property ends before either test is what fixes it.
-		// go.yaml.in/yaml/v3 v3.0.5 reads ", a", the reference parser passes
-		// the document and grammar.NewRecognizer accepts it.
+		// At the root lastDelimColumn is 0, and the anchor's name is still in the buffer when the tab arrives.
+		// The scan must end the property before either indentation test in the tab branch reads on,
+		// or "&a1\t>-" cuts the anchor "a1>-" and never opens the block scalar.
 		for _, src := range []string{
 			"&a1\t>-\n , a\n",
 			"&a1\t|-\n , a\n",
 			"&a1\t>-\n   , a\n",
 			"&a1\t>-\n x\n",
 
-			// The three neighbors that always read, kept so a fix here cannot
-			// move them: a space, a tag, and no property at all.
+			// Three controls: a space, a tag, and no property at all.
 			"&a1 >-\n , a\n",
 			"!!str\t>-\n , a\n",
 			">-\n , a\n",
@@ -118,8 +94,7 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 	})
 
 	t.Run("an alias naming nothing is still refused", func(t *testing.T) {
-		// The tab ends the alias name, so this one names "x" and not "xy" --
-		// and nothing anchors "x", which the grammar refuses too.
+		// The tab ends the alias name, so the alias names "x", which no anchor declares.
 		var got any
 		err := codec.Unmarshal([]byte("a: *x\ty\n"), &got)
 		require.Error(t, err)

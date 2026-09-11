@@ -11,18 +11,14 @@ import (
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
 )
 
-// TestGroupingHolds reports how far ahead of the descent the grouping keeps the
-// tape.
+// TestGroupingHolds logs how many tokens the grouping holds ahead of the descent, for each corpus document.
 //
-// A grouping pass runs ahead of the parse and holds what it cannot yet settle,
-// so the tape stands at least that much however far the tail has moved. It is
-// the floor under everything the walk gives back.
+// A grouping pass runs ahead of the parse and holds what it cannot settle yet,
+// so the tape keeps at least that much however far the tail has moved.
+// groupMapKeysByValue holds the most: keyWindow.keepFrom reaches back to the start of any open flow collection,
+// because that collection may still close and become a key.
 //
-// groupMapKeysByValue is the pass that can hold a lot of it. Its window reaches
-// back to the start of any flow collection still open, because that collection
-// may yet close and stand as a key -- keyWindow.keepFrom says so.
-//
-// Run with -v for the table.
+// It asserts only that each document parses. Run with -v for the table.
 func TestGroupingHolds(t *testing.T) {
 	ordinary := readCorpus(t, corpusDir())
 	stress := readCorpus(t, stressDir())
@@ -44,12 +40,10 @@ func TestGroupingHolds(t *testing.T) {
 	}
 }
 
-// TestGroupingHoldsLittleInBlockStyle is the floor a walk over an ordinary
-// document runs into.
+// TestGroupingHoldsLittleInBlockStyle checks that the grouping holds at most 16 tokens
+// on every corpus document written in block style, however wide.
 //
-// Every workload written in block style, and map_wide with its fifty thousand
-// keys, leaves the grouping holding a handful of tokens. Width costs nothing:
-// the pass settles each key as its ':' arrives and hands the rest on.
+// The pass settles each key as its ':' arrives and hands the rest on, so the width of a mapping costs nothing.
 func TestGroupingHoldsLittleInBlockStyle(t *testing.T) {
 	all := readCorpus(t, corpusDir())
 	wide := readCorpus(t, stressDir())
@@ -71,15 +65,12 @@ func TestGroupingHoldsLittleInBlockStyle(t *testing.T) {
 	}
 }
 
-// TestAFlowCollectionHoldsToItsClose records the case that does not come down.
+// TestAFlowCollectionHoldsToItsClose checks that the grouping holds more than 50,000 tokens of flow_wide at once.
 //
-// A flow collection may close and stand as a mapping key, so nothing inside one
-// is settled until the ']' arrives. flow_wide is one sequence of 30,000
-// members, and the grouping holds every token of it.
-//
-// The collection there is written as a value -- "wide: [...]" -- so it cannot
-// be a key, and a window that knew as much could hand its tokens on. Nothing
-// reads that yet.
+// A flow collection may close and become a mapping key, so nothing inside one is settled until its ']' arrives,
+// and the grouping holds the whole of flow_wide's single sequence.
+// The sequence is written as a value ("wide: [...]"), so it cannot be a key,
+// but the key window does not use that to release its tokens.
 func TestAFlowCollectionHoldsToItsClose(t *testing.T) {
 	for _, w := range readCorpus(t, stressDir()) {
 		if w.Name != "flow_wide" {

@@ -15,13 +15,11 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestMergeKeysFoldWithoutTheRestOf11 holds what [parser.WithMergeKeys] turns
-// on, and what it leaves alone.
+// TestMergeKeysFoldWithoutTheRestOf11 checks what [parser.WithMergeKeys] turns on, and what it leaves alone.
 //
-// A document written for a tool that never left YAML 1.1 uses a bare "<<" and
-// expects it to fold. Reading the whole document as 1.1 to get that changes
-// how every plain scalar resolves, which is the trade this option exists to
-// avoid.
+// A document written for a YAML 1.1 tool uses a bare "<<" and expects it to merge.
+// Reading the whole document as 1.1 would also change how every plain scalar resolves,
+// and WithMergeKeys enables the merge key alone.
 func TestMergeKeysFoldWithoutTheRestOf11(t *testing.T) {
 	const src = "base: &b {k: 1}\nuse:\n  <<: *b\nnums: [0100, 1_000, yes]\n"
 
@@ -61,8 +59,8 @@ func holdsAMergeKey(t *testing.T, src string, opts ...parser.Option) bool {
 	return found
 }
 
-// scalarKindsOf names the node type of each element of the document's "nums"
-// sequence, which says how the version in force resolved it.
+// scalarKindsOf returns the node type of each element of the document's "nums" sequence,
+// which shows how the version in force resolved it.
 func scalarKindsOf(t *testing.T, src string, opts ...parser.Option) string {
 	t.Helper()
 

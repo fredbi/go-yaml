@@ -12,14 +12,13 @@ import (
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
 )
 
-// anchored names the documents holding an anchor, whose chunks a walk saves.
+// anchored lists the corpus documents that hold an anchor, whose chunks a walk saves.
 var anchored = map[string]bool{
 	"anchors_far": true, "anchors_many": true, "anchors_nested": true,
 }
 
-// counting is a visitor that keeps nothing, which is the point -- except for
-// the first anchor it meets, which it keeps on purpose so that what Save
-// promises can be checked after the walk.
+// counting is a visitor that keeps nothing except the first anchor it meets.
+// The test reads that anchor after the walk, to check what Save promises.
 type counting struct {
 	nodes      int
 	anchor     ast.Node
@@ -37,33 +36,25 @@ func (v *counting) Enter(node ast.Node, _ Step) bool {
 
 func (v *counting) Leave(ast.Node, Step) {}
 
-// TestWalkLetsTheTapeGo checks a walk hands the tape back as it reads.
+// TestWalkLetsTheTapeGo checks that a walk returns the tape's chunks as it reads.
 //
-// The walk keeps nothing it is handed, so the tail follows the descent and
-// every chunk behind it reaches the free list. Two chunks stand at the end,
-// whatever the document: the one being read and the one before it.
+// The walk keeps nothing it is handed, so the tail follows the descent,
+// and every chunk behind it goes to the free list, where the next Add takes it back.
+// At most three chunks stay live at the end, whatever the document, and no chunk goes missing.
 //
-// It recycles: the reader fills the tape as the descent asks for tokens, so a
-// chunk the tail passes reaches the free list and the next Add takes it back.
-// golang_source runs 293,142 tokens through 9 chunks and takes 1,137 off the
-// free list, a 99% hit; map_wide runs 150,000 through 3.
+// A document with an anchor saves chunks while it runs, because an alias may name the anchored node later,
+// and releases them when the document ends.
 //
-// Two columns read the other way and are not failures:
+// Run with -v for the table. Its columns:
 //
-//   - free high is how many chunks sat idle at once. flow_wide's 233 is the key
-//     window holding an open flow collection, which may yet close and stand as
-//     a key, so nothing behind it may be given up.
-//   - saved high is what the anchors held. anchors_many keeps 218 chunks in the
-//     stash and anchors_far 1. That is Save doing its job: an anchored node has
-//     to outlive the tail because an alias may name it later in the document.
+//   - free high is the most chunks idle at once.
+//     An open flow collection raises it, because the collection may still close and become a key,
+//     so the key window releases nothing behind it.
+//   - saved high is the most chunks the anchors held at once.
+//   - working set is the chunks live plus the chunks saved.
 //
-// A 0% hit with a low free high and a high saved high, as anchors_many has, is
-// the tape holding what it was told to hold. A 0% hit with a high free high, as
-// flow_wide has, is one node spanning more chunks than the tape can reclaim
-// behind. Neither is recycling failing.
-//
-// working set is what the walk needed at once: the chunks live plus the chunks
-// saved.
+// A low hit rate is not a failure when saved high is high, because the anchors hold those chunks,
+// or when free high is high, because one node spans more chunks than the tape can reclaim behind it.
 func TestWalkLetsTheTapeGo(t *testing.T) {
 	ordinary := readCorpus(t, corpusDir())
 	stress := readCorpus(t, stressDir())
@@ -82,17 +73,14 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 			stats := p.tapeStats()
 
 			if anchored[w.Name] {
-				// Saved is zero by now: the document ended and what its anchors
-				// saved went back with it. SavedHigh is what they held while it
-				// ran.
+				// Saved is zero once the document ends and its anchors' saves go back.
+				// SavedHigh records what they held while it ran.
 				require.Positive(t, stats.SavedHigh,
 					"%s holds anchors and the walk saved no chunk for them", w.Name)
 				require.Zero(t, stats.Saved,
 					"%s: the document ended and its saves did not go back", w.Name)
 
-				// What Save promises. It holds trivially while nothing refills
-				// the free list, and becomes a real check the moment tokens
-				// arrive during a walk.
+				// Save keeps the anchor's chunk, so the reader does not refill it under the anchor during the walk.
 				require.NotNil(t, keep.anchor)
 				require.Equal(t, keep.anchorName, keep.anchor.GetToken().Value,
 					"%s: the anchor's token was filled again under it", w.Name)
@@ -106,11 +94,8 @@ func TestWalkLetsTheTapeGo(t *testing.T) {
 				"%s: a walk left %d chunks live, so something is holding what it was handed",
 				w.Name, stats.Live)
 
-			// held is the memory the arena has taken and not given back --
-			// every chunk it allocated, free list included. working set is
-			// what the walk actually needed at once, which is what the same
-			// walk would hold if the tokens arrived as it read rather than
-			// all before it.
+			// hit is the share of chunk requests the free list served,
+			// and the last column is the working set in KiB.
 			hit := 100 * float64(stats.Recycled) / float64(max(stats.Recycled+stats.Allocated, 1))
 
 			t.Logf("%-19s %8d %10d %9d %5.0f%% %9d %8d %7d %9dK",

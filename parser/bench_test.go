@@ -12,9 +12,9 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// The benchmarks below are the regression baseline for the parser. They measure
-// this library only -- comparisons against other libraries live in the
-// benchmarks and analysis modules, which take the dependencies for it.
+// The benchmarks below are the regression baseline for the parser, and measure this library only.
+// Comparisons against other libraries live in the internal/benchmarks and internal/analysis modules,
+// which take the dependencies for them.
 //
 // To compare two revisions:
 //
@@ -46,13 +46,9 @@ func BenchmarkParseBytesWithComments(b *testing.B) {
 	})
 }
 
-// Parsing and tokenizing are measured apart in internal/analysis, over the
-// workloads: BenchmarkScanTokens is the scan, BenchmarkParserNew adds the
-// grouping, and BenchmarkParserParse adds the tree. parser.New reads an
-// iterator rather than a slice, so there is no token slice to parse twice.
+// BenchmarkScanTokens in internal/analysis measures the scan alone, over the same workloads.
 
-// BenchmarkRender measures turning an AST back into text, which is half of the
-// round trip and is not otherwise covered.
+// BenchmarkRender measures turning an AST back into text, the other half of the round trip.
 func BenchmarkRender(b *testing.B) {
 	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
 		file, err := parser.ParseBytes(src, parser.WithComments())

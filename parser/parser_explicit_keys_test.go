@@ -16,10 +16,9 @@ import (
 // TestParseExplicitKeyValues covers what may follow the ':' of an explicit key.
 //
 // The ':' stands alone on its line, with the key written above it after a '?'.
-// The level the value is measured against is that ':' -- it had been left at
-// the level of whatever the key held, so a key that was a block sequence put it
-// two columns further in than the entry really sits, and a block scalar value
-// was cut off at its first line.
+// The value's indentation is measured from that ':', not from the key's content.
+// Measured from a block sequence key, the level sits two columns too far in,
+// and a block scalar value is cut off at its first line.
 func TestParseExplicitKeyValues(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -64,14 +63,11 @@ func TestParseExplicitKeyValues(t *testing.T) {
 	}
 }
 
-// TestParseExplicitKeyWithNothingInIt covers the entry whose key is the empty
-// node.
+// TestParseExplicitKeyWithNothingInIt covers the entry whose key is the empty node.
 //
 // c-l-block-map-explicit-key is "?" followed by s-l+block-indented(n,block-out),
 // which admits e-node, and the separation after the "?" may be a line break.
-// So "?" alone on its line opens an entry keyed on null, with or without a
-// value written under it. Both used to be refused -- "? \n" as "undefined map
-// key" and "?\n: v\n" as "value is not allowed in this context".
+// So "?" alone on its line opens an entry keyed on null, with or without a value written under it.
 func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -127,12 +123,11 @@ func TestParseExplicitKeyWithNothingInIt(t *testing.T) {
 	}
 }
 
-// TestParseIndicatorWhereAValueGoes checks that "?" is refused where only a
-// node may stand.
+// TestParseIndicatorWhereAValueGoes checks that "?" is rejected where only a node may stand.
 //
-// "k: ?\n" was read as the string "?", which no production reaches: a plain
-// scalar may open with "?" only when a non-space character follows, and an
-// explicit key may not be the value of an entry on the entry's own line.
+// No production reads "k: ?\n" as the string "?":
+// a plain scalar may open with "?" only when a non-space character follows,
+// and an explicit key may not be the value of an entry on the entry's own line.
 func TestParseIndicatorWhereAValueGoes(t *testing.T) {
 	_, err := parser.ParseBytes([]byte("k: ?\n"))
 	require.Error(t, err)

@@ -34,12 +34,11 @@ func aliasesOf(t *testing.T, doc *ast.DocumentNode) aliasCollector {
 	return found
 }
 
-// TestAnAliasKnowsWhatItNames covers the target the parser fills in.
+// TestAnAliasKnowsWhatItNames checks the target the parser sets on each alias.
 //
-// A consumer reads [ast.AliasNode.Target] rather than collecting anchors of its
-// own, so what an alias names has to be right for every shape an anchor may
-// stand on -- a scalar, a collection, an empty node, a mapping key -- and for
-// an anchor nested inside another.
+// A consumer reads [ast.AliasNode.Target] and collects no anchors of its own,
+// so the target must be right for every node an anchor may stand on:
+// a scalar, a collection, an empty node, a mapping key, and an anchor nested inside another.
 func TestAnAliasKnowsWhatItNames(t *testing.T) {
 	tests := map[string]struct {
 		source string
@@ -72,13 +71,12 @@ func TestAnAliasKnowsWhatItNames(t *testing.T) {
 	}
 }
 
-// TestAnAliasNamesTheDeclarationBeforeIt covers a name declared twice.
+// TestAnAliasNamesTheDeclarationBeforeIt checks an anchor name declared twice.
 //
-// §3.2.2.2: "an alias event refers to the most recent event in the
-// serialization having the specified anchor. Therefore, anchors need not be
-// unique within a serialization." So the two aliases below name two nodes, and
-// a table read after the parse -- which holds only the last -- would give both
-// the same one.
+// Section 3.2.2.2: "an alias event refers to the most recent event in the serialization having the specified anchor.
+// Therefore, anchors need not be unique within a serialization."
+// So the two aliases below name two nodes.
+// A table read after the parse holds only the last declaration, and would give both aliases the same node.
 func TestAnAliasNamesTheDeclarationBeforeIt(t *testing.T) {
 	f, err := parser.ParseBytes([]byte("a: &x 1\nb: *x\nc: &x 2\nd: *x\n"))
 	require.NoError(t, err)
@@ -89,13 +87,11 @@ func TestAnAliasNamesTheDeclarationBeforeIt(t *testing.T) {
 	assert.Equal(t, "1", aliases[0].Target.String())
 	assert.Equal(t, "2", aliases[1].Target.String())
 
-	// The document's table keeps the last, which is what an anchor of that name
-	// means anywhere after it.
+	// The document's table keeps the last declaration, the node the name stands for from there on.
 	assert.Equal(t, "2", f.Docs[0].Anchors["x"].String())
 }
 
-// TestADocumentCarriesItsOwnAnchors covers what reaches
-// [ast.DocumentNode.Anchors].
+// TestADocumentCarriesItsOwnAnchors checks the anchors each document's [ast.DocumentNode.Anchors] holds.
 func TestADocumentCarriesItsOwnAnchors(t *testing.T) {
 	f, err := parser.ParseBytes([]byte("a: &x 1\nb: &y [2]\n---\nc: &z 3\n"))
 	require.NoError(t, err)
@@ -110,17 +106,16 @@ func TestADocumentCarriesItsOwnAnchors(t *testing.T) {
 	assert.Len(t, f.Docs[1].Anchors, 1)
 	assert.Equal(t, "3", f.Docs[1].Anchors["z"].String())
 
-	// A document declaring none carries none rather than an empty table.
+	// A document declaring no anchor carries a nil table, not an empty one.
 	plain, err := parser.ParseBytes([]byte("a: 1\n"))
 	require.NoError(t, err)
 	assert.Nil(t, plain.Docs[0].Anchors)
 }
 
-// TestAnAliasNamesNothingAndIsRefused covers the rule a grammar cannot state.
+// TestAnAliasNamesNothingAndIsRefused checks that an alias naming no anchor fails with yamlerrors.ErrUnknownAnchor.
 //
-// All three break the one rule: an alias names an anchor its own document
-// declared before it. The decoder reported these; the parser reports them now,
-// which is what lets every other consumer stop checking.
+// An alias names an anchor its own document declared before it, a rule the grammar cannot express.
+// The parser applies it, so no other consumer needs to check.
 func TestAnAliasNamesNothingAndIsRefused(t *testing.T) {
 	tests := map[string]string{
 		"an anchor that is never declared": "a: *x\n",
@@ -140,14 +135,12 @@ func TestAnAliasNamesNothingAndIsRefused(t *testing.T) {
 	}
 }
 
-// TestACycleResolvesRatherThanBeingRefused covers an alias inside what its own
-// anchor names.
+// TestACycleResolvesRatherThanBeingRefused checks that an alias inside the node its own anchor names resolves.
 //
-// An anchor names its node from where the node starts, so "&x [ *x ]" resolves
-// and the tree holds a cycle: YAML's representation is a graph. Refusing it as
-// malformed would be a defect whichever model reads it afterwards -- the
-// decoder refuses the cycle, because a Go value built by walking has nowhere to
-// put one, and that is a different refusal at a different layer.
+// An anchor names its node from where the node starts, so "&x [ *x ]" resolves and the tree holds a cycle:
+// YAML's representation is a graph.
+// The decoder rejects the cycle, because a Go value built by walking has no place for one.
+// That check belongs to the decoder, not the parser.
 func TestACycleResolvesRatherThanBeingRefused(t *testing.T) {
 	tests := map[string]string{
 		"a sequence holding an alias to itself":   "a: &x [ *x ]\n",
@@ -172,7 +165,7 @@ func TestACycleResolvesRatherThanBeingRefused(t *testing.T) {
 	}
 }
 
-// TestACycleClosesOnTheNodeTheAliasStandsIn is the cycle itself, measured.
+// TestACycleClosesOnTheNodeTheAliasStandsIn checks that the alias in "&x [ *x ]" names the sequence holding it.
 func TestACycleClosesOnTheNodeTheAliasStandsIn(t *testing.T) {
 	f, err := parser.ParseBytes([]byte("a: &x [ *x ]\n"))
 	require.NoError(t, err)
@@ -186,12 +179,10 @@ func TestACycleClosesOnTheNodeTheAliasStandsIn(t *testing.T) {
 	assert.Same(t, ast.Node(aliases[0]), seq.Values[0], "the sequence holds the alias that names it")
 }
 
-// TestPublishedAnchorsAreNamedButNotDeclared covers [parser.WithAnchors].
+// TestPublishedAnchorsAreNamedButNotDeclared checks [parser.WithAnchors].
 //
-// A document read alongside others -- the reference files the decoder is given,
-// which exist to publish their anchors -- names anchors it does not write. What
-// is published is not what the document declares, so it stays out of
-// [ast.DocumentNode.Anchors].
+// A document read alongside others, such as the reference files the decoder is given, names anchors it does not write.
+// Published anchors are not the document's own, so they stay out of [ast.DocumentNode.Anchors].
 func TestPublishedAnchorsAreNamedButNotDeclared(t *testing.T) {
 	published, err := parser.ParseBytes([]byte("a: &x 1\n"))
 	require.NoError(t, err)
@@ -211,9 +202,8 @@ func TestPublishedAnchorsAreNamedButNotDeclared(t *testing.T) {
 	assert.Equal(t, "2", aliasesOf(t, own.Docs[0])[0].Target.String())
 }
 
-// TestANamelessAnchorNeverReachesTheTable pins where a '&' or a '*' with no
-// name is caught: the scanner refuses it, before the anchor table is asked
-// anything. So no entry is ever made under an empty name.
+// TestANamelessAnchorNeverReachesTheTable checks that the scanner rejects a '&' or a '*' with no name,
+// with yamlerrors.ErrSyntax, before the anchor table sees it, so no entry is made under an empty name.
 func TestANamelessAnchorNeverReachesTheTable(t *testing.T) {
 	for _, source := range []string{"a: &\n  b: 1\n", "a: *\n"} {
 		_, err := parser.ParseBytes([]byte(source))

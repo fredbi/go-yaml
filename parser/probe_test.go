@@ -18,26 +18,23 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// keyLedger records how often the parser's mapping-key state disagreed with
-// itself over the fuzz corpus, the way the scanner's state ledger does.
+// keyLedger records how often each mapping-key invariant of the parser fails over the fuzz corpus,
+// as the scanner's state ledger does for the scanner.
 //
-// A ratchet in both directions. An entry that starts disagreeing has lost an
-// invariant; one that stops may have become removable, and it comes down.
+// TestKeyLedger holds each count exactly, in both directions.
+// An entry that starts failing has lost an invariant.
+// An entry that stops failing may guard a check that can go, and its count comes down.
 var keyLedger = map[string]int64{ //nolint:gochecknoglobals // ok to store an immutable map as a global
-	// Mappings nest, so a mapping records keys only while it is the innermost
-	// one open. If that holds, the key set's entries above base are exactly one
-	// mapping's keys, so the base its index records adds nothing to the slice
-	// bound, and a duplicate can be found by scanning the tail instead of
-	// hashing base into a document-wide map.
+	// Mappings nest, so a mapping records keys only while it is the innermost one open.
+	// Then the key set's entries above base are one mapping's keys,
+	// and a duplicate is found by scanning the tail instead of hashing base into a document-wide map.
 	//
-	// Nothing may raise this: a disagreement means an outer mapping recorded a
-	// key over an inner one's, and key.Ledger.Close would drop a key it still
-	// owns.
+	// This count stays 0: a failure means an outer mapping recorded a key over an inner one's,
+	// and key.Ledger.Close would drop a key it still owns.
 	"mapkey.stackTailIsOneMapping": 0,
 }
 
-// TestKeyLedger holds the parser's mapping-key invariants to what they were
-// measured at.
+// TestKeyLedger holds the parser's mapping-key invariants to the counts keyLedger records.
 //
 //	go test -tags yamlprobe -run TestKeyLedger ./parser/
 func TestKeyLedger(t *testing.T) {
@@ -54,9 +51,9 @@ func TestKeyLedger(t *testing.T) {
 	checks := probe.Checks()
 	require.NotEmpty(t, checks, "the probe recorded nothing; is the yamlprobe tag on?")
 
-	// probe.Checks is one ledger for the whole library and a parse runs the
-	// scanner too, which keeps its own in internal/scanner. Only the parser's
-	// names are this test's business.
+	// probe.Checks holds one ledger for the whole library,
+	// and a parse also runs the scanner, whose checks internal/scanner holds to its own ledger.
+	// This test reads only the parser's "mapkey." names.
 	names := make([]string, 0, len(checks))
 	for name := range checks {
 		if strings.HasPrefix(name, "mapkey.") {

@@ -12,28 +12,18 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestATabIsSeparationAndNotIndentation holds one rule to one answer.
+// TestATabIsSeparationAndNotIndentation checks that a tab is rejected in a block entry's indentation
+// and admitted as separation.
 //
-// s-indent(n) is spaces and nothing else, so a tab among a block entry's
-// indentation leaves the entry with nothing to sit on. A tab is separation, and
-// is admitted wherever separation is: in front of a flow node, after a ':', and
-// inside a flow collection.
+// s-indent(n) is spaces and nothing else, so a tab among a block entry's indentation leaves the entry no indentation.
+// A tab is separation, and is admitted wherever separation is:
+// in front of a flow node, after a ':', and inside a flow collection.
 //
-// Three scanner sites asked this and answered it three ways. Two cut the origin
-// with strings.TrimPrefix(origin, " ") and tested the next byte for a tab,
-// which trims one space -- so " \ta: 1" and "  \ta: 1" drew different messages
-// for one fault -- and the third read Scanner.indentHasTab. The origin form
-// also missed a quoted key, which resets the buffer, and knew nothing about
-// flow mode, so it refused "{\ta: 1}" that every oracle reads.
-//
-// Scanner.tabStandsWhereAnEntryNeedsIndent is the one question now, over the
-// two runs that can hold the tab: the line's own indentation, and the
-// separation since a token already cut on this line.
+// Scanner.tabStandsWhereAnEntryNeedsIndent decides it, over the two runs that can hold the tab:
+// the line's own indentation, and the separation after a token already cut on this line.
 func TestATabIsSeparationAndNotIndentation(t *testing.T) {
 	t.Run("a block entry is refused, whatever stands in front of the tab", func(t *testing.T) {
-		// Every one of these drew "tab character cannot use as a map key
-		// directly" or "...cannot stand for the indentation..." depending on
-		// the space count and on whether the key was quoted.
+		// Each fails with the same message, whatever the space count and whether the key is quoted.
 		for _, src := range []string{
 			"\ta: 1\n",
 			" \ta: 1\n",
@@ -44,8 +34,8 @@ func TestATabIsSeparationAndNotIndentation(t *testing.T) {
 			"a:\n \tb: 1\n",
 			"a:\n  \tb: 1\n",
 
-			// The tab is in the separation the '-' left, not in the line's
-			// indentation, which is the second run.
+			// Here the tab stands in the separation after the '-', the second run,
+			// not in the line's indentation.
 			"- \ta: 1\n",
 			"-\ta: 1\n",
 		} {
@@ -65,8 +55,7 @@ func TestATabIsSeparationAndNotIndentation(t *testing.T) {
 	})
 
 	t.Run("a flow collection admits it, and used to be refused", func(t *testing.T) {
-		// grammar.NewRecognizer, go.yaml.in/yaml/v3 v3.0.5 and libfyaml
-		// 1.0.0b1 all read these three. The retired check had no flow test.
+		// A flow collection has no indentation, so a tab inside one is separation.
 		for _, src := range []string{
 			"{\ta: 1}\n",
 			"{ \ta: 1}\n",

@@ -15,18 +15,14 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestStepDocumentNumbersTheStream checks which document of a stream a walk
-// says each node belongs to.
+// TestStepDocumentNumbersTheStream checks the document number a walk gives each node.
 //
-// A walk hands the nodes of every document over in one run, and a stream's
-// documents are independent: an anchor and a "%YAML" directive are both scoped
-// to one. Step.Document is what tells them apart.
+// A walk hands the nodes of every document over in one run, and a stream's documents are independent:
+// an anchor and a "%YAML" directive each apply to one. Step.Document tells them apart.
 //
-// An empty document hands over no node at all, so the count has to move where
-// the document is read rather than where its first node is. That is the whole
-// point of the field: "---" over "---" over "b: 2" hands over one mapping, and
-// it belongs to document 1. codec.ToJSON counted the bodies it saw instead and
-// converted that mapping as though it were the first document.
+// An empty document hands over no node, so the count moves when the document is read, not at its first node:
+// "---" over "---" over "b: 2" hands over one mapping, and it belongs to document 1.
+// Counting the bodies handed over would put that mapping in document 0.
 func TestStepDocumentNumbersTheStream(t *testing.T) {
 	t.Parallel()
 
@@ -45,8 +41,7 @@ func TestStepDocumentNumbersTheStream(t *testing.T) {
 	t.Run("the count indexes the documents the walk returns", func(t *testing.T) {
 		t.Parallel()
 
-		// Step.Document and File.Docs have to agree, or a caller holding both
-		// cannot line them up.
+		// Step.Document indexes File.Docs, so a caller holding both can line them up.
 		const src = "%YAML 1.2\n---\na: 1\n---\n---\nc: 3\n"
 
 		v := &documentSpy{}
@@ -99,17 +94,15 @@ func walkDocumentTestCases() iter.Seq[walkDocumentTestCase] {
 			want: []int{0, 2},
 		},
 		{
-			// The count indexes the File's Docs, and a directive line is an
-			// entry of those, so "a: 1" is document 1 rather than document 0.
-			// A caller that means "the first document holding a value" has to
-			// step past the directives itself, which is what codec.ToJSON does.
+			// The count indexes the File's Docs, and a directive line is one of them,
+			// so "a: 1" is document 1, not document 0.
+			// To find the first document holding a value, a caller steps past the directives, as codec.ToJSON does.
 			name: "a directive is a document of its own",
 			src:  "%YAML 1.2\n---\na: 1\n---\nb: 2\n",
 			want: []int{0, 1, 2},
 		},
 		{
-			// Each directive line is a document of its own, so two of them put
-			// the mapping at 2. codec.ToJSON steps past them one at a time.
+			// Each directive line is a document of its own, so two of them put the mapping at 2.
 			name: "two directive lines are two documents",
 			src:  "%YAML 1.2\n%TAG !e! tag:yaml.org,2002:\n---\na: 1\n",
 			want: []int{0, 1, 2},

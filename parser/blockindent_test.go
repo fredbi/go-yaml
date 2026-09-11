@@ -14,42 +14,26 @@ import (
 	"github.com/go-openapi/go-yaml/parser"
 )
 
-// TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon covers where a block
-// scalar's indentation indicator counts from when the entry holding it has no
-// key.
+// TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon checks where a block scalar's indentation indicator
+// counts from when the entry holding it has no key.
 //
-// 8.1.1.1 makes the indicator count from the parent node's indentation, and
-// "- : |1" over "   x" is a sequence entry holding a mapping whose key is the
-// empty node. The mapping sits at the ':' in column 3, so the content is
-// measured from there and reads "x".
+// Section 8.1.1.1 counts the indicator from the parent node's indentation.
+// "- : |1" over "   x" is a sequence entry holding a mapping whose key is the empty node.
+// The mapping sits at the ':' in column 3, so the content is measured from there and reads "x".
 //
-// scanMapValue took the column from the last content token on the line, and a
-// '-' is not one, so the entry kept the sequence's own column 1 and the content
-// read as "  x" -- two spaces that were the entry's indentation. Every
-// rendering then wrote them out and the next read gained two more, so the value
-// grew without bound: "x" to "  x" to "    x". libfyaml 1.0.0b1 reads "x".
-//
-// A key of any kind hides it, because the key is a content token that says
-// where the entry sits: "- \"\": |1" and "- a: |1" were both correct.
-//
-// The same empty key under a mapping rather than a sequence entry -- "k:" over
-// "  : |1" -- is not here on purpose. It was refused outright, with "unexpected
-// scalar value", until keyWindow.hasNoKey stopped keying a ':' on the entry
-// above it, and it belongs to that fix and its tests. Asserting it here would
-// make this test pass only with that commit already applied.
+// Measured from the sequence's column 1, the content would read "  x",
+// and each rendering would add two more spaces, so the value would have no fixed point.
+// A written key hides the fault, because the key token marks where the entry sits.
 func TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon(t *testing.T) {
 	t.Run("the content is measured from the colon", func(t *testing.T) {
 		for _, tc := range []struct{ name, src, want string }{
 			{name: "an empty key in a sequence entry", src: "- : |1\n   x\n", want: "x\n"},
 			{name: "folded reads the same way", src: "- : >1\n   x\n", want: "x\n"},
-			// The rule is the same when the block scalar stands on its own
-			// line -- the ':' at column 3, so content at column 4 -- and the
-			// content is written one column further right there, so one space
-			// of it survives. libfyaml 1.0.0b1 reads " x" too.
+			// On its own line the block scalar is measured from the same ':' at column 3, so content starts at column 4.
+			// The content here is written at column 5, so one space of it stays in the value.
 			{name: "the block scalar on its own line", src: "- :\n   |1\n    x\n", want: " x\n"},
 
-			// The shapes that were already right, kept so a fix to the one
-			// above cannot move them.
+			// Shapes outside the fault, held so that a change to the rule cannot move them.
 			{name: "a quoted empty key", src: "- \"\": |1\n   x\n", want: "x\n"},
 			{name: "a named key", src: "- a: |1\n   x\n", want: "x\n"},
 			{name: "an empty key at the root", src: ": |1\n  x\n", want: " x\n"},
@@ -63,9 +47,7 @@ func TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon(t *testing.T) {
 	})
 
 	t.Run("rendering settles, and the value with it", func(t *testing.T) {
-		// The compounding is what made this worth fixing rather than filing: a
-		// document that grows by two spaces every rendering has no fixed point,
-		// so nothing that writes a document back can be trusted with it.
+		// A document that grows on every rendering has no fixed point, so each case must render the same twice.
 		for _, src := range []string{
 			"- : |1\n   x\n",
 			"- : |1\n   \n",
@@ -83,17 +65,14 @@ func TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon(t *testing.T) {
 	})
 
 	t.Run("a mapping nested straight in a sequence entry is refused", func(t *testing.T) {
-		// "- - : |1" is not YAML 1.2 -- the grammar refuses it and so does
-		// libfyaml 1.0.0b1 -- and it was read here while the entry took the
-		// sequence's column. Closing that took the laxity with it.
+		// "- - : |1" is not YAML 1.2, and the grammar rejects it.
 		_, err := parser.ParseBytes([]byte("- - : |1\n    x\n"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "non-map value is specified")
 	})
 }
 
-// blockScalarOf is the block scalar the first entry of the document holds,
-// whatever depth of sequence and mapping stands around it.
+// blockScalarOf returns the value of the first block scalar in the first document of src, at any depth.
 func blockScalarOf(t *testing.T, src string) string {
 	t.Helper()
 
@@ -131,33 +110,24 @@ func renderDocument(t *testing.T, src string) string {
 	return b.String() + "\n"
 }
 
-// TestFixedALastLineOfSpacesEndsABlockScalar: a block scalar whose last line
-// holds nothing but spaces was refused when the source ended there.
+// TestFixedALastLineOfSpacesEndsABlockScalar checks that a block scalar whose last line holds only spaces
+// parses when the source ends on that line.
 //
-// "k: >1-\n  1\n " came back *the content of a block scalar is indented less
-// than the indicator in its header states*, where "k: >1-\n  1\n \n" -- the same
-// document with a line break after it -- was read. A line of spaces is an empty
-// line, and l-empty admits s-indent(<n), so the indicator does not apply to it.
-// readMultiLineBreak marks a line empty when the break arrives;
-// closeMultiLineAtEOS is reached instead when the source ends on that line, and
-// it validated the spaces as content.
-//
-// go.yaml.in/yaml/v3 v3.0.5, libfyaml 1.0.0b1 and the reference parser all read
-// every shape below, and agree on the value: " 1" for the scalar and ["1"] for
-// the sequence.
+// A line of spaces is an empty line, and l-empty admits s-indent(<n),
+// so the indentation indicator does not apply to it.
+// readMultiLineBreak marks a line empty when its break arrives,
+// and closeMultiLineAtEOS, reached when the source ends on the line, must treat the spaces the same way.
 func TestFixedALastLineOfSpacesEndsABlockScalar(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
 		{"k: >1-\n  1\n ", " 1"},
 		{"k: >2-\n   1\n  ", " 1"},
 		{"k: >2-\n   1\n ", " 1"},
 		{"k: |2-\n   1\n ", " 1"},
-		// The shapes that always parsed, so the fix is bounded: a line break
-		// after the spaces, and no trailing line at all.
+		// Shapes outside the fault: a line break after the spaces, and no trailing line at all.
 		{"k: >1-\n  1\n \n", " 1"},
 		{"k: >1-\n  1\n", " 1"},
-		// A trailing line holding as many spaces as the indicator states is
-		// content and not an empty line, so it folds into the value. Unchanged
-		// by the fix, and libfyaml 1.0.0b1 reads it the same way.
+		// A trailing line holding as many spaces as the indicator states is content, not an empty line,
+		// so it folds into the value.
 		{"k: >1-\n  1\n  ", " 1\n "},
 	} {
 		file, err := parser.ParseBytes([]byte(tc.src))
@@ -172,9 +142,6 @@ func TestFixedALastLineOfSpacesEndsABlockScalar(t *testing.T) {
 	}
 
 	t.Run("and inside a sequence entry, which is where the corpus found it", func(t *testing.T) {
-		// Reached by removing the comment from "k:\n - >1-\n  1\n # c\n ": the
-		// comment's line was the only thing between the content and the end of
-		// the source, so the removal left a document the parser refused.
 		file, err := parser.ParseBytes([]byte("k:\n - >1-\n  1\n "))
 		require.NoError(t, err)
 		assert.Equal(t, "k:\n- >2-\n  1", strings.TrimRight(file.Docs[0].String(), "\n"))

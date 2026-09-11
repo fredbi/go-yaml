@@ -11,6 +11,7 @@ import (
 // YAMLVersion is a version of the YAML specification, as named by a "%YAML" directive or by [WithYAMLVersion].
 //
 // The version decides how a plain scalar resolves.
+//
 // 1.1 reads "0100" as 64, "1_000" as 1000, "1:30" as 90 and "yes" as true, where 1.2 reads 100 and three strings.
 // A document may also name 1.0 or 1.3: 1.0 resolves as 1.1, and 1.3 as 1.2.
 type YAMLVersion string
@@ -29,9 +30,10 @@ var yamlVersionMap = map[string]YAMLVersion{
 	"1.3": YAML13,
 }
 
-// Schema returns the schema v resolves plain scalars against.
+// Schema returns the YAML schema to resolve plain scalars.
 //
 // 1.0 and 1.1 resolve against [token.Schema11].
+//
 // 1.2, 1.3, the zero value and any other value resolve against [token.Schema12].
 //
 // Use it to scan a document alongside a parse with the same reading of plain scalars.

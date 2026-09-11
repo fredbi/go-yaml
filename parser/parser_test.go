@@ -179,9 +179,8 @@ v:
 }
 
 func TestParseEmptyDocument(t *testing.T) {
-	// A document with nothing in it renders as nothing. The line break it used
-	// to produce belonged to no content, and reading it back gave a document
-	// that no longer matched the one written.
+	// A document with nothing in it renders as nothing.
+	// A line break would belong to no content, and reading it back would give a different document.
 	t.Run("empty document", func(t *testing.T) {
 		f, err := parser.ParseBytes([]byte(""), parser.WithComments())
 		if err != nil {
@@ -1374,10 +1373,8 @@ a:
 			"key: [`val]",
 			"\n[1:7] '`' is a reserved character\n>  1 | key: [`val]\n             ^\n",
 		},
-		// A repeated key was here, and the parse no longer refuses one: it
-		// records the repeat and the load reports it. See
-		// codec.TestADuplicateKeyIsReportedAtTheLoad for the same two documents
-		// and the same message, drawn under the line that repeats.
+		// The parse records a repeated key and the load rejects it,
+		// so codec.TestADuplicateKeyIsReportedAtTheLoad holds the repeated-key cases and their message.
 		{
 			`{"000":0000A,`,
 			`
@@ -1689,10 +1686,9 @@ baz:
 	if len(f.Docs) != 1 {
 		t.Fatal("failed to parse content with next line with sequence")
 	}
-	// The comment was written on the entry's own line and stays there. Moving
-	// it to a line of its own above the entry kept the text and lost what it
-	// was attached to: read back, it is the entry's head comment rather than
-	// its line comment, so the document does not settle.
+	// The comment written on the entry's own line stays there.
+	// On a line of its own above the entry it would read back as the entry's head comment, not its line comment,
+	// and the document would not render back as itself.
 	expected := `
 foo:
 - # comment
