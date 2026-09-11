@@ -109,17 +109,19 @@ func New(opts ...Option) *Parser {
 // Reset reuses the memory of the previous parse: the next parse refills its tokens, nodes and path steps.
 // Do not use the [ast.File] that an earlier [Parser.Parse] or [Parser.Walk] returned once Reset has been called.
 func (p *Parser) Reset(opts ...Option) {
-	// The key ledger, the descent and anchor stacks and the token references are the parse's own scratch space:
-	// they keep their room, emptied. The token arena, the node arena, the reader and the path slabs keep their
-	// memory, which begin and newContext recycle for the next parse. Every other field starts from zero.
+	// The key ledger, the descent and anchor stacks, the token references and the scanner are the parse's own
+	// scratch space: they keep their room, emptied. The token arena, the node arena, the reader and the path slabs
+	// keep their memory, which begin and newContext recycle for the next parse. Every other field starts from zero.
 	p.keys.Reset()
 	p.descent.reset()
 	p.anchors.reset()
+	p.scan.Reset()
 	for _, ref := range p.refs {
 		*ref = tokenRef{}
 	}
 
 	*p = Parser{
+		scan:       p.scan,
 		keys:       p.keys,
 		descent:    p.descent,
 		anchors:    p.anchors,
