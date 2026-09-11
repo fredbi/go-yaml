@@ -2987,21 +2987,19 @@ map:
  <<: *x
  e: f
 `,
-			// The "<<" is NOT merged, and that is defect 64 rather than the
-			// rule working. unmarshalYAMLWithAliasMap implements
-			// UnmarshalYAML([]byte) and re-parses the fragment it is handed
-			// with a fresh yaml.Unmarshal, so the document's "%YAML 1.1" does
-			// not travel with the bytes and the merge key resolves as an
-			// ordinary key. The alias does survive, because it is expanded
-			// before the fragment is handed over.
+			// unmarshalYAMLWithAliasMap implements UnmarshalYAML([]byte) and
+			// parses the fragment it is handed with a fresh yaml.Unmarshal.
+			// The fragment opens with the document's "%YAML 1.1", so the "<<"
+			// merges there as it does in the document; without the line it
+			// came back as an ordinary key, which was defect 64. The alias
+			// survives either way, being expanded before the fragment is
+			// handed over.
 			expectedValue: value{
 				String: unmarshalYAMLWithAliasString(`"hello" "world"`),
 				Map: unmarshalYAMLWithAliasMap(map[string]interface{}{
-					"<<": map[string]any{
-						"a": "b",
-						"c": "d",
-						"d": `"hello" "world"`,
-					},
+					"a": "b",
+					"c": "d",
+					"d": `"hello" "world"`,
 					"e": "f",
 				}),
 			},

@@ -144,6 +144,8 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 		return nil, false, err
 	}
 	end := endTk.RawToken()
+	// Read before the scope below ends, which takes the document's own "%YAML" with it.
+	schema := p.schemaInForce()
 	// A TAG or "%YAML" directive applies to the one document after it,
 	// so a document holding only directives opens their scope instead of ending it.
 	// Every other document ends the scope:
@@ -154,6 +156,7 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	}
 
 	node := ast.Document(start, body)
+	node.Schema = schema
 	// The comment on the marker's own line. A "---" is not a node, so nothing else collects it.
 	node.StartComment = markerComment(ctx, startTk)
 	// An anchor belongs to its document, so the table moves to the node and the next document starts with an empty one.

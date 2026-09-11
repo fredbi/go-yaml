@@ -91,6 +91,9 @@ type Decoder struct {
 	parsedFile  *ast.File
 	streamIndex int
 	decodeDepth int
+	// docSchema is the resolution the document being decoded was read under.
+	// See unmarshalableDocument.
+	docSchema token.Schema
 }
 
 // NewDecoder returns a new decoder that reads from r.
@@ -1517,8 +1520,17 @@ func (d *Decoder) deleteStructKeys(structType reflect.Type, unknownFields map[st
 	return nil
 }
 
+// unmarshalableDocument renders node as the document a bytes unmarshaler reads.
+//
+// Where the document was read under YAML 1.1, the text opens with "%YAML 1.1",
+// so a nested Unmarshal reads the fragment as the document read it: "<<" merges
+// and "yes" is true. Without the line the fragment parsed as 1.2, and a merge
+// inside it came back as an ordinary key named "<<".
 func (d *Decoder) unmarshalableDocument(node ast.Node) ([]byte, error) {
 	doc := format.FormatNodeWithResolvedAlias(node, d.anchorNodeMap)
+	if d.docSchema == token.Schema11 {
+		return []byte("%YAML 1.1\n---\n" + doc), nil
+	}
 	return []byte(doc), nil
 }
 
@@ -3849,6 +3861,7 @@ func (d *Decoder) decode(ctx context.Context, v reflect.Value) error {
 		return io.EOF
 	}
 	doc := d.parsedFile.Docs[d.streamIndex]
+	d.docSchema = doc.Schema
 	body := doc.Body
 	if isEmptyDocument(doc) {
 		// A document written with "---" or "..." and holding nothing holds the

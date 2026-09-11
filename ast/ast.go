@@ -639,6 +639,14 @@ type DocumentNode struct {
 	// declaration is the one kept here -- read [AliasNode.Target] to expand a
 	// particular alias, which names the declaration that stood before it.
 	Anchors map[string]Node
+	// Schema is the resolution the document's plain scalars were read against:
+	// the version its "%YAML" line declares, or the parser's WithYAMLVersion
+	// where it declares none. The zero value is [token.Schema12].
+	//
+	// A node carries no version of its own, so a reader that renders part of
+	// the document for another parse reads it here: under 1.1, "yes" is true
+	// and "<<" merges, and a fragment parsed again under 1.2 reads neither.
+	Schema token.Schema
 }
 
 // Type returns DocumentNodeType
