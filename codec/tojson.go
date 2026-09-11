@@ -82,6 +82,11 @@ func isMergeKey(n ast.Node) bool {
 		tag, ok := token.ReservedTagOf(t.URI)
 
 		return ok && tag == token.MergeTag
+	case *ast.MappingKeyNode:
+		// "? <<" is the merge key written the long way. The walk hands the "?"
+		// over first, and a reader that took it for an ordinary key wrote the
+		// merged mapping under the name "<<" -- or, in ToJSON, under no name.
+		return t.IsMergeKey()
 	default:
 		return false
 	}

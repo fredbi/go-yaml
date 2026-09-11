@@ -3335,3 +3335,70 @@ func TestFixedMergingNullIsRefusedOnEveryPath(t *testing.T) {
 		assert.Contains(t, err.Error(), "null was used where mapping is expected")
 	}
 }
+
+// TestFixedAMergeKeyWrittenTheLongWayMerges: under "%YAML 1.1", "? <<" over
+// ": *a" is the merge key "<<: *a" is, in block and in flow, on both decode
+// paths.
+//
+// The 1.1 merge type names the key `<<` and says nothing about how it is
+// written. The long form came back as an ordinary key named "<<" in block, and
+// in flow the walk read it as one while the tree merged it: the scanner types
+// "<<" a merge key only where a ':' follows it on its line, and the walk handed
+// a "?" over before its content said what the key was.
+//
+// The key beside the merge is `w` and not `y`: 1.1 resolves `y` to the boolean
+// true. go.yaml.in/yaml/v3 v3.0.5 merges both spellings, in block and in flow;
+// libfyaml 1.0.0b1 resolves no merge at all and cannot say which is right.
+// codec.TestTheMergeKeyWrittenTheLongWayMergesOnEveryPath holds ToJSON and the
+// tokens to the same answer.
+func TestFixedAMergeKeyWrittenTheLongWayMerges(t *testing.T) {
+	const base = "%YAML 1.1\n---\nb: &a {x: 1}\n"
+	want := map[string]any{"x": uint64(1), "w": uint64(2)}
+
+	for _, src := range []string{
+		base + "d:\n  <<: *a\n  w: 2\n",
+		// A tag on the mapping changes nothing, which is what makes this the
+		// key's presentation rather than the node's type.
+		base + "d: !foo\n  <<: *a\n  w: 2\n",
+		base + "d: !!map\n  <<: *a\n  w: 2\n",
+		base + "d:\n  ? <<\n  : *a\n  w: 2\n",
+		base + "d: {? <<\n  : *a, w: 2}\n",
+		base + "d: !foo\n  ? <<\n  : *a\n  w: 2\n",
+	} {
+		// An any goes down the walk, a map[string]any builds the tree, and a
+		// struct takes the typed walk: canWalk takes a bare interface alone.
+		var walked any
+		require.NoErrorf(t, codec.Unmarshal([]byte(src), &walked), "the walk: %q", src)
+		asMap, isMap := walked.(map[string]any)
+		require.Truef(t, isMap, "the walk: %q", src)
+		assert.Equalf(t, want, asMap["d"], "the walk: %q", src)
+
+		var tree map[string]any
+		require.NoErrorf(t, codec.Unmarshal([]byte(src), &tree), "the tree: %q", src)
+		assert.Equalf(t, want, tree["d"], "the tree: %q", src)
+
+		var typed struct {
+			D map[string]any `yaml:"d"`
+		}
+		require.NoErrorf(t, codec.Unmarshal([]byte(src), &typed), "the typed walk: %q", src)
+		assert.Equalf(t, want, typed.D, "the typed walk: %q", src)
+	}
+
+	t.Run("in flow with the mapping in place, the two paths agree", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\n{? <<: {x: 1}, w: 2}\n"
+
+		var walked any
+		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
+		assert.Equal(t, want, walked, "the walk")
+
+		var typed map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &typed))
+		assert.Equal(t, want, typed, "the tree")
+	})
+
+	t.Run("without the directive it is an ordinary key", func(t *testing.T) {
+		var got map[string]any
+		require.NoError(t, codec.Unmarshal([]byte("b: &a {x: 1}\nd:\n  ? <<\n  : *a\n"), &got))
+		assert.Equal(t, map[string]any{"<<": map[string]any{"x": uint64(1)}}, got["d"])
+	})
+}

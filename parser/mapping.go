@@ -31,6 +31,70 @@ func (p *Parser) mappingValue(ctx context, colon, entry *group.TapeToken, key as
 	return n, err
 }
 
+// mergeKeysInForce reports whether a "<<" merges here: the merge key, tag:yaml.org,2002:merge, is a YAML 1.1 type,
+// and [WithMergeKeys] turns it on under 1.2.
+func (p *Parser) mergeKeysInForce() bool {
+	return p.opts.mergeKeys || p.schemaInForce() == token.Schema11
+}
+
+// explicitMergeKey returns the "<<" a "?" at ctx encloses alone, where the merge key is in force, and nil otherwise.
+//
+// The merge type names the key "<<" whatever writes it, so "? <<" over ": *a" merges as "<<: *a" does.
+// The scanner types "<<" a merge key only where a ':' follows it on its line, which "? <<" does in flow and not in block,
+// so the plain "<<" is taken here too. A quoted "<<" is a string under any version, and a comment between the '?'
+// and the key leaves the key to the ordinary path.
+func (p *Parser) explicitMergeKey(ctx context) *group.TapeToken {
+	if !p.mergeKeysInForce() {
+		return nil
+	}
+	tk := ctx.nextToken()
+	if tk == nil || tk.Group != nil {
+		return nil
+	}
+	switch tk.Type() {
+	case token.MergeKeyType:
+		return tk
+	case token.StringType:
+		if tk.RawToken().Value == "<<" {
+			return tk
+		}
+	}
+
+	return nil
+}
+
+// parseExplicitMergeKey builds the merge key a "?" encloses, as the value of key.
+//
+// Nothing goes to the walk here. The caller hands the whole key over once this returns, so a reader meets a
+// MappingKeyNode that says it is the merge key, where it meets "<<:" -- before the value, and with nothing inside
+// to read. Handed over as it opens, as parseMapKey hands any other "?", the key held nothing yet, and the walk,
+// ToJSON and the tokens took it for an ordinary key.
+func (p *Parser) parseExplicitMergeKey(ctx context, g *group.TokenGroup, key *ast.MappingKeyNode) (ast.MapKeyNode, error) {
+	ctx.goNext() // Skip the '?'.
+	value, err := newMergeKeyNode(ctx, ctx.currentToken())
+	if err != nil {
+		return nil, err
+	}
+	ctx.goNext()
+	if left := unreadInGroup(ctx); left != nil {
+		return nil, yamlerrors.NewSyntax("an explicit key names one node, and this stands past it", left.RawToken())
+	}
+	// As parseMapKey does: the comment closing the line of the '?' goes to the key's own node.
+	if cm := key.GetComment(); cm != nil && value.GetComment() == nil {
+		ast.TakeComment(key)
+		if err := value.SetComment(cm); err != nil {
+			return nil, err
+		}
+	}
+	key.Value = value
+	key.SetPathNode(ctx.withChild(p, p.mapKeyText(value)).path)
+	if err := p.validateMapKey(ctx, key, g.Last()); err != nil {
+		return nil, err
+	}
+
+	return key, nil
+}
+
 // refuseMergeKeyAlone rejects a "<<" written alone as a flow entry's key, where the merge key is in force.
 //
 // yaml.org/type/merge.html spells the merge key "<<" followed by its ':' and a value to merge,
@@ -43,7 +107,7 @@ func (p *Parser) mappingValue(ctx context, colon, entry *group.TapeToken, key as
 // Under the core schema nothing merges and a bare "<<" is an ordinary key,
 // so this returns nil and the duplicate check applies instead.
 func (p *Parser) refuseMergeKeyAlone(key ast.MapKeyNode) error {
-	if !p.opts.mergeKeys && p.schemaInForce() != token.Schema11 {
+	if !p.mergeKeysInForce() {
 		return nil
 	}
 	tk := key.GetToken()
@@ -344,6 +408,9 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 			if err := key.SetComment(group); err != nil {
 				return nil, err
 			}
+		}
+		if p.explicitMergeKey(ctx) != nil {
+			return p.parseExplicitMergeKey(ctx, g, key)
 		}
 
 		// A "?" encloses the key node, so it goes to the walk before that node and is left after it,

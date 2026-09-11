@@ -223,42 +223,6 @@ var Ledger = []Divergence{
 		Property: Parses | Decode | Render | Settle | CommentsKept | RenderValid | DecodeTyped,
 		Match:    writesAPropertiedKeyBeforeABlockScalar,
 	},
-	{
-		Name: "decode/a-merge-key-written-the-long-way-does-not-merge",
-		Pin:  "TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge",
-		Reason: "Under `%YAML 1.1`, a `<<` entry written `? <<` over `: *a` is read as an ordinary key " +
-			"named `<<`, where the same entry written `<<: *a` merges. The 1.1 merge type names the key " +
-			"and says nothing about how it is written, and the two are the same key node.\n\n" +
-			"The directive is half of the shape since 8acf11b, which resolves `<<` under the version the " +
-			"document declares: with no directive neither spelling merges and the two agree, so this " +
-			"matches a document declaring 1.1 and no other.\n\n" +
-			"go.yaml.in/yaml/v3 v3.0.5 merges both, in block and in flow. libfyaml 1.0.0b1 resolves the " +
-			"merge under a `%YAML 1.1` directive and hands `<<` back as a member name without one -- " +
-			"the same rule this library took in 8acf11b, measured 2026-09-08 -- and it is not an oracle " +
-			"for the long form either way, since it refuses a collection key.\n\n" +
-			"A tag on the mapping makes no difference -- `!foo` and `!!map` over the plain form both " +
-			"merge, over the long form neither does -- so it is the key's presentation and nothing else.\n\n" +
-			"And in flow the two decode paths disagree, which is the worse half. `{? <<: {x: 1}, w: 2}` " +
-			"reads {\"<<\": {x: 1}, w: 2} into an `any` and {x: 1, w: 2} into a typed map: the walk does " +
-			"not merge it and the tree does. In block, `? <<` over `: {x: 1}`, both agree and neither " +
-			"merges. So a caller's answer depends on the destination they chose, which is why this " +
-			"claims DecodeTyped as well.\n\n" +
-			"⚠️ **codec.ToJSON writes malformed output for it**, which is sharper than the " +
-			"disagreement. It walks, so it does not merge -- and it emits the key with no value at " +
-			"all: `{? <<: {x: 1}, w: 2}` converts to `{\"\",\"w\":2,\"x\":1}`, which no JSON parser " +
-			"reads. Found by TestToJSONMatchesTheValueConverter once the corpus grew to 3,000 " +
-			"documents.\n\n" +
-			"Found on 2026-09-07 by the merge axis on its first run; the flow half by " +
-			"TestDecodingIntoAGoTypeGivesTheSameValue rather than by the value properties. The key " +
-			"beside the merge is `w` and not `y` on purpose: 1.1 resolves `y` to the boolean true, so a " +
-			"document that declares 1.1 to reach the merge has to keep clear of 1.1's other spellings.\n\n" +
-			"Render is claimed because the rendered document is read back and compared against the " +
-			"same stated meaning, so a merge the library does not perform fails there too. It could " +
-			"not before 8acf11b: a merge document set Written.MeansUnclear and every value property " +
-			"returned early on it.",
-		Property: Decode | DecodeTyped | Render,
-		Match:    writesAMergeKeyTheLongWay,
-	},
 }
 
 // writesAPropertiedKeyBeforeABlockScalar reports whether an entry writes a key
@@ -427,18 +391,6 @@ func holdsAMergeKey(v Value) bool {
 	}
 
 	return false
-}
-
-// writesAMergeKeyTheLongWay reports whether a "<<" entry is written "? <<" over
-// ": *a" rather than "<<: *a".
-//
-// Style.ExplicitKeys decides it for every entry of the document, so the two
-// halves are the style asking for the long form and the value holding a merge.
-//
-// A third half now: the document has to declare "%YAML 1.1", since nothing
-// merges without it and both spellings then agree.
-func writesAMergeKeyTheLongWay(v Value, st Style) bool {
-	return st.Version == Reading11Version && writesAnExplicitKey(v, st) && holdsAMergeKey(v)
 }
 
 // holdsACollectionKey reports whether a mapping's key is a collection anywhere

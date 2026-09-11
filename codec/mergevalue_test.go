@@ -95,3 +95,43 @@ func TestAMergeTakesOnlyMappingsOnEveryPath(t *testing.T) {
 		assert.JSONEq(t, `{"m":{"a":1,"b":2,"c":3}}`, string(rebuildJSON(toks)))
 	})
 }
+
+// TestTheMergeKeyWrittenTheLongWayMergesOnEveryPath holds the four readers to
+// one answer about "? <<" under YAML 1.1, which is the merge key "<<:" is.
+//
+// In block no reader merged it. In flow the tree merged it, the walk kept a key
+// named "<<", and ToJSON wrote {"","x":1}, which is not JSON: the walk hands a
+// "?" over before its content says what the key is.
+func TestTheMergeKeyWrittenTheLongWayMergesOnEveryPath(t *testing.T) {
+	const anchor = "a: &a {x: 1}\n"
+
+	for src, want := range map[string]string{
+		"%YAML 1.1\n---\n" + anchor + "m:\n  ? <<\n  : *a\n  w: 2\n": `{"a":{"x":1},"m":{"x":1,"w":2}}`,
+		"%YAML 1.1\n---\n" + anchor + "m: {? <<: *a, w: 2}\n":        `{"a":{"x":1},"m":{"x":1,"w":2}}`,
+		"%YAML 1.1\n---\n" + anchor + "m: {? <<\n  : *a, w: 2}\n":    `{"a":{"x":1},"m":{"x":1,"w":2}}`,
+		// v and not y: 1.1 reads y as the boolean true.
+		"%YAML 1.1\n---\n" + anchor + "m:\n  ? <<\n  : [*a, {v: 3}]\n  w: 2\n": `{"a":{"x":1},"m":{"x":1,"v":3,"w":2}}`,
+		"%YAML 1.1\n---\n" + anchor + "m:\n  ? <<\n  : {x: 9}\n  x: 2\n":       `{"a":{"x":1},"m":{"x":2}}`,
+		"%YAML 1.1\n---\n" + anchor + "m:\n  ? \"<<\"\n  : *a\n":               `{"a":{"x":1},"m":{"<<":{"x":1}}}`,
+		anchor + "m:\n  ? <<\n  : *a\n":                                        `{"a":{"x":1},"m":{"<<":{"x":1}}}`,
+		anchor + "m: {? <<: *a}\n":                                             `{"a":{"x":1},"m":{"<<":{"x":1}}}`,
+	} {
+		doc := []byte(src)
+
+		js, err := ToJSON(doc)
+		require.NoErrorf(t, err, "ToJSON: %q", src)
+		assert.JSONEqf(t, want, string(js), "ToJSON: %q", src)
+
+		toks, err := collectJSONTokens(doc)
+		require.NoErrorf(t, err, "tokens: %q", src)
+		assert.JSONEqf(t, want, string(rebuildJSON(toks)), "tokens: %q", src)
+
+		for name, opts := range map[string][]DecodeOption{"walk": nil, "tree": {UseOrderedMap()}} {
+			var v any
+			require.NoErrorf(t, UnmarshalWithOptions(doc, &v, opts...), "%s: %q", name, src)
+			got, err := MarshalWithOptions(v, JSON())
+			require.NoError(t, err)
+			assert.JSONEqf(t, want, string(got), "%s: %q", name, src)
+		}
+	}
+}

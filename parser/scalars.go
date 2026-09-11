@@ -130,7 +130,7 @@ func (p *Parser) parseScalarValue(ctx context, tk *group.TapeToken) (ast.ScalarN
 	}
 	switch tk.Type() {
 	case token.MergeKeyType:
-		if !p.opts.mergeKeys && p.schemaInForce() != token.Schema11 {
+		if !p.mergeKeysInForce() {
 			// The merge key, tag:yaml.org,2002:merge, is a YAML 1.1 type, so under 1.2 a bare "<<" is an ordinary key.
 			// The scanner types "<<" whatever the version, so the version is checked here.
 			// A tagged "!!merge <<" merges through TagNode.IsMergeKey, which reads the tag's URI.
