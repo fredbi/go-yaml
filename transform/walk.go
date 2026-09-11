@@ -4,6 +4,7 @@
 package transform
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -336,25 +337,26 @@ func implicitNull(n ast.Node, tk *token.Token) bool {
 	}
 }
 
-// extent is the stretch of the source a token covers, held inside the document
-// and ahead of what is already written.
+// extent is the stretch of the source a token covers, and false where the
+// scanner placed it outside the text still to write.
 //
-// The scanner's extents tile the source and four documents the parse accepts
-// break that: "- single multiline\n - sequence entry\n" is 37 bytes and its
-// second token claims to end at 56. Clamping keeps the output byte for byte
-// what the document was -- the bytes past the end are not there to write -- and
-// stops a broken extent from indexing off the slice.
-//
-// extentLedger in internal/ledgers/scanner/extent_test.go records the four.
-// Delete this and read the extents plainly when it is empty: a fix there also
-// raises offsetMissLedger's String count, since clamping the extent makes an
-// Offset visible that does not address its own text, so the two ledgers move in
-// one commit and this goes with them.
-func (wk *walker) extent(tk *token.Token) (int, int) {
-	from := min(max(int(tk.Position.Offset()), wk.prev), len(wk.src))
-	end := min(max(int(tk.EndOffset()), from), len(wk.src))
+// The scanner's extents tile the source: a token starts where the text written
+// so far ends, or after it, and ends inside the document. One that does not is
+// a scanner fault and fails the walk. Clamped into place, as this did until the
+// last documents breaking the tiling were fixed, it wrote the document back byte
+// for byte and hid the fault -- "- single multiline\n - sequence entry\n" is 37
+// bytes, and its scalar claimed to end at 56. extentLedger in
+// internal/ledgers/scanner/extent_test.go records any document that breaks it.
+func (wk *walker) extent(tk *token.Token) (int, int, bool) {
+	from, end := int(tk.Position.Offset()), int(tk.EndOffset())
+	if from < wk.prev || end < from || end > len(wk.src) {
+		wk.err = fmt.Errorf("the scanner placed %q at bytes %d to %d, outside the text from %d to %d still to write",
+			tk.Value, from, end, wk.prev, len(wk.src))
 
-	return from, end
+		return 0, 0, false
+	}
+
+	return from, end, true
 }
 
 // peek reads the next token, holding it until emit writes it.
@@ -384,7 +386,10 @@ func (wk *walker) emit() {
 	}
 	wk.holding = false
 
-	from, end := wk.extent(tk)
+	from, end, ok := wk.extent(tk)
+	if !ok {
+		return
+	}
 	lead := wk.src[wk.prev:from]
 	p := Piece{
 		Lead:  lead,

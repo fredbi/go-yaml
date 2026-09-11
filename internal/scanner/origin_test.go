@@ -33,9 +33,10 @@ import (
 // opening
 // a token.
 // ⚠️ It reaches what the six workloads hold and no more. None of them writes a
-// multi-line plain scalar whose extents break, so the seven documents that do
-// pass here unnoticed -- ledgers/scanner's extentLedger is what covers those,
-// over the Test Suite and the fuzz seeds. Keep the two apart: this is a pin
+// plain scalar continued by a "- " line, whose extents broke until
+// TestAPlainScalarContinuedByADashStartsWhereItsTextDoes, so the documents that
+// did passed here unnoticed. ledgers/scanner's extentLedger covers the Test
+// Suite and the fuzz seeds. Keep the two apart: this is a pin
 // over a fixed corpus and that is a ledger over one that reshuffles on every
 // regeneration, and a pin standing on shifting ground guards nothing.
 //
@@ -97,6 +98,46 @@ func TestADoubleQuotedScalarReachesItsClosingQuote(t *testing.T) {
 				assert.Equalf(t, tc.quoted, tc.src[from:to], "%q", tc.src)
 			}
 			require.Truef(t, found, "%q holds no double-quoted token", tc.src)
+		})
+	}
+}
+
+// TestAPlainScalarContinuedByADashStartsWhereItsTextDoes checks the position of a plain scalar whose continuation line
+// opens with "- ".
+//
+// The dash on a more indented line continues the scalar, and scanRawFoldedChar reads the rest as a block of its own.
+// That block recorded its start at the dash, and the token took its position from there: "- single multiline" over
+// " - sequence entry" gave line 2, offset 21 and an end past the source, and Renderer.Verbatim wrote
+// " sequence entry". The block now starts where the scalar did.
+//
+// Read through this path, the token's end takes in the line break closing the source, where a plain scalar read the
+// ordinary way stops before it, so the text is compared without it.
+func TestAPlainScalarContinuedByADashStartsWhereItsTextDoes(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, text string
+		line            int32
+	}{
+		{"the Test Suite's shape", "- single multiline\n - sequence entry\n", "single multiline\n - sequence entry", 1},
+		{"a number continued", "- -14\n    - x\n", "-14\n    - x", 1},
+		{"line breaks written as CRLF", "- {}\r\n- null\r\n    - '-1'\r\n", "null\r\n    - '-1'", 2},
+
+		// The shape outside the fault: no dash, so no block of its own.
+		{"a continuation without a dash", "- single multiline\n   sequence entry\n", "single multiline\n   sequence entry", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var found bool
+			for _, tk := range tokenize(t, tc.src) {
+				if tk.Type != token.StringType {
+					continue
+				}
+				found = true
+				from, to := int(tk.Position.Offset()), int(tk.EndOffset())
+				require.LessOrEqualf(t, to, len(tc.src), "%q ends past the source", tc.src)
+				require.LessOrEqualf(t, from, to, "%q", tc.src)
+				assert.Equalf(t, tc.text, strings.TrimRight(tc.src[from:to], "\r\n"), "%q", tc.src)
+				assert.Equalf(t, tc.line, tk.Position.Line, "%q", tc.src)
+			}
+			require.Truef(t, found, "%q holds no plain scalar", tc.src)
 		})
 	}
 }

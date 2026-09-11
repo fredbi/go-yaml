@@ -101,7 +101,10 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 //
 // Re-baselined again the same day when a double-quoted scalar's end began to take the blanks after a dropped tab.
 // One source moved, suite/trailing-tabs-in-double-quoted/05, whose token now ends on its closing quote.
-const fixedWalkDigest = "43020fc130dde123ffc1273f3025465c03237bf797cf109a536b54876ef9a55a"
+//
+// And once more when a plain scalar continued by a "- " line began to start where its text does. One source moved,
+// suite/sequence-entry-that-looks-like-two-with-wrong-indentation, whose token now stands on line 1.
+const fixedWalkDigest = "28c3ff4f7de18d47c4aab95f9087f7ce653e06af5c50ff40278cf0b9a8c6969d"
 
 // digestVisitor writes each node it is handed, so a node the walk reads from a reused cell changes the digest.
 type digestVisitor struct {
