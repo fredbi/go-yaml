@@ -4,6 +4,7 @@
 package codec_test
 
 import (
+	"fmt"
 	"math"
 	"math/big"
 	"testing"
@@ -79,4 +80,44 @@ func TestAFloatPastTheExponentBoundIsAnInfinityOrZero(t *testing.T) {
 			assert.ErrorIsf(t, err, yamlerrors.ErrDuplicateKey, "%q", src)
 		}
 	})
+}
+
+// TestAFloatPastTheExponentBoundConvertsToTheNumberWritten covers ToJSON and
+// ToJSONTokens on a float past ±1000.
+//
+// The decoder reads one as an infinity or zero, as Go's types require. JSON
+// bounds no number, so both converters write the digits -- but only where the
+// document spelled them as JSON does. "+1e1001", "1.e1001" and every spelling
+// under "!!float" were read as the infinity and written as null, and
+// "!!float 1e-1001" as 0.0.
+func TestAFloatPastTheExponentBoundConvertsToTheNumberWritten(t *testing.T) {
+	for src, want := range map[string]string{
+		"k: !!float 1e1001\n":   "1e1001",
+		"k: !!float -1e1001\n":  "-1e1001",
+		"k: +1e1001\n":          "1e1001",
+		"k: !!float +1e1001\n":  "1e1001",
+		"k: 1.e1001\n":          "1e1001",
+		"k: -1.e1001\n":         "-1e1001",
+		"k: !!float 1e-1001\n":  "1e-1001",
+		"k: !!float 1.5e1001\n": "1.5e1001",
+		"k: !!float 007e1001\n": "7e1001",
+
+		// Shapes outside the fault: JSON spells these as the document did.
+		"k: 1e1001\n":  "1e1001",
+		"k: 1E+1001\n": "1E+1001",
+	} {
+		t.Run(src, func(t *testing.T) {
+			out, err := codec.ToJSON([]byte(src))
+			require.NoError(t, err)
+			assert.Equal(t, `{"k":`+want+`}`, string(out), "the digits as written")
+
+			s := codec.ToJSONTokens([]byte(src))
+			var got []string
+			for tk := range s.Tokens() {
+				got = append(got, fmt.Sprintf("%v:%s", tk.Kind, tk.Value))
+			}
+			require.NoError(t, s.Err())
+			assert.Contains(t, got, "number:"+want)
+		})
+	}
 }

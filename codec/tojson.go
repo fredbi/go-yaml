@@ -459,6 +459,9 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 			if isJSONNumber(tk.Value) {
 				return append(out, tk.Value...)
 			}
+			if text, ok := pastRangeJSON(tk.Value, tk.Type); ok {
+				return append(out, text...)
+			}
 			if f, ok := token.ParseFloat(tk.Value, tk.Type); ok {
 				return appendJSONFloat64(out, f)
 			}
@@ -669,6 +672,13 @@ func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	case token.IntegerTag:
 		written = appendJSONScalar(nil, taggedInteger(res.Text, res.Schema))
 	case token.FloatTag:
+		if base, ok := token.FloatBase(res.Text, res.Schema); ok {
+			if text, past := pastRangeJSON(res.Text, base); past {
+				written = text
+
+				break
+			}
+		}
 		written = appendJSONFloat(nil, taggedFloat(res.Text, res.Schema))
 	case token.BooleanTag:
 		b, _ := token.ParseBool(strings.ToLower(res.Text))
@@ -1291,6 +1301,71 @@ func isJSONNumber(text string) bool {
 	}
 
 	return i == len(text)
+}
+
+// pastRangeJSON writes a float past the exponent bound as the number the
+// document wrote, spelled as JSON spells it, and reports false for any other
+// text.
+//
+// The decoder reads such a float as an infinity or zero, as Go's types require;
+// JSON bounds no number, so ToJSON writes the digits. A spelling JSON already
+// shares is copied before this is asked. One it does not -- "+1e1001",
+// "1.e1001", a YAML 1.1 "1_0e1001", or any of them under "!!float" -- was
+// read as the infinity and written as null, and "!!float 1e-1001" as 0.0.
+func pastRangeJSON(text string, typ token.Type) ([]byte, bool) {
+	if _, past := token.FloatPastRange(text, typ); !past {
+		return nil, false
+	}
+	spelled, ok := jsonNumberText(text)
+	if !ok {
+		return nil, false
+	}
+
+	return withFraction([]byte(spelled), 0), true
+}
+
+// jsonNumberText rewrites a YAML decimal float as JSON spells it: no "+", no
+// "_", one digit at least and no leading zero before the point, and no point
+// with nothing after it. It reports false where the result is not a JSON
+// number.
+func jsonNumberText(text string) (string, bool) {
+	s := strings.ReplaceAll(text, "_", "")
+
+	var b strings.Builder
+	b.Grow(len(s) + 1)
+	if s != "" && (s[0] == '+' || s[0] == '-') {
+		if s[0] == '-' {
+			b.WriteByte('-')
+		}
+		s = s[1:]
+	}
+
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	whole := strings.TrimLeft(s[:i], "0")
+	if whole == "" {
+		whole = "0"
+	}
+	b.WriteString(whole)
+	s = s[i:]
+
+	if s != "" && s[0] == '.' {
+		j := 1
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j > 1 {
+			b.WriteString(s[:j])
+		}
+		s = s[j:]
+	}
+	b.WriteString(s)
+
+	out := b.String()
+
+	return out, isJSONNumber(out)
 }
 
 // digitsFrom reads one or more digits and returns where they end, or -1 where
