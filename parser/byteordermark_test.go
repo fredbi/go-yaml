@@ -54,6 +54,16 @@ func TestAByteOrderMarkOpensAPrefixOrNothing(t *testing.T) {
 		}
 	})
 
+	t.Run("a mark after a plain scalar keeps the scalar", func(t *testing.T) {
+		// The scan cuts a plain scalar only once it knows the next line does not carry it on, so the 1 was still
+		// buffered when the mark reset the buffer, and a read as null.
+		f, err := parser.ParseBytes([]byte("a: 1\n" + byteOrderMark + "---\nb: 2\n"))
+		require.NoError(t, err)
+		require.Len(t, f.Docs, 2)
+		assert.Equal(t, "a: 1", f.Docs[0].Body.String())
+		assert.Equal(t, "b: 2", f.Docs[1].Body.String())
+	})
+
 	t.Run("and one where no document begins is still refused", func(t *testing.T) {
 		_, err := parser.ParseBytes([]byte("a: 1\n" + byteOrderMark + "b: 2\n"))
 		require.Error(t, err)

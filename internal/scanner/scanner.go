@@ -262,6 +262,11 @@ func (s *Scanner) scan(ctx *Context) error {
 				return err
 			}
 
+			// A plain scalar ending the line before is still buffered: the scan cuts one only once it knows the next line
+			// does not carry it on. Cut it here, since resetting the buffer dropped it, and "a: 1" over a mark over "---"
+			// read a as null.
+			s.addBufferedTokenIfExists(ctx)
+
 			// The mark opens a document prefix and is not content.
 			// Step over it, counting its bytes: an offset addresses the source as it was handed in, and deleting the mark
 			// instead moved every offset after it.

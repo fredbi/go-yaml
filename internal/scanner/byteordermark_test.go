@@ -164,6 +164,13 @@ func markOffsetTestCases() iter.Seq[markOffsetTestCase] {
 			want: map[string]int{"...": 5, "---": 12, "b": 16, "2": 19},
 		},
 		{
+			// The 1 is still buffered when the scan reaches the mark, a plain scalar being cut only once the next line
+			// is known not to carry it on. The mark reset the buffer and the value was gone.
+			name: "opening a document after a plain scalar",
+			src:  "a: 1\n" + bom + "---\nb: 2\n",
+			want: map[string]int{"1": 3, "---": 8, "b": 12, "2": 15},
+		},
+		{
 			name: "none at all",
 			src:  "a: 1\n",
 			want: map[string]int{"a": 0, ":": 1, "1": 3},
