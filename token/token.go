@@ -1200,7 +1200,9 @@ func ParseInteger(text string, typ Type) (any, bool) {
 	switch {
 	case !ok:
 		return nil, false
-	case !negative:
+	case !negative || u == 0:
+		// "-0" is the integer 0, whose canonical form 10.2.1.3 gives without a
+		// sign. As an int64 it was a second key to a Go map beside "0".
 		return u, true
 	case u == 1<<63:
 		return int64(-1 << 63), true // the smallest int64, which -int64(u) cannot hold
@@ -1441,6 +1443,11 @@ func toNumber(value string) (*NumberValue, error) {
 			return nil, err
 		}
 		v = i
+		if i == 0 {
+			// "-0" is 0, a uint64 as [ParseInteger] reads it. Text keeps the sign
+			// the document wrote.
+			v = uint64(0)
+		}
 	default:
 		u, err := strconv.ParseUint(text, shape.base, 64)
 		if err != nil {

@@ -5,6 +5,7 @@ package token
 
 import (
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -105,7 +106,8 @@ func KeyName(text string, typ Type) (string, KeyKind) {
 // wrote it in.
 func integerKeyName(text string, typ Type) string {
 	if u, negative, ok := ParseWholeNumber(text, typ); ok {
-		if negative {
+		// "-0" is 0: a zero has no sign to write.
+		if negative && u != 0 {
 			return "-" + strconv.FormatUint(u, 10)
 		}
 
@@ -118,22 +120,38 @@ func integerKeyName(text string, typ Type) string {
 	return text
 }
 
-// floatKeyName writes a float key so that it can never spell an integer.
+// floatKeyName writes a float key by its value, as [KeyNameOfFloat] names one,
+// and as [KeyNameOfBigFloat] names one too wide for a float64. Named by the
+// text instead, "1e400" and "10e399" passed the duplicate check as two keys.
+func floatKeyName(text string, typ Type) string {
+	if f, ok := ParseFloat(text, typ); ok {
+		return KeyNameOfFloat(f, 64)
+	}
+	if b, ok := ParseBigFloat(text, typ); ok {
+		return KeyNameOfBigFloat(b)
+	}
+
+	return text
+}
+
+// KeyNameOfFloat returns the name a float key takes, so that it can never spell
+// an integer. bitSize is 32 for a float32 and 64 for a float64, as
+// strconv.FormatFloat takes it.
 //
 // strconv.FormatFloat with 'g' and -1 gives the shortest text that reads back
-// as the same float64, and ".0" goes on where that text holds no '.', 'e' or
-// 'E'. So "1e3" is "1000.0" and "1e30" stays "1e+30".
+// as the same float, and ".0" goes on where that text holds no '.', 'e' or 'E'.
+// So "1e3" is "1000.0", "1e30" stays "1e+30", and float32(0.5) and 0.5 are both
+// "0.5": YAML has one float type, and Go's two widths name one key.
 //
 // Expanding every float to decimal instead would write 1e300 as 301 characters
 // and would print precision the value never had: 1e23 has no exact float64, and
 // expanding it gives 99999999999999991611392 rather than the digits the
 // document wrote. libfyaml 1.0.0a8 names a float this same way.
-func floatKeyName(text string, typ Type) string {
-	f, ok := ParseFloat(text, typ)
-	if !ok {
-		return text
-	}
-
+//
+// A negative zero is "0.0". 10.2.1.4 gives zero one canonical form, and Go's ==
+// already holds -0.0 and 0.0 as one map key, so naming them apart let the
+// parser pass a pair the decoder then merged, dropping the first value.
+func KeyNameOfFloat(f float64, bitSize int) string {
 	switch {
 	case math.IsInf(f, 1):
 		return ".inf"
@@ -141,9 +159,31 @@ func floatKeyName(text string, typ Type) string {
 		return "-.inf"
 	case math.IsNaN(f):
 		return ".nan"
+	case f == 0:
+		return "0.0"
 	}
 
-	return withDecimalPoint(strconv.FormatFloat(f, 'g', -1, 64))
+	return withDecimalPoint(strconv.FormatFloat(f, 'g', -1, bitSize))
+}
+
+// KeyNameOfBigFloat returns the name a float too wide or too small for a
+// float64 takes, by the rule [KeyNameOfFloat] follows.
+//
+// The digits come from big.Float.Text with 'g' and -1, the shortest text that
+// reads back as the same value at the float's precision. Comparing two of them
+// with big.Float.Cmp would not do: [ParseBigFloat] sizes the precision by the
+// digits written, so one value written two ways can round apart.
+func KeyNameOfBigFloat(f *big.Float) string {
+	switch {
+	case f.IsInf() && f.Sign() > 0:
+		return ".inf"
+	case f.IsInf():
+		return "-.inf"
+	case f.Sign() == 0:
+		return "0.0"
+	}
+
+	return withDecimalPoint(f.Text('g', -1))
 }
 
 // withDecimalPoint appends ".0" to a number written without one, so that a
