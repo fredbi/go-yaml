@@ -8,11 +8,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// Kind names the collection around a node handed to a [Visitor].
+// Kind names what encloses a node handed to a [Visitor]: a collection, or the anchor, tag or "?" written on the node.
 type Kind uint8
 
 const (
-	// KindNone marks a document's body, which is in no collection.
+	// KindNone marks a document's root, which nothing encloses.
 	KindNone Kind = iota
 	// KindMapping is a mapping. Its entries are keys, each followed by its value.
 	KindMapping
@@ -46,31 +46,80 @@ func (k Kind) String() string {
 
 // Step locates a node handed to a [Visitor].
 //
-// It carries what a writer needs to emit the document again:
-// the enclosing collection, the depth, the entry index and the source position.
+// The walk computes it from the nodes it holds open, so a consumer does not keep that stack itself.
+// Leave receives the Step that Enter received, except for At on a block mapping.
+//
+// The consumers in this module read these fields, and the note on each field explains what for:
+//
+//   - [github.com/go-openapi/go-yaml/codec.ToJSON] reads Key, Document, Depth, In and Index;
+//   - [github.com/go-openapi/go-yaml/codec.ToJSONTokens] reads Key, Document, Depth, In and At;
+//   - the decoder's walk, behind [github.com/go-openapi/go-yaml/codec.WalkValues] and
+//     [github.com/go-openapi/go-yaml/codec.Decoder], reads Key, and Depth with In to find a document's root;
+//   - [github.com/go-openapi/go-yaml/transform.Walk] reads Key to give a piece its role,
+//     and copies the whole Step into [github.com/go-openapi/go-yaml/transform.Piece], where nothing reads it yet.
 type Step struct {
-	// In is the collection around the node.
+	// In names the node enclosing this one: a mapping, a sequence, or the anchor, tag or "?" written on it.
+	// It is KindNone for a document's root.
+	//
+	// A node under an anchor, a tag or a "?" has that property as In, not the collection around the property.
+	// The walk never records KindNone for an open node, so In is KindNone exactly when Depth is 0.
+	//
+	// codec.ToJSON switches on In to write a separator: a comma or a colon in a mapping, a comma in a sequence,
+	// and nothing inside an anchor or a tag, whose own handover wrote it. codec.ToJSON, codec.ToJSONTokens
+	// and the decoder test Depth == 0 together with In == KindNone to find a document's root,
+	// where the second test repeats the first.
 	In Kind
-	// Depth counts the collections enclosing the node. A document's body is at depth 0.
+	// Depth counts the nodes enclosing the node: collections, and the anchors, tags and "?" keys written on them,
+	// each of which adds a level. A document's root is at depth 0.
+	//
+	// codec.ToJSON, codec.ToJSONTokens and the decoder read Depth == 0 to find a document's root.
+	// The two JSON converters also record the depth where a "<<" value or a buffered key opened,
+	// to match the Leave that closes it.
 	Depth int
-	// Index is the node's entry number in In, counted from 0.
-	// A writer reads it to decide whether a separator goes before the node.
+	// Index counts the handovers in In before this one, from 0.
+	// In a mapping a key and its value are two handovers, so the first key is at 0, its value at 1,
+	// and the next key at 2. The node inside an anchor, a tag or a "?" is at 0,
+	// and every root of a document is at 0.
+	//
+	// A "<<" and the value it merges take two indices like any entry, although they write no member of their own,
+	// and "&!" hands two values over for one key (see [Visitor]). A writer's count of members therefore falls
+	// behind Index. codec.ToJSON reads Index only in a sequence, to put a comma before every element but the first,
+	// and keeps its own count in a mapping.
 	Index int
-	// Key reports that the node is a mapping key and that its value comes next.
+	// Key reports that the node is a mapping key, and that its value is the next handover in the same mapping.
 	// A key and its value are two handovers of one entry, and nothing on the node tells them apart.
+	//
+	// Key marks the outermost node standing for the key: the "?" of an explicit key, or the anchor or tag written on
+	// a key. The node inside arrives with Key false, and with In set to KindKey, KindAnchor or KindTag,
+	// so a consumer that names a key by its content tracks the enclosing key itself, as codec.ToJSON does.
+	// A tagged scalar key is not handed over on its own: "!!str 1: v" hands over the tag, marked Key, then "v".
+	//
+	// Every consumer in this module reads Key: the JSON converters to write a member name,
+	// the decoder to fill a map entry or choose a struct field, and transform.Walk to give a piece RoleKey.
 	Key bool
-	// At is the position of the node's first token.
+	// At is node.GetToken().Position at the time of the call, and the zero Position when the node has no token.
+	//
+	// A block mapping's token is its first key until the parse reads that key's ':', and the ':' after that,
+	// so Enter and Leave give a block mapping two positions: the first key's, then the ':' after it.
+	// Every other node has the same At on Enter and on Leave.
+	//
+	// codec.ToJSONTokens reads it to give each JSON token its source position. No other consumer reads At,
+	// and a consumer holding the node can read the same position from it.
 	At token.Position
 	// Document indexes the node's document in the Docs of the [ast.File] that [Parser.Walk] returns.
-	// An anchor and a "%YAML" directive each apply to one document, so use it to tell documents apart.
+	// The walk never hands a DocumentNode over, so a consumer reads Document to see one document end
+	// and the next begin. An anchor and a "%YAML" directive each apply to one document.
 	//
 	// An empty document hands over no node, and the count still moves past it:
 	// "---" over "---" over "b: 2" hands over one mapping, at Document 1.
 	//
 	// Each "%YAML" or "%TAG" line counts as a document of its own, ahead of the one it applies to.
 	// "%YAML 1.2" over "---" over "a: 1" puts the mapping at Document 1, and two directive lines put it at 2.
-	// To find the nth document a reader sees, skip the documents whose node is an [ast.DirectiveNode],
-	// as [github.com/go-openapi/go-yaml/codec.ToJSON] does.
+	// To find the nth document a reader sees, skip the documents whose node is an [ast.DirectiveNode].
+	//
+	// codec.ToJSON and codec.ToJSONTokens read Document to convert the first document that is not a directive line.
+	// codec.ToJSONTokens also reads it to reject a second document under
+	// [github.com/go-openapi/go-yaml/codec.JSONTokens.OneDocument]. The decoder and transform.Walk do not read it.
 	Document int
 }
 
@@ -86,11 +135,17 @@ type Step struct {
 // Do not key a map on the node pointer.
 // Because the parse reuses node cells, two different nodes of one document often share a pointer.
 // Key on the token's offset, or on the node's value.
+//
+// A walk can hand over more values than the document writes.
+// The parse reads "&!" as a tag on the empty node followed by an anchor on the empty node,
+// so the walk hands over two roots at depth 0 in one document, or two values after one mapping key.
+// Do not assume a mapping alternates key and value.
 type Visitor interface {
 	// Enter is called before the node's content.
 	// Returning false skips the content, and Leave is not called for the node.
 	Enter(node ast.Node, at Step) bool
-	// Leave is called after the node's content has been visited.
+	// Leave is called after the node's content has been visited, with the Step that Enter received,
+	// except for At on a block mapping (see [Step.At]).
 	Leave(node ast.Node, at Step)
 }
 
