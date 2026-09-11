@@ -327,9 +327,19 @@ func (p *Parser) parseMapKeyValue(ctx context, g *group.TokenGroup, entryTk *gro
 // A key is usually a single scalar token, and that path is kept: it is every
 // ordinary document. A key spanning more tokens is a flow collection used as a
 // key, which has to be parsed as a node like any other.
+//
+// A plain key that spells a timestamp under %YAML 1.1 is one, as the same
+// scalar is where it stands as a value or after a "?". Read as a string, it let
+// "2001-12-14" over "2001-12-14 00:00:00" through as two keys, and refused the
+// string "2001-12-14" beside the timestamp as a repeat.
 func (p *Parser) parseMapKeyValueNode(ctx context, g *group.TokenGroup) (ast.Node, error) {
 	if g.Len() <= 2 {
-		return p.parseScalarValue(ctx, g.First())
+		node, err := p.parseScalarValue(ctx, g.First())
+		if err != nil {
+			return nil, err
+		}
+
+		return p.resolveTimestamp(ctx, g.First(), node), nil
 	}
 
 	return p.parseToken(ctx, g.First())

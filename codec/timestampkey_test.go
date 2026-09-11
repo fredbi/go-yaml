@@ -132,6 +132,39 @@ func TestATimestampKeyIsItsInstant(t *testing.T) {
 		}
 	})
 
+	t.Run("under 1.1 a plain key that spells a timestamp is one", func(t *testing.T) {
+		t.Parallel()
+
+		// As the same scalar is where it stands as a value, after a "?" and
+		// under an anchor. It stayed a string in a block and a flow mapping.
+		want := time.Date(2001, time.December, 14, 0, 0, 0, 0, time.UTC)
+		for _, src := range []string{
+			"%YAML 1.1\n---\n2001-12-14: v\n",
+			"%YAML 1.1\n---\n{2001-12-14: v}\n",
+		} {
+			var asAny any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &asAny), "%q", src)
+			assert.Equalf(t, map[any]any{want: "v"}, asAny, "%q", src)
+
+			out, err := codec.ToJSON([]byte(src))
+			require.NoError(t, err)
+			assert.JSONEqf(t, `{"2001-12-14T00:00:00Z": "v"}`, string(out), "%q", src)
+		}
+
+		// So two spellings of the date are one key written twice, and the
+		// quoted string beside it is another key.
+		var asAny any
+		require.ErrorIs(t,
+			codec.Unmarshal([]byte("%YAML 1.1\n---\n2001-12-14: a\n2001-12-14 00:00:00: b\n"), &asAny),
+			yamlerrors.ErrDuplicateKey)
+		require.NoError(t, codec.Unmarshal([]byte("%YAML 1.1\n---\n\"2001-12-14\": a\n2001-12-14: b\n"), &asAny))
+		assert.Equal(t, map[any]any{"2001-12-14": "a", want: "b"}, asAny)
+
+		// Under 1.2 the core schema resolves no timestamp, and the key is text.
+		require.NoError(t, codec.Unmarshal([]byte("2001-12-14: v\n"), &asAny))
+		assert.Equal(t, map[string]any{"2001-12-14": "v"}, asAny)
+	})
+
 	t.Run("two instants are two keys", func(t *testing.T) {
 		t.Parallel()
 

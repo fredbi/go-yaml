@@ -140,11 +140,15 @@ func (p *Parser) parseFlowMap(ctx context) (*ast.MappingNode, error) {
 			// group -- the "&a" of "{&a}" -- over as a value.
 			p.markKey()
 			loud := p.quiet()
-			key, err := p.parseScalarValue(ctx, mapKeyTk)
+			scalar, err := p.parseScalarValue(ctx, mapKeyTk)
 			loud()
 			if err != nil {
 				return nil, err
 			}
+			// A plain key that spells a timestamp under %YAML 1.1 is one, as
+			// parseMapKeyValueNode reads it in a block mapping. The tag goes
+			// over as the key, which leaves handKey nothing to hand.
+			key, _ := p.resolveTimestamp(ctx, mapKeyTk, scalar).(ast.MapKeyNode)
 			p.handKey(ctx, key)
 
 			if err := p.refuseMergeKeyAlone(key); err != nil {
