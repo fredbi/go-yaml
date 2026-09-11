@@ -5,6 +5,7 @@ package token
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -1297,8 +1298,114 @@ const (
 	bigFloatMaxPrecision = 1024
 )
 
+// maxFloatExponent bounds the decimal exponent of a float the library reads as
+// a number: past it, [FloatPastRange] reads the float as an infinity of its
+// sign, or zero.
+//
+// A big.Float holds 1e10000000 at no cost, but writing it as decimal -- which
+// naming it as a mapping key does, through [KeyNameOfBigFloat] -- takes time
+// that grows about with the square of the exponent: over a minute for the
+// 13-byte document "1e10000000: a". 1000 covers any float a document holds for
+// its value, with room past float64's 308, and keeps naming a key at 1e1000 to
+// about 80 µs.
+const maxFloatExponent = 1000
+
+// FloatPastRange returns the float64 a float scalar reads as where the decimal
+// exponent of its value is past ±1000: an infinity of its sign for an
+// overflow, as IEEE 754 rounds one, and zero for an underflow. It reports false
+// where text is not a float of type typ, is zero, or is inside the range.
+//
+// The exponent is the value's and not the one written: "0.001e1002" is 1e999,
+// inside the range, and a 2,000-digit number written with a point is past it.
+func FloatPastRange(text string, typ Type) (float64, bool) {
+	shape, ok := shapeOfTypedNumber(text, typ)
+	if !ok || shape.typ != NumberTypeFloat {
+		return 0, false
+	}
+	digits, ok := floatDigits(shape)
+	if !ok {
+		return 0, false
+	}
+
+	exp, nonZero := decimalExponent(digits)
+	switch {
+	case !nonZero || (-maxFloatExponent <= exp && exp <= maxFloatExponent):
+		return 0, false
+	case exp < 0:
+		return 0, true
+	case shape.negative:
+		return math.Inf(-1), true
+	default:
+		return math.Inf(1), true
+	}
+}
+
+// decimalExponent returns E where digits write a value d.ddd × 10^E, and false
+// where every digit of the mantissa is zero. The written exponent saturates, so
+// a thousand-digit one cannot overflow, and an underscore between digits, which
+// YAML 1.1 allows, is not counted.
+func decimalExponent(digits string) (int, bool) {
+	mantissa, exponent := digits, ""
+	if i := strings.IndexAny(digits, "eE"); i >= 0 {
+		mantissa, exponent = digits[:i], digits[i+1:]
+	}
+	point := strings.IndexByte(mantissa, '.')
+	if point < 0 {
+		point = len(mantissa)
+	}
+	first := strings.IndexAny(mantissa, "123456789")
+	if first < 0 {
+		return 0, false
+	}
+
+	var e int
+	if first < point {
+		e = decimalDigits(mantissa[first:point]) - 1
+	} else {
+		e = -decimalDigits(mantissa[point+1 : first+1])
+	}
+
+	return e + writtenExponent(exponent), true
+}
+
+// writtenExponent reads the exponent written after an "e", saturating at a
+// billion either way.
+func writtenExponent(text string) int {
+	const limit = 1_000_000_000
+
+	negative := false
+	if text != "" && (text[0] == '+' || text[0] == '-') {
+		negative, text = text[0] == '-', text[1:]
+	}
+	n := 0
+	for i := 0; i < len(text) && n < limit; i++ {
+		if c := text[i]; c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+	n = min(n, limit)
+	if negative {
+		return -n
+	}
+
+	return n
+}
+
+// decimalDigits counts the decimal digits of text, skipping anything else.
+func decimalDigits(text string) int {
+	n := 0
+	for i := range len(text) {
+		if c := text[i]; c >= '0' && c <= '9' {
+			n++
+		}
+	}
+
+	return n
+}
+
 // ParseBigFloat returns text as a [big.Float], for a real no float64 holds.
-// It reports false where text is not a float.
+// It reports false where text is not a float, and where [FloatPastRange] reads
+// it as an infinity or zero instead.
 //
 // See [ParseBigInteger] for why a document may carry one.
 func ParseBigFloat(text string, typ Type) (*big.Float, bool) {
@@ -1309,6 +1416,11 @@ func ParseBigFloat(text string, typ Type) (*big.Float, bool) {
 
 	digits, ok := floatDigits(shape)
 	if !ok {
+		return nil, false
+	}
+	if exp, nonZero := decimalExponent(digits); nonZero && (exp > maxFloatExponent || exp < -maxFloatExponent) {
+		// Past the range. A big.Float of it is cheap to build and costly to
+		// write as decimal; see maxFloatExponent.
 		return nil, false
 	}
 

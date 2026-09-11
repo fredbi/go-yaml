@@ -302,6 +302,9 @@ func readsAsFloat(text string, schema token.Schema) bool {
 	if _, parsed := token.ParseFloat(text, base); parsed {
 		return true
 	}
+	if _, past := token.FloatPastRange(text, base); past {
+		return true
+	}
 	_, big := token.ParseBigFloat(text, base)
 
 	return big

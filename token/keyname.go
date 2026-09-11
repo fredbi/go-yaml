@@ -133,6 +133,10 @@ func floatKeyName(text string, typ Type) string {
 	if f, ok := ParseFloat(text, typ); ok {
 		return KeyNameOfFloat(f, 64)
 	}
+	if f, ok := FloatPastRange(text, typ); ok {
+		// ".inf", "-.inf" or "0.0", so "1e2000" and ".inf" are one key.
+		return KeyNameOfFloat(f, 64)
+	}
 	if b, ok := ParseBigFloat(text, typ); ok {
 		return KeyNameOfBigFloat(b)
 	}

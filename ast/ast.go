@@ -828,7 +828,8 @@ func (n *FloatNode) AddColumn(col int) {
 
 // GetValue reads the float and returns it as a float64, as a [big.Float] where
 // the number reaches past what a float64 holds, or 0 where the text is not a
-// float after all.
+// float after all. A float whose decimal exponent is past ±1000 is an infinity
+// of its sign, or zero: see [token.FloatPastRange].
 //
 // The parser types the scalar without converting it, so the conversion happens
 // here, each time it is asked for. Use [FloatNode.Text] to read the number as
@@ -838,6 +839,9 @@ func (n *FloatNode) GetValue() interface{} {
 		return float64(0)
 	}
 	if v, ok := token.ParseFloat(n.Token.Value, n.Token.Type); ok {
+		return v
+	}
+	if v, ok := token.FloatPastRange(n.Token.Value, n.Token.Type); ok {
 		return v
 	}
 

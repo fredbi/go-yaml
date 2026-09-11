@@ -5,6 +5,7 @@ package codec_test
 
 import (
 	"bytes"
+	"math"
 	"math/big"
 	"testing"
 
@@ -14,16 +15,19 @@ import (
 	"github.com/go-openapi/go-yaml/codec"
 )
 
-// A number past big.Float's exponent decodes to zero.
+// A number past big.Float's exponent decoded to zero.
 //
 // The parser reads a number no machine type holds as a big.Int or a big.Float.
-// A big.Float keeps its exponent in an int32, so past 1e2147483647 there is no
-// big.Float to build -- and the decoder falls back to a float64, which cannot
-// hold it either and comes back as zero. Nothing is reported.
+// A big.Float keeps its exponent in an int32, so past 1e2147483647 there was no
+// big.Float to build -- and the decoder fell back to a float64, which cannot
+// hold it either and came back as zero. Nothing was reported.
 //
-// ToJSON is unaffected and is right: it writes what the document said, and JSON
-// puts no bound on the magnitude of a number. Found by regenerating the corpus
-// on 2026-09-10, through the seed set fuzzseeds.All() draws from it.
+// A float whose decimal exponent is past ±1000 now reads as an infinity of its
+// sign, or zero, before any big.Float is built: see token.FloatPastRange.
+//
+// ToJSON writes what the document said, and JSON puts no bound on the
+// magnitude of a number. Found by regenerating the corpus on 2026-09-10,
+// through the seed set fuzzseeds.All() draws from it.
 
 func decoded(t *testing.T, src string) any {
 	t.Helper()
@@ -34,23 +38,19 @@ func decoded(t *testing.T, src string) any {
 	return v.(map[string]any)["a"]
 }
 
-// TestDefectANumberPastBigFloatDecodesToZero pins today's behavior.
-func TestDefectANumberPastBigFloatDecodesToZero(t *testing.T) {
-	for _, src := range []string{
-		"a: 1e2147483647\n",
-		"a: -3.96068E4059375226\n",
-		"a: -36.74E69647216797\n",
+// TestFixedANumberPastBigFloatIsAnInfinity: each of these came back as zero.
+func TestFixedANumberPastBigFloatIsAnInfinity(t *testing.T) {
+	for src, want := range map[string]float64{
+		"a: 1e2147483647\n":        math.Inf(1),
+		"a: -3.96068E4059375226\n": math.Inf(-1),
+		"a: -36.74E69647216797\n":  math.Inf(-1),
 	} {
-		assert.Equal(t, float64(0), decoded(t, src),
-			"today: %q comes back as zero, and nothing says so", src)
+		assert.Equal(t, want, decoded(t, src), "%q", src)
 	}
 }
 
-// TestAWideNumberBelowThatBoundIsKept is what makes the above a defect rather
-// than a limit nobody crossed.
-//
-// int32's range is the edge, not the machine word: everything up to it is held
-// exactly.
+// TestAWideNumberBelowThatBoundIsKept holds the numbers inside the ±1000 bound,
+// which keep the width they need.
 func TestAWideNumberBelowThatBoundIsKept(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
 		{src: "a: 1e308\n", want: "float64"},

@@ -1113,6 +1113,9 @@ func taggedFloat(text string, schema token.Schema) any {
 	if f, parsed := token.ParseFloat(text, base); parsed {
 		return f
 	}
+	if f, past := token.FloatPastRange(text, base); past {
+		return f
+	}
 	if b, big := token.ParseBigFloat(text, base); big {
 		return b
 	}
