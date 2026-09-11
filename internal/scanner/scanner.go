@@ -452,13 +452,24 @@ func (s *Scanner) scan(ctx *Context) error {
 				s.endsProperty(ctx)
 			}
 
+			if s.isDirective {
+				// The tab separates a directive's name and its parameters, which is what a space does through
+				// scanWhiteSpace. Read on as indentation or content, it joined them: "%YAML\t1.1" was a directive
+				// named "YAML1.1", and "%YAML 1\t.1" the version 1.1.
+				s.addBufferedTokenIfExists(ctx)
+				s.progressColumn(ctx, 1)
+				ctx.addOriginBuf(c)
+
+				continue
+			}
+
 			// The tab counts as indentation in two places: a plain scalar under way at the root, where lastDelimColumn
 			// is 0 (yaml-test-suite's spec-example-7-12-plain-lines), and anywhere the last delimiter stands left of
 			// the cursor.
 			if (ctx.existsBuffer() && s.lastDelimColumn == 0) || s.lastDelimColumn < s.column {
 				s.indentNum++
 				ctx.addOriginBuf(c)
-				if s.isFirstCharAtLine || s.isDirective || len(ctx.buf) == 0 {
+				if s.isFirstCharAtLine || len(ctx.buf) == 0 {
 					s.progress(ctx, 1)
 
 					continue
@@ -469,9 +480,6 @@ func (s *Scanner) scan(ctx *Context) error {
 				// It goes into the buffer and moves the column, as a space does,
 				// because bufferedToken finds where the scalar starts by counting the buffer back from the column.
 				// bufferedSrc drops it again when no text follows.
-				//
-				// A directive is not a plain scalar, and its tabs stay out of the buffer.
-				// They do not separate its parameters either: "%YAML\t1.1" reads as a directive named "YAML1.1".
 				ctx.addBuf(c)
 				s.progressColumn(ctx, 1)
 

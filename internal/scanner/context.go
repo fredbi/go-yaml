@@ -300,7 +300,6 @@ func (c *Context) removeRightSpaceFromBuf() {
 //
 // scanNewLine calls it on the line a plain scalar starts on, with the cursor on the line break.
 // The scan loop puts a space or a tab that follows the scalar's text into the buffer and moves the column over it.
-// A tab it leaves out of the buffer -- in a directive -- does not move the column, and is not counted.
 func (c *Context) trailingBlankColumns() int {
 	return len(c.buf) - int(c.notSpaceCharPos)
 }

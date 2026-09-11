@@ -4,6 +4,7 @@
 package scanner_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -12,6 +13,45 @@ import (
 	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/token"
 )
+
+// TestATabSeparatesADirectivesParameters checks that a tab in a directive line cuts a token, as a space does.
+//
+// s-separate-in-line separates a directive's name and its parameters, and it admits a tab.
+// The tab arm of Scanner.scan read on over the tab, so "%YAML\t1.1" held one String, "YAML1.1".
+func TestATabSeparatesADirectivesParameters(t *testing.T) {
+	t.Parallel()
+
+	// directiveLine returns the type and value of every token in front of the "---".
+	directiveLine := func(t *testing.T, src string) []string {
+		t.Helper()
+
+		tokens, err := scanTokens(src)
+		require.NoErrorf(t, err, "%q", src)
+
+		var line []string
+		for _, tk := range tokens {
+			if tk.Type == token.DocumentHeaderType {
+				break
+			}
+			line = append(line, tk.Type.String()+"="+tk.Value)
+		}
+
+		return line
+	}
+
+	assert.Equal(t, []string{"Directive=%", "String=YAML", "Float=1.1"}, directiveLine(t, "%YAML\t1.1\n---\na\n"))
+
+	for _, src := range []string{
+		"%YAML\t1.1\n---\na\n",
+		"%YAML \t 1.1\n---\na\n",
+		"%YAML 1.1\t\n---\na\n",
+		"%YAML 1\t.1\n---\na\n",
+		"%TAG\t!e!\ttag:example.com,2000:\n---\na\n",
+	} {
+		spaced := strings.ReplaceAll(src, "\t", " ")
+		assert.Equalf(t, directiveLine(t, spaced), directiveLine(t, src), "%q against %q", src, spaced)
+	}
+}
 
 // TestDirectiveOpensALine holds both halves of the rule c-directive states.
 //

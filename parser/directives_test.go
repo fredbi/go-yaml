@@ -4,6 +4,7 @@
 package parser_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -11,6 +12,41 @@ import (
 
 	"github.com/go-openapi/go-yaml/parser"
 )
+
+// TestATabSeparatesADirectivesParameters checks that a directive line written with a tab reads as the same line
+// written with a space.
+//
+// The scanner dropped the tab, so "%YAML\t1.1" named a directive "YAML1.1" and the document was read as 1.2,
+// and "%YAML 1\t.1" read as the version 1.1. go.yaml.in/yaml/v3 reads the first as 1.1 and refuses the second.
+func TestATabSeparatesADirectivesParameters(t *testing.T) {
+	for _, tc := range []struct {
+		src     string
+		want    any
+		refused string
+	}{
+		// 1.1 reads "010" as the octal 8, and 1.2 as the decimal 10.
+		{src: "%YAML\t1.1\n---\nk: 010\n", want: uint64(8)},
+		{src: "%YAML 1.1\t# c\n---\nk: 010\n", want: uint64(8)},
+		{src: "%TAG\t!e!\ttag:yaml.org,2002:\n---\nk: !e!str x\n"},
+		{src: "%YAML 1\t.1\n---\nk: 010\n", refused: "unexpected format YAML directive"},
+		{src: "%TAG !e! t\tg:yaml.org,2002:\n---\nk: 1\n", refused: "unexpected format TAG directive"},
+	} {
+		for _, src := range []string{tc.src, strings.ReplaceAll(tc.src, "\t", " ")} {
+			_, err := parser.ParseBytes([]byte(src))
+			if tc.refused != "" {
+				require.Errorf(t, err, "%q", src)
+				assert.Containsf(t, err.Error(), tc.refused, "%q", src)
+
+				continue
+			}
+
+			require.NoErrorf(t, err, "%q", src)
+			if tc.want != nil {
+				assert.Equalf(t, tc.want, firstValue(t, src), "%q", src)
+			}
+		}
+	}
+}
 
 // TestParseCommentsAroundDirectives covers comment lines between a directive and the '---' that opens the document.
 //
