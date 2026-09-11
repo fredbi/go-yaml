@@ -260,7 +260,11 @@ type verbatimWriter struct {
 	// See settleGap.
 	roots []Node
 	held  map[int32]bool
-	err   error
+	// dashes says whether the tree holds a block sequence with no entries
+	// recorded: 1 where it does, -1 where it does not, 0 until asked. See
+	// verbatimWriter.holdsText.
+	dashes int8
+	err    error
 }
 
 // upTo writes the source from where the last write stopped to end.
@@ -309,7 +313,7 @@ func (vw *verbatimWriter) upTo(end int) {
 // an entry of a flow collection -- and no line can be left out for it.
 func (vw *verbatimWriter) settleGap(end int) {
 	if vw.err != nil || vw.dropping || end <= vw.cursor || end > len(vw.src) ||
-		!holdsText(vw.src, vw.cursor, end) {
+		!vw.holdsNodeText(vw.cursor, end) {
 		return
 	}
 
@@ -341,7 +345,7 @@ func (vw *verbatimWriter) settleGap(end int) {
 		switch {
 		case at == from && from > 0 && !isBreak(vw.src[from-1]):
 			// The rest of the line the last token written stands on.
-			if holdsText(vw.src, at, brk) {
+			if vw.holdsText(at, brk) {
 				drops = append(drops, extent{from: int32(at), to: int32(brk)})
 			}
 			dropped = false
@@ -351,7 +355,7 @@ func (vw *verbatimWriter) settleGap(end int) {
 			if dropped {
 				drops = append(drops, extent{from: int32(at), to: int32(next)})
 			}
-		case holdsText(vw.src, at, brk) || !vw.holdsComment(at, brk):
+		case vw.holdsText(at, brk) || !vw.holdsComment(at, brk):
 			drops = append(drops, extent{from: int32(at), to: int32(next)})
 			dropped = true
 		default:
@@ -422,9 +426,84 @@ func (vw *verbatimWriter) holdsComment(from, to int) bool {
 // holdsText reports whether src[from:to] holds anything but spacing, commas, a
 // byte order mark and comments.
 func holdsText(src []byte, from, to int) bool {
+	return textIn(src, from, to, false)
+}
+
+// holdsText is holdsText for this rendering.
+//
+// A tree that records no "-" for the entries of a block sequence -- a parse
+// without parser.WithComments builds no SequenceNode.Entries -- hands none over,
+// and the copy writes each as the layout in front of its value. Read as text a
+// removed entry left behind, "- a" at the start of a document was refused with
+// ErrRemove, and "-" over "  x" lost its dash and read back as "x". There a "-"
+// followed by a blank, a break or the end is layout too; a removed entry's value
+// is still text, and its line still goes.
+func (vw *verbatimWriter) holdsText(from, to int) bool {
+	if !holdsText(vw.src, from, to) {
+		return false
+	}
+
+	return textIn(vw.src, from, to, vw.untrackedDashes())
+}
+
+// holdsNodeText reports whether src[from:to] holds text a removed node left,
+// which is what makes settleGap read the stretch at all.
+//
+// A "..." opening its line is no node's text: it closes a document, and one the
+// tree holds no node for -- after a comment in a stream holding nothing else,
+// or closing a document with no content -- is layout. Taken for a removed
+// node's, it sent settleGap through a stretch no caller touched, and a parse
+// without parser.WithComments, whose tree holds no comment, lost "# comment"
+// over "..." whole. A removed document still leaves text of its own.
+func (vw *verbatimWriter) holdsNodeText(from, to int) bool {
+	for at := from; at < to; {
+		end := to
+		if brk := indexBreak(vw.src, at, to); brk >= 0 {
+			end = brk
+		}
+		marker := (at == 0 || isBreak(vw.src[at-1])) && isDocumentEnd(vw.src[at:end])
+		if !marker && vw.holdsText(at, end) {
+			return true
+		}
+		if end == to {
+			break
+		}
+		at = afterBreak(vw.src, end)
+	}
+
+	return false
+}
+
+// untrackedDashes reports whether the tree holds a block sequence read from the
+// document that records no entries. It is worked out once, the first time a
+// stretch holds text.
+func (vw *verbatimWriter) untrackedDashes() bool {
+	if vw.dashes == 0 {
+		vw.dashes = -1
+		for _, root := range vw.roots {
+			eachNode(root, func(n Node) {
+				// Read from the document by its first "-" and not by its values,
+				// which may hold no token at all: "&a" over "-" is a sequence of
+				// one null.
+				s, ok := n.(*SequenceNode)
+				if ok && !s.IsFlowStyle && len(s.Values) > 0 && len(s.Entries) == 0 &&
+					s.Start != nil && s.Start.FromSource() {
+					vw.dashes = 1
+				}
+			})
+		}
+	}
+
+	return vw.dashes > 0
+}
+
+// textIn reports whether src[from:to] holds text, reading a "-" followed by a
+// blank, a break or the end as layout where dashes is set.
+func textIn(src []byte, from, to int, dashes bool) bool {
 	for i := from; i < to; i++ {
 		switch c := src[i]; {
 		case c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',':
+		case dashes && c == '-' && (i+1 == to || isSpacing(src[i+1])):
 		case c == '#' && (i == 0 || isSpacing(src[i-1]) || afterByteOrderMark(src, i)):
 			for i+1 < to && !isBreak(src[i+1]) {
 				i++

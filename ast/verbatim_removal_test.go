@@ -130,3 +130,46 @@ func dropDocument(i int) func(*ast.File) {
 		f.Docs = append(f.Docs[:i:i], f.Docs[i+1:]...)
 	}
 }
+
+// TestVerbatimFileWritesASequenceParsedWithoutComments checks the "-" of a block
+// sequence the tree records no entry for.
+//
+// A parse without parser.WithComments builds no SequenceNode.Entries, so no node
+// hands a "-" over and the copy writes it as the layout in front of the value.
+// Read as text a removed entry left behind, "- a" at the start of a document
+// was refused with ErrRemove, and "-" over "  x" lost its dash and read back as
+// the scalar "x".
+func TestVerbatimFileWritesASequenceParsedWithoutComments(t *testing.T) {
+	for _, src := range []string{
+		"- plain",
+		"- a\n- b\n",
+		"- |\n  x\n",
+		"-\n  x\n",
+		"- - x\n",
+		"- a: 1\n  b: 2\n",
+		"k:\n  - a\n",
+		// An entry holding nothing: its null has no token, only the "-" says the
+		// sequence was read from the document.
+		"&a\n-\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(src))
+			require.NoError(t, err)
+
+			var out bytes.Buffer
+			require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, f))
+			assert.Equal(t, src, out.String())
+		})
+	}
+
+	t.Run("a removed entry still takes its line", func(t *testing.T) {
+		const src = "- a\n- b\n- c\n"
+		f, err := parser.ParseBytes([]byte(src))
+		require.NoError(t, err)
+		dropItem(1)(f)
+
+		var out bytes.Buffer
+		require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, f))
+		assert.Equal(t, "- a\n- c\n", out.String())
+	})
+}
