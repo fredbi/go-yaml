@@ -99,19 +99,6 @@ func writeKeyIdentity(b *strings.Builder, n Node, depth int, anchors AnchorIdent
 		return true
 	case *TagNode:
 		return writeTaggedIdentity(b, nn, depth, anchors)
-	case *LiteralNode:
-		// A literal or folded block scalar is a string whatever it spells, and
-		// its own token is the header -- "|-" or ">-". Falling through to the
-		// token named every block scalar key after its header, so two of them
-		// collided however differently they read.
-		if nn.Value == nil {
-			writeScalarIdentity(b, "", token.KeyString)
-
-			return true
-		}
-		writeScalarIdentity(b, nn.Value.Value, token.KeyString)
-
-		return true
 	case *SequenceNode:
 		b.WriteString("seq(")
 		for i, v := range nn.Values {
@@ -133,12 +120,14 @@ func writeKeyIdentity(b *strings.Builder, n Node, depth int, anchors AnchorIdent
 		return writeEntriesIdentity(b, []*MappingValueNode{nn}, depth, anchors)
 	}
 
-	tk := n.GetToken()
-	if tk == nil {
+	// A scalar, named by the walk every reader of a key shares. Reading the
+	// token here instead named a block scalar after its "|-" header, and a
+	// "<<" the core schema leaves a string as a key of kind other.
+	name, kind, named := scalarKeyNameAt(n, depth, nil)
+	if !named {
 		return false
 	}
-	name, kind := token.KeyName(tk.Value, tk.Type)
-	writeScalarIdentity(b, name, kind)
+	writeScalarIdentity(b, CanonicalKeyName(name, kind), kind)
 
 	return true
 }

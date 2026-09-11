@@ -163,59 +163,31 @@ func (p *Parser) mapKeyText(n ast.Node) string {
 	return n.GetToken().Value
 }
 
+// mapKeyIdentity returns the name and the kind the duplicate check compares a key by.
+//
+// The name comes from [ast.ComparedKeyName], the walk every reader of a key shares,
+// so the duplicate check compares a key by the rule [ast.KeyName] names it by.
+// aliasKeyIdentity answers an alias.
+//
+// A collection key gets no name here: its first token would name every sequence key "[" and every block mapping key ":".
+// recordBuiltKeyOnce checks it with ast.KeyIdentity once its entry is complete,
+// since a collection holds nothing while its entry is being read.
 func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
-	if n == nil {
+	name, kind, named := ast.ComparedKeyName(n, p.aliasKeyIdentity)
+	if !named {
 		return "", token.KeyOther
 	}
 
-	switch nn := n.(type) {
-	case *ast.MappingKeyNode:
-		return p.mapKeyIdentity(nn.Value)
-	case *ast.AnchorNode:
-		return p.mapKeyIdentity(nn.Value)
-	case *ast.TagNode:
-		// A tag names the type, so it is part of the key's identity:
-		// "!!str 1" is the string "1" and not the integer, and the two are two keys.
-		if name, kind, tagged := ast.TaggedKeyName(nn); tagged {
-			return ast.CanonicalKeyName(name, kind), kind
-		}
+	return name, kind
+}
 
-		return p.mapKeyIdentity(nn.Value)
-	case *ast.AliasNode:
-		// An alias node is the node its anchor named (section 3.2.2.2), so it takes that node's key.
-		// keepAnchorIdentity recorded it while the node was whole;
-		// on a walk AliasNode.Target now points at a reused cell.
-		// A scalar anchor is named here, so "{&a x: 1, *a : 2}" is one key written twice.
-		// A collection anchor returns no name, and builtKeyIdentity checks it once its entry is built.
-		at := p.anchors.identity(anchorNameOf(nn.Value))
+// aliasKeyIdentity names an alias key as the node its anchor named (section 3.2.2.2).
+//
+// keepAnchorIdentity recorded that node while it was whole; on a walk AliasNode.Target now points at a reused cell.
+// A scalar anchor is named here, so "{&a x: 1, *a : 2}" is one key written twice.
+// A collection anchor returns no name, and builtKeyIdentity checks it once its entry is built.
+func (p *Parser) aliasKeyIdentity(a *ast.AliasNode) (string, token.KeyKind, bool) {
+	at := p.anchors.identity(anchorNameOf(a.Value))
 
-		return at.text, at.kind
-	case *ast.StringNode:
-		// Named by the node's text and the string kind, not by the token, as ast.KeyName does.
-		// A "<<" that the core schema leaves an ordinary key reaches here over a token still typed MergeKey,
-		// which token.KeyName has no case for. Named by the node, it is the same key as the "<<" of "{<<}".
-		// Under 1.1 the merge key reaches here as another node type, and collides only with another merge key.
-		return nn.Value, token.KeyString
-	case *ast.LiteralNode:
-		// A literal or folded block scalar is a string whatever it spells, and its own token is the header, "|-" or ">-".
-		// Named by its string, "? |-" over "  a" is the same key as a plain "a", as section 3.2.1.1 requires,
-		// and it is recorded beside the plain keys so the two meet.
-		if nn.Value == nil {
-			return "", token.KeyString
-		}
-
-		return nn.Value.Value, token.KeyString
-	case *ast.SequenceNode, *ast.MappingNode, *ast.MappingValueNode:
-		// No single token names a collection key: its first token would name every sequence key "["
-		// and every block mapping key ":". recordBuiltKeyOnce checks it with ast.KeyIdentity
-		// once its entry is complete, since a collection holds nothing while its entry is being read.
-		return "", token.KeyOther
-	}
-
-	tk := n.GetToken()
-	if tk == nil {
-		return "", token.KeyOther
-	}
-
-	return token.KeyName(tk.Value, tk.Type)
+	return at.text, at.kind, true
 }

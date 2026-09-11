@@ -39,58 +39,108 @@ import (
 // "!!float 1.0: x" came back keyed "1" -- a float in the integers' namespace,
 // where an entry keyed "1" then displaces it.
 func KeyName(n Node) (string, token.KeyKind) {
-	return keyNameAt(n, 0)
+	name, kind, named := ScalarKeyName(n, aliasTarget)
+	if !named {
+		return "", token.KeyOther
+	}
+
+	return name, kind
 }
 
-// keyNameAt is [KeyName] with the descent bounded: a tag stands over a node
-// that may carry another.
-func keyNameAt(n Node, depth int) (string, token.KeyKind) {
+// aliasTarget names an alias as the node its anchor named (3.2.2.2), through
+// [AliasNode.Target]. Reading Target is safe on a walk as well as on a tree
+// since ast.Arena.Commit holds an anchored node's cells for the document;
+// before that it read another part of the document.
+//
+// A scalar answers in constant time and a collection hands back nothing, so
+// this cannot expand the way an identity does -- there is no structure to write
+// out, only a name. The target is named with no alias rule of its own: an
+// anchored node is never an alias.
+func aliasTarget(a *AliasNode) (string, token.KeyKind, bool) {
+	return scalarKeyNameAt(a.Target, 1, nil)
+}
+
+// KeyAlias names the key an alias stands for, and reports false where it cannot.
+//
+// Each reader of a key answers an alias its own way: [KeyName] through
+// [AliasNode.Target], the parser through the identities its anchors recorded,
+// which a walk still holds once the anchored node is gone.
+type KeyAlias func(*AliasNode) (string, token.KeyKind, bool)
+
+// ScalarKeyName names the scalar a mapping key stands for, and its type. It is
+// the one walk from a key node to its name: [KeyName], [KeyIdentity] and the
+// parser's duplicate check all read it, so a rule for one kind of key reaches
+// all three.
+//
+// It looks through an explicit "?", an anchor and a tag that names no type. A
+// tag that names one says what the key is, through [TaggedKeyName]. A quoted
+// key is named by what its escapes resolved to, a block scalar by its string
+// and not its "|-" header, and an alias by alias, which may be nil.
+//
+// It reports false for a collection, which [KeyIdentity] names from what it
+// holds, and for an alias alias does not answer.
+func ScalarKeyName(n Node, alias KeyAlias) (string, token.KeyKind, bool) {
+	return scalarKeyNameAt(n, 0, alias)
+}
+
+// ComparedKeyName is [ScalarKeyName] in the form two keys are compared by,
+// which [CanonicalKeyName] gives.
+func ComparedKeyName(n Node, alias KeyAlias) (string, token.KeyKind, bool) {
+	name, kind, named := ScalarKeyName(n, alias)
+	if !named {
+		return "", token.KeyOther, false
+	}
+
+	return CanonicalKeyName(name, kind), kind, true
+}
+
+// scalarKeyNameAt is [ScalarKeyName] with the descent bounded: a tag stands
+// over a node that may carry another.
+func scalarKeyNameAt(n Node, depth int, alias KeyAlias) (string, token.KeyKind, bool) {
 	if n == nil || depth > maxKeyNameDepth {
-		return "", token.KeyOther
+		return "", token.KeyOther, false
 	}
 
 	switch nn := n.(type) {
 	case *MappingKeyNode:
-		return keyNameAt(nn.Value, depth+1)
+		return scalarKeyNameAt(nn.Value, depth+1, alias)
 	case *AnchorNode:
-		return keyNameAt(nn.Value, depth+1)
+		return scalarKeyNameAt(nn.Value, depth+1, alias)
 	case *TagNode:
 		if name, kind, tagged := TaggedKeyName(nn); tagged {
-			return name, kind
+			return name, kind, true
 		}
 
-		return keyNameAt(nn.Value, depth+1)
+		return scalarKeyNameAt(nn.Value, depth+1, alias)
 	case *StringNode:
-		// The node's own text, not the token's: a double-quoted key holds what
-		// the escapes resolved to.
-		return nn.Value, token.KeyString
+		// The node's own text and the string kind, not the token's: a
+		// double-quoted key holds what the escapes resolved to, and a "<<" the
+		// core schema leaves an ordinary key stands over a token still typed
+		// MergeKey, which token.KeyName would file under KeyOther.
+		return nn.Value, token.KeyString, true
 	case *LiteralNode:
 		if nn.Value == nil {
-			return "", token.KeyString
+			return "", token.KeyString, true
 		}
 
-		return nn.Value.Value, token.KeyString
+		return nn.Value.Value, token.KeyString, true
 	case *AliasNode:
-		// An alias node is the node its anchor named (3.2.2.2), so it is named
-		// as that node. Reading Target is safe on a walk as well as on a tree
-		// since ast.Arena.Commit holds an anchored node's cells for the
-		// document; before that it read another part of the document, and this
-		// arm handed back nothing rather than a wrong answer.
-		//
-		// A scalar answers in constant time and a collection hands back
-		// nothing, so this cannot expand the way an identity does -- there is
-		// no structure to write out, only a name.
-		return keyNameAt(nn.Target, depth+1)
+		if alias == nil {
+			return "", token.KeyOther, false
+		}
+
+		return alias(nn)
 	case *SequenceNode, *MappingNode, *MappingValueNode:
-		return "", token.KeyOther
+		return "", token.KeyOther, false
 	}
 
 	tk := n.GetToken()
 	if tk == nil {
-		return "", token.KeyOther
+		return "", token.KeyOther, false
 	}
+	name, kind := token.KeyName(tk.Value, tk.Type)
 
-	return token.KeyName(tk.Value, tk.Type)
+	return name, kind, true
 }
 
 // TaggedKeyName names a key from the tag standing on it, for the tags that name
