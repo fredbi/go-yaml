@@ -725,13 +725,13 @@ func (vw *verbatimWriter) spacingAfter(from int) int {
 func (vw *verbatimWriter) restOfLine() int {
 	for i := vw.cursor; i < len(vw.src); i++ {
 		switch c := vw.src[i]; c {
-		case '\n':
-			return i + 1
-		case ' ', '\t', '\r':
+		case '\n', '\r':
+			return afterBreak(vw.src, i)
+		case ' ', '\t':
 		case '#':
 			for ; i < len(vw.src); i++ {
-				if vw.src[i] == '\n' {
-					return i + 1
+				if isBreak(vw.src[i]) {
+					return afterBreak(vw.src, i)
 				}
 			}
 
@@ -742,6 +742,20 @@ func (vw *verbatimWriter) restOfLine() int {
 	}
 
 	return len(vw.src)
+}
+
+// afterBreak is the offset just past the line break standing at i, a "\r\n"
+// counted as one.
+//
+// A lone "\r" ends a line as "\n" does. Read as spacing, it sent the search for
+// the end of a line on through the lines after it, and an entry inserted after
+// the last of a document written with "\r" went in after the next document.
+func afterBreak(src []byte, i int) int {
+	if src[i] == '\r' && i+1 < len(src) && src[i+1] == '\n' {
+		return i + 2
+	}
+
+	return i + 1
 }
 
 // indentAt is the indentation the line holding from opens with, taken from the

@@ -179,6 +179,10 @@ func TestVerbatimPlacesAnInsertedEntry(t *testing.T) {
 		{"a blank line between entries", "a: 1\n\nb: 2\n", false, 2, "a: 1\n\nb: 2\nx: 9\n"},
 		{"no trailing line break", "a: 1", false, 1, "a: 1\nx: 9\n"},
 		{"carriage returns", "a: 1\r\nb: 2\r\n", false, 2, "a: 1\r\nb: 2\r\nx: 9\n"},
+		// A lone CR ends the line the entry before stands on. Read as spacing, it
+		// sent the search for the end of that line on through the next document,
+		// and the entry went in after that document.
+		{"lines broken by a lone CR", "a: 1 # c\r---\rb: 2\r", false, 1, "a: 1 # c\rx: 9\n---\rb: 2\r"},
 		{"outside a nested mapping", "root:\n  a: 1\n", false, 1, "root:\n  a: 1\nx: 9\n"},
 
 		{"a flow mapping, at the front", "{a: 1, b: 2}\n", false, 0, "{x: 9, a: 1, b: 2}\n"},
@@ -305,10 +309,16 @@ type placement struct {
 // every seed reshuffled. 58 -> 56 unreadable at the front and the middle and
 // 192 -> 189 disturbed at the back followed the new documents, and the renderer
 // did not move. An equal count does not mean the same documents.
+//
+// At the back, 13 -> 12 unreadable and 189 -> 190 disturbed is one document:
+// seed/3300, written with lone "\r" breaks, whose entry went in after its second
+// document until a "\r" began to end the line, and now lands in the first. It
+// counts as disturbed with the 60 other documents written that way, since
+// withoutMarkerLines splits on "\n" and cannot take the entry's line out of one.
 var insertionCensus = map[string]placement{
 	"front":  {tested: 1776, unreadable: 56, disturbed: 0},
 	"middle": {tested: 1776, unreadable: 56, disturbed: 17},
-	"back":   {tested: 1776, unreadable: 13, disturbed: 189},
+	"back":   {tested: 1776, unreadable: 12, disturbed: 190},
 }
 
 // TestInsertingIntoTheCorpus puts one entry into every document the corpus holds
