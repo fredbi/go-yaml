@@ -10,64 +10,50 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// recordKeyOnce records tk among the keys of the mapping being parsed, and
-// notes a repeat on the mapping rather than refusing the document.
+// recordKeyOnce records tk among the keys of the mapping being parsed, and notes a repeat on the mapping.
 //
-// The parse reads a document that repeats a key and says where: 3.2.1.1 makes
-// the repeat an error, but which error and whether to stop is the caller's, and
-// a document that cannot be parsed cannot be linted, rendered or colorized
-// either. codec refuses it at the load.
+// A repeated key does not stop the parse. Section 3.2.1.1 makes the repeat an error,
+// but the caller chooses which error to return and whether to stop,
+// and a document the parser rejects cannot be linted, rendered or colorized either.
+// codec rejects the repeat when it loads the tree.
 //
-// Every entry's key passes through here, including a flow entry written as a
-// key with no value: "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does,
-// and was read without complaint while the check only saw keys that came with
-// a ':'.
+// Every entry's key passes through here, including a flow entry written as a key with no value:
+// "{a, a: 1}" repeats a key as much as "{a: 1, a: 2}" does.
 //
-// Told to allow duplicates, nothing is recorded at all: the mapping carries no
-// Duplicates, the load has nothing to refuse, and the last entry written wins
-// because that is what filling a map does.
+// Under [WithAllowDuplicateMapKey] nothing is recorded: the mapping carries no Duplicates,
+// and a load filling a Go map keeps the last entry written.
 func (p *Parser) recordKeyOnce(ctx context, tk *token.Token, name string, kind token.KeyKind) {
 	if p.opts.allowDuplicateMapKey {
 		return
 	}
 
 	if unnamedKey(name, kind) {
-		// [Parser.mapKeyIdentity] had nothing to say about this key: an alias,
-		// whose target the load resolves, or a collection, whose identity is a
-		// comparison of trees. Recording it would make every such key the same
-		// key, so "{[a]: 1, [b]: 2}" was refused as a repeat of "" -- and,
-		// before that, as a repeat of "[".
-		//
-		// A key written empty is not this: "" from a quoted key comes back as
-		// [token.KeyString] and the empty node as "null", so both are recorded
-		// and both still catch a genuine repeat.
+		// mapKeyIdentity returned no name: the key is an alias whose target the load resolves,
+		// or a collection, whose identity is a comparison of trees.
+		// Recording such keys would make every one of them the same key.
+		// A quoted "" comes back as token.KeyString and the empty node as "null", so both are still recorded.
 		return
 	}
 
 	p.keys.RecordOnce(ctx.keyBase, name, kind, tk.Position)
 }
 
-// unnamedKey reports whether mapKeyIdentity gave up on a key, which it says by
-// handing back no name under [token.KeyOther].
+// unnamedKey reports whether mapKeyIdentity returned no name for a key: "" under [token.KeyOther].
 func unnamedKey(name string, kind token.KeyKind) bool {
 	return name == "" && kind == token.KeyOther
 }
 
-// recordBuiltKeyOnce records an entry whose key a single token cannot name, and
-// notes it where the key repeats one an earlier entry of this mapping wrote.
+// recordBuiltKeyOnce records an entry whose key no single token names, and notes a repeat on the mapping.
 //
-// 3.2.1.1 makes two keys equal when they resolve to the same node, so "[a]" and
-// "[ a ]" are one key and the second entry repeats the first. A scalar key is
-// recorded as it is read, where its one token names it; these are what is left,
-// and [ast.KeyIdentity] names them from the built node.
+// Section 3.2.1.1 makes two keys equal when they resolve to the same node, so "[a]" and "[ a ]" are one key.
+// recordKeyOnce records a scalar key as it is read, from its one token.
+// The keys left over reach here, and [ast.KeyIdentity] names them from the built node.
 //
-// It runs from [Parser.mappingValue], where the entry is complete and its key
-// with it. Every earlier attempt named the key while the parser was still
-// cutting it, which is why a collection had no children to be named by and a
-// block scalar offered its header.
+// It runs from [Parser.mappingValue], once the entry and its key are complete.
+// Before that a collection key has no children to be named by, and a block scalar key has only its header.
 //
-// The refusal names the repeat's own token and the token of the entry that
-// first wrote the key, which is what a reader gets for a scalar key.
+// The repeat is recorded with its own position and the position of the entry that first wrote the key,
+// as for a scalar key.
 func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
 	if p.opts.allowDuplicateMapKey || !p.keys.InMapping() {
 		return
@@ -77,7 +63,7 @@ func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
 		return
 	}
 	if name, kind := p.mapKeyIdentity(key); !unnamedKey(name, kind) {
-		// Recorded as it was read, by the one token that names it.
+		// recordKeyOnce recorded this key as it was read.
 		return
 	}
 
@@ -94,30 +80,24 @@ func (p *Parser) recordBuiltKeyOnce(key ast.MapKeyNode) {
 	p.keys.RecordBuilt(identity, keyDisplayName(key), tk.Position)
 }
 
-// keepsNothing reports whether a walk may hand the cells of what it has just
-// read out again.
+// keepsNothing reports whether a walk may reuse the cells of the nodes it has just read.
 //
-// It holds inside a key and inside an anchor, and for the same reason: the node
-// is read a second time, so it has to still be there. A key is named by what it
-// holds, and an alias names the anchored node, which [ast.KeyIdentity] reads
-// through [ast.AliasNode.Target].
+// It returns false inside a key and inside an anchor, because there the node is read a second time.
+// A key is named by its content, and an alias names the anchored node,
+// which [ast.KeyIdentity] reads through [ast.AliasNode.Target].
 //
-// The anchor costs nothing new. closeAnchor already saves the tokens an anchor
-// covers until the document ends, so a walk of "a: &x" over ten thousand block
-// entries holds 80 tape chunks where the same document without the anchor holds
-// 2 -- 1.46 MiB against 55 KiB. The nodes stand on content the tape is keeping
-// either way.
+// Keeping an anchor's nodes holds no extra tape: closeAnchor already saves the tokens an anchor covers
+// until the document ends.
 func (p *Parser) keepsNothing() bool {
 	return !p.descent.readingAKey() && !p.anchors.reading()
 }
 
-// builtKeyIdentity names a key that a single token could not.
+// builtKeyIdentity names a key that no single token names.
 //
-// An alias is read from the identities the anchors recorded rather than through
-// [ast.AliasNode.Target]: 3.2.1.1 makes "&a [1]" and a later "*a" one key,
-// because an alias node is the anchored node rather than a copy of it, and on a
-// walk the anchored node is scrubbed by the time the alias is read. Everything
-// else is named from the node in hand.
+// An alias is named from the identities the anchors recorded, not through [ast.AliasNode.Target].
+// Section 3.2.1.1 makes "&a [1]" and a later "*a" one key, because an alias node is the anchored node and not a copy,
+// and on a walk the anchored node is scrubbed by the time the alias is read.
+// Every other key is named from the node in hand.
 func (p *Parser) builtKeyIdentity(key ast.MapKeyNode) string {
 	n := ast.Node(key)
 	if explicit, isExplicit := n.(*ast.MappingKeyNode); isExplicit {
@@ -130,12 +110,10 @@ func (p *Parser) builtKeyIdentity(key ast.MapKeyNode) string {
 	return ast.KeyIdentityWithAnchors(key, p.anchors.identityOf)
 }
 
-// keyDisplayName is what a refusal calls a key a single token cannot name.
+// keyDisplayName returns the text an error shows for a key that no single token names.
 //
-// The rendered node rather than the identity: "[a]" reads back to a user where
-// "seq(string/a)" does not. The explicit "?" comes off and the lines are joined
-// with a space, so a key written over three lines still names itself on the one
-// line an error message has.
+// It renders the node, because "[a]" reads well in an error where the identity "seq(string/a)" does not.
+// It drops an explicit "?" and joins the lines with a space, so a key written over three lines fits on one line.
 func keyDisplayName(n ast.Node) string {
 	if key, explicit := n.(*ast.MappingKeyNode); explicit {
 		n = key.Value
@@ -147,15 +125,13 @@ func keyDisplayName(n ast.Node) string {
 	return strings.Join(strings.Fields(n.String()), " ")
 }
 
-// isScalarKeyToken reports whether tk is a scalar written where a key goes,
-// quoted or not.
-// isScalarKeyToken reports whether a key's token sits where the entry begins,
-// so that the column of what follows can be measured against it.
+// isScalarKeyToken reports whether tk is a key token that stands at the start of its entry,
+// so the column of what follows can be measured against it.
 //
-// A plain or quoted key does. So does the implicit null standing for a key that
-// was never written: implicitNullKeyToken copies the ':' position, and the ':'
-// is where the entry begins. Without it ":\n1\n" read as {null: 1}, where the
-// same document with the key written out, "k:\n1\n", is refused.
+// A plain or quoted key does. So does the implicit null standing for a key that was never written:
+// implicitNullKeyToken copies the position of the ':', and the entry begins at the ':'.
+// Without it ":\n1\n" would read as {null: 1}, although "k:\n1\n", the same document with the key written out,
+// is rejected.
 func isScalarKeyToken(tk *token.Token) bool {
 	switch tk.Type {
 	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType, token.ImplicitNullType:
@@ -165,10 +141,9 @@ func isScalarKeyToken(tk *token.Token) bool {
 	}
 }
 
-// mapKeyText is the key as the document wrote it, which is what a path
-// addresses the entry by: "$.0x10" reaches the entry written "0x10:" whatever
-// the number resolves to. Telling one key from another is a different question
-// and mapKeyIdentity's.
+// mapKeyText returns the key as the document wrote it, and a path addresses the entry by that text:
+// "$.0x10" reaches the entry written "0x10:" whatever the number resolves to.
+// mapKeyIdentity tells one key from another.
 func (p *Parser) mapKeyText(n ast.Node) string {
 	if n == nil {
 		return ""
@@ -199,66 +174,41 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 	case *ast.AnchorNode:
 		return p.mapKeyIdentity(nn.Value)
 	case *ast.TagNode:
-		// A tag names the type, so it names the key's identity: "!!str 1" is
-		// the string "1" and not the integer, and the two are two keys.
-		// Unwrapping to the node under it read the tag off and made them one.
+		// A tag names the type, so it is part of the key's identity:
+		// "!!str 1" is the string "1" and not the integer, and the two are two keys.
 		if name, kind, tagged := ast.TaggedKeyName(nn); tagged {
 			return ast.CanonicalKeyName(name, kind), kind
 		}
 
 		return p.mapKeyIdentity(nn.Value)
 	case *ast.AliasNode:
-		// An alias node is the node its anchor named (3.2.2.2), so it is that
-		// node's key. keepAnchorIdentity read it where the node was whole; a
-		// walk has scrubbed it by now, and AliasNode.Target points at a cell
-		// holding whatever was built there next.
-		//
-		// A scalar anchor answers here and is recorded among the scalar keys,
-		// so "{&a x: 1, *a : 2}" is one key written twice. A collection anchor
-		// hands back nothing and is checked when its entry is built, by
-		// builtKeyIdentity.
+		// An alias node is the node its anchor named (section 3.2.2.2), so it takes that node's key.
+		// keepAnchorIdentity recorded it while the node was whole;
+		// on a walk AliasNode.Target now points at a reused cell.
+		// A scalar anchor is named here, so "{&a x: 1, *a : 2}" is one key written twice.
+		// A collection anchor returns no name, and builtKeyIdentity checks it once its entry is built.
 		at := p.anchors.identity(anchorNameOf(nn.Value))
 
 		return at.text, at.kind
 	case *ast.StringNode:
-		// The node's own text and the string kind, not the token's, which is
-		// what [ast.KeyName] reads for the same reason.
-		//
-		// A "<<" that the core schema leaves an ordinary key reaches here as a
-		// StringNode over a token still typed MergeKey, and token.KeyName has
-		// no case for that type: it fell through to KeyOther, so the entry was
-		// recorded as "other/<<" where a bare "{<<}" is recorded as
-		// "string/<<". A key's identity is its kind and its name, so the two
-		// never met and "{<<: {x: 1}, <<}" read as {"<<": nil} with the first
-		// entry's mapping gone and nothing reported. Under 1.1 the merge key
-		// is a merge key and reaches here as another node, so it keeps its own
-		// identity and still collides only with another merge key.
+		// Named by the node's text and the string kind, not by the token, as ast.KeyName does.
+		// A "<<" that the core schema leaves an ordinary key reaches here over a token still typed MergeKey,
+		// which token.KeyName has no case for. Named by the node, it is the same key as the "<<" of "{<<}".
+		// Under 1.1 the merge key reaches here as another node type, and collides only with another merge key.
 		return nn.Value, token.KeyString
 	case *ast.LiteralNode:
-		// A literal or folded block scalar is a string whatever it spells, and
-		// its own token is the header, "|-" or ">-". Falling through to the
-		// token named every block scalar key after its header, so two of them
-		// collided however differently they read. Named by the string instead,
-		// "? |-" over "  a" is the same key as a plain "a", which 3.2.1.1 makes
-		// it -- and it is recorded beside the plain keys, so the two meet.
+		// A literal or folded block scalar is a string whatever it spells, and its own token is the header, "|-" or ">-".
+		// Named by its string, "? |-" over "  a" is the same key as a plain "a", as section 3.2.1.1 requires,
+		// and it is recorded beside the plain keys so the two meet.
 		if nn.Value == nil {
 			return "", token.KeyString
 		}
 
 		return nn.Value.Value, token.KeyString
 	case *ast.SequenceNode, *ast.MappingNode, *ast.MappingValueNode:
-		// A key a single token cannot name. It is checked when the mapping
-		// closes instead, by [ast.KeyIdentity] over the built node: a
-		// collection is named by what it holds, and it holds nothing while the
-		// entry is being read.
-		//
-		// Naming one here has been tried three ways and all three were wrong.
-		// The node's first token names every sequence key "[" and every block
-		// mapping key ":". Nothing at all stops the check, and the walk then
-		// folds a repeat's two entries into one and drops the first value. The
-		// document's own source text reads "[a]" and "[ a ]" as two keys, which
-		// the walk then folds anyway -- the same dropped value, reached by a
-		// longer route.
+		// No single token names a collection key: its first token would name every sequence key "["
+		// and every block mapping key ":". recordBuiltKeyOnce checks it with ast.KeyIdentity
+		// once its entry is complete, since a collection holds nothing while its entry is being read.
 		return "", token.KeyOther
 	}
 

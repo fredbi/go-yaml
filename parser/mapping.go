@@ -10,9 +10,10 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// mappingValue builds a map entry and tells onComplete about it. Every entry
-// the parser makes goes through here, block and flow alike, which is what lets
-// a consumer fold entries without walking the tree. EXPERIMENT (2026-08-27).
+// mappingValue builds a mapping entry and passes it to the onComplete hook, which is experimental.
+//
+// Every entry the parser builds goes through here, block and flow alike,
+// so a consumer can fold entries without walking the tree.
 func (p *Parser) mappingValue(ctx context, colon, entry *group.TapeToken, key ast.MapKeyNode, value ast.Node) (*ast.MappingValueNode, error) {
 	if p.opts.jsonCompatible {
 		if err := refuseCollectionKey(key); err != nil {
@@ -30,24 +31,17 @@ func (p *Parser) mappingValue(ctx context, colon, entry *group.TapeToken, key as
 	return n, err
 }
 
-// refuseMergeKeyAlone rejects a "<<" written as a flow entry's key alone, where
-// the merge key is in force.
+// refuseMergeKeyAlone rejects a "<<" written alone as a flow entry's key, where the merge key is in force.
 //
-// yaml.org/type/merge.html spells the merge key "<<" followed by its ':' and a
-// value to merge, so "{a: 1, <<}" is not a merge at all -- the scanner types
-// the two characters MergeKeyType only when a ':' follows them, which is why
-// the bare one arrives here as a plain string.
+// yaml.org/type/merge.html spells the merge key "<<" followed by its ':' and a value to merge,
+// so "{a: 1, <<}" is not a merge. The scanner types the two characters MergeKeyType only when a ':' follows them,
+// so the bare one arrives here as a plain string.
+// Read as an ordinary key, it would resolve to a string beside entries where the same two characters merge.
 //
-// Read as an ordinary key instead, it put a "<<" named nothing into the mapping
-// beside the entries a real merge had brought in, so the same two characters
-// resolved to the merge type in one entry and to a string in another. Nobody
-// else does that: go.yaml.in/yaml/v3 v3.0.5 refuses the document and libfyaml
-// 1.0.0b1 drops the entry.
-//
-// Only the plain spelling. Quoting makes it a string whatever the version, so
-// `{"<<": {x: 1}, "<<"}` is an ordinary repeated key and is refused as one.
-// Under the core schema nothing merges and a bare "<<" is an ordinary key, so
-// this stands aside and the duplicate check answers instead.
+// Only the plain spelling is rejected. Quoting makes it a string under any version,
+// so {"<<": {x: 1}, "<<"} is an ordinary repeated key and is recorded as one.
+// Under the core schema nothing merges and a bare "<<" is an ordinary key,
+// so this returns nil and the duplicate check applies instead.
 func (p *Parser) refuseMergeKeyAlone(key ast.MapKeyNode) error {
 	if !p.opts.mergeKeys && p.schemaInForce() != token.Schema11 {
 		return nil
@@ -60,19 +54,15 @@ func (p *Parser) refuseMergeKeyAlone(key ast.MapKeyNode) error {
 	return yamlerrors.NewSyntax("merge key requires a ':' and a value to merge", tk)
 }
 
-// parseMapEntry parses exactly ONE "key: value" pair at keyTk.
+// parseMapEntry parses exactly one "key: value" pair at keyTk.
 //
-// Extracted from parseMap so sibling entries can be accumulated in a loop. parseMap used to
-// recurse once per sibling, building a whole MappingNode at every level and discarding it to
-// keep only .Values -- which made a mapping of N keys cost N recursions and slice
-// concatenations summing to O(N^2).
+// parseMap calls it once per entry, in a loop.
 func (p *Parser) parseMapEntry(ctx context, keyTk *group.TapeToken) (*ast.MappingValueNode, error) {
 	if keyTk.Group == nil {
 		return nil, yamlerrors.NewSyntax("unexpected map key", keyTk.RawToken())
 	}
 
-	// The entry's own tokens are read again once the value under it is parsed,
-	// and the tail passes them meanwhile.
+	// holdRun keeps the entry's own tokens, which are read again once the value under it is parsed.
 	runSeq := keyTk.Seq()
 	p.holdRun(runSeq)
 	defer p.releaseRun(runSeq)
@@ -94,8 +84,8 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *group.TapeToken) (*ast.Mappin
 	if err != nil {
 		return nil, err
 	}
-	// The key goes over before its value is parsed: a writer needs it first,
-	// and its token is on the tape now.
+	// The key goes to the walk before its value is parsed: a writer needs it first,
+	// and its token is still on the tape.
 	p.handKey(ctx, key)
 	ctx.goNext()
 
@@ -109,10 +99,8 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *group.TapeToken) (*ast.Mappin
 		return nil, err
 	}
 
-	// A value taken from the key's own line settles the entry, so nothing
-	// indented under it belongs to this key. The pairing pass used to make that
-	// case its own group and the check ran on the group; without the group the
-	// condition has to be read off the tokens.
+	// A value on the key's own line settles the entry, so nothing indented under it belongs to this key.
+	// The grouping gives this case no group of its own, so the condition is read off the tokens.
 	if valueTk != nil && keyTk.Line() == valueTk.Line() {
 		if err := p.validateMapKeyValueNextToken(ctx, keyTk, ctx.currentToken()); err != nil {
 			return nil, err
@@ -122,28 +110,22 @@ func (p *Parser) parseMapEntry(ctx context, keyTk *group.TapeToken) (*ast.Mappin
 	return p.mappingValue(childCtx, keyTk.Group.Last(), nil, key, value)
 }
 
-// explicitKeyValue reads the value of the entry keyTk opens.
+// explicitKeyValue reads the value of the entry that keyTk opens.
 //
-// An explicit key whose group holds no ':' of its own has no value written, and
-// 8.2.2 gives the entry e-node for one. Reading forward instead took whatever
-// stood at the '?'s column: "? a" over "1" came back as {a: 1} and "? a" over
-// "&x b" as {a: b}, documents with no ':' in them at all, and "? a" over "- b"
-// as {a: [b]} -- a zero-indented sequence is a value where a ':' was written,
-// which is why "a:" over "- b" is right and this is not. All three are refused
-// by grammar.NewRecognizer and by yaml/v3.
+// An explicit key whose group holds no ':' of its own has no value written,
+// and section 8.2.2 gives the entry an e-node.
+// Reading forward would take whatever stands at the column of the '?':
+// "? a" over "1" would read as {a: 1}, a document with no ':' in it, which grammar.NewRecognizer rejects.
 //
-// The token then stands where the mapping around the entry reads it, and is
-// refused there if it opens nothing -- the same answer "a:" over "b" already
-// gave.
+// The token then stays where the mapping around the entry reads it,
+// and that mapping rejects it if it opens nothing, as it does for "a:" over "b".
 func (p *Parser) explicitKeyValue(ctx context, keyTk *group.TapeToken, key ast.MapKeyNode) (ast.Node, error) {
 	g := keyTk.Group
 	if tk := ctx.currentToken(); tk != nil &&
 		g.First().Type() == token.MappingKeyType && g.Last().Type() != token.MappingValueType {
-		// The same null parseMapValue supplies for a key at this column whose
-		// value is absent, so the two shapes give the entry the same node.
-		// Nothing follows at all is left to parseMapValue: it ends the run as
-		// well as supplying the null, and the null it builds stands one column
-		// further on.
+		// This is the null parseMapValue supplies for a key whose value is absent,
+		// so both shapes give the entry the same node.
+		// When nothing follows at all, parseMapValue handles it: it ends the run as well as supplying the null.
 		return p.handNull(ctx, ctx.insertNullToken(g.Last()))
 	}
 
@@ -159,36 +141,31 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 	defer p.keys.Close(base)
 	ctx = ctx.withMapping(base)
 
-	// The entries are gathered on a stack the parser reuses for every mapping,
-	// so a mapping's Values is allocated once, at its own length, rather than
-	// grown an entry at a time. entryBase is where this mapping's run starts.
+	// The entries gather on a stack the parser reuses for every mapping, so Values is allocated once, at its length.
+	// entryBase marks the start of this mapping's run on that stack.
 	entryBase := p.descent.entryBase()
 	defer p.descent.dropEntries(entryBase)
 
 	keyTk := ctx.currentToken()
 
-	// The node is made before its entries, not after, so a walk is handed the
-	// mapping while the token it stands on is still on the tape. Gathering
-	// fills Values at the end; walking leaves it empty and hands each entry
-	// over instead.
+	// The node is built before its entries, so a walk receives the mapping while its token is still on the tape.
+	// A parse fills Values at the end; a walk leaves it empty and hands each entry over instead.
 	mapNode := ctx.arena.Mapping(keyTk.RawToken(), false, nil)
 	mapNode.SetPathNode(ctx.path)
 	defer p.keys.Open(mapNode)()
 	p.enter(ctx, mapNode, KindMapping)
 
-	// Where the arena stands before an entry is read. A walk has seen the entry
-	// by the time the next one starts and keeps none of it, so the cells go out
-	// again for the entry that follows -- what stands at once is the depth
-	// rather than the mapping. A parse gathering a tree never rewinds.
+	// markNodes records the arena's position before each entry.
+	// A walk keeps nothing of an entry once it is handed over, so rewindNodes reuses its cells for the next one.
+	// A parse that builds the tree never rewinds.
 	p.markNodes(ctx)
 
 	keyValueNode, err := p.parseMapEntry(ctx, keyTk)
 	if err != nil {
 		return nil, err
 	}
-	// A mapping stands on its first entry's ':', which is only known now. The
-	// walk was handed the key's position instead, which is where a reader would
-	// say the mapping begins.
+	// The mapping's Start is its first entry's ':', known only now.
+	// The walk received the key's position instead, where a reader sees the mapping begin.
 	mapNode.Start = keyValueNode.GetToken()
 	p.hold(keyValueNode)
 	p.rewindNodes(ctx)
@@ -241,17 +218,9 @@ func (p *Parser) parseMap(ctx context) (*ast.MappingNode, error) {
 
 	if ctx.isComment() {
 		if keyTk.Column() <= ctx.currentToken().Column() {
-			// If the comment is in the same or deeper column as the last element column in map value,
-			// treat it as a footer comment for the last element.
-			//
-			// It attaches to the last ENTRY rather than to the mapping: when sibling entries were
-			// parsed by recursion, the innermost call always held exactly one value and so took
-			// that branch. Parsing them in a loop puts every value in one node, so the choice has
-			// to be made explicitly to keep the attribution identical.
-			//
-			// The comment is read either way. A walk gathers no entries, so there is nothing here
-			// to attach it to -- the entry it belongs to went over before the comment was reached,
-			// which is the foot-comment lag Walk's doc names.
+			// A comment at or past the column of the mapping's keys is a foot comment for the last entry,
+			// not for the mapping. A walk gathers no entries, so the comment is read and attached to nothing:
+			// its entry was handed over before the comment was reached, as Walk's doc describes.
 			foot := p.parseFootComment(ctx, keyTk.Column())
 			if len(mapNode.Values) != 0 {
 				last := mapNode.Values[len(mapNode.Values)-1]
@@ -303,16 +272,16 @@ func (p *Parser) parseMapKeyValue(ctx context, g *group.TokenGroup, entryTk *gro
 	if err != nil {
 		return nil, err
 	}
-	// As in parseMapEntry: the key goes over before its value. This shape holds
-	// key and value in one group, so parseMapEntry returns here before it hands
-	// anything over, and a flow mapping reaches this and nothing else.
+	// As in parseMapEntry, the key goes to the walk before its value.
+	// This shape holds key and value in one group, so parseMapEntry returns through here before handing anything over.
+	// Every flow mapping entry takes this path.
 	p.handKey(ctx, key)
 
 	c := p.valueContext(ctx, key)
-	// The entry the value is written in, so a property standing alone at the
-	// end of a line knows what indentation its node has to be past. parseMapValue
-	// records this for the "k: v" shape; without it here, "? a" over ": &a1"
-	// took the "? b" below it as the node the anchor names.
+	// enterEntry records the entry the value is written in,
+	// so a property alone at the end of a line finds the indentation its node must be past.
+	// parseMapValue does the same for the "k: v" shape.
+	// Without it, "? a" over ": &a1" would take the "? b" below as the node the anchor names.
 	defer p.descent.enterEntry(int(key.GetToken().Position.Column), true)()
 
 	value, err := p.parseToken(c, g.Last())
@@ -324,14 +293,12 @@ func (p *Parser) parseMapKeyValue(ctx context, g *group.TokenGroup, entryTk *gro
 
 // parseMapKeyValueNode parses the key part of a map-key group.
 //
-// A key is usually a single scalar token, and that path is kept: it is every
-// ordinary document. A key spanning more tokens is a flow collection used as a
-// key, which has to be parsed as a node like any other.
+// A key of one scalar token takes the scalar path, which covers every ordinary document.
+// A key of more tokens is a flow collection used as a key, and is parsed as a node like any other.
 //
-// A plain key that spells a timestamp under %YAML 1.1 is one, as the same
-// scalar is where it stands as a value or after a "?". Read as a string, it let
-// "2001-12-14" over "2001-12-14 00:00:00" through as two keys, and refused the
-// string "2001-12-14" beside the timestamp as a repeat.
+// A plain key that spells a timestamp under %YAML 1.1 resolves to a timestamp, as it does as a value or after a "?".
+// Read as a string, "2001-12-14" and "2001-12-14 00:00:00" would be two keys,
+// and a string key "2001-12-14" beside the timestamp would count as a repeat.
 func (p *Parser) parseMapKeyValueNode(ctx context, g *group.TokenGroup) (ast.Node, error) {
 	if g.Len() <= 2 {
 		node, err := p.parseScalarValue(ctx, g.First())
@@ -345,9 +312,8 @@ func (p *Parser) parseMapKeyValueNode(ctx context, g *group.TokenGroup) (ast.Nod
 	return p.parseToken(ctx, g.First())
 }
 
-// unreadInGroup returns the first token the group at ctx still holds that is
-// not a comment, or nil where the group is spent. A comment carries no node and
-// is written wherever the author liked.
+// unreadInGroup returns the first token left in the group at ctx that is not a comment, or nil when the group is spent.
+// A comment carries no node and may stand anywhere.
 func unreadInGroup(ctx context) *group.TapeToken {
 	for !ctx.isTokenNotFound() {
 		if tk := ctx.currentToken(); tk.Type() != token.CommentType {
@@ -380,15 +346,13 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 			}
 		}
 
-		// A "?" stands around the node that addresses the entry, so it goes
-		// over before that node and closes after it -- the shape an anchor and
-		// a tag take. Handed over afterwards, as parseMapEntry hands a plain
-		// key, it arrived after its own content and the content arrived as a
-		// value: "? a\n: b" read as the three values a, ? and b.
+		// A "?" encloses the key node, so it goes to the walk before that node and is left after it,
+		// as an anchor and a tag are. Handed over afterwards, as parseMapEntry hands a plain key,
+		// it would follow its own content, and "? a\n: b" would read as the three values a, ? and b.
 		p.enterKey(ctx, key, KindKey)
 		defer p.leave(ctx, key)
 
-		ctx.goNext() // skip mapping key token
+		ctx.goNext() // Skip the '?'.
 		if ctx.isTokenNotFound() {
 			return nil, yamlerrors.NewSyntax("could not find value for mapping key", mapKeyTk.RawToken())
 		}
@@ -399,11 +363,9 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 		if err != nil {
 			return nil, err
 		}
-		// 8.2.2 gives the body one node -- s-l+block-indented(n, block-out) --
-		// and everything indented past the '?' was read into it, so a token
-		// left over is a second node the key cannot hold. Nothing read it: the
-		// key was built from the first node and the rest of the group was
-		// dropped, so "? a" over " : b" came back as {a: null} with the b gone.
+		// Section 8.2.2 gives the key one node (s-l+block-indented(n, block-out)),
+		// and everything indented past the '?' belongs to it.
+		// A token left over is a second node the key cannot hold, and "? a" over " : b" would otherwise lose the b.
 		if left := unreadInGroup(ctx); left != nil {
 			return nil, yamlerrors.NewSyntax("an explicit key names one node, and this stands past it", left.RawToken())
 		}
@@ -411,23 +373,15 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 		if !ok {
 			return nil, yamlerrors.NewSyntax("cannot use this node as a map key", value.GetToken())
 		}
-		// A comment closing the '?'s own line belongs to the key, and the node
-		// the key names is where the renderer writes one: "? a # note" already
-		// keeps its comment that way, since there the comment closes the
-		// scalar's line and is recorded against the scalar. Put on the
-		// MappingKeyNode instead it reached the tree and no renderer wrote it,
-		// so "? # c" over "  k" over ": v" rendered as "? k" over ": v" -- and
-		// the same document one level in, "?" over " #" over " ? \"\"", took two
-		// renderings to settle and lost the comment on the second.
-		//
-		// It moves onto the key's own line: "? # c" over "  k" comes back as
-		// "? k # c", which is where the short spelling puts it.
+		// A comment closing the line of the '?' belongs to the key, and the renderer writes it on the key's node,
+		// as it does for "? a # note". Left on the MappingKeyNode, no renderer writes it,
+		// and "? # c" over "  k" over ": v" would render as "? k" over ": v".
+		// The comment moves to the key's own line: "? # c" over "  k" comes back as "? k # c".
 		if cm := key.GetComment(); cm != nil && value.GetComment() == nil {
-			// ast.TakeComment and not SetComment(nil): the comment is being put
-			// on the node it belongs to while the tree is built, and the
-			// document's own text is not changing. SetComment refuses to drop a
-			// comment the document wrote, since a caller doing that leaves the
-			// renderer nothing to take the old text out by.
+			// ast.TakeComment and not SetComment(nil):
+			// the tree is being built, and the document's text is not changing.
+			// SetComment rejects dropping a comment the document wrote,
+			// because the renderer would then have nothing to remove the old text by.
 			ast.TakeComment(key)
 			if err := value.SetComment(cm); err != nil {
 				return nil, err
@@ -438,13 +392,8 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 			keyText := p.mapKeyText(scalar)
 			key.SetPathNode(ctx.withChild(p, keyText).path)
 		}
-		// A collection used as a key has no path: neither YAMLPath nor JSON
-		// Pointer has syntax that reaches one, so it stays out of the path map
-		// rather than being given an invented address. It is still a key, and
-		// 3.2.1.1 still holds it to being written once -- returning early here
-		// skipped the check as well as the path, so "? [a]" over ": 1" twice
-		// read as two entries where the flow spelling "{[a]: 1, [a]: 2}" is
-		// refused.
+		// A collection used as a key gets no path: neither YAMLPath nor JSON Pointer has syntax that reaches one.
+		// It is still a key, so validateMapKey still checks it for a repeat.
 		if err := p.validateMapKey(ctx, key, g.Last()); err != nil {
 			return nil, err
 		}
@@ -474,23 +423,18 @@ func (p *Parser) parseMapKey(ctx context, g *group.TokenGroup) (ast.MapKeyNode, 
 	return key, nil
 }
 
-// validateMapKey checks key against the rules a mapping key is held to, and
-// records it among the keys of the mapping being parsed.
+// validateMapKey checks key against the mapping key rules, and records it among the keys of the mapping being parsed.
 //
-// Two entries of one mapping repeat a key when they resolve to the same node,
-// which mapKeyIdentity reads as a type and that type's own spelling, so the
-// check needs the key and not the path built from it.
+// Two entries of one mapping repeat a key when they resolve to the same node.
+// mapKeyIdentity reads that as a type and the type's own spelling, so the check needs the key and not its path.
 func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, colonTk *group.TapeToken) error {
 	tk := key.GetToken()
 	name, kind := p.mapKeyIdentity(key)
 	p.recordKeyOnce(ctx, tk, name, kind)
 	if ctx.isFlow {
-		// A pair written inside a flow sequence is an implicit key: it has to
-		// fit on one line, and its ':' has to be on that line with it.
-		//
-		// A flow mapping's key is under neither restriction. It may span lines,
-		// and a line break before the ':' is ordinary separation, so
-		// "{foo\n: bar}" is as legal as "{foo: bar}".
+		// A pair written inside a flow sequence is an implicit key: it must fit on one line, with its ':' on that line.
+		// A flow mapping's key has neither restriction. It may span lines, and a line break before the ':'
+		// is ordinary separation, so "{foo\n: bar}" is as legal as "{foo: bar}".
 		if ctx.inFlowSequence && isScalarKeyToken(tk) {
 			if int(tk.EndLine()) != colonTk.Line() {
 				return yamlerrors.NewSyntax("map key definition includes an implicit line break", tk)
@@ -507,18 +451,15 @@ func (p *Parser) validateMapKey(ctx context, key ast.MapKeyNode, colonTk *group.
 	return nil
 }
 
-// carriesProperty reports whether a token is an anchor or a tag: a property
-// naming the node that follows it rather than a node of its own.
+// carriesProperty reports whether tk is an anchor or a tag, a property of the node that follows it.
 func carriesProperty(tk *group.TapeToken) bool {
 	return tk.GroupType() == group.TokenGroupAnchorName || tk.Type() == token.TagType
 }
 
 // valueContext returns the context for the value of key.
 //
-// parseMapKey has already built the key's path and stored it on the key node,
-// so read it back rather than build the same string a second time. A flow
-// collection used as a key is the one case with no path: it is given one here,
-// the same way it was before.
+// parseMapKey has already built the key's path and stored it on the key node, so valueContext reads it back.
+// A flow collection used as a key has no path, and gets one here from mapKeyText.
 func (p *Parser) valueContext(ctx context, key ast.MapKeyNode) context {
 	if path := key.GetPathNode(); path != nil {
 		return ctx.withPath(path)
@@ -550,16 +491,14 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *group.T
 	}
 
 	if tk.Column() == keyCol && isMapToken(tk) {
-		// in this case,
-		// ----
-		// key: <value does not defined>
+		// key: <no value>
 		// next
 		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
 
 	if ctx.isFlow && closesFlowEntry(tk) {
-		// "[a:]", "[:]" and "[a, :]" -- the punctuation belongs to the
-		// collection the pair is written in, so the pair's value is e-node.
+		// In "[a:]", "[:]" and "[a, :]" the punctuation belongs to the enclosing collection,
+		// so the pair's value is an e-node.
 		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
 
@@ -571,25 +510,18 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *group.T
 		// next
 		// ^
 		//
-		// The property stands on the key's line, so the node it names is a
-		// block node and has to be indented past the key like any other value.
-		// Level with the key a token can only open the next entry, and this one
-		// opens nothing -- so the property names nothing and the token belongs
-		// nowhere. Read as the property's node it made "k: &a\n1" the mapping
-		// {k: 1}, which no other implementation reads at all.
+		// The property stands on the key's line, so its node is a block node and must be indented past the key.
+		// Level with the key, a token can only open the next entry, and this one opens nothing.
 		return nil, yamlerrors.NewSyntax("value is not indented past its key", next.RawToken())
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == keyLine && tk.GroupType() == group.TokenGroupAnchorName &&
 		next.Column() == keyCol && isMapToken(next) {
-		// in this case,
-		// ----
 		// key: &anchor
 		// next
 		//
-		// A comment may stand between the two. It belongs to the entry below
-		// and says nothing about where this one ends, so what follows the
-		// anchor is looked for past it.
+		// A comment may stand between the two. It belongs to the entry below,
+		// so the search for what follows the anchor skips it.
 		group := group.NewTokenGroup(group.TokenGroupAnchor, []*group.TapeToken{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
@@ -600,20 +532,18 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *group.T
 	}
 
 	if tk.Column() <= keyCol && tk.GroupType() == group.TokenGroupAnchorName {
-		// key: <value does not defined>
+		// key: <no value>
 		// &anchor
 		return nil, yamlerrors.NewSyntax("anchor is not allowed in this context", tk.RawToken())
 	}
 	if tk.Column() <= keyCol && tk.Type() == token.TagType {
-		// key: <value does not defined>
+		// key: <no value>
 		// !!tag
 		return nil, yamlerrors.NewSyntax("tag is not allowed in this context", tk.RawToken())
 	}
 
 	if tk.Column() < keyCol {
-		// in this case,
-		// ----
-		//   key: <value does not defined>
+		//   key: <no value>
 		// next
 		return p.handNull(ctx, ctx.insertNullToken(colonTk))
 	}
@@ -624,24 +554,15 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *group.T
 		// b
 		// ^
 		//
-		// An entry's value is written further in than its key. Level with the
-		// key, a token can only open the next entry -- another key, handled
-		// above, or the '-' of a block sequence, which by convention sits at
-		// its own key's column. Anything else has nowhere to belong, and
-		// reading it as the value made "a:\nb" the mapping {a: b} where every
-		// other implementation refuses the document.
-		//
-		// Only a plain or quoted key is measured this way. Where the key
-		// carries a property or is written after a '?', its first token is the
-		// property or the '?' rather than the key itself, and the column that
-		// token sits at says nothing about where the entry begins.
+		// A value is indented further than its key, and a token level with the key can only open the next entry:
+		// another key (handled above) or the '-' of a block sequence, which by convention sits at its key's column.
+		// Only a plain or quoted key is measured this way.
+		// A key with a property or a '?' starts with that token, and its column does not mark where the entry begins.
 		return nil, yamlerrors.NewSyntax("value is not indented past its key", tk.RawToken())
 	}
 
 	if tk.Line() == keyLine && tk.GroupType() == group.TokenGroupAnchorName &&
 		ctx.nextNotCommentToken().Column() < keyCol {
-		// in this case,
-		// ----
 		//   key: &anchor
 		// next
 		group := group.NewTokenGroup(group.TokenGroupAnchor, []*group.TapeToken{tk, ctx.createImplicitNullToken(tk)})
@@ -663,25 +584,19 @@ func (p *Parser) parseMapValue(ctx context, key ast.MapKeyNode, colonTk *group.T
 	return value, nil
 }
 
-// refuseCollectionKey reports the error for a mapping key JSON has no spelling
-// for, or nil where the key is a scalar.
+// refuseCollectionKey returns the error for a mapping key JSON cannot write, or nil when the key is a scalar.
 //
-// A "?" key, an anchor and a tag are stood around the key rather than being the
-// key, so they are unwrapped to reach what a converter would have to write. An
-// alias is followed to the node it names: "a: &x [1, 2]" then "? *x" wrote the
-// key as "[1,2]" through the converter and as "[1 2]" through the decoder, two
-// spellings and neither of them the key.
+// A "?" key, an anchor and a tag enclose the key, so the loop unwraps them to reach the node a converter would write.
+// An alias is followed to the node it names: after "a: &x [1, 2]", the key "? *x" is a sequence.
 //
-// The walk ends. An anchor's value is never another anchor and never an alias
-// -- the parser refuses "&x &y 1" and "&x *y", the second because §7.1 gives an
-// alias no properties -- so following a target costs one step and reaches a tag
-// or a node.
+// The loop ends. An anchor's value is never another anchor and never an alias:
+// the parser rejects "&x &y 1", and "&x *y" because section 7.1 gives an alias no properties.
+// So following a target takes one step and reaches a tag or a node.
 func refuseCollectionKey(key ast.MapKeyNode) error {
 	var (
 		node ast.Node = key
-		// at is where the complaint is drawn. Following an alias lands on the
-		// anchored node, which is somewhere else in the document, so the alias
-		// keeps the caret on the key that cannot be one.
+		// at, when set, places the caret of the error. Following an alias lands on the anchored node,
+		// elsewhere in the document, so the alias token keeps the caret on the key.
 		at *token.Token
 	)
 

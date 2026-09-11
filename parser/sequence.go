@@ -10,9 +10,9 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// hold keeps a mapping's entry for the node above it, or drops it where the
-// parse is walking: the key went over before its value and the value announced
-// itself, so the entry holds nothing the caller has not seen.
+// hold keeps a mapping's entry for the node above it, or drops it on a walk where keepsNothing holds.
+//
+// On a walk the key and its value have both been handed over, so the entry holds nothing the visitor has not seen.
 func (p *Parser) hold(entry *ast.MappingValueNode) {
 	if p.walking() && p.keepsNothing() {
 		return
@@ -28,13 +28,10 @@ type pendingEntry struct {
 	headComment *ast.CommentGroupNode
 }
 
-// fillSequence gives node the entries it was built from, each slice allocated
-// once at the length it ends up with.
+// fillSequence gives node the entries it was built from, allocating each slice once at its final length.
 //
-// ValueHeadComments is left empty where no entry carried a head comment, which
-// is every sequence of a document written without them. Readers already meet a
-// short one -- a flow sequence only ever grew it as far as its last commented
-// entry.
+// ValueHeadComments stays nil when no entry carries a head comment.
+// Readers already meet a shorter slice: parseFlowSequence grows it only as far as its last commented entry.
 func fillSequence(node *ast.SequenceNode, entries []pendingEntry) {
 	if len(entries) == 0 {
 		return
@@ -76,21 +73,19 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 	p.enter(ctx, seqNode, KindSequence)
 	defer p.leave(ctx, seqNode)
 
-	// The entries are gathered on a stack the parser reuses for every sequence,
-	// so this one's slices are allocated at its own length rather than grown an
-	// entry at a time. base is where this sequence's run starts.
+	// The entries gather on a stack that every sequence reuses, so fillSequence allocates this one's slices once.
+	// base indexes the start of this sequence's entries on the stack.
 	base := p.descent.seqBase()
 	defer p.descent.dropSeqEntries(base)
 
 	tk := seqTk
-	// index counts the entries read, which is what the run's own length used
-	// to say. A walk holds no entry, so it cannot be counted by them.
+	// index counts the entries read. A walk holds no entry, so the stack cannot count them.
 	var index uint
 	for tk.Type() == token.SequenceEntryType && tk.Column() == seqTk.Column() {
 		seqTk := tk
 		p.markNodes(ctx)
 		headComment := p.parseHeadComment(ctx)
-		ctx.goNext() // skip sequence entry token
+		ctx.goNext() // Skip the '-'.
 
 		ctx := ctx.withIndex(p, index)
 		index++
@@ -103,10 +98,8 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 			return nil, err
 		}
 		if p.walking() && p.keepsNothing() {
-			// Nothing gathers the entries and the walk has seen this one, so
-			// the cells it stands in go out again for the entry after it.
-			// Inside a key they are kept, so that the key can be named by what
-			// it holds.
+			// Nothing gathers the entries and the walk has seen this one, so its node cells are reused for the next entry.
+			// Inside a key the entries are kept, so the key can be named by what it holds.
 			p.rewindNodes(ctx)
 		} else {
 			p.descent.holdSeqEntry(pendingEntry{
@@ -128,8 +121,7 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 
 	if ctx.isComment() {
 		if seqTk.Column() <= ctx.currentToken().Column() {
-			// If the comment is in the same or deeper column as the last element column in sequence value,
-			// treat it as a footer comment for the last element.
+			// A comment at the column of the '-' or deeper is the foot comment of the last entry.
 			seqNode.FootComment = p.parseFootComment(ctx, seqTk.Column())
 			countFootAttached(seqNode.FootComment)
 			if len(seqNode.Values) != 0 {
@@ -155,28 +147,15 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *group.TapeToken) (ast.No
 	defer p.descent.enterEntry(int(seqCol), false)()
 
 	if tk.Column() == seqCol && tk.Type() == token.SequenceEntryType {
-		// in this case,
-		// ----
-		// - <value does not defined>
-		// -
+		// An entry with no value, followed by the next '-'.
 		return p.handNull(ctx, ctx.insertNullToken(seqTk))
 	}
 
 	if next := ctx.nextNotCommentToken(); tk.Line() == seqLine && tk.GroupType() == group.TokenGroupAnchorName &&
 		next.Column() <= seqCol {
-		// in this case,
-		// ----
-		// - &anchor
-		// -
-		//
-		// Whatever an anchor at the end of an entry's line names has to be
-		// written inside that entry, which means further in than its '-'. A
-		// token back at that column or before it belongs to something the
-		// entry is part of, so the anchor names the empty node.
-		//
-		// A comment may stand between the two. It belongs to what comes after
-		// and says nothing about where this entry ends, so what follows the
-		// anchor is looked for past it.
+		// An anchor ending the entry's line, followed by a token at or before the '-' column, as in "- &a" over "-".
+		// The anchored node must be further in than the '-', so the anchor names the empty node.
+		// A comment between the two belongs to what follows, so the check looks past it.
 		group := group.NewTokenGroup(group.TokenGroupAnchor, []*group.TapeToken{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
@@ -187,30 +166,22 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *group.TapeToken) (ast.No
 	}
 
 	if tk.Column() <= seqCol && tk.GroupType() == group.TokenGroupAnchorName {
-		// - <value does not defined>
-		// &anchor
+		// An anchor at or before the column of the '-' is outside the entry, which has no value.
 		return nil, yamlerrors.NewSyntax("anchor is not allowed in this sequence context", tk.RawToken())
 	}
 	if tk.Column() <= seqCol && tk.Type() == token.TagType {
-		// - <value does not defined>
-		// !!tag
+		// A tag at or before the column of the '-' is outside the entry, which has no value.
 		return nil, yamlerrors.NewSyntax("tag is not allowed in this sequence context", tk.RawToken())
 	}
 
 	if tk.Column() < seqCol || (tk.Column() == seqCol && tk.Line() != seqLine) {
-		// in this case,
-		// ----
-		//   - <value does not defined>
-		// next
+		// A token before the column of the '-', or at it on a later line, follows an entry with no value.
 		return p.handNull(ctx, ctx.insertNullToken(seqTk))
 	}
 
 	if tk.Line() == seqLine && tk.GroupType() == group.TokenGroupAnchorName &&
 		ctx.nextNotCommentToken().Column() < seqCol {
-		// in this case,
-		// ----
-		//   - &anchor
-		// next
+		// An anchor ending the entry's line, followed by a token before the column of the '-'.
 		group := group.NewTokenGroup(group.TokenGroupAnchor, []*group.TapeToken{tk, ctx.createImplicitNullToken(tk)})
 		anchor, err := p.parseAnchor(ctx.withGroup(p, group), group)
 		if err != nil {
@@ -230,14 +201,11 @@ func (p *Parser) parseSequenceValue(ctx context, seqTk *group.TapeToken) (ast.No
 	return value, nil
 }
 
-// sequenceEntry returns the node holding an element's '-' and its comments, and
-// nil where the parse was not asked for comments.
+// sequenceEntry returns the node holding an entry's '-' and its comments, or nil when the parse drops comments.
 //
-// The node carries a head comment, a line comment and the '-' the element was
-// written with. A parse dropping comments has only the '-' to put in it:
-// ast.Renderer reads Entries only when it is writing comments, and
-// codec.sequenceEntryNode reads it for the position of a missing-field error,
-// falling back to the mapping's first key where the sequence kept none.
+// Without comments the node would hold only the '-'. ast.Renderer reads Entries only when it writes comments,
+// and codec.sequenceEntryNode, which reads an entry for the position of a missing-field error,
+// falls back to the mapping's first key when the sequence kept none.
 func (p *Parser) sequenceEntry(ctx context, entryTk *group.TapeToken, value ast.Node, headComment *ast.CommentGroupNode) (*ast.SequenceEntryNode, error) {
 	if !p.opts.keepComments {
 		return nil, nil

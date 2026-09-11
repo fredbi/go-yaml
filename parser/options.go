@@ -8,26 +8,24 @@ import "github.com/go-openapi/go-yaml/ast"
 // Option configures a [Parser]. Pass options to [New] or [ParseBytes].
 type Option func(p *Parser)
 
-// options holds what the [Option] arguments to [New] wrote.
+// options holds the settings the [Option] arguments to [New] write.
 //
-// [Parser.Parse] and [Parser.Walk] read these and never write them, so one
-// parser reads document after document with the same settings. A document's own
-// %YAML version and TAG handles go to the Parser instead.
+// Parser.begin writes one field: it fills chunkSize from the document's length when no option set it.
+// Nothing else writes these after [New], so every document of a stream is read with the same settings.
+// A document's own %YAML version and TAG handles go to the Parser's yamlVersion and tagHandles fields.
 type options struct {
-	// onComplete is told about each node as it is finished. EXPERIMENT.
+	// onComplete receives each node as the parser finishes it. See [WithOnComplete].
 	onComplete func(ast.Node)
 
-	// chunkSize is how many tokens one chunk of the token arena holds.
+	// chunkSize is the number of tokens in one chunk of the token arena.
 	chunkSize int
 
-	// version is the version to fall back on where a document names none.
+	// version applies to a document that names no version.
 	version YAMLVersion
 
-	// mergeKeys resolves a bare "<<" as a merge key whatever version is in
-	// force. See [WithMergeKeys].
+	// mergeKeys resolves a bare "<<" as a merge key under every version. See [WithMergeKeys].
 	mergeKeys bool
-	// keepComments says [WithComments] was passed, so the comments a document
-	// holds reach the tree rather than being dropped as they are read.
+	// keepComments records that [WithComments] was passed, so comments reach the tree.
 	keepComments         bool
 	allowDuplicateMapKey bool
 	omitNodePaths        bool

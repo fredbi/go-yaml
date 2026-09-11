@@ -44,13 +44,9 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	node.LaxTags = p.opts.laxTags
 	node.Schema = p.schemaInForce()
 
-	// The tag stands around the node it types, so it goes over before that node
-	// and closes after it -- the same shape parseAnchorValue gives an anchor,
-	// and for the same reason. Handed over afterwards, as a node holding
-	// nothing is, a tag on a collection stood beside its own value at the same
-	// depth: "a: !!seq [1, 2]" read as the two entries [1,2] and !!seq. A tag
-	// on a scalar keeps its value on the node rather than handing it over,
-	// since parseScalarValue builds it without going through parseToken.
+	// The tag encloses the node it types, so the visitor gets the tag's Enter before that node and its Leave after,
+	// as readAnchorValue does for an anchor.
+	// A tagged scalar is not handed over on its own, because parseScalarValue builds it without going through parseToken.
 	p.enter(ctx, node, KindTag)
 	defer p.leave(ctx, node)
 
@@ -75,11 +71,10 @@ func (p *Parser) clearTagDirectives() {
 	p.tagHandles = nil
 }
 
-// namedTagHandle returns the handle a tag shorthand uses, and whether that
-// handle is one a TAG directive has to define.
+// namedTagHandle returns the handle a tag shorthand uses, and whether a TAG directive must declare that handle.
 //
-// The primary "!" and secondary "!!" handles are always available, and a
-// verbatim "!<...>" tag uses none: only "!name!" has to be declared.
+// The primary "!" and secondary "!!" handles are always available, and a verbatim "!<...>" tag uses none.
+// Only a named handle such as "!name!" must be declared.
 func namedTagHandle(value string) (string, bool) {
 	if !strings.HasPrefix(value, "!") || strings.HasPrefix(value, "!<") {
 		return "", false
@@ -95,12 +90,12 @@ func namedTagHandle(value string) (string, bool) {
 
 // resolveTag expands a tag shorthand to the URI it names.
 //
-// "!!int" is the secondary handle and a suffix, and stands for
-// tag:yaml.org,2002:int unless a "%TAG !!" directive gives that handle another
-// prefix. "!<...>" carries the URI already. "!thing" is the primary handle,
-// whose prefix is "!" unless a "%TAG !" directive changes it, so a local tag
-// names itself. "!name!suffix" needs the handle declared, which parseTag has
-// already checked.
+// "!!int" is the secondary handle and a suffix, and stands for tag:yaml.org,2002:int
+// unless a "%TAG !!" directive gives that handle another prefix.
+// "!<...>" carries the URI already.
+// "!thing" is the primary handle, whose prefix is "!" unless a "%TAG !" directive changes it,
+// so a local tag names itself.
+// "!name!suffix" needs its handle declared, which parseTag has already checked.
 func (p *Parser) resolveTag(text string) string {
 	if suffix, ok := strings.CutPrefix(text, "!<"); ok {
 		return strings.TrimSuffix(suffix, ">")
@@ -118,8 +113,7 @@ func (p *Parser) resolveTag(text string) string {
 	return text
 }
 
-// drawnAt returns at where an alias set one, and the node's own token
-// otherwise.
+// drawnAt returns at when an alias set one, and the node's own token otherwise.
 func drawnAt(at *token.Token, node ast.Node) *token.Token {
 	if at != nil {
 		return at
@@ -128,8 +122,7 @@ func drawnAt(at *token.Token, node ast.Node) *token.Token {
 	return node.GetToken()
 }
 
-// tagPrefix returns the prefix a handle expands to, or fallback where no
-// directive declared it.
+// tagPrefix returns the prefix a handle expands to, or fallback when no directive declared it.
 func (p *Parser) tagPrefix(handle, fallback string) string {
 	if prefix, declared := p.tagHandles[handle]; declared {
 		return prefix
@@ -138,32 +131,25 @@ func (p *Parser) tagPrefix(handle, fallback string) string {
 	return fallback
 }
 
-// parseTagValue reads the node a tag stands on, which the tag's own type
-// decides: a collection tag descends into the collection, a scalar tag reads
-// what follows, and a tag the core schema does not resolve leaves its scalar as
-// the text it was written with.
+// parseTagValue reads the node a tag stands on, and the tag's type decides how:
+// a collection tag descends into the collection, a scalar tag reads what follows,
+// and a tag the core schema does not resolve leaves its scalar as the text it was written with.
 //
-// ⚠️ Every branch settles the cursor for itself, and getting that wrong is the
-// fault this function has had three times. The rule is one line: a branch that
-// reads tk steps past it, and a branch that builds a node out of nothing does
-// not. So parseScalarValue, parseAnchor and parseLiteral are each followed by
-// ctx.goNext, newTagDefaultScalarValueNode is not -- it stands the tag on the
-// empty node and tk belongs to whatever comes next -- and parseToken,
-// parseMap, parseSequence and the two flow readers settle it themselves, which
-// is how parseToken calls them too.
+// Every branch settles the cursor itself.
+// A branch that reads tk steps past it, and a branch that builds a node from nothing does not.
+// So parseScalarValue, parseAnchor and parseLiteral are each followed by ctx.goNext.
+// newTagDefaultScalarValueNode is not, because it stands the tag on the empty node and tk belongs to what comes next.
 //
-// Left out, the document keeps a token nothing has read and parseDocumentBody
-// refuses it with "value is not allowed in this context", pointing at a place
-// the reader has no reason to suspect. That was "%TAG !! !local-" over
-// "v: !!seq 1", "{a: !!str &x}" and "!!null" over ">".
+// parseToken, parseMap, parseSequence and the two flow readers settle the cursor themselves.
+// A branch that leaves tk unread makes the document fail in parseDocumentBody,
+// with the error "value is not allowed in this context" at a position away from the tag.
 func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, tk *group.TapeToken) (ast.Node, error) {
 	if tk == nil {
 		return p.handNull(ctx, ctx.createImplicitNullToken(group.NewSynthetic(tagRawTk)))
 	}
 
-	// Match on the URI rather than on the shorthand the tag was written with: a
-	// "%TAG" line repointing "!!" makes "!!seq" the document's own tag, which
-	// stands on whatever follows it rather than requiring a sequence.
+	// Match on the URI, not the shorthand:
+	// a "%TAG" line that repoints "!!" makes "!!seq" a local tag, which stands on whatever follows.
 	tag, _ := token.ReservedTagOf(uri)
 	switch tag {
 	case token.MappingTag, token.SetTag:
@@ -176,11 +162,10 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		return p.parseMap(ctx)
 	case token.IntegerTag, token.FloatTag, token.StringTag, token.BinaryTag, token.TimestampTag, token.BooleanTag, token.NullTag:
 		if tk.GroupType() == group.TokenGroupLiteral || tk.GroupType() == group.TokenGroupFolded {
-			// A block scalar written under the tag rather than beside it. The
-			// grouping joins a tag only to what stands on its own line, so
-			// "!!null >" arrives here as one scalar-tag group and "!!null" over
-			// ">" as a tag and a folded group -- and the cursor has to step
-			// past the second, as parseToken does for the same group.
+			// A block scalar written on the line below the tag.
+			// The grouping joins a tag only to a scalar on its own line,
+			// so "!!null" over ">" arrives as a tag then a folded group.
+			// The cursor steps past the folded group, as parseToken does for it.
 			literal, err := p.parseLiteral(ctx.withGroup(p, tk.Group))
 			if err != nil {
 				return nil, err
@@ -190,9 +175,8 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 			return literal, nil
 		}
 		if endsValue(tk) || (startsEntry(tk) && !p.tagStandsOver(tk, tagRawTk)) {
-			// Nothing here is the tag's value: either punctuation closes what
-			// the tag was written in, or the next entry of the enclosing
-			// mapping has begun. The tag is on the empty node.
+			// Nothing here is the tag's value: punctuation closes the enclosing collection, or its next entry has begun.
+			// The tag stands on the empty node.
 			return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 		}
 		if group, ends := p.anchorNamesNothing(ctx, tk); ends {
@@ -223,29 +207,21 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		return p.parseSequence(ctx)
 	}
 	if endsValue(tk) {
-		// A tag the core schema does not resolve -- the non-specific "!", or a
-		// local tag -- with punctuation after it that closes what the tag was
-		// written in. The tag stands on the empty node: "[!]", "[a, !]",
-		// "{a: !}". The case above says the same for the resolved tags, where
-		// the empty node takes the tag's own default rather than null.
+		// A tag the core schema does not resolve (the non-specific "!", or a local tag),
+		// followed by punctuation that closes the enclosing collection, stands on the empty node: "[!]", "{a: !}".
+		// The resolved tags above do the same, with the empty node taking the tag's default instead of null.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 	}
 	if p.descent.opensNextEntry(tk, int(tagRawTk.Position.Line)) {
-		// A tag written with nothing after it, and what follows opens the next
-		// entry of the collection around it: the tag stands on the empty node.
-		// The tags the core schema resolves reach the same answer through
-		// startsEntry above; one it does not resolve went straight to
-		// parseToken and read the next entry as its own value, so "a: !foo"
-		// over "b: 1" over "c: 2" came back as {a: {b: 1, c: 2}} and "- !foo"
-		// over "- 1" as [[1]].
+		// A tag with nothing after it, followed by the next entry of the enclosing collection, stands on the empty node.
+		// The resolved tags reach this through startsEntry above.
+		// Without the test, "a: !foo" over "b: 1" parses the next entry as the tag's value.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 	}
 	if tk.Group == nil && resolvedBySchema(tk) {
-		// A tag the core schema does not resolve leaves its scalar as text,
-		// digits and all: "!thing 12" is the string "12". Only the parser can
-		// say so, because it holds the "%TAG" lines and the scanner does not --
-		// "!!int" under a "%TAG !! !local-" line names !local-int and resolves
-		// to nothing.
+		// A tag the core schema does not resolve leaves its scalar as text: "!thing 12" is the string "12".
+		// The parser applies this and not the scanner, because only the parser holds the "%TAG" lines:
+		// under "%TAG !! !local-", "!!int" names !local-int and resolves to nothing.
 		node, err := newStringNode(ctx, tk)
 		if err != nil {
 			return nil, err
@@ -255,36 +231,26 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		return node, nil
 	}
 	if scalar := anchoredScalar(tk); scalar != nil && resolvedBySchema(scalar) {
-		// The same rule, with an anchor standing between the tag and the
-		// scalar. "!foo &a1 true" read the boolean true where "!foo true" and
-		// "&a1 !foo true" both read the string "true", so the order the two
-		// properties were written in decided the type. The token is retyped
-		// before the node is built, as retypeAhead does for a schema arriving
-		// late.
+		// The same rule, with an anchor between the tag and the scalar: "!foo &a1 true" is the string "true",
+		// as "!foo true" and "&a1 !foo true" are.
+		// The token is retyped before the node is built, as retypeAhead does for a schema that arrives late.
 		scalar.RawToken().Type = token.StringType
 	}
 
 	return p.parseToken(ctx, tk)
 }
 
-// parseTaggedOtherKind reads the node a tag names the wrong kind for.
+// parseTaggedOtherKind reads a node whose tag names another kind, such as "!!seq 5" or "!!str [1, 2]".
 //
-// "!!seq 5" and "!!str [1, 2]" are YAML 1.2: the grammar puts no constraint on
-// which tag stands on which node, and grammar.NewRecognizer reads both. So the
-// parse builds the node the document wrote, the tag stays on it, and the
-// document renders as it was written.
+// The YAML 1.2 grammar puts no constraint on which tag stands on which node.
+// The parse builds the node the document wrote and keeps the tag on it, so the document renders as written.
 //
-// What the tag made of it is [ast.TagNode.Resolve]'s to report, and the load
-// refuses it whatever the tag policy: no text stands in for a sequence, and
-// writing "!!seq" was a claim about shape rather than about a value. This used
-// to be three complaints from the parse -- "could not find map", "value is not
-// allowed in this context", "unexpected scalar value type" -- none of which
-// named the tag, and each of which put the document out of reach of anything
-// that only wanted to read or reformat it.
+// [ast.TagNode.Resolve] reports the mismatch, and the load rejects it under any tag policy:
+// no text stands in for a sequence, and "!!seq" claims a shape.
 func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.Token, tk *group.TapeToken) (ast.Node, error) {
 	if endsValue(tk) || (startsEntry(tk) && !p.tagStandsOver(tk, tagRawTk)) {
-		// The tag stands on the empty node, which is not a mismatch: the
-		// document left the value out rather than writing one of another kind.
+		// The tag stands on the empty node.
+		// That is no mismatch: the document leaves the value out.
 		return newTagDefaultScalarValueNode(ctx, uri, tagRawTk)
 	}
 	if group, ends := p.anchorNamesNothing(ctx, tk); ends {
@@ -300,18 +266,15 @@ func (p *Parser) parseTaggedOtherKind(ctx context, uri string, tagRawTk *token.T
 	return p.parseToken(ctx, tk)
 }
 
-// tagStandsOver reports whether tk opens an entry the tag is written over,
-// rather than the next entry of the collection around it.
+// tagStandsOver reports whether tk opens an entry the tag types, and not the next entry of the enclosing collection.
 //
-// A mapping entry may begin on the tag's own line: "!!str &a [1]: v" is one
-// entry whose key the tag types, and the grouping hands that key over as a map
-// key group. Read as the next entry it left the whole mapping unparsed, and the
-// document was refused as `value is not allowed in this context`.
+// A mapping entry may begin on the tag's own line: "!!str &a [1]: v" is one entry whose key the tag types,
+// and the grouping marks that key as a map key group.
 //
-// A block sequence may not begin on that line. 8.2.1 keeps a "-" off the line a
-// node's properties are written on, so "!!int - 8" is not a document at all and
-// a "-" there belongs to neither the tag nor the collection around it. On a
-// later line a "-" is an ordinary token and opensNextEntry decides it.
+// A block sequence may not begin on that line.
+// Section 8.2.1 keeps a "-" off the line a node's properties are written on, so "!!int - 8" is not a document,
+// and a "-" there belongs to neither the tag nor the enclosing collection.
+// On a later line a "-" is an ordinary token, and opensNextEntry decides.
 func (p *Parser) tagStandsOver(tk *group.TapeToken, tag *token.Token) bool {
 	if tk.Type() == token.SequenceEntryType && tk.Line() == int(tag.Position.Line) {
 		return false

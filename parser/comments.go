@@ -10,14 +10,11 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// attachTrailingComment gives a comment written after a ',' to the entry the
-// ',' follows, which is the entry it was written about: in "[ a, # note" the
-// note sits on a's line and is a remark on a.
+// attachTrailingComment attaches a comment written after a ',' to the entry before the ',':
+// in "[ a, # note" the note stands on a's line and is about a.
 //
-// The scanner hangs such a comment on the ',' itself rather than leaving it in
-// the stream, so the loop reading the collection never sees it. Left there it
-// reached a sequence entry node that nothing renders, or -- in a mapping -- the
-// entry after the comma, one place further on than it was written.
+// The scanner hangs such a comment on the ',' itself, so the loop reading the collection never sees it.
+// Left there, it would reach a sequence entry node that nothing renders, or the next entry of a mapping.
 func attachTrailingComment(ctx context, entryTk *group.TapeToken, values []ast.Node) error {
 	if entryTk == nil || len(values) == 0 || ctx.lineComment(entryTk) == nil {
 		return nil
@@ -25,7 +22,7 @@ func attachTrailingComment(ctx context, entryTk *group.TapeToken, values []ast.N
 
 	target := values[len(values)-1]
 	if entry, ok := target.(*ast.MappingValueNode); ok && entry.Value != nil {
-		// On the entry itself it would read as a comment introducing it.
+		// On the entry itself it would render as a comment introducing the entry.
 		target = entry.Value
 	}
 	if target.GetComment() != nil {
@@ -42,11 +39,8 @@ func (p *Parser) parseComment(ctx context) (ast.Node, error) {
 	if ctx.isTokenNotFound() {
 		return cm, nil
 	}
-	// parseTokenNode and not parseToken: this runs *inside* parseToken, which
-	// reports the node it returns. Going round again handed a walk the same
-	// node twice -- "# c" over "%YAML 1.2" gave Enter and Leave on one
-	// DirectiveNode twice in a row, and "# c" over "foo" did it to the string.
-	// A collection hid it, since parseToken leaves those to hand themselves.
+	// parseTokenNode, not parseToken: this runs inside parseToken, which hands the node it returns to a walk.
+	// Calling parseToken here would hand the same node over twice.
 	node, err := p.parseTokenNode(ctx, ctx.currentToken())
 	if err != nil {
 		return nil, err

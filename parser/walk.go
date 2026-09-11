@@ -94,31 +94,27 @@ type Visitor interface {
 	Leave(node ast.Node, at Step)
 }
 
-// walkState is where a walk stands. It is nil where the parse was not asked to
-// walk, and every hook below returns at once on that.
+// walkState holds the state of a walk.
+// It is nil when the parse is not walking, and every hook below then returns at once.
 type walkState struct {
 	visitor Visitor
-	// in and index hold the collection at each depth, so a node knows what it
-	// stands in and which entry of it it is. key says whether the node opened
-	// at that depth was a mapping key, so Leave says what Enter did.
+	// in and index hold the collection at each depth and the node's entry number within it.
+	// key records whether the node opened at that depth was a mapping key, so that Leave repeats what Enter reported.
 	in    []Kind
 	index []int
 	key   []bool
-	// keyNext says the next node handed over is a mapping's key. A key may turn
-	// out to be a scalar, an anchor, a tag or a "?" standing around one of
-	// those, and each of them goes over through a different path; the flag
-	// reaches whichever it is, so the key is announced once and as a key.
+	// keyNext is set when the next node handed over is a mapping key.
+	// A key may be a scalar, an anchor, a tag or a "?" around one of those, each handed over by a different path.
+	// The flag reaches whichever it is, so the key is announced once, as a key.
 	keyNext bool
-	// skip counts the depths below a node Enter refused, which are walked
-	// without being handed over.
+	// skip counts the depths below a node that Enter declined, which are walked without being handed over.
 	skip int
-	// quiet counts the parses standing inside a node already handed over. A
-	// block scalar reads its content through parseToken, and the content is
-	// part of the literal rather than a value of its own.
+	// quiet counts the parses running inside a node already handed over.
+	// A block scalar reads its content through parseToken, and that content is part of the literal.
 	quiet int
-	// document is which document of the stream is being walked, counted from 0.
+	// document is the index of the stream's document being walked, counted from 0.
 	document int
-	// err is the first thing the walk refused.
+	// err holds the first error of the walk.
 	err error
 }
 
@@ -143,9 +139,8 @@ func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
 
 	p.begin(src)
 
-	// begin pinned the tape, which is what a full scan wants. A walk keeps
-	// nothing it is handed, so the pin goes and the tail moves as the descent
-	// reads.
+	// begin pinned the tape for a full scan.
+	// A walk keeps nothing it is handed, so it unpins, and the tail moves as the descent reads.
 	p.tokens.Unpin()
 	defer p.tokens.ReleaseAll()
 
@@ -163,7 +158,7 @@ func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
 // walking reports whether this parse is handing nodes over as it goes.
 func (p *Parser) walking() bool { return p.walk != nil }
 
-// openAnchor holds the tape and records where the anchor begins.
+// openAnchor pins the tape and records where the anchor begins.
 func (p *Parser) openAnchor(ctx context) {
 	if p.walk == nil || p.tokens == nil {
 		return
@@ -177,11 +172,10 @@ func (p *Parser) openAnchor(ctx context) {
 	p.tokens.Pin()
 }
 
-// closeAnchor keeps the chunks the anchor covers and gives the hold back.
+// closeAnchor saves the chunks the anchor covers and releases the pin.
 //
-// The descent stands at or just past the last token of the anchored node, so
-// saving to there takes one token more than the run holds at worst, which costs
-// the chunk it falls in and never loses one that is wanted.
+// The descent stands at or just past the anchored node's last token, so the save covers at most one extra token.
+// That can keep one extra chunk, and never drops a chunk the node needs.
 func (p *Parser) closeAnchor(ctx context) {
 	if p.walk == nil || p.tokens == nil || len(p.anchorFrom) == 0 {
 		return
@@ -198,12 +192,11 @@ func (p *Parser) closeAnchor(ctx context) {
 	p.tokens.Unpin()
 }
 
-// openWalkDocument records which document of the stream the walk is about to
-// read, so [Step.Document] tells the nodes of one from the nodes of the next.
+// openWalkDocument records the index of the document the walk is about to read,
+// so [Step.Document] tells the nodes of one document from those of the next.
 //
-// It is counted here rather than at the first node of a document, because an
-// empty document has no node to count: "---" over "---" over "b: 2" hands over
-// only the mapping, and it belongs to document 1.
+// It counts here, not at a document's first node, because an empty document has no node:
+// "---" over "---" over "b: 2" hands over only the mapping, and it belongs to document 1.
 func (p *Parser) openWalkDocument(n int) {
 	if p.walk == nil {
 		return
@@ -211,10 +204,9 @@ func (p *Parser) openWalkDocument(n int) {
 	p.walk.document = n
 }
 
-// releaseDocument gives back what the anchors of a document saved.
+// releaseDocument releases the chunks the document's anchors saved.
 //
-// An alias names its anchor within one document, so what the anchors covered is
-// finished with when the document is.
+// An alias names an anchor of its own document, so nothing reads those chunks after the document ends.
 func (p *Parser) releaseDocument() {
 	if p.walk == nil || p.tokens == nil {
 		return
@@ -222,14 +214,12 @@ func (p *Parser) releaseDocument() {
 	p.tokens.ReleaseAll()
 }
 
-// enter hands a node over before what it holds, and reports whether to go on
-// into it.
+// enter hands a node over before its content, and reports whether to descend into it.
 func (p *Parser) enter(ctx context, node ast.Node, in Kind) bool {
 	return p.enterAs(ctx, node, in, false)
 }
 
-// enterKey hands a mapping key over before what it holds, for the "?" that
-// stands around a key rather than being one.
+// enterKey hands a mapping key over before its content, for the "?" that encloses a key.
 func (p *Parser) enterKey(ctx context, node ast.Node, in Kind) bool {
 	return p.enterAs(ctx, node, in, true)
 }
@@ -244,17 +234,17 @@ func (p *Parser) enterAs(ctx context, node ast.Node, in Kind, key bool) bool {
 		return true
 	}
 	if p.walk.quiet > 0 {
-		// The node reads its content back through the descent, so nothing
-		// inside it goes over on its own. skip unwinds this in leave.
+		// The node reads its content back through the descent, so nothing inside it is handed over on its own.
+		// leave unwinds the skip.
 		p.walk.skip = 1
 
 		return true
 	}
 
-	// takeKey comes after the guards above: a node that is not handed over has
-	// not announced the key, and handKey still has it to hand. It is called
-	// whatever key says, so the flag is cleared either way -- left standing it
-	// would mark the entry's value as a key too.
+	// takeKey runs after the guards above: a node that is not handed over has not announced the key,
+	// and handKey still has it to hand over.
+	// takeKey is called whatever key is, so the flag is always cleared.
+	// Left set, it would mark the entry's value as a key too.
 	if p.takeKey() {
 		key = true
 	}
@@ -274,7 +264,7 @@ func (p *Parser) enterAs(ctx context, node ast.Node, in Kind, key bool) bool {
 	return true
 }
 
-// leave hands a node over once everything it holds has been.
+// leave hands a node over after its content.
 func (p *Parser) leave(ctx context, node ast.Node) {
 	if p.walk == nil || node == nil {
 		return
@@ -295,19 +285,17 @@ func (p *Parser) leave(ctx context, node ast.Node) {
 	p.readTo(ctx)
 }
 
-// markKey says the next node handed over is a mapping's key.
+// markKey marks the next node handed over as a mapping key.
 //
-// It is set before the key is parsed rather than after, because a key that is
-// an anchor, a tag or a "?" stands around what it holds and goes over as it
-// opens -- before parseMapKey has returned anything to hand over.
+// It is set before the key is parsed, because a key that is an anchor, a tag or a "?" encloses its content
+// and is handed over as it opens, before parseMapKey has returned anything.
 func (p *Parser) markKey() {
 	if p.walk != nil {
 		p.walk.keyNext = true
 	}
 }
 
-// takeKey reports whether the node about to go over is the key that markKey
-// announced, and forgets it.
+// takeKey reports whether the node about to be handed over is the key markKey announced, and clears the flag.
 func (p *Parser) takeKey() bool {
 	if p.walk == nil || !p.walk.keyNext {
 		return false
@@ -317,12 +305,11 @@ func (p *Parser) takeKey() bool {
 	return true
 }
 
-// handKey gives a mapping's key over, before its value is parsed.
+// handKey hands a mapping key over, before its value is parsed.
 //
-// A key that opened on its way here -- a "?", an anchor, a tag, a collection --
-// took markKey's flag as it went over, and handing it again would put it in the
-// mapping twice. The flag still standing is what says nothing has gone over
-// yet: parseScalarValue builds a scalar key without handing it anywhere.
+// A "?", an anchor, a tag or a collection is handed over as it opens, and clears markKey's flag then.
+// Handing it over again here would put the key in the mapping twice.
+// A flag still set means nothing has been handed over: parseScalarValue builds a scalar key without handing it over.
 func (p *Parser) handKey(ctx context, node ast.Node) {
 	if p.walk != nil && !p.walk.keyNext {
 		return
@@ -330,7 +317,7 @@ func (p *Parser) handKey(ctx context, node ast.Node) {
 	p.handAs(ctx, node, true)
 }
 
-// hand gives a node that holds nothing to the visitor, Enter then Leave.
+// hand passes a node without content to the visitor, Enter then Leave.
 func (p *Parser) hand(ctx context, node ast.Node) {
 	p.handAs(ctx, node, false)
 }
@@ -339,8 +326,8 @@ func (p *Parser) handAs(ctx context, node ast.Node, key bool) {
 	if p.walk == nil || node == nil || p.walk.skip > 0 || p.walk.quiet > 0 {
 		return
 	}
-	// takeKey is called whatever key says, so the flag is cleared either way:
-	// left standing it would mark the entry's value as a key too.
+	// takeKey is called whatever key is, so the flag is always cleared.
+	// Left set, it would mark the entry's value as a key too.
 	if p.takeKey() {
 		key = true
 	}
@@ -354,14 +341,14 @@ func (p *Parser) handAs(ctx context, node ast.Node, key bool) {
 	p.readTo(ctx)
 }
 
-// count records that one more entry of the collection in hand has been walked.
+// count records that one more entry of the current collection has been walked.
 func (p *Parser) count() {
 	if n := len(p.walk.index); n > 0 {
 		p.walk.index[n-1]++
 	}
 }
 
-// step is where the walk stands, for a node about to be handed over.
+// step returns the [Step] for a node about to be handed over.
 func (p *Parser) step(node ast.Node) Step {
 	at := Step{Depth: len(p.walk.in), Document: p.walk.document}
 	if n := len(p.walk.in); n > 0 {
@@ -374,8 +361,9 @@ func (p *Parser) step(node ast.Node) Step {
 	return at
 }
 
-// quiet stops what a node holds from being handed over on its own, for a node
-// that reads its content back through the descent. It returns what undoes it.
+// quiet stops a node's content from being handed over on its own,
+// for a node that reads its content back through the descent.
+// It returns a func that undoes it.
 func (p *Parser) quiet() func() {
 	if p.walk == nil {
 		return func() {}
@@ -385,15 +373,13 @@ func (p *Parser) quiet() func() {
 	return func() { p.walk.quiet-- }
 }
 
-// readTo tells the arena how far the descent has read, so that it may fill
-// again what stands behind that.
+// readTo sets the arena's tail to how far the descent has read, so the chunks behind it can be refilled.
 //
-// The tail follows the outermost run and not the token in hand. A descent
-// standing deep in a document still holds the tokens of every level it is
-// inside -- parseMapEntry reads its key's group again after the value under it
-// has been parsed -- and those sit behind where the innermost run stands. The
-// outermost run moves only when a whole entry of the document is done, which is
-// the last moment any of them is read.
+// The tail follows the outermost run, not the token in hand.
+// A descent deep in a document still holds the tokens of every level it is inside,
+// and those lie behind the innermost run: parseMapEntry reads its key's group again after parsing the value.
+//
+// The outermost run moves only when a whole entry of the document is done, after the last read of any of them.
 func (p *Parser) readTo(ctx context) {
 	if p.tokens == nil || p.body == nil {
 		return
@@ -409,42 +395,28 @@ func (p *Parser) readTo(ctx context) {
 	}
 }
 
-// releasedByTape answers whether the tape has given up the chunk holding seq.
+// releasedByTape reports whether the tape has released the chunk holding seq.
 //
-// It stands in for the group.Grouper's own liveness: a cell of its own belongs to a
-// run of the stream, and the tape knows what it still holds -- the tail it has
-// been given, what holdRun saved, and what an anchor pinned.
+// The group.Grouper calls it to test whether one of its cells is still live.
+// The tape records what it still holds: the tail it has been given, what holdRun saved and what an anchor pinned.
 func (p *Parser) releasedByTape(seq int32) bool {
 	_, held := p.tokens.Generation(int(seq))
 
 	return !held
 }
 
-/*
-// saveHere keeps the chunks holding [from, to] without holding the tape first,
-// for a run whose extent is already known.
-func (p *Parser) saveHere(from, to int32) {
-	if p.walk == nil || p.tokens == nil {
-		return
-	}
-	p.tokens.Save(int(from), int(to))
-}
-*/
-
-// holdRun keeps the chunk holding seq while a construct that began there is
-// read. releaseRun gives it back, and every caller defers one against the other.
+// holdRun keeps the chunk holding seq while a construct that began there is read.
+// releaseRun releases it, and every caller defers one against the other.
 //
 // The descent reads a construct's own tokens again after everything under it:
-// parseMapEntry reads its key's group once the value below it is parsed, and a
-// sequence reads the '-' its entries are lined up against. The tail follows the
-// outermost run and passes those, so the construct says it still wants them.
+// parseMapEntry reads its key's group once the value below it is parsed,
+// and a sequence reads the '-' its entries align on.
+// The tail follows the outermost run and passes those tokens, so the construct holds them itself.
 //
-// One chunk per level open at once, so what this holds is the depth of the
-// document and not its length.
+// It holds one chunk per open level, so what it keeps grows with the document's depth, not its length.
 //
-// The pair takes the sequence rather than holdRun returning what undoes it: a
-// closure escapes, and this runs once per mapping and once per sequence -- a
-// megabyte of them on citm_catalog, 14% of what the conversion allocated.
+// The pair takes seq instead of holdRun returning an undo func,
+// because the closure would escape to the heap and this runs once per mapping and once per sequence.
 func (p *Parser) holdRun(seq int32) {
 	if p.walk == nil || p.tokens == nil {
 		return
@@ -452,7 +424,7 @@ func (p *Parser) holdRun(seq int32) {
 	p.tokens.Save(int(seq), int(seq))
 }
 
-// releaseRun gives back the chunk holdRun kept.
+// releaseRun releases the chunk holdRun kept.
 func (p *Parser) releaseRun(seq int32) {
 	if p.walk == nil || p.tokens == nil {
 		return

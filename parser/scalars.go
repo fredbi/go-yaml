@@ -84,12 +84,10 @@ func (p *Parser) parseTokenNode(ctx context, tk *group.TapeToken) (ast.Node, err
 	case token.SequenceEntryType:
 		return p.parseSequence(ctx)
 	case token.SequenceEndType:
-		// SequenceEndType is always validated in parseFlowSequence.
-		// Therefore, if this is found in other cases, it is treated as a syntax error.
+		// parseFlowSequence consumes every ']' that closes a '[', so one found here has no '[' to close.
 		return nil, yamlerrors.NewSyntax("could not find '[' character corresponding to ']'", tk.RawToken())
 	case token.MappingEndType:
-		// MappingEndType is always validated in parseFlowMap.
-		// Therefore, if this is found in other cases, it is treated as a syntax error.
+		// parseFlowMap consumes every '}' that closes a '{', so one found here has no '{' to close.
 		return nil, yamlerrors.NewSyntax("could not find '{' character corresponding to '}'", tk.RawToken())
 	case token.MappingValueType:
 		return nil, yamlerrors.NewSyntax("found an invalid key for this map", tk.RawToken())
@@ -133,16 +131,9 @@ func (p *Parser) parseScalarValue(ctx context, tk *group.TapeToken) (ast.ScalarN
 	switch tk.Type() {
 	case token.MergeKeyType:
 		if !p.opts.mergeKeys && p.schemaInForce() != token.Schema11 {
-			// The merge key is tag:yaml.org,2002:merge, a YAML 1.1 type. 1.2
-			// leaves it a tag like any other an application defines, so a bare
-			// "<<" is an ordinary key spelled "<<" and the document reads the
-			// way libfyaml 1.0.0b1 reads it under its own 1.2 mode.
-			//
-			// The scanner types the characters whatever the version, because it
-			// cannot see a "!!merge" standing in front of them: a "%TAG" line
-			// repoints the secondary handle and the scanner never reads one. So
-			// this is where the version arrives, and "!!merge" reaches the same
-			// node through TagNode.IsMergeKey, which reads the tag's own URI.
+			// The merge key, tag:yaml.org,2002:merge, is a YAML 1.1 type, so under 1.2 a bare "<<" is an ordinary key.
+			// The scanner types "<<" whatever the version, so the version is checked here.
+			// A tagged "!!merge <<" merges through TagNode.IsMergeKey, which reads the tag's URI.
 			return newStringNode(ctx, tk)
 		}
 
@@ -168,39 +159,26 @@ func (p *Parser) parseScalarValue(ctx context, tk *group.TapeToken) (ast.ScalarN
 	case token.StringType, token.SingleQuoteType, token.DoubleQuoteType:
 		return newStringNode(ctx, tk)
 	case token.TagType:
-		// this case applies when it is a scalar tag and its value does not exist.
-		// Examples of cases where the value does not exist include cases like `key: !!str,` or `!!str : value`.
+		// A scalar tag with no value, as in "key: !!str," or "!!str : value".
 		return p.parseScalarTag(ctx)
 	}
 	return nil, yamlerrors.NewSyntax("unexpected scalar value type", tk.RawToken())
 }
 
-// resolveTimestamp gives a plain scalar the timestamp tag where YAML 1.1
-// resolves one, and hands the scalar back unchanged everywhere else.
+// resolveTimestamp tags a plain scalar as a timestamp where YAML 1.1 resolves one, and returns node otherwise.
 //
-// A timestamp is tag:yaml.org,2002:timestamp, a 1.1 type. 1.2's core schema
-// resolves null, bool, int, float and str and no timestamp, so under 1.2
-// "a: 2001-12-14" is the string it looks like -- which is the same rule the
-// merge key follows, and Fred's ruling of 2026-09-07: resolution follows the
-// version the document declares, and WithYAMLVersion is the fallback where it
-// declares none.
+// A timestamp, tag:yaml.org,2002:timestamp, is a 1.1 type. The 1.2 core schema resolves no timestamp,
+// so under 1.2 "a: 2001-12-14" is a string.
+// As for the merge key, the version the document declares decides, and WithYAMLVersion applies where it declares none.
 //
-// The tag is marked implicit, so a renderer writing the document back leaves it
-// off and one reformatting to explicit tags writes it. Everything reading types
-// -- the decoder, ToJSON -- reads the URI and does not care which way it
-// arrived, which is what stops this needing a token type of its own.
+// The tag is marked implicit, so a renderer writing the document back leaves it off.
+// The decoder and ToJSON read the tag's URI, so a timestamp needs no token type of its own.
 //
-// Only a plain scalar resolves. A quoted one says it is a string by being
-// quoted, so "a: \"2001-12-14\"" stays one at every version, and so does the
-// content of a block scalar, which 10.2.1.2 gives tag:yaml.org,2002:str -- the
-// scanner cuts that content as a plain String token, so inLiteral is what tells
-// the two apart.
+// Only a plain scalar resolves. A quoted scalar is a string at every version.
+// So is the content of a block scalar, which section 10.2.1.2 types tag:yaml.org,2002:str.
+// The scanner cuts that content as a plain String token, so the inBlockScalar check tells the two apart.
 //
-// ast.ParseTimestamp holds which spellings count, and it agrees with
-// go.yaml.in/yaml/v3 v3.0.5 -- a 1.1 parser, so its implicit resolution is the
-// behavior to match -- on every shape measured: the date alone, the RFC 3339
-// forms with either "T" or "t", short date fields, and the refusals "1-2-3",
-// "15:04", "12:34:56", "2001-13-45" and a zone written "-5".
+// ast.ParseTimestamp defines which spellings are timestamps.
 func (p *Parser) resolveTimestamp(ctx context, tk *group.TapeToken, node ast.ScalarNode) ast.Node {
 	if tk.Type() != token.StringType || p.descent.inBlockScalar() || p.schemaInForce() != token.Schema11 {
 		return node
@@ -213,10 +191,8 @@ func (p *Parser) resolveTimestamp(ctx context, tk *group.TapeToken, node ast.Sca
 		return node
 	}
 
-	// A tag token the document did not write, at the scalar's own position, so
-	// the node is shaped like any other tagged node and every consumer reads it
-	// the same way. Built rather than inserted, as an implicit null is: putting
-	// one in the stream would leave it to be read again.
+	// A tag token the document did not write, at the scalar's position, so the node is shaped like any other tagged node.
+	// It is built and not inserted into the stream, where the descent would read it again.
 	at := tk.RawToken()
 	marker := token.Tag(string(token.TimestampTag), string(token.TimestampTag), at.Position)
 
@@ -226,11 +202,8 @@ func (p *Parser) resolveTimestamp(ctx context, tk *group.TapeToken, node ast.Sca
 	tag.Value = node
 	tag.SetPathNode(ctx.path)
 
-	// Handed over as a real tag on a scalar is: the tag opens and closes and
-	// keeps its value on the node, which parseToken's switch relies on -- it
-	// leaves a TagNode to hand itself over, so one that does not is never seen
-	// and a walking consumer reads the entry with no value at all. ToJSON wrote
-	// `{"a"}` for a document this resolved.
+	// The tag is handed over like a written tag on a scalar.
+	// parseToken leaves a TagNode to hand itself over, so without this a walk sees the entry with no value.
 	p.enter(ctx, tag, KindTag)
 	p.leave(ctx, tag)
 
@@ -242,7 +215,7 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx.goNext() // skip literal/folded token
+	ctx.goNext() // Skip the "|" or ">" header.
 
 	tk := ctx.currentToken()
 	if tk == nil {
@@ -253,8 +226,7 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 		node.Value = value
 		return node, nil
 	}
-	// The content belongs to the literal and is not a value of its own, so it
-	// does not go over on its own account.
+	// The content belongs to the literal, so the walk does not hand it over as a value of its own.
 	loud := p.quiet()
 	doneLiteral := p.descent.enterLiteral()
 	value, err := p.parseToken(ctx, tk)
@@ -273,11 +245,10 @@ func (p *Parser) parseLiteral(ctx context) (*ast.LiteralNode, error) {
 	return node, nil
 }
 
-// handNull builds the null a missing value stands for and hands it over.
+// handNull builds the null node for a missing value and hands it to the walk.
 //
-// A null of this kind is built where the value would have been rather than
-// drawn from a token of its own, so it does not pass through parseToken and
-// would otherwise reach no walk.
+// The null is built from a token the stream does not hold,
+// so it never passes through parseToken, which hands the other nodes over.
 func (p *Parser) handNull(ctx context, tk *group.TapeToken) (ast.Node, error) {
 	node, err := newNullNode(ctx, tk)
 	if err != nil {

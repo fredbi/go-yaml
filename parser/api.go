@@ -25,67 +25,56 @@ func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
 // Build one with [New], and use it for one stream: call [Parser.Parse] or [Parser.Walk] once.
 // A Parser is not safe for concurrent use.
 type Parser struct {
-	// tokens holds every token.Token the tree points at, in chunks it can fill
-	// again once the parse has finished reading them. A full scan pins it and
-	// never lets go, so nothing is recycled and every token stands.
+	// tokens holds every token.Token the tree points at, in chunks the arena refills once the parse has read them.
+	// Parse pins it for the whole parse, so no chunk is refilled and every token survives.
 	tokens *tokenarena.TokenArena[group.TapeToken]
-	// src is the document being read, kept so that a node can be given the
-	// text it was written as. A folded block scalar is the one that needs it.
+	// src is the document being read.
+	// parseLiteral takes from it the text a block scalar was written as.
 	src string
-	// lineComments holds the comment closing a token's line, against that
-	// token. It is nil where the parse was not asked for comments.
+	// lineComments maps a token to the comment closing its line. It is nil unless [WithComments] was passed.
 	lineComments map[*group.TapeToken]*token.Token
-	// opts holds what the [Option] arguments to [New] wrote, and nothing
-	// changes it after that. A document's own %YAML and %TAG declarations go to
-	// yamlVersion and tagHandles instead.
+	// opts holds the settings the [Option] arguments to [New] wrote. Only begin changes it, to fill chunkSize.
+	// A document's own %YAML and %TAG declarations go to yamlVersion and tagHandles.
 	opts options
 
-	// yamlVersion is the version the document being read named. Where it names
-	// none, opts.version stands.
+	// yamlVersion is the version the current document's "%YAML" line names, and empty where it names none.
 	yamlVersion YAMLVersion
-	// tagHandles maps a handle a TAG directive declared to the prefix it
-	// expands to.
+	// tagHandles maps each handle a "%TAG" directive declares to the prefix it expands to.
 	tagHandles map[string]string
 
-	// keys records the keys of the mapping being read and notes a repeat on
-	// that mapping. The parser names the keys it records; see keys.go.
+	// keys records the keys of the mapping being read and notes a repeated key on it.
+	// keys.go computes the names it records.
 	keys key.Ledger
 
-	// walk is where a Walk stands, and nil for a parse that gathers a tree
-	// rather than handing it over.
+	// walk holds the state of a [Parser.Walk], and is nil during [Parser.Parse].
 	walk *walkState
 
-	// anchorFrom holds where each anchor open at this point in the descent
-	// begins, innermost last. Anchors nest, so it is a stack.
+	// anchorFrom holds the token sequence at which each open anchor begins, innermost last.
 	anchorFrom []int32
 
-	// descent holds the collections the parse has open, the entry it is
-	// reading, and the two depths it counts. See descent.go.
+	// descent holds the collections the parse has open, the entry it is reading, and the two depths it counts.
+	// See descent.go.
 	descent descentState
 
-	// anchors holds the anchors of the document being read, and the aliases
-	// that named one before its node existed. See anchors.go.
+	// anchors holds the anchors of the document being read, and the aliases that named one before its node existed.
+	// See anchors.go.
 	anchors anchorTable
 
-	// scan reads src into tokens, one at a time, as the reader asks.
+	// scan cuts src into tokens, one at a time, as reader requests them.
 	scan scanner.Scanner
-	// reader groups what the scanner reads and hands over a document at a time.
+	// reader groups the scanner's tokens and returns them one document at a time.
 	reader *reader
-	// body is the run the document's own tokens are drawn from, which is the
-	// outermost of the descent. The tail follows it: every level below holds
-	// tokens at or behind where it stands.
+	// body is the outermost run of the descent, which holds the document's own tokens.
+	// readTo moves the arena's tail with it, because every deeper run holds tokens at or behind its position.
 	body *tokenRef
 
-	// arena is where the nodes of the parse in hand come from. It is kept so
-	// that what a tree cost can be read after the parse rather than guessed at
-	// from a heap profile -- see [Parser.ArenaStats].
+	// arena allocates the nodes of the current parse.
 	arena *ast.Arena
 
-	// pathSlab hands out path trie nodes in blocks, so a document of N keys
-	// costs N/pathSlabSize allocations rather than N.
+	// pathSlab provides path trie nodes in blocks, so a document of N keys costs N/pathSlabSize allocations.
 	pathSlab []ast.PathNode
-	// refs holds one token reference per depth of the descent. They are held by
-	// pointer, so growing the slice leaves the ones in hand where they are.
+	// refs holds one token reference per depth of the descent.
+	// They are held by pointer, so growing the slice does not move the references already handed out.
 	refs []*tokenRef
 }
 

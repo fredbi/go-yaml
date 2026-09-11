@@ -12,17 +12,10 @@ import (
 )
 
 func (p *Parser) parseDirective(ctx context, g *group.TokenGroup) (*ast.DirectiveNode, error) {
-	// A directive's name and arguments belong to the directive. They are not
-	// nodes of the document -- 6.8 makes a directive an instruction to the
-	// processor and puts it outside the node graph -- so nothing built here
-	// goes over to a walk on its own account. The DirectiveNode does, from the
-	// caller, and a walk skips it there.
-	//
-	// "%&AML 1.2" cuts "&AML" as an anchor group, and parseScalarValue below
-	// builds an anchor from it. Handed over, that anchor arrived at depth 0
-	// before the directive did and the walk took it for the document's root:
-	// `%&AML 1.2` over `---` over `k: v` walked to 1.2 and the mapping was
-	// gone, where the tree read it correctly.
+	// Section 6.8 puts a directive outside the node graph, so its name and arguments are not nodes of the document.
+	// Nothing built here goes to a walk: the caller hands over the DirectiveNode, and a walk skips it.
+	// "%&AML 1.2" cuts "&AML" as an anchor group, and parseScalarValue builds an anchor from it,
+	// which a walk would otherwise take for the document's root.
 	defer p.quiet()()
 
 	directiveNameGroup := g.First().Group
@@ -48,9 +41,9 @@ func (p *Parser) parseDirective(ctx context, g *group.TokenGroup) (*ast.Directiv
 		}
 		p.yamlVersion = ver
 
-		// The scanner resolves plain scalars, so it is told here rather than
-		// asked later: a schema set part way through takes effect from the next
-		// scalar it cuts, and the directive stands before the document's body.
+		// The scanner resolves plain scalars, and a schema applies from the next scalar it cuts.
+		// The directive stands before the document's body, so setting the schema here covers the body,
+		// and retypeAhead reads again the scalars already cut past the directive.
 		p.scan.SetSchema(ver.Schema())
 		p.retypeAhead(ver.Schema(), valueTk.Seq())
 
@@ -75,9 +68,8 @@ func (p *Parser) parseDirective(ctx context, g *group.TokenGroup) (*ast.Directiv
 			p.tagHandles = make(map[string]string)
 		}
 		if _, declared := p.tagHandles[tagKey.Value]; declared {
-			// §6.8.2.2: "It is an error to specify more than one '%TAG'
-			// directive for the same handle in the same document." The same
-			// rule the "%YAML" case above states for a version.
+			// Section 6.8.2.2: "It is an error to specify more than one '%TAG' directive
+			// for the same handle in the same document." The "%YAML" case above applies the same rule to the version.
 			return nil, yamlerrors.NewSyntax(
 				fmt.Sprintf("tag handle %s has already been declared by a TAG directive", tagKey.Value),
 				g.At(1).RawToken())
@@ -100,12 +92,10 @@ func (p *Parser) parseDirective(ctx context, g *group.TokenGroup) (*ast.Directiv
 }
 
 func (p *Parser) parseDirectiveName(ctx context) (*ast.DirectiveNode, error) {
-	// The name is read the same way whichever group reached here, so the quiet
-	// is taken again: emitDirective wraps a group.TokenGroupDirective only where the
-	// directive carries values of its own, and "%&AML 1.2" carries none --
-	// stageProperties runs before stageDirectives and had already folded the
-	// "1.2" into the anchor group. So that one arrives as a bare
-	// group.TokenGroupDirectiveName and never passes through parseDirective.
+	// emitDirective wraps a group.TokenGroupDirective only around a directive with values of its own.
+	// A directive without them arrives as a bare group.TokenGroupDirectiveName and skips parseDirective,
+	// so the walk is quieted here as well.
+	// "%&AML 1.2" is one: stageProperties runs before stageDirectives and folds the "1.2" into the anchor group.
 	defer p.quiet()()
 
 	directive, err := newDirectiveNode(ctx, ctx.currentToken())

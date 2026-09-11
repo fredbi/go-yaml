@@ -16,42 +16,38 @@ import (
 
 // begin sets the parse up to read src, and reads nothing yet.
 //
-// The scanner, the grouping and the descent run at once from here: [parse] asks
-// for a document, the reader scans and groups just enough to hand one over, and
-// the tape may be filled again behind what the descent has passed.
+// From here the scanner, the grouping and the descent run together:
+// parse pulls a document, the reader scans and groups just enough to return it,
+// and the tape can be refilled behind the descent.
 func (p *Parser) begin(src []byte) {
 	if p.opts.chunkSize == 0 {
-		// Sized from the document, so a short one does not pay for a chunk it
-		// will use a tenth of. A caller passing ChunkSize wins.
+		// Sized from the document, so a short document does not pay for a chunk it barely uses.
+		// A size set with WithChunkSize is kept.
 		p.opts.chunkSize = tokenarena.SizeFor(len(src))
 	}
 	p.tokens = tokenarena.New[group.TapeToken](p.opts.chunkSize)
 	p.keys.UseJSONNames(p.opts.jsonCompatible)
 
-	// A full scan holds every token it reads. The pin says so once, here, and
-	// [Parser.Walk] is what gives it back.
+	// A full scan holds every token it reads. The pin is set once, here, and [Parser.Walk] releases it.
 	p.tokens.Pin()
 
 	p.src = nocopy.String(src)
 	p.scan.Init(src)
 	p.scan.SetSchema(p.opts.version.Schema())
 
-	// Guessed from the source rather than counted, since counting would mean
-	// reading the document through before parsing any of it. It sizes buffers
-	// and nothing else.
+	// Estimated from the source length, since counting tokens would mean reading the document through first.
+	// It sizes buffers and nothing else.
 	estimate := max(len(src)/8, 16)
 	p.reader = newReader(&p.scan, p.tokens, estimate, p.opts.keepComments)
 	p.lineComments = p.reader.g.LineComments
 }
 
-// groupingHeld is the most tokens a grouping pass held at once while reading
-// the last document.
+// groupingHeld returns the most tokens a grouping pass held at once while reading the last document.
 //
-// The grouping runs ahead of the descent and keeps what it cannot yet settle,
-// so the tape has to hold at least this much however far the tail has moved.
-// groupMapKeysByValue is the pass that can hold a lot of it: its window reaches
-// back to the start of any flow collection still open, because that collection
-// may yet close and stand as a key.
+// The grouping runs ahead of the descent and keeps what it cannot settle yet,
+// so the tape holds at least this many tokens however far the tail has moved.
+// groupMapKeysByValue can hold the most: its window reaches back to the start of any flow collection still open,
+// because that collection may still close and stand as a key.
 func (p *Parser) groupingHeld() int {
 	if p.reader == nil {
 		return 0
@@ -60,7 +56,7 @@ func (p *Parser) groupingHeld() int {
 	return p.reader.g.HeldHigh
 }
 
-// TokenStats reports what holding the tokens of the last parse cost.
+// tapeStats returns the token arena's statistics for the last parse.
 func (p *Parser) tapeStats() tokenarena.Stats {
 	if p.tokens == nil {
 		return tokenarena.Stats{}
@@ -69,14 +65,13 @@ func (p *Parser) tapeStats() tokenarena.Stats {
 	return p.tokens.Stats()
 }
 
-// drawUnder puts the document under an error read from it, so the message shows
-// the line it came from.
+// drawUnder attaches the document to an error read from it, so the message shows the line it came from.
 func drawUnder(src []byte, err error) error {
 	return yamlerrors.WithSource(asSyntaxError(err), yamlerrors.Source{Text: nocopy.String(src), FirstLine: 1})
 }
 
-// asSyntaxError reports a scanning failure the way a parsing one is reported,
-// so a caller sees one kind of error whichever stage refused the document.
+// asSyntaxError converts a scanner error into a syntax error,
+// so a caller sees one kind of error whichever stage rejected the document.
 func asSyntaxError(err error) error {
 	var invalid *scanner.InvalidTokenError
 	if errors.As(err, &invalid) {
@@ -89,8 +84,6 @@ func asSyntaxError(err error) error {
 func (p *Parser) parse(ctx context) (*ast.File, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 	for {
-		// Reading only as far as the descent has asked is what lets the tape be
-		// filled again behind it.
 		p.openWalkDocument(len(file.Docs))
 		doc, ok, err := p.parseDocument(ctx)
 		if err != nil {
@@ -101,20 +94,17 @@ func (p *Parser) parse(ctx context) (*ast.File, error) {
 		}
 		file.Docs = append(file.Docs, doc)
 
-		// An alias names its anchor within one document, so what this one's
-		// anchors and directives saved is finished with here.
+		// An alias names an anchor of its own document, so the tokens this document saved are released here.
 		p.releaseDocument()
 	}
 
 	return file, nil
 }
 
-// parseDocument reads one document, and reports false at the end of the stream.
+// parseDocument reads one document, and returns false at the end of the stream.
 //
-// The body is read through the reader rather than out of a group holding the
-// whole document: the "---" is known when the document opens and the "..." only
-// once the body has run out, which is where the group could not be built until
-// the document had been read through.
+// The body is read through the reader, not from a group holding the whole document:
+// the "---" is known when the document opens, but the "..." only once the body has run out.
 func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	startTk, ok, err := p.reader.openDocument()
 	if err != nil || !ok {
@@ -122,8 +112,8 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 	}
 	start := startTk.RawToken()
 
-	// A document holding nothing between its markers has no body. Asking for
-	// the first token is what says so, and it draws no more than that one.
+	// A document with nothing between its markers has no body.
+	// The first pull detects that, and reads no further.
 	var body ast.Node
 
 	bodyCtx := ctx.withPull(p, p.reader.bodyToken)
@@ -142,37 +132,27 @@ func (p *Parser) parseDocument(ctx context) (*ast.DocumentNode, bool, error) {
 		return nil, false, err
 	}
 	end := endTk.RawToken()
-	// A TAG directive defines a handle for the one document that follows it,
-	// and a document holding only the directives themselves does not end their
-	// scope -- it opens it. A "%YAML" directive is scoped the same way: a
-	// document is independent of its neighbors, which is what this package
-	// already holds an anchor and a tag handle to, and 3.2.2.2 scopes an anchor
-	// to the document that writes it. So "%YAML 1.1" over "---" over "a: yes"
-	// over "---" over "b: yes" reads true and then the string "yes".
+	// A TAG or "%YAML" directive applies to the one document after it,
+	// so a document holding only directives opens their scope instead of ending it.
+	// Every other document ends the scope:
+	// "%YAML 1.1" over "---" over "a: yes" over "---" over "b: yes" reads true and then the string "yes".
 	if _, directives := body.(*ast.DirectiveNode); !directives {
 		p.clearTagDirectives()
 		p.endVersionScope()
 	}
 
 	node := ast.Document(start, body)
-	// The marker's own line comment. Nothing else asks for it -- a "---" and a
-	// "..." are not nodes -- so it was staged and left there, and "--- # c1"
-	// rendered as "---".
+	// The comment on the marker's own line. A "---" is not a node, so nothing else collects it.
 	node.StartComment = markerComment(ctx, startTk)
-	// An anchor belongs to the document it was written in, so the table goes
-	// with it here and the next document starts on an empty one.
+	// An anchor belongs to its document, so the table moves to the node and the next document starts with an empty one.
 	node.Anchors = p.anchors.take()
 	if body != nil {
-		// A document holding nothing keeps no "...": the pass this replaced
-		// read the marker, then returned on the empty body before it hung the
-		// marker on the node. "--- ..." renders as "---".
+		// A document with no body keeps no "...", so "--- ..." renders as "---".
 		node.End = end
 		node.EndComment = markerComment(ctx, endTk)
 	}
 	if p.opts.onComplete != nil {
-		// The document closes after its body, so a consumer folding nodes hears
-		// about it last and knows where one document of a stream ends and the
-		// next begins. An anchor's scope is exactly that.
+		// The document completes after its body, so an onComplete consumer sees where each document of a stream ends.
 		p.opts.onComplete(node)
 	}
 
@@ -184,8 +164,8 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Comments may trail what the document holds -- between a directive and the
-	// '---' below it, most often. They are not a second value.
+	// Comments may follow the document's node, most often between a directive and the "---" below it.
+	// They are not a second value.
 	if comment := p.parseFootComment(ctx, 1); comment != nil {
 		if err := setTrailingComment(comment, node); err != nil {
 			return nil, err
@@ -197,12 +177,10 @@ func (p *Parser) parseDocumentBody(ctx context) (ast.Node, error) {
 	return node, nil
 }
 
-// parseToken builds the node tk introduces, and tells onComplete about it.
+// parseToken builds the node tk opens, and passes it to the onComplete hook.
 //
-// EXPERIMENT (2026-08-27): every node the parser builds returns through here,
-// and it returns complete, so this is the whole post-order hook a consumer
-// folding nodes into values needs. parseMapEntry reports its own entries, which
-// do not come back through here.
+// Every node the parser builds returns through here complete, so this is the post-order hook behind [WithOnComplete].
+// parseMapEntry reports its own entries, which do not return through here.
 func (p *Parser) parseToken(ctx context, tk *group.TapeToken) (ast.Node, error) {
 	n, err := p.parseTokenNode(ctx, tk)
 	if err != nil || n == nil {
@@ -212,9 +190,8 @@ func (p *Parser) parseToken(ctx context, tk *group.TapeToken) (ast.Node, error) 
 		p.opts.onComplete(n)
 	}
 
-	// A collection hands itself over as it opens and closes, and so do an anchor
-	// and a tag, which stand around the node they name; everything else goes
-	// over here, once, when it is built.
+	// A collection, an anchor and a tag enclose other nodes, so they are handed over as they open and close.
+	// Every other node is handed over here, once, when it is built.
 	switch n.(type) {
 	case *ast.MappingNode, *ast.SequenceNode, *ast.AnchorNode, *ast.TagNode:
 	default:

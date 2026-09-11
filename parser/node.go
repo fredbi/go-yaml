@@ -20,32 +20,20 @@ func newMappingValueNode(ctx context, colonTk, entryTk *group.TapeToken, key ast
 	node := ctx.arena.MappingValue(colonTk.RawToken(), key, value)
 	node.SetPathNode(ctx.path)
 	node.CollectEntry = entryTk.RawToken()
-	// entryTk is the ',' that comes *before* this entry, so a comment hanging on
-	// it was written about the entry before this one and is attached there.
+	// entryTk is the ',' before this entry. A comment on it belongs to the previous entry and is attached there.
 	if _, explicit := key.(*ast.MappingKeyNode); explicit {
 		if colonTk.Type() != token.MappingValueType {
-			// parseMapKeyValue hands the key's own last token over as colonTk,
-			// because an explicit key written in one group ends on the key
-			// rather than on a ':'. A comment there is the key's own and is
-			// attached at the key already; carrying it over would write it
-			// twice, once on the "?" line and once on the ':' line, and the
-			// document would gain a comment on every cycle.
+			// An explicit key written in one group ends on the key and has no ':',
+			// so parseMapKeyValue passes the key's last token as colonTk.
+			// A comment on that token belongs to the key and is already attached there.
+			// Attaching it again would write it on the "?" line and on the ':' line.
 			return node, nil
 		}
 
-		// A ':' of its own, so a comment on it was written on the ':' line and
-		// is neither the key's nor the value's. Returning here dropped it:
-		// "? a" over ": # c3" over "  v" rendered as "? a" over ": v".
-		//
-		// It goes in the entry's own slot. The two places it had before are
-		// each occupied by something else in a document that writes one. On the
-		// value it becomes a head comment, since the value begins on a later
-		// line, and collides with a head comment written under the ':': "? a"
-		// over ": # c4" over "  # c5" over "  - 1" kept c4 and lost c5. On
-		// BaseNode.Comment it collides with a head comment written above the
-		// '?': "# h" over "? k" over ": # c" kept the first and lost the
-		// second. Those are one defect from two sides, and a comment was lost
-		// whichever side was chosen.
+		// The ':' has a token of its own, so a comment on it belongs to the ':' line and not to the key or the value.
+		// It goes in the entry's own LineComment slot.
+		// On the value it would collide with a head comment written under the ':',
+		// and on BaseNode.Comment with a head comment written above the '?'.
 		if err := setEntryLineComment(ctx, node, colonTk); err != nil {
 			return nil, err
 		}
@@ -53,7 +41,7 @@ func newMappingValueNode(ctx context, colonTk, entryTk *group.TapeToken, key ast
 		return node, nil
 	}
 	if key.GetToken().Position.Line == value.GetToken().Position.Line {
-		// originally key was commented, but now that null value has been added, value must be commented.
+		// The value shares the key's line, so the comment closing that line goes to the value.
 		if err := setLineComment(ctx, value, colonTk); err != nil {
 			return nil, err
 		}
@@ -72,20 +60,14 @@ func newMappingKeyNode(ctx context, tk *group.TapeToken) (*ast.MappingKeyNode, e
 	return node, nil
 }
 
-// takeIndicatorComment returns the comment closing the line an explicit key's
-// '?' stands on, and drops it from the index.
+// takeIndicatorComment returns the comment closing the line of an explicit key's '?', and drops it from the index.
 //
-// The token it is recorded against is the bare '?'. stageLineComments runs
-// before anything is grouped, and by the time parseMapKey reaches the key the
-// '?' has been wrapped twice -- once with the body naming the key, and again
-// with the entry's ':' -- so the token handed over is the outer wrapper.
-// Looking the comment up against that found nothing, and "? # c" over "  k"
-// over ": v" came back with no comment at all where "? k # c" keeps one: there
-// the comment closes the key's own line and is recorded against the scalar.
+// stageLineComments records the comment against the bare '?', before anything is grouped.
+// By the time parseMapKey reaches the key, the '?' has been wrapped twice,
+// once with the key's body and again with the entry's ':', so tk is the outer wrapper.
 //
-// A group reports the type it opens with, so a type test cannot tell the
-// wrapper from the '?' it wraps. Only the identity can, which is what the walk
-// down First() follows.
+// A group reports the type it opens with, so a type test cannot tell the wrapper from the '?' it wraps.
+// The loop follows First() down to the bare '?' and compares pointers.
 func takeIndicatorComment(ctx context, tk *group.TapeToken) *token.Token {
 	for tk != nil && tk.Group != nil && tk.Group.Len() > 0 {
 		first := tk.Group.First()
@@ -98,15 +80,12 @@ func takeIndicatorComment(ctx context, tk *group.TapeToken) *token.Token {
 	return ctx.takeLineComment(tk)
 }
 
-// openerComment is the comment closing the line a flow collection opens on, as
-// in "{ # why". It goes to MappingNode.StartComment or
-// SequenceNode.StartComment, which the renderer writes back after the bracket.
+// openerComment returns the comment closing the line a flow collection opens on, as in "{ # why".
+// It goes to MappingNode.StartComment or SequenceNode.StartComment, and the renderer writes it back after the bracket.
 //
-// A group token reports the type of the token it opens with, so the "{" the
-// parse holds may be a wrapper around the one the comment was staged against,
-// and only pointer identity tells the two apart. The descent through First()
-// asks at each step; without it a flow mapping lost every comment written on
-// its opening line.
+// A group token reports the type of the token it opens with,
+// so the "{" in hand may wrap the token the comment was recorded against.
+// The loop looks the comment up at each step down First(), since only pointer identity tells the two apart.
 func openerComment(ctx context, tk *group.TapeToken) *ast.CommentGroupNode {
 	for tk != nil {
 		if cm := ctx.takeLineComment(tk); cm != nil {
@@ -249,11 +228,8 @@ func newSequenceNode(ctx context, tk *group.TapeToken, isFlow bool) (*ast.Sequen
 	node := ctx.arena.Sequence(tk.RawToken(), isFlow)
 	node.SetPathNode(ctx.path)
 	if isFlow {
-		// tk is the '[' that opens the collection, so a comment on it was
-		// written about the collection. A block sequence opens on the '-' of
-		// its first entry, and a comment there is that entry's -- read as the
-		// whole sequence's it came back twice, once at the head and once where
-		// it was written.
+		// tk is the '[' that opens the collection, so a comment on it belongs to the collection.
+		// A block sequence opens on the '-' of its first entry, and a comment there belongs to that entry.
 		node.StartComment = openerComment(ctx, tk)
 	}
 
@@ -311,13 +287,9 @@ func newTagDefaultScalarValueNode(ctx context, uri string, tag *token.Token) (as
 		}
 		node = n
 	default:
-		// A tag the core schema does not resolve -- the non-specific "!", or a
-		// local tag -- leaves the empty node unresolved, which is null.
-		//
-		// The null is implicit, so the renderer writes nothing for it. Written
-		// out as "null" it came back as the *string* "null" on the next read,
-		// since a tag that resolves to nothing leaves its scalar as text: "!"
-		// held a null and "! null" holds "null".
+		// A tag the core schema does not resolve (the non-specific "!", or a local tag) leaves the empty node null.
+		// The null is implicit, so the renderer writes nothing for it.
+		// Written out, "! null" would read back as the string "null", because such a tag leaves its scalar as text.
 		nullTk := token.New("null", "null", pos)
 		nullTk.Type = token.ImplicitNullType
 		tk = group.NewSynthetic(nullTk)
@@ -347,15 +319,9 @@ func setLineComment(ctx context, node ast.Node, tk *group.TapeToken) error {
 	return node.SetComment(comment)
 }
 
-// setEntryLineComment records the comment written on an explicit entry's ':'
-// line, in the entry's own slot.
+// setEntryLineComment records the comment written on an explicit entry's ':' line in the entry's LineComment.
 //
-// ⚠️ BaseNode.Comment is filled as well while it is free, which is a bridge and
-// not the design: ast.Renderer writes an entry's Comment above the entry and
-// reads nothing from LineComment yet, so filling only the new slot would stop
-// the comment reaching the rendered text at all. Take this out with the
-// renderer change that writes LineComment after the ':' -- the two together are
-// what put the comment back on the line it was written on.
+// Renderer.mappingValue writes LineComment back after the ':'.
 func setEntryLineComment(ctx context, node *ast.MappingValueNode, tk *group.TapeToken) error {
 	lineComment := ctx.takeLineComment(tk)
 	if lineComment == nil {
@@ -373,14 +339,11 @@ func setHeadComment(cm *ast.CommentGroupNode, value ast.Node) error {
 	return attachComment(cm, value, true)
 }
 
-// setTrailingComment records a comment written after the node it is attached
-// to, which only the comments closing a document are: those between a directive
-// and the "---" under it, and those under the document's own node.
+// setTrailingComment attaches a comment written after the node, as the comments closing a document are:
+// those between a directive and the "---" under it, and those under the document's own node.
 //
-// It differs from setHeadComment in one place, and the difference is the whole
-// reason for it: a comment standing after a node must not be written above it.
-// "%FOO bar baz # Should be ignored" over "# with a warning." over "--- \"foo\""
-// came back with the warning line first, before the directive it follows.
+// It differs from setHeadComment only on a node rendered on one line.
+// There a head comment goes to HeadComment and a trailing comment to Comment, so it is never written above the node.
 func setTrailingComment(cm *ast.CommentGroupNode, value ast.Node) error {
 	return attachComment(cm, value, false)
 }
@@ -392,15 +355,14 @@ func attachComment(cm *ast.CommentGroupNode, value ast.Node, above bool) error {
 	if probe.Enabled {
 		probe.Count("comment.head.attached", 1)
 		if target := headCommentTarget(value); target != nil && target.GetComment() != nil {
-			// SetComment assigns, so the one already there goes.
+			// SetComment assigns, so it replaces the comment already there.
 			probe.Count("comment.head.overwrote", 1)
 		}
 	}
 	switch n := value.(type) {
 	case *ast.MappingNode:
 		if len(n.Values) != 0 && value.GetComment() == nil {
-			// The entry's own Comment means "above the entry", which is where
-			// this stands, and Renderer.mappingValue writes it there.
+			// Renderer.mappingValue writes an entry's Comment above the entry, so the first entry takes it.
 			cm.SetPathNode(n.Values[0].GetPathNode())
 			return n.Values[0].SetComment(cm)
 		}
@@ -411,18 +373,10 @@ func attachComment(cm *ast.CommentGroupNode, value ast.Node, above bool) error {
 
 	cm.SetPathNode(value.GetPathNode())
 
-	// Where the node's one comment field is already taken, the head comment
-	// goes to the field that means "above" on every node. SetComment assigns,
-	// so this is exactly where a comment used to be destroyed: "# c1" over
-	// "831 # c2" kept "# c1" and lost the property comment.
-	//
-	// Only there. On most nodes Comment is where a head comment already
-	// renders correctly -- a mapping, a sequence, a block under a key -- and
-	// moving those would change documents that read and write correctly today.
-	// What is left is a node whose Comment means something else and is empty,
-	// such as the anchor of "# c1" over "&a q # c2": that one keeps both texts
-	// and renders them onto one line, which is the renderer's half of this and
-	// not the model's.
+	// SetComment assigns, so a head comment goes to HeadComment when Comment is already taken.
+	// It goes there as well when Comment renders beside the node (meansBeside),
+	// or when the node renders on one line and the comment was written above it (onOneLine).
+	// On other nodes Comment already renders above the node: a mapping, a sequence, a block under a key.
 	if head, ok := value.(headCommented); ok && (value.GetComment() != nil || meansBeside(value) || (above && onOneLine(value))) {
 		return head.SetHeadComment(cm)
 	}
@@ -430,15 +384,12 @@ func attachComment(cm *ast.CommentGroupNode, value ast.Node, above bool) error {
 	return value.SetComment(cm)
 }
 
-// meansBeside reports whether the node's Comment field holds the comment
-// written beside it rather than the one written above it.
+// meansBeside reports whether the node's Comment field holds the comment written beside the node, not above it.
 //
-// An anchor and a tag are properties standing in front of a node, and
-// ast.Renderer.withOwnComment puts their Comment back at the end of the line
-// they end -- right for "&a # beside" and wrong for a comment written on the
-// line above. Writing a head comment there rendered the two onto one line,
-// "&a q # c2 # c1", and a comment runs to the end of its line, so the next read
-// takes both for one comment.
+// An anchor and a tag are properties standing in front of a node,
+// and ast.Renderer.withOwnComment writes their Comment at the end of the line they end.
+// A head comment stored there renders on that line, as in "&a q # c2 # c1",
+// and a comment runs to the end of its line, so the next read takes both for one comment.
 func meansBeside(n ast.Node) bool {
 	switch n.(type) {
 	case *ast.AnchorNode, *ast.TagNode:
@@ -448,14 +399,11 @@ func meansBeside(n ast.Node) bool {
 	}
 }
 
-// onOneLine reports whether the node renders on a single line, so that its
-// Comment ends that line rather than standing above it.
+// onOneLine reports whether the node renders on a single line, so that its Comment ends that line.
 //
-// A scalar, an alias and a flow collection are written on one line. "# c1" over
-// "foo" put the comment in Comment and rendered "foo # c1", which is where a
-// comment beside the scalar goes -- the document wrote it above. A block
-// mapping or a block sequence renders Comment above itself, which is where a
-// head comment already belongs, so those keep it.
+// A scalar, an alias and a flow collection render on one line,
+// so a head comment stored in Comment would render beside the node, as in "foo # c1".
+// A block mapping or a block sequence renders Comment above itself, and keeps a head comment there.
 func onOneLine(n ast.Node) bool {
 	switch node := n.(type) {
 	case *ast.MappingNode:
@@ -469,18 +417,16 @@ func onOneLine(n ast.Node) bool {
 	}
 }
 
-// headCommented is a node with somewhere to record what stands above it.
+// headCommented is a node with a HeadComment field for the comment written above it.
 type headCommented interface {
 	SetHeadComment(*ast.CommentGroupNode) error
 	GetHeadComment() *ast.CommentGroupNode
 }
 
-// headCommentTarget is the node setHeadComment writes to, for the probe that
-// counts how often it writes over a comment already there.
+// headCommentTarget returns the node attachComment writes to, for the probe that counts overwritten comments.
 func headCommentTarget(value ast.Node) ast.Node {
 	if _, ok := value.(headCommented); ok {
-		// Written to HeadComment, which nothing else writes, so there is
-		// nothing there to lose.
+		// The comment goes to HeadComment, which nothing else writes, so nothing is overwritten.
 		if _, mapping := value.(*ast.MappingNode); !mapping {
 			if _, entry := value.(*ast.MappingValueNode); !entry {
 				return nil
@@ -498,11 +444,9 @@ func headCommentTarget(value ast.Node) ast.Node {
 
 // countFootAttached records that a foot comment reached a node.
 //
-// The census reads comment.scanned against the routes a comment can be attached
-// by, and a foot comment had none: parseFootComment counted what it read and
-// nothing counted where it went, so a kept foot comment looked like a lost one.
-// A comment written on a "---" or a "..." needs no counter of its own, taking
-// the staged/taken route through markerComment below.
+// The census compares comment.scanned with the counter of each route a comment is attached by.
+// parseFootComment counts what it reads, and this counts where it goes, so a kept foot comment is not counted as lost.
+// A comment on a "---" or "..." line needs no counter of its own: markerComment takes it through comment.taken.
 func countFootAttached(cm *ast.CommentGroupNode) {
 	if !probe.Enabled || cm == nil {
 		return
@@ -510,10 +454,9 @@ func countFootAttached(cm *ast.CommentGroupNode) {
 	probe.Count("comment.foot.attached", int64(len(cm.Comments)))
 }
 
-// markerComment is the comment closing a "---" or "..." line, as a group.
+// markerComment returns the comment closing a "---" or "..." line, as a group.
 //
-// A marker is not a node, so nothing takes the comment staged against it and
-// the document has to ask.
+// A marker is not a node, so no node takes the comment recorded against it, and the document parse takes it here.
 func markerComment(ctx context, tk *group.TapeToken) *ast.CommentGroupNode {
 	if tk == nil {
 		return nil
@@ -526,8 +469,7 @@ func markerComment(ctx context, tk *group.TapeToken) *ast.CommentGroupNode {
 	return ast.CommentGroup([]*token.Token{cm})
 }
 
-// pathSlabSize is how many trie steps one allocation covers. A document of N
-// keys then costs N/pathSlabSize allocations rather than N.
+// pathSlabSize is the number of path trie steps one allocation holds, so N steps cost N/pathSlabSize allocations.
 const pathSlabSize = 512
 
 // newPathNode returns the next unused step of the path trie, or nil when

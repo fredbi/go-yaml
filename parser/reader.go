@@ -13,59 +13,52 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// reader turns a document into the tokens the descent walks, as the descent
-// asks for them.
+// reader turns a document into the tokens the descent reads, as the descent pulls them.
 //
-// It scans a run into the arena, groups that run, and hands the result on a
-// token at a time. Nothing reads further than the descent has asked, so the
-// scanner, the grouping and the parse all run at once and the tape may be
-// filled again behind them.
+// It scans a token into the arena, feeds it to the grouping, and passes the grouped result on a token at a time.
+// It never reads further than the descent has pulled,
+// so the scanner, the grouping and the parse run together and the tape can be refilled behind them.
 //
-// A document opens at "---" or at the first token of the stream, and closes at
-// "...", at the "---" opening the next one, or at the end. The parse asks for
-// those three in turn: [reader.openDocument], then [reader.bodyToken] until it
-// says the document has run out, then [reader.closeDocument].
+// A document opens at "---" or at the first token of the stream,
+// and closes at "...", at the "---" opening the next one, or at the end of the stream.
+// The parse calls [reader.openDocument], then [reader.bodyToken] until it returns false, then [reader.closeDocument].
 type reader struct {
 	scan  *scanner.Scanner
 	arena *tokenarena.TokenArena[group.TapeToken]
 	g     group.Grouper
 
-	// out holds what the grouping has handed out and the descent has not yet
-	// taken, from at onward.
+	// out holds the tokens the grouping has emitted and the descent has not taken yet, from index at onward.
 	out []*group.TapeToken
 	at  int
 
-	// seq is the place on the tape of the next token read.
+	// seq is the tape position of the next token read.
 	seq int
-	// drained says the scanner has no more to give, and finished that the
-	// grouping has been emptied of what it was still holding.
+	// drained is set once the scanner has no more tokens,
+	// and finished once the grouping has emitted the tokens it was still holding.
 	drained, finished bool
-	// keepComments says the parse was asked for them. The rest are dropped as they
-	// arrive and never reach the grouping.
+	// keepComments is set under WithComments.
+	// Without it, comments are dropped as they arrive and never reach the grouping.
 	keepComments bool
 
-	// afterHeader and afterEnd hold the marker just read, so the token after it
-	// can be held against the line the marker stands on.
+	// afterHeader and afterEnd hold the marker just read,
+	// so that the token after it can be checked against the marker's line.
 	afterHeader, afterEnd *group.TapeToken
-	// taken says a token was read at all, since an empty stream is one empty
-	// document and a "..." closing nothing is none. ended says the document
-	// being read has run out. tail says the empty document at the end of a
-	// stream has been handed over.
+	// taken is set once any token has been read:
+	// an empty stream is one empty document, and a "..." closing nothing is none.
+	// ended is set when the current document has run out.
+	// tail is set once the empty document at the end of a stream has been returned.
 	taken, ended, tail bool
-	// tookDirective says the body just handed a directive over. A directive is
-	// a document of its own, so the next one closes this document rather than
-	// standing beside it.
+	// tookDirective is set when the body just returned a directive.
+	// A directive is a document of its own, so the next directive closes this document.
 	tookDirective bool
 
-	// err is a refusal bodyToken could not report, since the descent's pull
-	// answers with a token or nothing.
+	// err holds an error bodyToken cannot return, since the descent's pull returns a token or nothing.
 	err error
 }
 
-// newReader returns a reader over what scan hands out.
+// newReader returns a reader over the tokens of scan.
 //
-// estimate is how many tokens the document is guessed to hold; it sizes the
-// grouping's own buffers and nothing else.
+// estimate is a guess at the document's token count. It sizes the grouping's buffers and nothing else.
 func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[group.TapeToken], estimate int, keepComments bool) *reader {
 	r := &reader{
 		scan:         scan,
@@ -75,17 +68,15 @@ func newReader(scan *scanner.Scanner, arena *tokenarena.TokenArena[group.TapeTok
 		keepComments: keepComments,
 	}
 	if keepComments {
-		// Taken here rather than where the first comment arrives, so that the
-		// parser may hold the same map from the start. A parse dropping
-		// comments takes none.
+		// The map is made here, before the first comment arrives, so the parser can hold the same map from the start.
+		// A parse that drops comments makes none.
 		r.g.LineComments = make(map[*group.TapeToken]*token.Token)
 	}
 
 	return r
 }
 
-// peek returns the next grouped token without taking it, grouping another run
-// where it has none in hand.
+// peek returns the next grouped token without taking it, and fills the buffer when it is empty.
 func (r *reader) peek() (*group.TapeToken, error) {
 	for r.at >= len(r.out) {
 		if r.drained {
@@ -111,11 +102,11 @@ func (r *reader) take() (*group.TapeToken, error) {
 	return tk, nil
 }
 
-// openDocument begins the next document and returns the "---" that opened it,
-// where there is one. ok is false at the end of the stream.
+// openDocument begins the next document and returns the "---" that opened it, if there is one.
+// The bool is false at the end of the stream.
 func (r *reader) openDocument() (*group.TapeToken, bool, error) {
-	// A "..." standing where nothing is open closes nothing: l-yaml-stream
-	// admits a run of suffixes and only the first closes anything.
+	// A "..." where no document is open closes nothing:
+	// l-yaml-stream allows a run of suffixes, and only the first closes a document.
 	for {
 		tk, err := r.peek()
 		if err != nil {
@@ -141,8 +132,7 @@ func (r *reader) openDocument() (*group.TapeToken, bool, error) {
 	r.tookDirective = false
 
 	if tk == nil {
-		// The stream ends here. It holds one last document -- the empty one --
-		// unless something was read from it.
+		// The stream ends here. It holds one last, empty document unless a token was read from it.
 		if r.taken || r.tail {
 			return nil, false, nil
 		}
@@ -160,18 +150,15 @@ func (r *reader) openDocument() (*group.TapeToken, bool, error) {
 	}
 	r.afterHeader = head
 
-	// The tape token and not its raw one: the "---" carries the comment closing
-	// its line, staged against this token, and judgeNext below clears
-	// afterHeader before the caller could look it up again.
+	// Return the tape token, not its raw one: the comment closing the "---" line is staged against this token.
+	// judgeNext clears afterHeader, so the caller cannot find the marker there.
 	return head, true, r.judgeNext()
 }
 
-// bodyToken draws the next token of the document being read, and reports false
-// where the document ends: at "...", at the "---" opening the next one, or at
-// the end of the stream.
+// bodyToken returns the next token of the current document,
+// and false where the document ends: at "...", at the "---" opening the next one, or at the end of the stream.
 //
-// It is what the descent's run pulls from, so it answers with a token or
-// nothing and keeps a refusal in err for the parse to find.
+// The descent's run pulls from it, so it returns a token or nothing and keeps an error in err for the parse to find.
 func (r *reader) bodyToken() (*group.TapeToken, bool) {
 	if r.ended || r.err != nil {
 		return nil, false
@@ -197,16 +184,10 @@ func (r *reader) bodyToken() (*group.TapeToken, bool) {
 	}
 
 	if r.tookDirective && isDirectiveToken(tk) {
-		// A directive stands on its own: the body of a document is one node,
-		// and 6.8 lets several directives stand before one "---". Handing them
-		// over together made the second one a second value in one body, which
-		// parseDocumentBody refuses as "value is not allowed in this context",
-		// so "%YAML 1.2" over "%TAG !e! ..." -- the ordinary prelude -- could
-		// not be read at all.
-		//
-		// The next directive is what ends this one, not the next token of any
-		// kind: a comment written under a directive belongs to it, which is
-		// what the Test Suite's spec-example-6-13-reserved-directives is.
+		// Section 6.8 allows several directives before one "---", but a document body is one node,
+		// so the second directive would reach parseDocumentBody as a second value and be rejected.
+		// The next directive ends this one, not the next token of any kind:
+		// a comment written under a directive belongs to it.
 		r.ended = true
 
 		return nil, false
@@ -222,8 +203,7 @@ func (r *reader) bodyToken() (*group.TapeToken, bool) {
 	return tk, true
 }
 
-// isDirectiveToken reports whether tk is a directive, grouped with its values
-// or with its name alone.
+// isDirectiveToken reports whether tk is a directive, grouped with its values or with its name alone.
 func isDirectiveToken(tk *group.TapeToken) bool {
 	switch tk.GroupType() {
 	case group.TokenGroupDirective, group.TokenGroupDirectiveName:
@@ -233,8 +213,7 @@ func isDirectiveToken(tk *group.TapeToken) bool {
 	}
 }
 
-// closeDocument finishes the document being read and returns the "..." that
-// ended it, where there is one.
+// closeDocument finishes the current document and returns the "..." that ended it, if there is one.
 func (r *reader) closeDocument() (*group.TapeToken, error) {
 	if r.err != nil {
 		return nil, r.err
@@ -255,8 +234,7 @@ func (r *reader) closeDocument() (*group.TapeToken, error) {
 	return end, r.judgeNext()
 }
 
-// judgeNext holds the token after a marker against the line the marker stands
-// on. It reads one token ahead and takes none.
+// judgeNext checks the token after a marker against the marker's line. It reads one token ahead and takes none.
 func (r *reader) judgeNext() error {
 	tk, err := r.peek()
 	if err != nil || tk == nil {
@@ -275,9 +253,8 @@ func (r *reader) judgeNext() error {
 			return yamlerrors.NewSyntax("value cannot be placed after document separator", tk.RawToken())
 		}
 	case r.afterEnd != nil && r.afterEnd.Line() == tk.Line():
-		// "..." ends the document and takes the rest of its line: only a
-		// comment may follow it there. On the next line a new document begins,
-		// and it may be a bare one.
+		// "..." ends the document and the rest of its line: only a comment may follow it there.
+		// On the next line a new document begins, and it may be a bare one.
 		return yamlerrors.NewSyntax("unexpected end content", tk.RawToken())
 	}
 	r.afterHeader, r.afterEnd = nil, nil
@@ -285,20 +262,15 @@ func (r *reader) judgeNext() error {
 	return nil
 }
 
-// fill reads tokens until the grouping hands one out, or the scanner runs dry.
+// fill reads tokens until the grouping emits one, or the scanner runs dry.
 //
-// One token at a time: the grouping is a state machine now, so a token can be
-// fed the moment it is read and there is nothing to gain by reading a run of
-// them first. What that used to cost was a slice of tokens waiting to be
-// grouped, a second slice holding what the grouping made of the last run, and a
-// copy joining the two on every fill.
-//
-// It also means the scanner is never read further than the descent has asked
-// for, which is what lets a stage ask the scanner about the token in hand.
+// It feeds the grouping one token at a time,
+// since the grouping is a state machine and takes a token as soon as it is read.
+// The scanner is therefore never read further than the descent has pulled,
+// which lets a grouping stage query the scanner about the token in hand.
 func (r *reader) fill() error {
 	if r.at == len(r.out) {
-		// Everything handed out has been taken, so the buffer starts again
-		// rather than growing for the length of the document.
+		// Every token emitted has been taken, so the buffer restarts instead of growing with the document.
 		r.out, r.at = r.out[:0], 0
 	}
 
@@ -328,10 +300,8 @@ func (r *reader) fill() error {
 		r.seq++
 
 		if tk.Type == token.InvalidType {
-			// A token the scanner refused carries no reason of its own:
-			// Scanner.Err has it, and it names the character or the header
-			// option that was wrong. Reporting "found an invalid token"
-			// instead loses that.
+			// An invalid token carries no reason of its own.
+			// Scanner.Err names the character or the header option at fault, so return it when there is one.
 			if scanErr := r.scan.Err(); scanErr != nil {
 				return scanErr
 			}

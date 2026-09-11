@@ -12,82 +12,66 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
-// The parser keeps the anchors of the document it is reading and points every
-// alias at the node its anchor names, so a consumer reads
-// [ast.AliasNode.Target] rather than collecting anchors of its own. It does not
-// substitute: the alias stays an alias in the tree, and expanding it is the
-// consumer's to do.
+// The parser keeps the anchors of the document it reads and points every alias at the node its anchor names,
+// so a consumer reads ast.AliasNode.Target and collects no anchors of its own.
+// The alias stays an alias in the tree, and expanding it is left to the consumer.
 //
-// Three rules decide what an alias may name, and all three fall out of reading
-// the document once, front to back:
+// Three rules decide what an alias may name, and one front-to-back read of the document applies all three:
 //
-//   - An alias names the anchor declared before it. §3.2.2.2: "an alias event
-//     refers to the most recent event in the serialization having the specified
-//     anchor". So a name declared later, or never, is
-//     [yamlerrors.ErrUnknownAnchor], and a name declared twice resolves to
-//     whichever declaration the alias stands after.
-//   - An anchor belongs to the document it was written in. The table is emptied
-//     at each document boundary, so an alias naming an earlier document's
-//     anchor names nothing -- and the nodes the table pins are let go of there.
-//   - An anchor names its node from where the node starts, not from where it
-//     ends, so "&x [ *x ]" resolves and the tree it builds holds a cycle. The
-//     parser reads that document because YAML's representation is a graph.
-//     Whether a cycle can be held is the consumer's question and it is asked
-//     later: the decoder refuses one, because a Go value built by walking has
-//     nowhere to put it.
+//   - An alias names the anchor declared before it. Section 3.2.2.2 reads:
+//     "an alias event refers to the most recent event in the serialization having the specified anchor".
+//     A name declared later, or never, is yamlerrors.ErrUnknownAnchor,
+//     and a name declared twice resolves to the declaration the alias follows.
+//   - An anchor belongs to the document it was written in.
+//     take empties the table at each document boundary, so an alias naming an earlier document's anchor names nothing,
+//     and the table lets go of the nodes it pins there.
+//   - An anchor names its node from where the node starts, so "&x [ *x ]" resolves and its tree holds a cycle.
+//     YAML's representation is a graph, so the parser accepts the document.
+//     The decoder rejects a cycle, because a Go value built by walking has no place for one.
 
-// openAnchor is an anchor whose node is being read: the name, and the node that
-// will hold what the name stands for once it has been read.
+// openAnchor is an anchor whose node is being read, with its name and the node that will hold the anchored value.
 type openAnchor struct {
 	name string
 	node *ast.AnchorNode
 }
 
-// cyclicAlias is an alias that named an anchor still being read. Its target is
-// set once the document is done, which is the first moment the anchored node
-// exists.
+// cyclicAlias is an alias that names an anchor still being read.
+// take sets its target once the document is done, the first moment the anchored node exists.
 type cyclicAlias struct {
 	alias  *ast.AliasNode
 	anchor *ast.AnchorNode
-	// tagged is the tag written before the anchor, where there is one. The node
-	// the alias names carries both properties, so it is the tag node and not
-	// what the anchor holds. See anchorTable.retag.
+	// tagged is the tag written before the anchor, if any.
+	// The node the alias names carries both properties, so the target is the tag node and not the anchor's value.
+	// See anchorTable.retag.
 	tagged *ast.TagNode
 }
 
-// anchorTable holds the anchors of the document being read, and the aliases
-// that named one before its node existed.
+// anchorTable holds the anchors of the document being read, and the aliases that named one before its node existed.
 //
-// It is emptied at each document boundary by take, so an alias naming an
-// earlier document's anchor names nothing. Only declared outlives a document:
-// [WithAnchors] published it and every document of the stream may name it.
+// take empties it at each document boundary, so an alias naming an earlier document's anchor names nothing.
+// Only declared outlives a document: [WithAnchors] publishes it for every document of the stream.
 type anchorTable struct {
-	// nodes holds the node each anchor of the document in hand names, under the
-	// anchor's name. It goes to the document as that one closes, and the next
-	// starts with none.
+	// nodes maps each anchor name of the current document to the node it names.
+	// take hands it to the document as the document closes, and the next document starts with none.
 	nodes map[string]ast.Node
-	// identities holds what each anchor's node resolves to, under the same
-	// name. An alias standing as a mapping key is named from here rather than
-	// through AliasNode.Target: a walk scrubs the anchored node once the entry
-	// holding it closes, and the string outlives it. See keepAnchorIdentity.
+	// identities maps each anchor name to what its node resolves to.
+	// An alias used as a mapping key is named from here and not through AliasNode.Target,
+	// because a walk scrubs the anchored node once the entry holding it closes, and the string outlives it.
+	// See keepAnchorIdentity.
 	identities map[string]anchorIdentity
-	// open holds the anchors whose node is being read at this point in the
-	// descent, innermost last. An alias naming one of them stands inside what it
-	// names, and cyclic holds it until that node exists.
+	// open holds the anchors whose node is being read at this point in the descent, innermost last.
+	// An alias naming one of them stands inside the node it names, and cyclic holds it until that node exists.
 	open   []openAnchor
 	cyclic []cyclicAlias
-	// declared holds what [WithAnchors] published, which an alias of any
-	// document of this stream may name. It is not what a document declares and
-	// does not reach [ast.DocumentNode.Anchors].
+	// declared holds the anchors [WithAnchors] published, which an alias of any document of this stream may name.
+	// They are not the document's own and do not reach [ast.DocumentNode.Anchors].
 	declared map[string]ast.Node
 }
 
 // openName records that the node name stands for is being read.
 //
-// It is a stack and not a set because anchors nest -- "&x [&y 1]" -- and the
-// names come off in the order they went on. Looking one up is a walk down it,
-// over as many entries as there are anchors open at once, which is the
-// document's nesting and not its length.
+// open is a stack because anchors nest, as in "&x [&y 1]", and the last name opened closes first.
+// A lookup walks it, so its cost follows the document's nesting depth and not its length.
 func (t *anchorTable) openName(name string, node *ast.AnchorNode) {
 	t.open = append(t.open, openAnchor{name: name, node: node})
 }
@@ -95,7 +79,7 @@ func (t *anchorTable) openName(name string, node *ast.AnchorNode) {
 // reading reports whether an anchor's node is being read.
 func (t *anchorTable) reading() bool { return len(t.open) > 0 }
 
-// keep enters the node name stands for.
+// keep records the node name stands for.
 func (t *anchorTable) keep(name string, value ast.Node) {
 	if t.nodes == nil {
 		t.nodes = make(map[string]ast.Node, 4)
@@ -111,12 +95,10 @@ func (t *anchorTable) keepIdentity(name string, at anchorIdentity) {
 	t.identities[name] = at
 }
 
-// identityOf is what the node an anchor names resolves to, for
-// [ast.KeyIdentityWithAnchors] to answer an alias with.
+// identityOf returns what the node an anchor names resolves to, for [ast.KeyIdentityWithAnchors] to resolve an alias.
 //
-// Taken when the anchor closed, so it costs a lookup rather than a walk of the
-// anchored subtree -- and an anchor still being read is not in the table, which
-// is what stops "&x [ *x ]" naming itself.
+// The identity is taken when the anchor closes, so a lookup replaces a walk of the anchored subtree.
+// An anchor still being read is not in the table, which stops "&x [ *x ]" naming itself.
 func (t *anchorTable) identityOf(name string) (string, bool) {
 	at, known := t.identities[name]
 	if !known || at.identity == "" {
@@ -126,12 +108,11 @@ func (t *anchorTable) identityOf(name string) (string, bool) {
 	return at.identity, true
 }
 
-// identity returns what an anchor's node resolved to, and the zero value for a
-// name the table does not hold.
+// identity returns what an anchor's node resolved to, and the zero value for a name the table does not hold.
 func (t *anchorTable) identity(name string) anchorIdentity { return t.identities[name] }
 
-// target returns the node name stands for: what a document of this stream
-// wrote, else what [WithAnchors] published for the whole stream.
+// target returns the node name stands for: the current document's anchor if it declared one,
+// else the node [WithAnchors] published under that name.
 func (t *anchorTable) target(name string) (ast.Node, bool) {
 	if node, declared := t.nodes[name]; declared {
 		return node, true
@@ -142,19 +123,17 @@ func (t *anchorTable) target(name string) (ast.Node, bool) {
 	return node, declared
 }
 
-// holdCyclic keeps an alias that named an anchor still being read, until
-// take fills its target in.
+// holdCyclic keeps an alias that named an anchor still being read, until take fills its target in.
 func (t *anchorTable) holdCyclic(alias *ast.AliasNode, anchor *ast.AnchorNode) {
 	t.cyclic = append(t.cyclic, cyclicAlias{alias: alias, anchor: anchor})
 }
 
-// keepAnchor enters the node an anchor names, and closes the name.
+// keepAnchor records the node an anchor names, and closes the name.
 func (p *Parser) keepAnchor(name string, value ast.Node) {
 	p.anchors.dropName()
 
 	if name == "" || value == nil {
-		// Nothing an alias can reach. The scanner refuses a '&' with no name
-		// after it, so this is the guard and not the path.
+		// The scanner rejects a '&' with no name after it, so this branch is a guard.
 		return
 	}
 	p.anchors.keep(name, value)
@@ -162,30 +141,26 @@ func (p *Parser) keepAnchor(name string, value ast.Node) {
 	p.pinAnchoredNodes()
 }
 
-// anchorIdentity is what an anchor's node resolves to, in the two forms a key
-// is told apart by.
+// anchorIdentity holds what an anchor's node resolves to, in the two forms that tell keys apart.
 //
-// text and kind are what [Parser.mapKeyIdentity] reads off a scalar, and are
-// empty for a collection. identity is [ast.KeyIdentity]'s reading of the node,
-// which answers for both. An alias key is checked in whichever store its anchor
-// belongs to, so "&a x: 1" and a later "*a" meet among the scalar keys and
-// "&a [1]: 1" and its alias among the built ones.
+// text and kind hold [Parser.mapKeyIdentity]'s reading of a scalar, and are empty for a collection.
+// identity holds [ast.KeyIdentity]'s reading of the node, which covers both.
+// An alias key is checked in the store its anchor belongs to, so "&a x: 1" and a later "*a" meet among the scalar keys,
+// and "&a [1]: 1" and its alias among the built ones.
 type anchorIdentity struct {
 	text     string
 	kind     token.KeyKind
 	identity string
 }
 
-// keepAnchorIdentity records what the anchored node resolves to, for an alias
-// that later stands as a mapping key.
+// keepAnchorIdentity records what the anchored node resolves to, for an alias that later stands as a mapping key.
 //
-// The identity is taken here because this is the last moment the node is whole
-// on a walk. Parser.keepsNothing holds the cells while the anchor is being read,
-// so the node has its children now; the mapping around it rewinds past them
-// once its entry closes, and [ast.AliasNode.Target] then points at a scrubbed
-// cell -- "&a [a, b]" read back as "seq()".
+// On a walk this is the last moment the node is whole.
+// Parser.keepsNothing holds the cells while the anchor is being read, so the node still has its children here.
+// Once its entry closes, the mapping around it rewinds past them,
+// and [ast.AliasNode.Target] then points at a scrubbed cell: "&a [a, b]" reads back as "seq()".
 //
-// Two strings per anchor, and nothing is retained: the node itself goes.
+// It keeps two strings per anchor and does not retain the node.
 func (p *Parser) keepAnchorIdentity(name string, value ast.Node) {
 	if p.opts.allowDuplicateMapKey {
 		return
@@ -206,11 +181,9 @@ func (t *anchorTable) dropName() {
 	}
 }
 
-// openNode returns the anchor of this name whose node is being read right
-// now, which is what an alias inside that node names.
+// openNode returns the open anchor of this name, which an alias inside its node names.
 func (t *anchorTable) openNode(name string) (*ast.AnchorNode, bool) {
-	// Innermost first: "&x [&x 1, *x]" names the inner one, which is the most
-	// recent declaration and the one §3.2.2.2 asks for.
+	// Innermost first: "&x [&x 1, *x]" names the inner anchor, the most recent declaration, as section 3.2.2.2 requires.
 	for _, open := range slices.Backward(t.open) {
 		if open.name == name {
 			return open.node, true
@@ -224,17 +197,13 @@ func (t *anchorTable) openNode(name string) (*ast.AnchorNode, bool) {
 func (p *Parser) resolveAlias(alias *ast.AliasNode, name string, tk *token.Token) error {
 	if anchor, open := p.anchors.openNode(name); open {
 		if p.opts.jsonCompatible {
-			// JSON is a tree written out in full, so it has no spelling for a
-			// node that reaches back into itself, wherever the cycle closes.
-			// Caught here rather than at the conversion, which read the alias
-			// as naming an anchor it had not finished writing and reported it
-			// as missing.
+			// JSON writes a tree in full, so it cannot write a node that contains itself.
+			// The cycle is rejected here because the converter, reaching the alias, would report its anchor as missing.
 			return yamlerrors.NewNotJSON("a cycle cannot be written as JSON", tk)
 		}
 
-		// The alias stands inside what its own anchor names. The anchored node
-		// is not built yet -- a sequence is built once its entries are read --
-		// so the target is filled at the document's end, where it exists.
+		// The alias stands inside the node its anchor names, and that node is not built yet
+		// (a sequence is built once its entries are read). take fills the target at the document's end.
 		p.anchors.holdCyclic(alias, anchor)
 
 		return nil
@@ -250,15 +219,13 @@ func (p *Parser) resolveAlias(alias *ast.AliasNode, name string, tk *token.Token
 
 // retag points an anchor written after a tag at the tagged node.
 //
-// §6.9 lets a node's tag and anchor stand in either order and means the same by
-// both. Written anchor first the tree is Anchor over Tag over the value, and the
-// anchor names the tagged node. Written tag first it is Tag over Anchor over the
-// value, and the anchor named the value with the tag stripped off it, so
-// "a: !!int &a1 \"5\"" read 5 at a and "5" at "b: *a1" -- one node, read as a
-// number where it stands and as a string through an alias to it.
+// Section 6.9 lets a node's tag and anchor stand in either order with the same meaning.
+// Written anchor first, the tree is Anchor over Tag over the value, and the anchor names the tagged node.
+// Written tag first, the tree is Tag over Anchor over the value, so without retag the anchor names the untagged value:
+// "a: !!int &a1 \"5\"" reads 5 at a, and "b: *a1" reads the string "5".
 //
-// The tree keeps the order the document wrote, so it still renders as it was
-// written. Only what the name stands for changes.
+// The tree keeps the order the document wrote, so it renders as written.
+// retag changes only the node the name stands for.
 func (t *anchorTable) retag(tagged *ast.TagNode) {
 	anchor, anchored := tagged.Value.(*ast.AnchorNode)
 	if !anchored {
@@ -270,13 +237,13 @@ func (t *anchorTable) retag(tagged *ast.TagNode) {
 		return
 	}
 	if t.nodes[name] == anchor.Value {
-		// Still the entry this anchor made. A later "&a1" on another node has
-		// replaced it, and that one is what the name means from there on.
+		// The entry is still this anchor's.
+		// A later "&a1" on another node replaces it, and the name then stands for that node.
 		t.nodes[name] = tagged
 	}
 
-	// An alias inside the anchored node resolved before this tag was built, so
-	// it holds the anchor rather than the node standing around it.
+	// An alias inside the anchored node resolved before this tag was built,
+	// so it holds the anchor and not the tag around it.
 	for i := range t.cyclic {
 		if t.cyclic[i].anchor == anchor {
 			t.cyclic[i].tagged = tagged
@@ -284,8 +251,7 @@ func (t *anchorTable) retag(tagged *ast.TagNode) {
 	}
 }
 
-// take returns what the document just read declared, and empties the table for
-// the next one.
+// take returns what the document just read declared, and empties the table for the next one.
 func (t *anchorTable) take() map[string]ast.Node {
 	for _, cyclic := range t.cyclic {
 		if cyclic.tagged != nil {
@@ -305,13 +271,12 @@ func (t *anchorTable) take() map[string]ast.Node {
 	return anchors
 }
 
-// pinAnchoredNodes stops the walk handing the anchored node's cells out again.
+// pinAnchoredNodes stops a walk reusing the anchored node's cells.
 //
-// An alias names the node later in the document and reads it through
-// [ast.AliasNode.Target]. The walk rewinds the arena as each entry goes over,
-// so without this the cell is written over by what comes next and the alias
-// reads another part of the document. Only a walk rewinds, so this does nothing
-// for a parse that gathers a tree.
+// An alias later in the document reads the node through [ast.AliasNode.Target].
+// A walk rewinds the arena as each entry is handed to the visitor,
+// so without the pin the next node overwrites the cell and the alias reads another part of the document.
+// Only a walk rewinds, so this does nothing for a parse that builds a tree.
 func (p *Parser) pinAnchoredNodes() {
 	if !p.walking() || p.arena == nil {
 		return
@@ -365,11 +330,9 @@ func (p *Parser) parseAnchor(ctx context, g *group.TokenGroup) (*ast.AnchorNode,
 	return anchor, nil
 }
 
-// parseAnchorValue reads what an anchor names.
+// parseAnchorValue reads the node an anchor names.
 //
-// An anchor with nothing after it names the empty node: "a: &x" is a valid
-// document, and *x resolves to null. Refusing it made an anchor the one thing
-// that could not be attached to an absent value.
+// An anchor with nothing after it names the empty node: "a: &x" is a valid document, and *x resolves to null.
 func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
 	defer p.closeAnchor(ctx)
 
@@ -379,40 +342,35 @@ func (p *Parser) parseAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node
 
 		return nil, err
 	}
-	// An anchor names its node only once that node is read. Entering the name
-	// here, and not where the '&' was, is the whole of what makes an alias
-	// standing inside it name nothing.
+	// keepAnchor records the name in nodes only now that its node is read.
+	// An alias inside the node found the name through openName instead, and take fills its target.
 	p.keepAnchor(anchorNameOf(anchor.Name), value)
 
 	return value, nil
 }
 
-// readAnchorValue reads the node itself, and hands it over as the anchor's.
+// readAnchorValue reads the anchored node, between the anchor's Enter and Leave on a walk.
 func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node, error) {
-	// The anchor stands around the node it names, so it goes over before that
-	// node and closes after it. Handing it over afterwards, as a node holding
-	// nothing does, put it beside its own value at the same depth and lost the
-	// nesting: "a: &x 1" read as the two values 1 and &x.
+	// The anchor encloses the node it names, so the visitor gets the anchor's Enter before that node and its Leave after.
+	// Handed over as a leaf, the anchor would sit beside its own value at the same depth.
 	p.enter(ctx, anchor, KindAnchor)
 	defer p.leave(ctx, anchor)
 
 	if ctx.isTokenNotFound() || endsValue(ctx.currentToken()) {
-		// Built rather than inserted: there is no token here to stand for the
-		// null, and putting one in the stream would leave it to be read again.
+		// The null node is built and no token is inserted: a token put into the stream would be read again.
 		return p.handNull(ctx, ctx.createImplicitNullToken(group.NewSynthetic(anchor.GetToken())))
 	}
-	// A comment may stand between the anchor and the next token. It belongs to
-	// what comes after and says nothing about where this node ends.
+	// A comment may stand between the anchor and the next token.
+	// It belongs to what follows and does not end this node.
 	after := ctx.currentToken()
 	if ctx.isComment() {
 		after = ctx.nextNotCommentToken()
 	}
 	if after != nil && p.descent.opensNextEntry(after, int(anchor.GetToken().Position.Line)) {
-		// The anchor was the last thing on its line and what follows opens the
-		// next entry of the collection around it, so the anchor names the empty
-		// node. parseMapValue and parseSequenceValue say this for the entries
-		// they read; an explicit key's value is read here and nowhere else, so
-		// "? a" over ": &a1" over "? b" came back as {a: {b: nil}}.
+		// The anchor ends its line and the next token opens the next entry of the enclosing collection,
+		// so the anchor names the empty node.
+		// parseMapValue and parseSequenceValue apply this test to the entries they read,
+		// but an explicit key's value is read only here: without it "? a" over ": &a1" over "? b" reads as {a: {b: nil}}.
 		return p.handNull(ctx, ctx.createImplicitNullToken(group.NewSynthetic(anchor.GetToken())))
 	}
 
@@ -423,20 +381,16 @@ func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node,
 	if _, ok := value.(*ast.AnchorNode); ok {
 		return nil, yamlerrors.NewSyntax("anchors cannot be used consecutively", value.GetToken())
 	}
-	// Attached here and not by parseAnchor, which runs after this returns: the
-	// Leave deferred above fires on the way out, so a walking reader that took
-	// the assignment on trust was handed an anchor holding nothing.
-	// codec.unwrapKeyNode then unwrapped to nil and named "&a1 1.0" after
-	// fmt.Sprint of the float rather than after its YAML spelling.
+	// Set here as well as in parseAnchor, which runs after this returns:
+	// the Leave deferred above fires first, and the visitor must see the anchor holding its value.
 	anchor.Value = value
 
 	return value, nil
 }
 
 func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
-	// An alias may name this anchor anywhere below it in the document, so what
-	// the anchor covers outlives the tail. How far it runs is not known here,
-	// so the tape is held from the '&' until parseAnchorValue closes the node.
+	// An alias may name this anchor anywhere later in the document, so the tokens the anchor covers outlive the tail.
+	// Their extent is not known yet, so openAnchor holds the tape from the '&' until parseAnchorValue closes the node.
 	p.openAnchor(ctx)
 
 	anchor, err := newAnchorNode(ctx, ctx.currentToken())
@@ -456,9 +410,7 @@ func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
 		return nil, yamlerrors.NewSyntax("unexpected anchor. anchor name is not scalar value", ctx.currentToken().RawToken())
 	}
 	anchor.Name = anchorName
-	// The name is open from here and not from where the node ends, so an alias
-	// inside that node names it: "&x [ *x ]" is a document, and the tree it
-	// builds holds a cycle.
+	// The name opens here, before its node is read, so an alias inside that node names it: "&x [ *x ]" builds a cycle.
 	p.anchors.openName(anchorNameOf(anchorName), anchor)
 
 	return anchor, nil
@@ -490,8 +442,7 @@ func (p *Parser) parseAlias(ctx context) (*ast.AliasNode, error) {
 	return alias, nil
 }
 
-// anchorNameOf reads the name off the scalar an anchor or an alias was written
-// with. It is "" where the scan could not read one, which names nothing.
+// anchorNameOf returns the name written on an anchor or an alias, and "" when the node or its token is nil.
 func anchorNameOf(n ast.Node) string {
 	if n == nil {
 		return ""
@@ -504,8 +455,8 @@ func anchorNameOf(n ast.Node) string {
 	return tk.Value
 }
 
-// anchoredScalar returns the plain scalar an anchor group names, or nil where
-// tk is not an anchor or names something other than one.
+// anchoredScalar returns the plain scalar an anchor group names,
+// or nil when tk is not an anchor group or its value is itself a group.
 func anchoredScalar(tk *group.TapeToken) *group.TapeToken {
 	if tk.GroupType() != group.TokenGroupAnchor {
 		return nil
@@ -518,41 +469,27 @@ func anchoredScalar(tk *group.TapeToken) *group.TapeToken {
 	return value
 }
 
-// anchorNamesNothing reports whether tk is an anchor with no node after it, and
-// returns the group standing it on the empty node.
+// anchorNamesNothing reports whether tk is an anchor with no node after it,
+// and returns the group that stands the anchor on the empty node.
 //
-// Punctuation closes it. A "}", a "]", a "," or a ":" after the anchor's name
-// belongs to the collection the anchor was written in, so the anchor names the
-// empty node -- the same test the tag's own next token gets through endsValue.
-// Without it "{a: !!str &x}" fell through to parseScalarValue, which builds the
-// null correctly and leaves the cursor on the "}"; the caller then stepped past
-// it and the flow mapping ran to the end of the stream looking for a closer it
-// had already passed.
+// Punctuation closes it. A "}", "]", "," or ":" after the anchor's name belongs to the enclosing collection,
+// so the anchor names the empty node, as endsValue decides for a tag's next token.
+// Without the test, "{a: !!str &x}" leaves the cursor on the "}", the caller steps past it,
+// and the flow mapping runs to the end of the stream looking for its closer.
 //
-// Whatever a property at the end of a line names has to be written inside the
-// entry holding it, which means further in than that entry's own column. A
-// token back at that column or before it belongs to something the entry is part
-// of. parseMapValue and parseSequenceValue say exactly this for a bare anchor;
-// a tag written before the anchor sends the descent down parseTagValue, which
-// stands too far from either to repeat the test, so the column is carried here
-// on the parser.
+// A node named by a property at the end of a line is written further in than the entry holding it.
+// A token at that entry's column or before it belongs to an enclosing collection, so the anchor names the empty node.
+// parseMapValue and parseSequenceValue apply this test to a bare anchor.
+// A tag written before the anchor sends the descent down parseTagValue, so the test runs here, through p.descent.
 //
-// Without it the anchor went looking for a value and took the next entry of the
-// collection around it: "- !!null &a1" over "- x" came back a one-item sequence
-// with the second entry swallowed and no error at all.
+// Inside a sequence, any token at the '-' column opens the next entry.
+// Inside a mapping only another key does: a '-' at the key's column starts a block sequence written as the value,
+// as in "k: &a" over "- 1".
 //
-// Which token can be taken depends on what the entry is. Inside a sequence,
-// anything back at the '-' column opens the next entry. Inside a mapping only
-// another key does: a '-' at the key's column is a block sequence written as the
-// value, which is how "k: &a" over "- 1" reads, so parseMapValue asks isMapToken
-// and this asks the same.
+// At the document's root no entry encloses the anchor, so it names whatever follows:
+// "!!str" over "&a2" over "scalar2" is one node on three lines.
 //
-// At the document's root no entry encloses anything, so nothing can be taken
-// from one and the anchor names whatever follows -- which is what "!!str" over
-// "&a2" over "scalar2" is, three lines and one node.
-//
-// A comment may stand between the anchor and the next token. It belongs to what
-// comes after and says nothing about where this node ends.
+// A comment between the anchor and the next token belongs to what follows.
 func (p *Parser) anchorNamesNothing(ctx context, tk *group.TapeToken) (*group.TokenGroup, bool) {
 	if tk.GroupType() != group.TokenGroupAnchorName {
 		return nil, false

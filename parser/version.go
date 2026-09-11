@@ -44,14 +44,11 @@ func (v YAMLVersion) Schema() token.Schema {
 	}
 }
 
-// schemaInForce is the schema the document being read is resolved under: the
-// version it declared with a "%YAML" line, and the option where it declared
-// none.
+// schemaInForce returns the schema of the document being read:
+// the version its "%YAML" line declares, or the option where it declares none.
 //
-// The directive wins over the option, and its scope is one document --
-// endVersionScope clears yamlVersion at each document's end, which is defect
-// 43's fix. Reading opts.version.Schema() instead asks for the option alone and
-// misses every directive, which a first cut of the merge rule did.
+// A directive applies to one document, and endVersionScope clears yamlVersion at each document's end.
+// Call schemaInForce instead of opts.version.Schema(), which ignores the directive.
 func (p *Parser) schemaInForce() token.Schema {
 	if p.yamlVersion != "" {
 		return p.yamlVersion.Schema()
@@ -60,21 +57,15 @@ func (p *Parser) schemaInForce() token.Schema {
 	return p.opts.version.Schema()
 }
 
-// endVersionScope takes the version the document just read out of scope, so the
-// next one resolves against whatever the caller asked for.
+// endVersionScope takes the declared version out of scope, so the next document resolves under the option.
 //
-// Setting the schema back is not enough on its own. The scanner runs ahead of
-// the descent, and how far ahead depends on the marker: after "---" the next
-// document's scalars are usually still uncut, while after "..." the grouping
-// has read the whole of the next document to know the "..." closed anything.
-// So "%YAML 1.1" over "---" over "a: yes" over "..." over "b: yes" had "yes"
-// cut as a Bool before the scope ended, and the schema went back with nothing
-// to apply it to.
+// Resetting the scanner's schema is not enough, because the scanner runs ahead of the descent.
+// After a "..." marker the grouping has already read the next document, and its plain scalars are cut:
+// in "%YAML 1.1" over "---" over "a: yes" over "..." over "b: yes", the second "yes" is cut as a bool.
+// retypeAhead types them again under the option's schema.
 //
-// [Parser.retypeAhead] reads those tokens again, which is what it already does
-// for the tokens cut before a directive is parsed. It starts one past the
-// sequence it is given, so the first token the descent has not taken --
-// reader.out[reader.at], the first of the next document -- is passed one lower.
+// retypeAhead starts one past the sequence it is given,
+// so the first token the descent has not taken, reader.out[reader.at], is passed one lower.
 func (p *Parser) endVersionScope() {
 	if p.yamlVersion == "" {
 		return
@@ -90,31 +81,23 @@ func (p *Parser) endVersionScope() {
 	p.retypeAhead(schema, from)
 }
 
-// retypeAhead reads the plain scalars the scan has already cut past seq again,
-// against schema.
+// retypeAhead types again, under schema, the plain scalars the scanner has already cut after from.
 //
-// A schema reaches only what the scanner cuts after it is set, and the grouping
-// reads one token past the directive to know the directive's own document has
-// ended. For a document whose body is a bare scalar that one token is the body:
-// "%YAML 1.1" over "---" over "N" had N typed by 1.2 before the directive was
-// parsed, and read "N" where the same document read false at every other
-// position -- inside a collection a "-", a key or a "[" stands between the two,
-// so the schema was in place by the time the scalar was cut.
+// A new schema applies only to what the scanner cuts after it is set,
+// and the grouping reads one token past a directive to find where the directive's document ends.
+// When the document's body is a bare scalar, that token is the body:
+// in "%YAML 1.1" over "---" over "N", N is cut under 1.2 before the directive is parsed.
 //
-// token.ScalarType is a pure function of the text and the schema, so what is
-// already cut is read again rather than scanned again. There is one token at
-// stake in practice; the grouping holds what it cannot settle yet and no more.
+// token.ScalarType depends only on the text and the schema, so the cut tokens are retyped and not scanned again.
 //
-// Only a plain scalar is read this way. A quoted or folded one is a string
-// whatever it spells, and the scanner gives it a type of its own, so it is not
-// among the types below and keeps what it was cut as.
+// A quoted or folded scalar is a string whatever it spells.
+// The scanner gives it a type of its own, which resolvedByAnySchema excludes, so it keeps its type.
 func (p *Parser) retypeAhead(schema token.Schema, from int32) {
 	if p.tokens == nil {
 		return
 	}
 
-	// content says the token about to be read is a block scalar's, because the
-	// one before it was a "|" or a ">" header.
+	// content marks the next token as a block scalar's content, because the token before it was a "|" or ">" header.
 	var content bool
 
 	for seq := int(from) + 1; seq < p.tokens.Len(); seq++ {
@@ -127,20 +110,15 @@ func (p *Parser) retypeAhead(schema token.Schema, from int32) {
 			continue
 		}
 		if content {
-			// A block scalar is a string whatever it spells, so its content is
-			// not the schema's to read. The scan cuts that content as a plain
-			// String and it is the one string here a schema must not touch:
-			// "%YAML 1.1" over "---" over ">-" over " null" had the content
-			// retyped as a null, and parseLiteral then refused the document
-			// with "unexpected token. required string token".
+			// A block scalar's content is a string whatever it spells, but the scanner cuts it as a plain String.
+			// Retyped, " null" under ">-" would become a null, and parseLiteral would reject the document.
 			content = false
 
 			continue
 		}
 		if raw.Type == token.LiteralType || raw.Type == token.FoldedType {
-			// Whatever follows the header is its content, which is how
-			// stageBlockScalars reads it. The tape is not grouped yet here, so
-			// the two are still separate tokens.
+			// The token after the header is its content, as stageBlockScalars reads it.
+			// The tape is not grouped yet, so the header and its content are still two tokens.
 			content = true
 
 			continue
@@ -152,9 +130,8 @@ func (p *Parser) retypeAhead(schema token.Schema, from int32) {
 	}
 }
 
-// resolvedByAnySchema reports whether the scanner gave the token its type by
-// reading a plain scalar against a schema, which is what makes reading it again
-// against another one meaningful.
+// resolvedByAnySchema reports whether the scanner gives a plain scalar type t by reading it against a schema.
+// Only such a token can change type when retyped under another schema.
 func resolvedByAnySchema(t token.Type) bool {
 	switch t {
 	case token.StringType, token.BoolType, token.IntegerType, token.BinaryIntegerType,
@@ -166,9 +143,8 @@ func resolvedByAnySchema(t token.Type) bool {
 	}
 }
 
-// resolvedBySchema reports whether the scanner typed a plain scalar by the core
-// schema. A tag that resolves to nothing overrides that typing, and the scalar
-// keeps the text it was written with.
+// resolvedBySchema reports whether the scanner typed tk as a bool, a number or a null by reading it against a schema.
+// A tag that resolves to nothing overrides that type, and the scalar keeps the text it was written with.
 func resolvedBySchema(tk *group.TapeToken) bool {
 	switch tk.Type() {
 	case token.BoolType, token.IntegerType, token.BinaryIntegerType, token.OctetIntegerType,
