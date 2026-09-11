@@ -546,9 +546,19 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	}
 	line := s.line
 	column := s.column - int32(utf8.RuneCount(ctx.buf))
+	offset := ctx.idx - int32(len(ctx.buf))
 	level := s.indentLevel
 	if ctx.isMultiLine() {
 		line, column = s.multiLinePosition(ctx)
+		if start, ok := ctx.getMultiLineState().spaceOnlyStart(); ok {
+			// Content of spaces alone, cut where a less indented line opens.
+			// Counted back from the cursor, which has read that line's
+			// indentation by now, the offset landed inside it -- and the value,
+			// a run of spaces, matched there: "|6-" over a 13-space line over
+			// "      # c" put its content on the comment's line, and removing
+			// the comment could not take the line whole.
+			offset = start.Offset()
+		}
 		// Inside a literal, folded or raw folded scalar the indent level comes from the last token.
 		if ctx.lastToken() != nil { // The last token should never be nil here.
 			level = s.lastIndentLevel + 1
@@ -564,7 +574,7 @@ func (s *Scanner) bufferedToken(ctx *Context) (token.Token, bool) {
 	}
 
 	return ctx.bufferedToken(token.At(
-		line, column, ctx.idx-int32(len(ctx.buf)), s.indentNum,
+		line, column, offset, s.indentNum,
 	), endLine)
 }
 

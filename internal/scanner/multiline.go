@@ -58,8 +58,11 @@ func (s *Scanner) scanMultiLine(ctx *Context, c rune) error {
 		s.readMultiLineBreak(ctx, state, c)
 
 	case s.isFirstCharAtLine && c == ' ':
-		// Still inside the indentation the header announced.
-		state.addIndent(ctx, s.column)
+		// Still inside the indentation the header announced, or a space past
+		// it, which is content.
+		if state.addIndent(ctx, s.column) {
+			state.beganSpace(s.pos())
+		}
 		s.progressColumn(ctx, 1)
 
 	case s.isFirstCharAtLine && c == '\t' && state.isIndentColumn(s.column):
@@ -102,7 +105,9 @@ func (s *Scanner) closeMultiLineAtEOS(ctx *Context, state *MultiLineState, c run
 	spaceOnlyLine := s.isFirstCharAtLine && c == ' '
 
 	if spaceOnlyLine {
-		state.addIndent(ctx, s.column)
+		if state.addIndent(ctx, s.column) {
+			state.beganSpace(s.pos())
+		}
 	} else {
 		state.began(s.pos())
 		ctx.addBuf(c)
@@ -381,10 +386,14 @@ type MultiLineState struct {
 	//
 	// The scan cuts the token at the end of the block, and by then the cursor no longer gives the content's start.
 	start token.Position
+	// spaceStart records where the first space past the indentation stands, for a block whose content holds no other
+	// byte. See beganSpace.
+	spaceStart token.Position
 
-	// The five fields below take one byte each and stand together, as in Scanner and Context. Context holds a
+	// The six fields below take one byte each and stand together, as in Scanner and Context. Context holds a
 	// MultiLineState by value, in block, so the 8 bytes of padding saved here are saved there.
 
+	hasSpaceStart bool
 	foldedNewLine bool
 
 	// sawLineBreak records that a line break was read as part of this block scalar's content.
@@ -466,15 +475,18 @@ func (s *MultiLineState) isIndentColumn(column int32) bool {
 	return s.firstLineIndentColumn > column
 }
 
-func (s *MultiLineState) addIndent(ctx *Context, column int32) {
+// addIndent takes a space at the head of a line, and reports whether it keeps it
+// as content: a space past the width the block's first line settled is
+// content, and one inside it is indentation.
+func (s *MultiLineState) addIndent(ctx *Context, column int32) bool {
 	if s.firstLineIndentColumn == 0 {
-		return
+		return false
 	}
 
 	// If the first line of the document has already been evaluated, the number is treated as the threshold, since the
 	// `firstLineIndentColumn` is a positive number.
 	if column < s.firstLineIndentColumn {
-		return
+		return false
 	}
 
 	// `c.foldedNewLine` is a variable that is set to true for every newline.
@@ -484,6 +496,8 @@ func (s *MultiLineState) addIndent(ctx *Context, column int32) {
 	// addBuf drops a leading space, so this appends to the buffer directly.
 	ctx.buf = append(ctx.buf, ' ')
 	ctx.notSpaceCharPos = int32(len(ctx.buf))
+
+	return true
 }
 
 // updateNewLineInFolded folds the break above this line into a space, for a folded or raw folded block whose content
@@ -557,13 +571,45 @@ func (s *MultiLineState) began(pos token.Position) {
 	s.start, s.hasStart = pos, true
 }
 
+// beganSpace records where a space past the block's indentation stands, the
+// first time one is kept as content.
+//
+// began does not run for such a space: a content line may open with spaces
+// past the indentation before its first character, and the pinned positions
+// have the token start at that character. A block whose content is nothing but
+// such spaces reads no character at all, and this is then the only record of
+// where its content begins.
+func (s *MultiLineState) beganSpace(pos token.Position) {
+	if s == nil || s.hasSpaceStart {
+		return
+	}
+	s.spaceStart, s.hasSpaceStart = pos, true
+}
+
 // from returns where the content began, or now where nothing was read.
+//
+// A block whose content is spaces alone began at the first of them.
 func (s *MultiLineState) from(now token.Position) token.Position {
-	if s == nil || !s.hasStart {
+	switch {
+	case s == nil:
+		return now
+	case s.hasStart:
+		return s.start
+	case s.hasSpaceStart:
+		return s.spaceStart
+	default:
 		return now
 	}
+}
 
-	return s.start
+// spaceOnlyStart returns where a block whose content is spaces alone began, and
+// false for any other block.
+func (s *MultiLineState) spaceOnlyStart() (token.Position, bool) {
+	if s == nil || s.hasStart || !s.hasSpaceStart {
+		return token.Position{}, false
+	}
+
+	return s.spaceStart, true
 }
 
 // validateMultiLineHeaderOption checks the indicators a block scalar header carries.

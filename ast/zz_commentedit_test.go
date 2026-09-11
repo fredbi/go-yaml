@@ -5,6 +5,7 @@ package ast_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
@@ -342,6 +343,26 @@ func TestFixedARemovedHeadCommentDoesNotLeaveItsLine(t *testing.T) {
 		assert.Equalf(t, tc.want, out.String(), "verbatim: %q", tc.src)
 		assert.Equalf(t, tc.want, file.String(), "the two renderings say the same: %q", tc.src)
 	}
+}
+
+// TestRemovingACommentBelowABlockScalarLeavesTheNextEntryWhereItStood covers
+// row 123: a comment removed below a block scalar with an explicit indentation
+// indicator, after a whitespace-only line wider than its content.
+//
+// Removed and rendered verbatim, the entry after the comment moved two columns
+// right and the document stopped parsing, with "the content of a block scalar is
+// indented less than the indicator in its header states". Found by
+// TestEditingEveryCommentOfTheCorpus once the smoke corpus was regenerated.
+func TestRemovingACommentBelowABlockScalarLeavesTheNextEntryWhereItStood(t *testing.T) {
+	src := "k:\n      - |6-\n" + strings.Repeat(" ", 13) + "\n\n\n      # c\n      - x\n"
+	want := strings.Replace(src, "      # c\n", "", 1)
+
+	verbatim, _ := renderEdited(t, src, func(c *ast.CommentNode) { c.Remove() })
+	t.Logf("rendered: %q", verbatim)
+	assert.Equal(t, want, verbatim, "the comment's line goes, and nothing else moves")
+
+	_, err := parser.ParseBytes([]byte(verbatim), parser.WithComments())
+	assert.NoError(t, err, "the rendering parses")
 }
 
 // renderEdited parses src, applies edit to every comment in it, and renders it
