@@ -495,6 +495,12 @@ func (e *Encoder) encodeValue(ctx context.Context, v reflect.Value, column int) 
 	if e.isInvalidValue(v) {
 		return e.encodeNil(), nil
 	}
+	if v.Kind() == reflect.Interface {
+		// Ahead of the marshalers, which write a time.Time plain.
+		if t, held := e.heldTime(v.Elem()); held {
+			return e.encodeTaggedTime(t, column), nil
+		}
+	}
 	if e.canEncodeByMarshaler(v) {
 		node, err := e.encodeByMarshaler(ctx, v, column)
 		if err != nil {
@@ -710,12 +716,14 @@ func (e *Encoder) encodeArray(ctx context.Context, value reflect.Value) (*ast.Se
 // "null:". Asserting a string here panicked on every one of those, and on a
 // MapSlice a caller built by hand with any key but a string.
 func (e *Encoder) encodeMapItem(ctx context.Context, item MapItem, column int) (*ast.MappingValueNode, error) {
-	value, err := e.encodeValue(ctx, reflect.ValueOf(item.Value), column)
+	// Both fields are interface slots, and reach encodeValue as ones, so a
+	// time.Time in either takes its tag.
+	value, err := e.encodeValue(ctx, reflect.ValueOf(&item.Value).Elem(), column)
 	if err != nil {
 		return nil, err
 	}
 
-	encoded, err := e.encodeValue(ctx, reflect.ValueOf(item.Key), column)
+	encoded, err := e.encodeValue(ctx, reflect.ValueOf(&item.Key).Elem(), column)
 	key, isKey := encoded.(ast.MapKeyNode)
 	if !isKey || err != nil {
 		key = e.encodeString(fmt.Sprint(item.Key), column)
@@ -826,7 +834,13 @@ func (e *Encoder) encodeMap(ctx context.Context, value reflect.Value, column int
 			encoded = anchorNode
 		}
 
-		kn, err := e.encodeValue(ctx, reflect.ValueOf(key), column)
+		keyValue := reflect.ValueOf(key)
+		if value.Type().Key().Kind() == reflect.Interface {
+			// A map[any]any key stands in an interface slot, and keeps saying
+			// so to encodeValue: a time.Time there takes its tag.
+			keyValue = reflect.ValueOf(&key).Elem()
+		}
+		kn, err := e.encodeValue(ctx, keyValue, column)
 		keyNode, ok := kn.(ast.MapKeyNode)
 		if !ok || err != nil {
 			keyNode = e.encodeString(fmt.Sprint(key), column)
@@ -958,6 +972,45 @@ func (e *Encoder) encodeTime(v time.Time, column int) *ast.StringNode {
 		value = strconv.Quote(value)
 	}
 	return ast.String(token.New(value, value, e.pos(column)))
+}
+
+// heldTime returns the time.Time an interface slot holds, and whether the
+// encoder writes it itself. A custom marshaler registered for the type wins.
+func (e *Encoder) heldTime(v reflect.Value) (time.Time, bool) {
+	if !v.IsValid() || !v.CanInterface() || e.existsTypeInCustomMarshalerMap(v.Type()) {
+		return time.Time{}, false
+	}
+	switch t := v.Interface().(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, false
+		}
+
+		return *t, true
+	default:
+		return time.Time{}, false
+	}
+}
+
+// encodeTaggedTime writes a time.Time held in an interface slot -- a value in an
+// any, a map[any]any key, a MapSlice entry -- as a "!!timestamp".
+//
+// The core schema resolves no timestamp, so the plain spelling reads back as a
+// string wherever the destination does not say time.Time, and a round trip
+// through an any turned the value into text. A field or a map key typed
+// time.Time stays plain: its destination says what the text is. JSON has no
+// tags, so there it is the RFC 3339 string alone, as ToJSON writes it.
+func (e *Encoder) encodeTaggedTime(t time.Time, column int) ast.Node {
+	value := e.encodeTime(t, column)
+	if e.isJSONStyle {
+		return value
+	}
+	node := ast.Tag(token.New("!!timestamp", "!!timestamp", value.GetToken().Position))
+	node.Value = value
+
+	return node
 }
 
 func (e *Encoder) encodeDuration(v time.Duration, column int) *ast.StringNode {
