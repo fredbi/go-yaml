@@ -72,7 +72,8 @@ func TestFixedAKeyIsNamedByItsType(t *testing.T) {
 		{src: "1.0: a\n", key: "1.0"},
 		{src: "1e3: a\n", key: "1000.0"},
 		{src: "1.5e3: a\n", key: "1500.0"},
-		{src: "-0.0: a\n", key: "-0.0"},
+		// Zero's canonical form carries no sign, §10.2.1.4.
+		{src: "-0.0: a\n", key: "0.0"},
 		{src: "0.5: a\n", key: "0.5"},
 
 		{src: "1: a\n", key: "1"},
@@ -110,6 +111,11 @@ func TestFixedTwoKeysOfOneTypeAndNameConflict(t *testing.T) {
 		"true: a\nTrue: b\n",
 		".inf: a\n.Inf: b\n",
 		".nan: a\n.NaN: b\n",
+		// Zero carries no sign in its canonical form, §10.2.1.3 and §10.2.1.4.
+		// Both read as two entries until 2026-09-11, and the float pair lost a
+		// value.
+		"-0: a\n0: b\n",
+		"-0.0: a\n0.0: b\n",
 	} {
 		assert.Contains(t, refuses(t, src), "already defined", "%q", src)
 	}

@@ -460,7 +460,13 @@ func keyString(v reflect.Value) string {
 			return stamp.Format(time.RFC3339Nano)
 		}
 
-		// A *big.Int and a *big.Float name themselves through String.
+		// A *big.Float is named as KeyText names a BigFloat. Its String keeps
+		// ten significant digits, which names two keys alike.
+		if f, ok := reflect.TypeAssert[*big.Float](v); ok {
+			return bigFloatKeyText(f)
+		}
+
+		// A *big.Int names itself through String.
 		if s, ok := reflect.TypeAssert[interface{ String() string }](v); ok {
 			return s.String()
 		}

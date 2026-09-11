@@ -212,12 +212,11 @@ func KeyText(v Value) string {
 	case BigInt:
 		return n.V.String()
 	case BigFloat:
-		// bigFloatText and not Text('g', -1): the emitter puts a decimal point
-		// in a mantissa that has none, so that "1e+330" goes out as
-		// "1.0e+330" and is a float under 1.1 as well as under 1.2. The
-		// library names the key by the characters the document wrote, so this
-		// has to name it by the same ones.
-		return bigFloatText(n.V)
+		// By its value, as the library names one since 2026-09-11. The
+		// emitter writes "1.0e+330", with a point in the mantissa so that 1.1
+		// reads a float, and the key is named "1e+330" all the same -- so
+		// "1e400" and "10e399" are one key.
+		return bigFloatKeyText(n.V)
 	case Anchored:
 		return KeyText(n.V)
 	case Alias:
@@ -427,23 +426,20 @@ func newKeyedMap(size int) *keyedMap {
 
 // holds reports whether the mapping already holds key.
 //
-// A time.Time key is held where one at the same instant is, in any zone, as
-// codec's keyedMap decides it for a merge: "2001-12-14t21:59:43.10-05:00" and
+// Three kinds of key are found by value where a Go map lookup cannot find
+// them, as codec's keyedMap decides it for a merge. A time.Time is held where
+// one at the same instant is, in any zone: "2001-12-14t21:59:43.10-05:00" and
 // "2001-12-15 02:59:43.10" are one key to the override, and the map keeps the
-// own key's zone.
+// own key's zone. A *big.Int or a *big.Float is a pointer, so == compares the
+// pointers and not the numbers.
 func (k *keyedMap) holds(key any) bool {
 	if k.byKey != nil {
 		if _, held := k.byKey[key]; held {
 			return true
 		}
 
-		stamp, isTime := key.(time.Time)
-		if !isTime {
-			return false
-		}
-
 		for held := range k.byKey {
-			if other, ok := held.(time.Time); ok && other.Equal(stamp) {
+			if sameKeyValue(held, key) {
 				return true
 			}
 		}
@@ -478,6 +474,49 @@ func (k *keyedMap) put(key, value any) {
 	}
 
 	k.byKey[key] = value
+}
+
+// bigFloatKeyText names a float too wide for a float64 by floatKeyText's rule:
+// the shortest text that reads back as the value, with ".0" where that holds no
+// point or exponent, and zero without its sign.
+func bigFloatKeyText(f *big.Float) string {
+	switch {
+	case f.IsInf() && f.Sign() > 0:
+		return ".inf"
+	case f.IsInf():
+		return "-.inf"
+	case f.Sign() == 0:
+		return "0.0"
+	}
+
+	out := f.Text('g', -1)
+	if !strings.ContainsAny(out, ".eE") {
+		out += ".0"
+	}
+
+	return out
+}
+
+// sameKeyValue reports whether a and b are one key though == says they are not:
+// a time.Time at the same instant, or a *big.Int or *big.Float of the same
+// value.
+func sameKeyValue(a, b any) bool {
+	switch x := a.(type) {
+	case time.Time:
+		y, ok := b.(time.Time)
+
+		return ok && x.Equal(y)
+	case *big.Int:
+		y, ok := b.(*big.Int)
+
+		return ok && x.Cmp(y) == 0
+	case *big.Float:
+		y, ok := b.(*big.Float)
+
+		return ok && x.Cmp(y) == 0
+	default:
+		return false
+	}
 }
 
 // value returns the mapping under whichever key type it settled on.
@@ -1666,6 +1705,11 @@ func floatKeyText(f float64) string {
 		return ".inf"
 	case math.IsInf(f, -1):
 		return "-.inf"
+	case f == 0:
+		// Negative zero too, which == takes for zero. YAML 1.2.2 §10.2.1.4
+		// writes zero's canonical form as 0, with no sign, so "-0.0: a" over
+		// "0.0: b" is one key repeated.
+		return "0.0"
 	}
 
 	out := strconv.FormatFloat(f, 'g', -1, 64)

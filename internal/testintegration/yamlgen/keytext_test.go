@@ -4,6 +4,8 @@
 package yamlgen_test
 
 import (
+	"math"
+	"math/big"
 	"testing"
 	"time"
 
@@ -96,5 +98,36 @@ func TestATimestampKeyIsNamedAsTheLibraryNamesIt(t *testing.T) {
 		out, err := codec.ToJSON([]byte(tc.src))
 		require.NoErrorf(t, err, "%q", tc.src)
 		assert.JSONEq(t, `{"`+key+`":"v"}`, string(out), "and so does ToJSON: %q", tc.src)
+	}
+}
+
+// TestAFloatKeyIsNamedAsTheLibraryNamesIt holds KeyText's two float rules that
+// moved on 2026-09-11 to the name a string-keyed map gives the key the emitter
+// wrote. Zero is named without its sign, since §10.2.1.4 writes its canonical
+// form as 0. A float too wide for a float64 is named by its value, and not by
+// the "1.0e+330" the emitter writes for 1.1's sake.
+//
+// The wide floats are built as bigFloats builds them, with SetString.
+func TestAFloatKeyIsNamedAsTheLibraryNamesIt(t *testing.T) {
+	wide := func(text string) *big.Float {
+		f, ok := new(big.Float).SetString(text)
+		require.Truef(t, ok, "%q", text)
+
+		return f
+	}
+
+	for _, key := range []yamlgen.Value{
+		yamlgen.Float{V: math.Copysign(0, -1)},
+		yamlgen.Float{V: 0},
+		yamlgen.BigFloat{V: wide("1e400")},
+		yamlgen.BigFloat{V: wide("-2500e-403")},
+		yamlgen.BigFloat{V: wide("9999e330")},
+	} {
+		w := yamlgen.Write(yamlgen.Map{Pairs: []yamlgen.Pair{{Key: key, Val: yamlgen.Str{V: "v"}}}},
+			yamlgen.Style{NullSpelling: "null", Quoting: yamlgen.QuotePlain})
+
+		var named map[string]any
+		require.NoErrorf(t, codec.Unmarshal([]byte(w.Text), &named), "%q", w.Text)
+		assert.Equalf(t, map[string]any{yamlgen.KeyText(key): "v"}, named, "%q", w.Text)
 	}
 }
