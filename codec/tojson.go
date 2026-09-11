@@ -160,6 +160,27 @@ type mapFrame struct {
 	// than named, so what it writes goes to the mapping around it rather than
 	// into the output. It is -1 for every other mapping.
 	mergedInto int
+
+	// node is the mapping, whose Duplicates the parse appends to as it reads
+	// each key, and dups how many of those this frame has seen.
+	node *ast.MappingNode
+	dups int
+	// entryAt is where the entry being written began in out, before its comma.
+	// dropping says that entry repeats a key the parse allowed to repeat, so it
+	// comes out again once it is written: JSON names a member once, and the
+	// first entry to name it stands.
+	entryAt  int
+	dropping bool
+}
+
+// dropRepeated takes the entry the frame marked back out of out.
+func (w *jsonWriter) dropRepeated(f *mapFrame) {
+	if !f.dropping {
+		return
+	}
+	w.out = w.out[:f.entryAt]
+	f.entries--
+	f.dropping = false
 }
 
 func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
@@ -197,6 +218,11 @@ func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
 		if frame := w.frame(); frame != nil {
 			frame.mergeValue = true
 			frame.mergeSeq = -1
+			// A "<<" written twice is a repeat the parse records too. It is
+			// seen here, so the next entry does not take it for its own.
+			if frame.node != nil {
+				frame.dups = len(frame.node.Duplicates)
+			}
 		}
 
 		return false
@@ -214,7 +240,7 @@ func (w *jsonWriter) Enter(node ast.Node, at parser.Step) bool {
 		return true
 	case *ast.MappingNode:
 		w.openCollectionKey(at)
-		w.maps = append(w.maps, mapFrame{at: len(w.out), valueAt: -1, mergedInto: -1})
+		w.maps = append(w.maps, mapFrame{at: len(w.out), valueAt: -1, mergedInto: -1, node: n})
 		w.out = append(w.out, '{')
 	case *ast.SequenceNode:
 		w.openCollectionKey(at)
@@ -340,6 +366,8 @@ func (w *jsonWriter) separate(at parser.Step) {
 			return
 		}
 		if at.Key {
+			w.dropRepeated(frame)
+			frame.entryAt = len(w.out)
 			if frame.entries > 0 {
 				w.out = append(w.out, ',')
 			}
@@ -356,6 +384,12 @@ func (w *jsonWriter) separate(at parser.Step) {
 			w.out = w.out[:frame.valueAt]
 
 			return
+		}
+		if newAllowedRepeat(frame.node, &frame.dups) {
+			// The key repeats one the parse allowed to repeat. The entry is still
+			// written, so an anchor inside it can be named later, and taken back
+			// out once it is complete.
+			frame.dropping = true
 		}
 		w.out = append(w.out, ':')
 		frame.valueAt = len(w.out)
@@ -854,6 +888,7 @@ func (w *jsonWriter) closeMapping() {
 	frame := w.maps[len(w.maps)-1]
 	w.maps = w.maps[:len(w.maps)-1]
 
+	w.dropRepeated(&frame)
 	if frame.mergedInto >= 0 {
 		// "<<: {a: 1}" merges a mapping written out. It had to be walked to be
 		// read, so it was written where it stood; it comes back out of the

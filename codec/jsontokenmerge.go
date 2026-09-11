@@ -92,6 +92,13 @@ func (t *jsonTokener) collectRun(write func()) {
 // collected and the first writer of a name wins. JSON has no way to name a
 // member twice.
 func (t *jsonTokener) closeMapping(at parser.Step, end *token.Token) {
+	if f := &t.maps[len(t.maps)-1]; f.hasPending {
+		// A key whose value never began. Every entry has one, a null at least,
+		// so this only guards the order the tokens go over in.
+		f.hasPending = false
+		f.keys = append(f.keys, f.pending.Value)
+		t.emit(f.pending)
+	}
 	frame := t.maps[len(t.maps)-1]
 	t.maps = t.maps[:len(t.maps)-1]
 

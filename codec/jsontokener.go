@@ -88,6 +88,39 @@ type tokenMapFrame struct {
 	// of merge sources, and -1 where there is none.
 	mergeValue bool
 	mergeSeq   int
+
+	// node is the mapping, whose Duplicates the parse appends to as it reads
+	// each key, and dups how many of those this frame has seen.
+	node *ast.MappingNode
+	dups int
+	// pending is the key of the entry being read, held until its value begins:
+	// a key under an anchor, a tag or a "?" goes over before the parse has
+	// recorded whether it repeats, and a token cannot be taken back.
+	pending    JSONToken
+	hasPending bool
+}
+
+// settleEntry decides, as an entry's value begins, whether the entry goes over,
+// and reports whether it is dropped.
+//
+// An entry whose key repeats one the parse allowed to repeat is dropped: JSON
+// names a member once and the first entry to name it stands, as the encoder
+// writes a map under SkipDuplicateMapKey. The held key is let go and the value
+// is not entered at all.
+func (t *jsonTokener) settleEntry(frame *tokenMapFrame) bool {
+	repeat := newAllowedRepeat(frame.node, &frame.dups)
+	if !frame.hasPending {
+		return false
+	}
+	tok := frame.pending
+	frame.hasPending = false
+	if repeat {
+		return true
+	}
+	frame.keys = append(frame.keys, tok.Value)
+	t.emit(tok)
+
+	return false
 }
 
 // tokenKeyMark is one mapping key open: the wrapper the walk handed over, and
@@ -178,9 +211,20 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 		if frame := t.frame(); frame != nil {
 			frame.mergeValue = true
 			frame.mergeSeq = -1
+			// A "<<" written twice is a repeat the parse records too. It is
+			// seen here, so the next entry does not take it for its own.
+			if frame.node != nil {
+				frame.dups = len(frame.node.Duplicates)
+			}
 		}
 
 		return false
+	}
+
+	if at.In == parser.KindMapping && !at.Key {
+		if frame := t.frame(); frame != nil && t.settleEntry(frame) {
+			return false
+		}
 	}
 
 	if at.Key {
@@ -190,7 +234,7 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		t.open(JSONObjectStart, at.At)
-		t.maps = append(t.maps, tokenMapFrame{mergeSeq: -1})
+		t.maps = append(t.maps, tokenMapFrame{mergeSeq: -1, node: n})
 	case *ast.SequenceNode:
 		t.open(JSONArrayStart, at.At)
 	case *ast.AnchorNode:

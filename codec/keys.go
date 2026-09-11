@@ -37,6 +37,27 @@ func refuseDuplicateKeys(n ast.Node) error {
 	return duplicateKeyError(d, keyTokenAt(m, d))
 }
 
+// newAllowedRepeat reports whether node has recorded a repeat since seen, the
+// count its reader last saw, and whether that repeat is one the parse allowed.
+// It moves seen on to what node holds now.
+//
+// A converter writing JSON asks it as an entry's value begins. The parse
+// records a key before the value under it is handed over, so the record of a
+// repeat is there by then -- even for a key under an anchor, a tag or a "?",
+// which goes over before the parse has named it.
+func newAllowedRepeat(node *ast.MappingNode, seen *int) bool {
+	if node == nil {
+		return false
+	}
+	n := len(node.Duplicates)
+	if n == *seen {
+		return false
+	}
+	*seen = n
+
+	return node.Duplicates[n-1].Allowed
+}
+
 // refuseOrderedMapDuplicates reports the first key the parse recorded as
 // repeated across the entries of an "!!omap", as refuseDuplicateKeys does for a
 // mapping. seq is the sequence the tag stands on, and may be nil.

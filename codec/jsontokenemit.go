@@ -25,11 +25,21 @@ func (t *jsonTokener) emitKey(node ast.Node, at token.Position) {
 
 // emitKeyNamed hands a mapping key over under the name it was worked out to
 // have, and records it for the merge to be answered against.
+//
+// The key of a mapping the walk hands over is held in its frame until the
+// entry's value begins, where settleEntry lets it go over or drops the entry.
 func (t *jsonTokener) emitKeyNamed(name string, at token.Position) {
-	if frame := t.frame(); frame != nil {
+	tok := JSONToken{Kind: JSONKey, Value: name, At: at}
+	frame := t.frame()
+	if frame != nil && frame.node != nil {
+		frame.pending, frame.hasPending = tok, true
+
+		return
+	}
+	if frame != nil {
 		frame.keys = append(frame.keys, name)
 	}
-	t.emit(JSONToken{Kind: JSONKey, Value: name, At: at})
+	t.emit(tok)
 }
 
 // keyName is the string a mapping key names its entry by.
@@ -359,6 +369,14 @@ func (t *jsonTokener) emitTreeMapping(n *ast.MappingNode, at token.Position) {
 			return
 		default:
 			name := t.keyName(entry.Key)
+			if slices.Contains(held, name) {
+				// A repeat the parse allowed: the first entry to name a member
+				// stands. A repeat it did not allow was refused where the
+				// mapping was first walked. The tokens parse under
+				// WithJSONCompatible, which records every pair of keys that
+				// write one member, so the names match the record.
+				continue
+			}
 			held = append(held, name)
 			t.emit(JSONToken{Kind: JSONKey, Value: name, At: at})
 			t.emitTree(entry.Value, at)
