@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 
@@ -249,7 +250,11 @@ type verbatimWriter struct {
 	// is empty for a rendering that adds nothing, which is why the descent may
 	// leave the comments alone when nothing is transforming the output.
 	above map[*CommentNode]bool
-	err   error
+	// hoisted holds the comments a caller added beside a block scalar, in a
+	// group of more than one line, keyed by the node that opens the header's
+	// line. The descent writes them above that node. See collectEdits.
+	hoisted map[Node][]*CommentNode
+	err     error
 }
 
 // upTo writes the source from where the last write stopped to end.
@@ -298,11 +303,16 @@ func (vw *verbatimWriter) flushEdits() {
 // rendering says so. Fred's ruling of 2026-09-10: an edit the renderer cannot
 // carry out is an error, never a silent drop.
 func (vw *verbatimWriter) refuseUnwritten() {
-	if vw.err != nil || len(vw.above) == 0 {
+	if vw.err != nil {
 		return
 	}
 	for comment := range vw.above {
 		vw.err = fmt.Errorf("%s was added to a node this rendering does not reach", comment.String())
+
+		return
+	}
+	for _, comments := range vw.hoisted {
+		vw.err = fmt.Errorf("%s was added to a node this rendering does not reach", comments[0].String())
 
 		return
 	}
@@ -895,7 +905,7 @@ func (r *Renderer) writeComments(vw *verbatimWriter, n Node, span extent, above 
 	if vw.err != nil {
 		return
 	}
-	if vw.fn == nil && len(vw.above) == 0 {
+	if vw.fn == nil && len(vw.above) == 0 && len(vw.hoisted) == 0 {
 		// Nothing was added and nothing is transforming the output, so every
 		// comment is either copied as the filler in front of the token after it
 		// or applied by verbatimWriter.upTo where it stands. Walking the slots
@@ -932,6 +942,13 @@ func (r *Renderer) writeComments(vw *verbatimWriter, n Node, span extent, above 
 		delete(vw.above, comment)
 		vw.writeAddedComment(comment, span, n)
 	}
+
+	if comments, ok := vw.hoisted[n]; ok && above {
+		delete(vw.hoisted, n)
+		for _, comment := range comments {
+			vw.writeAddedComment(comment, span, n)
+		}
+	}
 }
 
 // collectEdits gathers the comments the document wrote that a caller has
@@ -942,11 +959,22 @@ func (r *Renderer) writeComments(vw *verbatimWriter, n Node, span extent, above 
 // costs nothing to a rendering with no edits in it and is wrong: a comment
 // attached to a node further on stands where it stands, and the copy had passed
 // it -- 957 corpus documents kept a comment that way, and 48 stopped parsing.
-func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*CommentNode]bool) {
+//
+// A group of more than one line set beside a block scalar has no room there:
+// the header's line takes one comment, and the next line is content. hoisted
+// holds those under the node that opens the header's line, for the descent to
+// write above it.
+func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*CommentNode]bool, hoisted map[Node][]*CommentNode) {
 	var out []pendingComment
 	above = make(map[*CommentNode]bool)
+	hoisted = make(map[Node][]*CommentNode)
 	var node Node
 	onGroup := func(group *CommentGroupNode, head bool) {
+		var opener Node
+		if !head && commentLines(group) > 1 && headerToken(node) != nil {
+			opener = lineOpener(n, node, src)
+		}
+
 		for _, comment := range group.Comments {
 			tk := comment.Token
 			if tk != nil && tk.FromSource() {
@@ -960,6 +988,11 @@ func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*Commen
 			// descent, which knows the node's indentation; one beside it is
 			// anchored here, at the end of the line the node opens on.
 			if comment.Removed() {
+				continue
+			}
+			if opener != nil {
+				hoisted[opener] = append(hoisted[opener], comment)
+
 				continue
 			}
 			if head {
@@ -989,7 +1022,49 @@ func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*Commen
 		sort.SliceStable(out, func(i, j int) bool { return out[i].at < out[j].at })
 	}
 
-	return out, above
+	return out, above, hoisted
+}
+
+// lineOpener returns the innermost node under root that opens the line lit's
+// header stands on -- lit itself, where nothing stands in front of it.
+//
+// No node opens the line of an explicit key's value: "? k" over ": |" has the
+// ":" first, and a token is not a node. The entry does, around it, so where
+// nothing opens the header's line the innermost node holding the header that
+// opens a line of its own is returned instead. Nil means there is neither.
+//
+// It computes an extent for every node ahead of lit, which costs the subtree
+// each time, and runs only for a comment group set beside a block scalar.
+func lineOpener(root Node, lit Node, src []byte) Node {
+	header := headerToken(lit)
+	if header == nil {
+		return nil
+	}
+	at := header.Position.Offset()
+	line := lineOf(src, int(at))
+
+	var onLine, around Node
+	var done bool
+	eachNode(root, func(current Node) {
+		if done {
+			return
+		}
+		if span := sourceExtent(current); span.found() && opensItsLine(src, int(span.from)) {
+			switch {
+			case lineOf(src, int(span.from)) == line:
+				onLine = current
+			case span.from <= at && at < span.to:
+				around = current
+			}
+		}
+		done = current == lit
+	})
+
+	if onLine != nil {
+		return onLine
+	}
+
+	return around
 }
 
 // settleAnchors drops the added comments whose anchor falls inside a node that
@@ -1665,7 +1740,10 @@ func sliceSiblings(values []Node) func(int) Node {
 // Where the node's line has no room for one -- it ends on a comment already, or
 // a scalar written across two lines runs through the end of it -- the comment
 // goes above the node instead: "a: 1 # old" with a comment set on the key comes
-// back as "# c" over "a: 1 # old". Only where it can go neither place, the node
+// back as "# c" over "a: 1 # old". A group of more than one line set beside a
+// block scalar goes above the line its header stands on, since the line below
+// is content: "k: |" with "# c" and "# d" comes back as "# c" over "# d" over
+// "k: |". Only where it can go neither place, the node
 // beginning partway along a line, does this return an error naming it. So a tree
 // that parsed cleanly can fail to render once a caller has added a comment to
 // it; [Renderer.Render] lays the same tree out by depth and places the comment.
@@ -1688,8 +1766,11 @@ func (r *Renderer) Verbatim(w io.Writer, n Node) error {
 		return nil
 	}
 
-	edits, above := collectEdits(n, r.src)
-	vw := &verbatimWriter{w: w, fn: r.transform, src: r.src, cursor: int(span.from), edits: edits, above: above}
+	edits, above, hoisted := collectEdits(n, r.src)
+	vw := &verbatimWriter{
+		w: w, fn: r.transform, src: r.src, cursor: int(span.from),
+		edits: edits, above: above, hoisted: hoisted,
+	}
 	r.write(vw, n)
 	vw.upTo(int(span.to))
 	vw.flushEdits()
@@ -1704,13 +1785,17 @@ func (r *Renderer) VerbatimFile(w io.Writer, f *File) error {
 		return nil
 	}
 
-	vw := &verbatimWriter{w: w, fn: r.transform, src: r.src, above: map[*CommentNode]bool{}}
+	vw := &verbatimWriter{
+		w: w, fn: r.transform, src: r.src,
+		above: map[*CommentNode]bool{}, hoisted: map[Node][]*CommentNode{},
+	}
 	for _, doc := range f.Docs {
-		edits, above := collectEdits(doc, r.src)
+		edits, above, hoisted := collectEdits(doc, r.src)
 		vw.edits = append(vw.edits, edits...)
 		for comment := range above {
 			vw.above[comment] = true
 		}
+		maps.Copy(vw.hoisted, hoisted)
 	}
 	if len(vw.edits) > 1 {
 		sort.SliceStable(vw.edits, func(i, j int) bool { return vw.edits[i].at < vw.edits[j].at })

@@ -87,6 +87,9 @@ type Renderer struct {
 	// the node says, for a node being written into a flow collection where a
 	// line break would end the collection. See [Renderer.flowing].
 	forceFlow bool
+	// hoisted is the block scalar whose comment group the node opening its
+	// line has already written above that line. See [Renderer.unhoisted].
+	hoisted *LiteralNode
 }
 
 // defaultRenderer and bareRenderer back the String methods of the composite
@@ -167,6 +170,10 @@ func (r *Renderer) String(n Node) string {
 func (r *Renderer) render(n Node) rendered {
 	if n == nil {
 		return rendered{}
+	}
+	if lit, group := r.unhoisted(n); lit != nil {
+		// Nothing wrote the group above the line, so n opens it.
+		return join(sepBreak, leaf(r.commentGroup(group)), r.hoisting(lit).render(n))
 	}
 
 	return r.withHeadComment(n, r.renderNode(n))
@@ -375,6 +382,10 @@ func (r *Renderer) mappingValue(n *MappingValueNode) rendered {
 		head = join(sepNone, leaf(blankLineBefore(n.Comment)), r.render(n.Comment), leaf("\n"))
 	} else {
 		head = leaf(blankLineBefore(n.Key))
+	}
+	if lit, group := r.unhoisted(n.Value); lit != nil {
+		head = join(sepNone, head, leaf(r.commentGroup(group)+"\n"))
+		r = r.hoisting(lit)
 	}
 
 	if _, explicit := n.Key.(*MappingKeyNode); explicit {
@@ -698,9 +709,15 @@ func (r *Renderer) fitsOnKeyLine(n Node) bool {
 }
 
 func (r *Renderer) mappingKey(n *MappingKeyNode) rendered {
+	var above string
+	if lit, group := r.unhoisted(n.Value); lit != nil {
+		above = r.commentGroup(group) + "\n"
+		r = r.hoisting(lit)
+	}
+
 	value := r.entry(n.Value)
 	if value.empty() {
-		return leaf(n.Start.Value)
+		return leaf(above + n.Start.Value)
 	}
 	if value.leads {
 		// The key opens below its "?" with a blank line between, and a blank
@@ -708,10 +725,10 @@ func (r *Renderer) mappingKey(n *MappingKeyNode) rendered {
 		// Written with the single break the entry carries, the gap was lost and
 		// the next rendering pulled the key back up onto the "?" line, so the
 		// document moved on every pass.
-		return join(sepNone, leaf(n.Start.Value+" "), leaf("\n"), value)
+		return join(sepNone, leaf(above+n.Start.Value+" "), leaf("\n"), value)
 	}
 
-	return join(sepNone, leaf(n.Start.Value+" "), value)
+	return join(sepNone, leaf(above+n.Start.Value+" "), value)
 }
 
 // entry renders a node placed after a marker that occupies the start of its
@@ -763,9 +780,15 @@ func (r *Renderer) sequence(n *SequenceNode) rendered {
 		lines = append(lines, r.render(n.Comment))
 	}
 	for i, value := range n.Values {
+		// A comment group on a block scalar has no room on the "- " line.
+		er, above := r, ""
+		if lit, group := r.unhoisted(value); lit != nil {
+			er, above = r.hoisting(lit), r.commentGroup(group)+"\n"
+		}
+
 		// A blank line inside an entry surfaces as a leading break on the
 		// entry's own text. It belongs above the "- ", not after it.
-		entry := r.entry(value)
+		entry := er.entry(value)
 		var blank string
 		if entry.leads {
 			blank, entry = "\n", entry.withoutLead()
@@ -820,12 +843,12 @@ func (r *Renderer) sequence(n *SequenceNode) rendered {
 			// "- # c1" over "  &a q # c2" lost one to
 			// "- &a q # c2 # c1".
 			lines = append(lines,
-				leaf(blank+"-"+comment),
-				r.render(value).indentedBy(r.indent))
+				leaf(blank+above+"-"+comment),
+				er.render(value).indentedBy(r.indent))
 
 			continue
 		}
-		lines = append(lines, join(sepNone, leaf(blank+"- "), entry, leaf(comment)))
+		lines = append(lines, join(sepNone, leaf(blank+above+"- "), entry, leaf(comment)))
 	}
 	if r.comments && !n.FootComment.Blank() {
 		lines = append(lines, join(sepNone, leaf(blankLineBefore(n.FootComment)), r.render(n.FootComment)))
@@ -1056,6 +1079,10 @@ func (r *Renderer) documentBody(n Node) rendered {
 // is still the node its header counts from -- so those are unwrapped rather
 // than handed to render.
 func (r *Renderer) lifted(n Node, lift int) rendered {
+	if lit, group := r.unhoisted(n); lit != nil {
+		return join(sepBreak, leaf(r.commentGroup(group)), r.hoisting(lit).lifted(n, lift))
+	}
+
 	switch node := n.(type) {
 	case *LiteralNode:
 		return r.withHeadComment(n, leaf(r.literalAt(node, lift)))
@@ -1100,6 +1127,66 @@ func statesWidth(n Node) bool {
 	return false
 }
 
+// unhoisted returns the block scalar standing at n, looking through the
+// properties in front of it, when its comment runs over more than one line and
+// nothing has written the comment yet.
+//
+// A block scalar's header has room for one comment: the content starts on the
+// next line, and a second comment line there ends the scalar before it. "k: |2-
+// #c" over "#d" over "  x" does not parse. The whole group goes above the line
+// the header stands on instead, written by whatever opens that line -- the
+// mapping entry, the "- " of a sequence entry, the "?" of an explicit key, or
+// the scalar itself.
+func (r *Renderer) unhoisted(n Node) (*LiteralNode, *CommentGroupNode) {
+	if !r.comments {
+		return nil, nil
+	}
+
+	for range maxPropertyDepth {
+		switch node := n.(type) {
+		case *LiteralNode:
+			if node == r.hoisted || commentLines(node.Comment) < 2 {
+				return nil, nil
+			}
+
+			return node, node.Comment
+		case *AnchorNode:
+			n = node.Value
+		case *TagNode:
+			n = node.Value
+		default:
+			return nil, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// hoisting returns a Renderer that leaves lit's comment out, the caller having
+// written it above the line.
+func (r *Renderer) hoisting(lit *LiteralNode) *Renderer {
+	hoisting := *r
+	hoisting.hoisted = lit
+
+	return &hoisting
+}
+
+// commentLines counts the comments of a group that are still written.
+func commentLines(c *CommentGroupNode) int {
+	if c == nil {
+		return 0
+	}
+
+	var lines int
+	for _, comment := range c.Comments {
+		if !comment.Removed() {
+			lines++
+		}
+	}
+
+	return lines
+}
+
 func (r *Renderer) literal(n *LiteralNode) string {
 	return r.literalAt(n, 0)
 }
@@ -1115,7 +1202,7 @@ func (r *Renderer) literalAt(n *LiteralNode, lift int) string {
 		header = restateIndent(header, r.indent+lift)
 	}
 
-	if r.comments && !n.Comment.Blank() {
+	if r.comments && !n.Comment.Blank() && n != r.hoisted {
 		header += " " + r.String(n.Comment)
 	}
 
