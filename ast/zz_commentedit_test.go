@@ -479,6 +479,72 @@ func TestACommentOnABlockScalarsContentGoesOnItsHeader(t *testing.T) {
 	})
 }
 
+// TestACommentOnAPropertyOverABlockScalarGoesAfterItsHeader holds both
+// renderers to one place for a comment set on an anchor or a tag standing on a
+// block scalar.
+//
+// The property and the block scalar share the header's line, and the content
+// stands below it, so the comment goes after the header. VerbatimFile read the
+// property as a node spanning two lines, found no end of line to close, and
+// failed where the layout renderer wrote "- &a | # c".
+func TestACommentOnAPropertyOverABlockScalarGoesAfterItsHeader(t *testing.T) {
+	property := func(t *testing.T, f *ast.File) ast.Node {
+		t.Helper()
+
+		switch body := f.Docs[0].Body.(type) {
+		case *ast.SequenceNode:
+			return body.Values[0]
+		case *ast.MappingNode:
+			return body.Values[0].Value
+		}
+		require.Failf(t, "no property", "%T", f.Docs[0].Body)
+
+		return nil
+	}
+
+	for _, tc := range []struct{ src, verbatim, laidOut string }{
+		{"- &a |\n  x\n", "- &a | # c\n  x\n", "- &a | # c\n  x\n"},
+		{"k: !!str |\n  x\n", "k: !!str | # c\n  x\n", "k: !!str | # c\n  x\n"},
+		{"- !!str &a |\n  x\n", "- !!str &a | # c\n  x\n", "- !!str &a | # c\n  x\n"},
+		{"- &a\n  |\n  x\n", "- &a\n  | # c\n  x\n", "- &a | # c\n  x\n"},
+	} {
+		t.Run(tc.src, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(tc.src), parser.WithComments())
+			require.NoError(t, err)
+			require.NoError(t, property(t, file).SetComment(comment(" c")))
+
+			var out bytes.Buffer
+			require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(tc.src))).VerbatimFile(&out, file))
+			assert.Equal(t, tc.verbatim, out.String())
+			assert.Equal(t, tc.laidOut, file.String())
+		})
+	}
+
+	t.Run("and two comments closing the header's line are refused, never merged", func(t *testing.T) {
+		// A comment runs to the end of its line, so "- &a | # one # two" reads
+		// back as one comment. The layout renderer puts the block scalar on a
+		// line of its own; the copy has no such line to write, and says so.
+		const src = "- &a |\n  x\n"
+
+		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
+		require.NoError(t, err)
+		anchor := property(t, file)
+		require.NoError(t, anchor.SetComment(comment(" one")))
+		require.NoError(t, literalOf(t, anchor).SetComment(comment(" two")))
+
+		var out bytes.Buffer
+		assert.Error(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, file))
+
+		laidOut := file.String()
+		assert.Equal(t, "- &a # one\n  | # two\n    x\n", laidOut)
+
+		var before, after any
+		require.NoError(t, codec.Unmarshal([]byte(src), &before))
+		require.NoError(t, codec.Unmarshal([]byte(laidOut), &after))
+		assert.Equal(t, before, after)
+	})
+}
+
 // literalOf returns the block scalar standing first in n: n itself, the first
 // entry of a sequence, the first value or key of a mapping, or what a property
 // stands on.

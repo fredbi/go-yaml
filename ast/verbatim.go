@@ -1300,6 +1300,7 @@ func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*Commen
 	var out []pendingComment
 	above = make(map[*CommentNode]bool)
 	hoisted = make(map[Node][]*CommentNode)
+	beside := make(map[int32]bool)
 	var node Node
 	onGroup := func(group *CommentGroupNode, head bool) {
 		var opener Node
@@ -1333,14 +1334,19 @@ func collectEdits(n Node, src []byte) (edits []pendingComment, above map[*Commen
 				continue
 			}
 			at, ok := besideAnchor(node, src)
-			if !ok {
+			if !ok || beside[at] {
 				// Nothing in the source to hang it on, or the line already
 				// ends on a comment and two cannot share one. It goes above
 				// the node instead, where the descent places it.
+				//
+				// The same holds for two comments added to nodes that close
+				// one line: a property and the block scalar it stands on both
+				// end on the header, and "| # one # two" reads back as one.
 				above[comment] = true
 
 				continue
 			}
+			beside[at] = true
 			out = append(out, pendingComment{comment: comment, at: at, add: true})
 		}
 	}
@@ -1530,20 +1536,43 @@ func lineStartIn(src []byte, at int) int {
 	return 0
 }
 
-// headerToken is the "|" or ">" a block scalar opens with, and nil for every
-// other node.
+// headerToken is the "|" or ">" a block scalar opens with, looking through the
+// anchor and the tag in front of it, and nil for every other node.
 //
 // A block scalar's own line is its header; its content stands underneath and is
 // content, not layout. A comment goes after the header, which is where the
 // layout renderer puts it too -- written after the content it becomes part of
 // the scalar, so "a: |" over "  text" read back as "text # c".
+//
+// A property standing on a block scalar has no line of its own either: "- &a |"
+// over "  x" with a comment on the anchor comes back as "- &a | # c". Read as a
+// node spanning two lines, the anchor had nowhere to take the comment, and the
+// rendering failed where the layout renderer wrote it.
 func headerToken(n Node) *token.Token {
-	literal, ok := n.(*LiteralNode)
-	if !ok || literal.Start == nil || !literal.Start.FromSource() {
+	literal := literalUnder(n)
+	if literal == nil || literal.Start == nil || !literal.Start.FromSource() {
 		return nil
 	}
 
 	return literal.Start
+}
+
+// literalUnder returns the block scalar n is, or the one its anchor and tag stand on, and nil otherwise.
+func literalUnder(n Node) *LiteralNode {
+	for range maxPropertyDepth {
+		switch v := n.(type) {
+		case *LiteralNode:
+			return v
+		case *AnchorNode:
+			n = v.Value
+		case *TagNode:
+			n = v.Value
+		default:
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // pendingComment is one comment the copy has still to deal with: a comment of
