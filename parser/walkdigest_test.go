@@ -98,7 +98,10 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 // Re-baselined on 2026-09-11 when a tab began to move the column: the positions changed in 925 of the 19,838
 // sources, 9 of them Test Suite documents, and every one of the 925 holds a tab. No source is accepted or refused
 // differently.
-const fixedWalkDigest = "5f5ed67653e8163a156ceb1d8a6bc43ed2417016b688c0003110a7569d5f9854"
+//
+// Re-baselined again the same day when a double-quoted scalar's end began to take the blanks after a dropped tab.
+// One source moved, suite/trailing-tabs-in-double-quoted/05, whose token now ends on its closing quote.
+const fixedWalkDigest = "43020fc130dde123ffc1273f3025465c03237bf797cf109a536b54876ef9a55a"
 
 // digestVisitor writes each node it is handed, so a node the walk reads from a reused cell changes the digest.
 type digestVisitor struct {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/scanner/internal/testscanner"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // TestOriginsTileTheSource checks that the tokens' extents follow one another with nothing between, so that
@@ -69,6 +70,37 @@ func TestOriginsTileTheSource(t *testing.T) {
 // "!!str k: v" reported k at offset 6 -- which addresses it -- and column 6,
 // where it is the seventh character. Every token after a tag on that line was
 // one short, and nothing here or anywhere else compared the two.
+// TestADoubleQuotedScalarReachesItsClosingQuote checks the end of a double-quoted scalar written across lines.
+//
+// A tab followed by blanks before a line break is dropped from the value, and the scan stepped over the blanks after
+// it without recording them in the origin. The token's end is counted from the origin, so it fell short by them:
+// "\"6 trailing\t  \n    tab\"" ended two bytes early, and Renderer.Verbatim wrote it without its closing "b\"".
+func TestADoubleQuotedScalarReachesItsClosingQuote(t *testing.T) {
+	for _, tc := range []struct{ name, src, quoted string }{
+		{"a tab then spaces", "\"6 trailing\t  \n    tab\"\n", "\"6 trailing\t  \n    tab\""},
+		{"a tab then a tab", "k: \"x\t\t\n  y\"\n", "\"x\t\t\n  y\""},
+		{"a tab, a space and a tab", "- \"x\t \t\n  y\"\n", "\"x\t \t\n  y\""},
+
+		// Shapes outside the fault: the blanks after a tab were the ones left out.
+		{"a tab alone", "\"x\t\n  y\"\n", "\"x\t\n  y\""},
+		{"spaces alone", "\"x  \n  y\"\n", "\"x  \n  y\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var found bool
+			for _, tk := range tokenize(t, tc.src) {
+				if tk.Type != token.DoubleQuoteType {
+					continue
+				}
+				found = true
+				from, to := int(tk.Position.Offset()), int(tk.EndOffset())
+				require.LessOrEqualf(t, to, len(tc.src), "%q ends past the source", tc.src)
+				assert.Equalf(t, tc.quoted, tc.src[from:to], "%q", tc.src)
+			}
+			require.Truef(t, found, "%q holds no double-quoted token", tc.src)
+		})
+	}
+}
+
 func assertColumnsAddressTheToken(t *testing.T, src string) {
 	t.Helper()
 

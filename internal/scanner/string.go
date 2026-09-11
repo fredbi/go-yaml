@@ -443,7 +443,12 @@ func (s *Scanner) scanDoubleQuote(ctx *Context) (token.Token, error) {
 				}
 			} else {
 				// Dropped, with the whitespace after it, so the value parts company with the source here.
+				// The origin still takes that whitespace: the document wrote it, and the token's end is counted from
+				// the origin. Left out, the end fell short by it and a verbatim copy cut the closing quote.
 				keep(idx)
+				for i := idx + 1; i <= idx+progress; i++ {
+					ctx.addOriginBuf(rune(src[i]))
+				}
 				idx += progress
 				s.progressColumn(ctx, progress)
 			}
