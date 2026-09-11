@@ -74,6 +74,26 @@ type jsonTokener struct {
 	// a key, which is one token whatever it holds, and a tag naming a scalar
 	// type, which says what its node is worth whatever the node wrote.
 	suppress int
+	// scratch is where emitScalarNode writes a scalar's JSON before reading it
+	// back as a token.
+	scratch []byte
+}
+
+// pushMap opens the frame of a mapping being handed over, reusing the room the
+// last frame at that depth grew for its keys.
+//
+// Every mapping grew a keys slice from nothing, which was a third of what the
+// conversion allocated. A popped frame is not read again: closeMapping copies it
+// before popping it, and nothing it calls opens another mapping.
+func (t *jsonTokener) pushMap(n *ast.MappingNode) {
+	if len(t.maps) < cap(t.maps) {
+		t.maps = t.maps[:len(t.maps)+1]
+		frame := &t.maps[len(t.maps)-1]
+		*frame = tokenMapFrame{keys: frame.keys[:0], mergeSeq: -1, node: n}
+
+		return
+	}
+	t.maps = append(t.maps, tokenMapFrame{mergeSeq: -1, node: n})
 }
 
 // tokenMapFrame is one mapping being handed over.
@@ -234,7 +254,7 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		t.open(JSONObjectStart, at.At)
-		t.maps = append(t.maps, tokenMapFrame{mergeSeq: -1, node: n})
+		t.pushMap(n)
 	case *ast.SequenceNode:
 		t.open(JSONArrayStart, at.At)
 	case *ast.AnchorNode:

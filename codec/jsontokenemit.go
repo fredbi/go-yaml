@@ -126,7 +126,33 @@ func (t *jsonTokener) emitScalarNode(node ast.Node, at token.Position) {
 		return
 	}
 
-	t.emitJSONText(appendScalarNode(nil, node), at)
+	// The text goes into a buffer the tokener keeps, since a document is mostly
+	// scalars and a fresh one each was a third of what the conversion allocated.
+	t.scratch = appendScalarNode(t.scratch[:0], node)
+	if sourceDigits(node, t.scratch) {
+		// The number is spelled as the document wrote it, so the token takes the
+		// source's own string rather than a copy of the buffer.
+		t.emit(JSONToken{Kind: JSONNumber, Value: node.GetToken().Value, At: at})
+
+		return
+	}
+	t.emitJSONText(t.scratch, at)
+}
+
+// sourceDigits reports whether text, the JSON written for a number node, is the
+// text the document wrote for it.
+//
+// Only a number: "true" and "null" read the same as their source too, and are
+// not numbers.
+func sourceDigits(node ast.Node, text []byte) bool {
+	switch node.(type) {
+	case *ast.IntegerNode, *ast.FloatNode:
+		tk := node.GetToken()
+
+		return tk != nil && string(text) == tk.Value
+	default:
+		return false
+	}
 }
 
 // emitJSONText hands over the tokens carrying one piece of JSON.

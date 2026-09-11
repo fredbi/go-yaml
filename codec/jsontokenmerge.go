@@ -65,7 +65,7 @@ func (t *jsonTokener) collectMerge(node ast.Node, at parser.Step) bool {
 		t.bufDepth = at.Depth
 		t.bufOwner = len(t.maps) - 1
 		t.open(JSONObjectStart, at.At)
-		t.maps = append(t.maps, tokenMapFrame{mergeSeq: -1})
+		t.pushMap(nil)
 
 		return true
 	default:
