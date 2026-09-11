@@ -116,7 +116,7 @@ func WithMergeKeys() Option {
 // The parse returns [github.com/go-openapi/go-yaml/errors.ErrNotJSON] for:
 //
 //   - a sequence or a mapping used as a mapping key, including through an alias such as "? *x";
-//   - an infinity or a NaN, for which JSON has no number;
+//   - an infinity or a NaN, for which JSON has no number, unless a tag makes it a string: "!!str .inf" converts to ".inf";
 //   - a cycle, such as "&x [ *x ]", since JSON writes a tree in full.
 //
 // Two keys that YAML tells apart and that write one JSON member name, such as the integer 1 and the string "1",

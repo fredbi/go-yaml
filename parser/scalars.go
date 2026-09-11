@@ -147,7 +147,8 @@ func (p *Parser) parseScalarValue(ctx context, tk *group.TapeToken) (ast.ScalarN
 	case token.FloatType:
 		return newFloatNode(ctx, tk)
 	case token.InfinityType, token.NanType:
-		if p.opts.jsonCompatible {
+		// A written tag decides what the scalar is, so jsonNumberless checks a tagged one once the tag resolves.
+		if p.opts.jsonCompatible && !p.descent.isTagged(tk.RawToken()) {
 			return nil, yamlerrors.NewNotJSON(
 				fmt.Sprintf("JSON has no number for %s", tk.RawToken().Value), tk.RawToken())
 		}

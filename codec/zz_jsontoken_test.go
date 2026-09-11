@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/parser"
 )
@@ -128,6 +129,77 @@ func TestJSONTokensRebuildWhatToJSONWrites(t *testing.T) {
 
 	t.Logf("%d documents converted alike, %d refused alike, %d skipped where ToJSON wrote no JSON document, %d held out",
 		compared, refused, malformed, heldOut)
+}
+
+// TestATagDecidesWhetherAnInfinityConverts holds both converters to one answer
+// for an infinity or a NaN under a tag.
+//
+// JSON has no number for either, so an untagged ".inf" and a "!!float .inf" are
+// refused. A tag that makes the scalar a string leaves JSON a spelling for it:
+// "k: !!str .inf" is the string ".inf", exactly as "k: \".inf\"" is. A "!!int"
+// cannot read ".inf" and is refused as the decoder refuses it, unless
+// parser.WithLaxTags keeps the text.
+func TestATagDecidesWhetherAnInfinityConverts(t *testing.T) {
+	convert := func(t *testing.T, src string, opts ...parser.Option) (string, string) {
+		t.Helper()
+
+		out, err := ToJSON([]byte(src), opts...)
+		toks, tokErr := collectJSONTokens([]byte(src), opts...)
+		if err != nil {
+			require.Errorf(t, tokErr, "ToJSON refused %q and the tokens did not", src)
+
+			return err.Error(), tokErr.Error()
+		}
+		require.NoErrorf(t, tokErr, "ToJSON converted %q and the tokens did not", src)
+
+		return string(out), string(rebuildJSON(toks))
+	}
+
+	t.Run("a string tag converts", func(t *testing.T) {
+		for src, want := range map[string]string{
+			"k: !!str .inf\n":           `{"k":".inf"}`,
+			"k: !!str -.inf\n":          `{"k":"-.inf"}`,
+			"k: !!str .nan\n":           `{"k":".nan"}`,
+			"k: !!str &x .inf\n":        `{"k":".inf"}`,
+			"k: &x !!str .inf\n":        `{"k":".inf"}`,
+			"!!str .inf: v\n":           `{".inf":"v"}`,
+			"{!!str .inf: v}\n":         `{".inf":"v"}`,
+			"[!!str .nan]\n":            `[".nan"]`,
+			"k: !a .inf\n":              `{"k":".inf"}`,
+			"k: \".inf\"\n":             `{"k":".inf"}`,
+			"k: !!str &x .inf\nj: *x\n": `{"k":".inf","j":".inf"}`,
+		} {
+			t.Run(src, func(t *testing.T) {
+				fromBytes, fromTokens := convert(t, src)
+				assert.Equal(t, want, fromBytes)
+				assert.Equal(t, want, fromTokens)
+			})
+		}
+	})
+
+	t.Run("a number is refused", func(t *testing.T) {
+		for src, want := range map[string]string{
+			"k: .inf\n":            "JSON has no number for .inf",
+			"k: !!float .inf\n":    "JSON has no number for .inf",
+			"k: !!float -.inf\n":   "JSON has no number for -.inf",
+			"k: !!float &x .nan\n": "JSON has no number for .nan",
+			"k: &x !!float .nan\n": "JSON has no number for .nan",
+			"!!float .inf: v\n":    "JSON has no number for .inf",
+			"k: !!int .inf\n":      `cannot read ".inf" as !!int`,
+		} {
+			t.Run(src, func(t *testing.T) {
+				fromBytes, fromTokens := convert(t, src)
+				assert.Contains(t, fromBytes, want)
+				assert.Contains(t, fromTokens, want)
+			})
+		}
+	})
+
+	t.Run("and WithLaxTags keeps the text", func(t *testing.T) {
+		fromBytes, fromTokens := convert(t, "k: !!int .inf\n", parser.WithLaxTags())
+		assert.Equal(t, `{"k":".inf"}`, fromBytes)
+		assert.Equal(t, `{"k":".inf"}`, fromTokens)
+	})
 }
 
 // jsonTokenHoldOuts are the documents the two converters disagree about, with

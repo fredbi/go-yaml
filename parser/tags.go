@@ -65,6 +65,11 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 		return nil, err
 	}
 	node.Value = tagValue
+	if p.opts.jsonCompatible {
+		if err := jsonNumberless(node); err != nil {
+			return nil, err
+		}
+	}
 	p.anchors.retag(node)
 
 	return node, nil
@@ -90,6 +95,29 @@ func secondTag(value ast.Node) *ast.TagNode {
 	return nil
 }
 
+// jsonNumberless returns the error WithJSONCompatible gives a "!!float" standing on an infinity or a NaN,
+// which JSON has no number for.
+//
+// parseScalarValue refuses an untagged ".inf" by its token type.
+// A written tag decides what the scalar is, so parseScalarValue leaves a tagged one to this check:
+// "!!str .inf" is the string ".inf", and "!!float .inf" is refused.
+func jsonNumberless(tag *ast.TagNode) error {
+	res := tag.Resolve()
+	if res.Verdict != ast.TagResolved || res.Empty || res.Tag != token.FloatTag {
+		return nil
+	}
+	if base, ok := token.FloatBase(res.Text, res.Schema); !ok || (base != token.InfinityType && base != token.NanType) {
+		return nil
+	}
+
+	scalar := tag.Value
+	if anchor, ok := scalar.(*ast.AnchorNode); ok {
+		scalar = anchor.Value
+	}
+
+	return yamlerrors.NewNotJSON(fmt.Sprintf("JSON has no number for %s", res.Text), scalar.GetToken())
+}
+
 // taggedScalar returns the plain scalar a tag stands on, when tk is that scalar or an anchor group naming it,
 // and nil otherwise.
 //
@@ -97,7 +125,7 @@ func secondTag(value ast.Node) *ast.TagNode {
 // so neither hands a key to its enclosing collection's tag.
 func taggedScalar(tk *group.TapeToken) *group.TapeToken {
 	if tk.Group == nil {
-		if tk.Type() != token.StringType {
+		if !resolvedByAnySchema(tk.Type()) {
 			return nil
 		}
 
