@@ -1623,7 +1623,13 @@ func eachCommentGroup(n Node, fn func(group *CommentGroupNode, head bool)) {
 	// BaseNode.Comment is the head comment on a collection and on a mapping
 	// entry, and the comment beside the node everywhere else. HeadComment means
 	// above on every node.
-	handGroup(fn, n.GetComment(), headSlot(n))
+	own := n.GetComment()
+	if lit, ok := n.(*LiteralNode); ok {
+		// eachNode stops at a block scalar, so a comment set on its content comes
+		// with the block scalar's own and is placed on the header's line.
+		own = blockComment(lit)
+	}
+	handGroup(fn, own, headSlot(n))
 	if carrier, ok := n.(headCommented); ok {
 		handGroup(fn, carrier.GetHeadComment(), true)
 	}

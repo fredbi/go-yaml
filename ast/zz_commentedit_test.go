@@ -281,8 +281,11 @@ func TestFixedAnAddedCommentDoesNotBreakTheLineItLandsOn(t *testing.T) {
 		// Fred's ruling of 2026-09-10: where adding a comment is not legitimate,
 		// say so. A node the document did not write says so at SetComment; a
 		// placement the source has no room for says so at the rendering. Over
-		// the 86,086 placements the corpus offers -- a comment on every node of
-		// every document, one at a time -- nothing is dropped without a word.
+		// the 86,086 placements the corpus offers -- a comment on every node
+		// the renderers descend to, one at a time -- nothing is dropped without
+		// a word. A block scalar's content node was not among them, and a
+		// comment on it was dropped by both renderers until
+		// TestACommentOnABlockScalarsContentGoesOnItsHeader.
 		for _, tc := range []struct {
 			name, src string
 			at        func(*ast.File) ast.Node
@@ -391,4 +394,120 @@ func renderEdited(t *testing.T, src string, edit func(*ast.CommentNode)) (verbat
 // source, which is what tells the renderer to lay it out.
 func comment(text string) *ast.CommentGroupNode {
 	return ast.CommentGroup([]*token.Token{token.New(text, "#"+text, token.Position{})})
+}
+
+// TestACommentOnABlockScalarsContentGoesOnItsHeader holds both renderers to one
+// place for a comment set on a block scalar's content node, LiteralNode.Value.
+//
+// The content is text and has no line of its own, so the comment is written as
+// the block scalar's, on the header's line. Both renderers dropped it and
+// returned no error, because neither reached the content for a comment. Where the
+// header's line has no room -- it ends on a comment already, or the block scalar
+// carries one of its own -- the comment goes above the line, as a group of two
+// lines set on the block scalar does.
+func TestACommentOnABlockScalarsContentGoesOnItsHeader(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, verbatim, laidOut string
+		own                          bool
+	}{{
+		name: "as a sequence entry", src: "- |\n  x\n",
+		verbatim: "- | # c\n  x\n", laidOut: "- | # c\n  x\n",
+	}, {
+		name: "folded, as a sequence entry", src: "- >\n  x\n",
+		verbatim: "- > # c\n  x\n", laidOut: "- > # c\n  x\n",
+	}, {
+		name: "as a mapping value", src: "k: |\n  x\n",
+		verbatim: "k: | # c\n  x\n", laidOut: "k: | # c\n  x\n",
+	}, {
+		name: "as an explicit key", src: "? |\n  x\n: v\n",
+		verbatim: "? | # c\n  x\n: v\n", laidOut: "? | # c\n  x\n: v\n",
+	}, {
+		name: "under an anchor", src: "- &a |\n  x\n",
+		verbatim: "- &a | # c\n  x\n", laidOut: "- &a | # c\n  x\n",
+	}, {
+		name: "on a header that ends on a comment", src: "- | # old\n  x\n",
+		verbatim: "# c\n- | # old\n  x\n", laidOut: "# old\n# c\n- |\n  x\n",
+	}, {
+		name: "beside the block scalar's own", src: "k: |\n  x\n", own: true,
+		verbatim: "# own\n# c\nk: |\n  x\n", laidOut: "# own\n# c\nk: |\n  x\n",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseBytes([]byte(tc.src), parser.WithComments())
+			require.NoError(t, err)
+
+			lit := literalOf(t, file.Docs[0].Body)
+			if tc.own {
+				require.NoError(t, lit.SetComment(comment(" own")))
+			}
+			require.NoError(t, lit.Value.SetComment(comment(" c")))
+
+			var out bytes.Buffer
+			require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(tc.src))).VerbatimFile(&out, file))
+			assert.Equal(t, tc.verbatim, out.String())
+			assert.Equal(t, tc.laidOut, file.String())
+
+			var before any
+			require.NoError(t, codec.Unmarshal([]byte(tc.src), &before))
+			for _, rendered := range []string{out.String(), file.String()} {
+				var after any
+				require.NoErrorf(t, codec.Unmarshal([]byte(rendered), &after), "%q does not parse", rendered)
+				assert.Equalf(t, before, after, "%q says something else", rendered)
+			}
+		})
+	}
+
+	t.Run("and beside a comment on the property in front", func(t *testing.T) {
+		// The layout renderer writes the property's comment at the end of the
+		// property's line, and puts the block scalar on the next line where
+		// the header's line would carry a comment too. Two comments on one
+		// line read back as one: "- &a | # c # a".
+		const src = "- &a |\n  x\n"
+
+		file, err := parser.ParseBytes([]byte(src), parser.WithComments())
+		require.NoError(t, err)
+		anchor := file.Docs[0].Body.(*ast.SequenceNode).Values[0]
+		require.NoError(t, anchor.SetComment(comment(" a")))
+		require.NoError(t, literalOf(t, anchor).Value.SetComment(comment(" c")))
+
+		laidOut := file.String()
+		assert.Equal(t, "- &a # a\n  | # c\n    x\n", laidOut)
+
+		var before, after any
+		require.NoError(t, codec.Unmarshal([]byte(src), &before))
+		require.NoError(t, codec.Unmarshal([]byte(laidOut), &after))
+		assert.Equal(t, before, after)
+	})
+}
+
+// literalOf returns the block scalar standing first in n: n itself, the first
+// entry of a sequence, the first value or key of a mapping, or what a property
+// stands on.
+func literalOf(t *testing.T, n ast.Node) *ast.LiteralNode {
+	t.Helper()
+
+	for range 8 {
+		switch v := n.(type) {
+		case *ast.LiteralNode:
+			return v
+		case *ast.AnchorNode:
+			n = v.Value
+		case *ast.TagNode:
+			n = v.Value
+		case *ast.SequenceNode:
+			n = v.Values[0]
+		case *ast.MappingNode:
+			if _, explicit := v.Values[0].Key.(*ast.MappingKeyNode); explicit {
+				n = v.Values[0].Key
+			} else {
+				n = v.Values[0].Value
+			}
+		case *ast.MappingKeyNode:
+			n = v.Value
+		default:
+			require.Failf(t, "no block scalar", "%T", n)
+		}
+	}
+	require.Fail(t, "no block scalar within eight levels")
+
+	return nil
 }

@@ -213,6 +213,9 @@ func endsOnAComment(n Node) bool {
 			n = node.Value
 		case *TagNode:
 			n = node.Value
+		case *LiteralNode:
+			// A comment set on the content is written on the header's line too.
+			return !blockComment(node).Blank()
 		default:
 			return false
 		}
@@ -947,6 +950,28 @@ func (r *Renderer) anchor(n *AnchorNode) string {
 // firstComment returns whichever of two comment groups is present, preferring
 // the first. Two comments cannot share the end of one line: written there they
 // come back as a single comment, "#" inside one being ordinary text.
+// blockComment returns the comment a block scalar writes on its header's line: its own, then the one set on its
+// content.
+//
+// A block scalar's content is text with no line of its own, so a comment set on [LiteralNode.Value] is written
+// as the block scalar's. The parser never puts one there; a caller may. Where both hold a comment, both are
+// written, one line each, which is a group too long for the header's line.
+func blockComment(n *LiteralNode) *CommentGroupNode {
+	var content *CommentGroupNode
+	if n.Value != nil {
+		content = n.Value.GetComment()
+	}
+
+	switch {
+	case content.Blank():
+		return n.Comment
+	case n.Comment.Blank():
+		return content
+	}
+
+	return &CommentGroupNode{Comments: append(append([]*CommentNode{}, n.Comment.Comments...), content.Comments...)}
+}
+
 func firstComment(own, borrowed *CommentGroupNode) *CommentGroupNode {
 	if !own.Blank() {
 		return own
@@ -1210,11 +1235,12 @@ func (r *Renderer) unhoisted(n Node) (*LiteralNode, *CommentGroupNode) {
 	for range maxPropertyDepth {
 		switch node := n.(type) {
 		case *LiteralNode:
-			if node == r.hoisted || commentLines(node.Comment) < 2 {
+			comment := blockComment(node)
+			if node == r.hoisted || commentLines(comment) < 2 {
 				return nil, nil
 			}
 
-			return node, node.Comment
+			return node, comment
 		case *AnchorNode:
 			n = node.Value
 		case *TagNode:
@@ -1269,8 +1295,8 @@ func (r *Renderer) literalAt(n *LiteralNode, lift int) string {
 		header = restateIndent(header, r.indent+lift)
 	}
 
-	if r.comments && !n.Comment.Blank() && n != r.hoisted {
-		header += " " + r.String(n.Comment)
+	if comment := blockComment(n); r.comments && !comment.Blank() && n != r.hoisted {
+		header += " " + r.String(comment)
 	}
 
 	value := n.Value.Value
