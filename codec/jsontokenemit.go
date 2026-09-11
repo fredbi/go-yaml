@@ -198,7 +198,7 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 		t.peek = -1
 	}
 
-	resolved, ok := t.taggedValue(n)
+	resolved, ok := t.taggedValue(n, mark.key)
 	if t.stopped {
 		// taggedValue reads the tag's verdict as jsonWriter does, so a tag
 		// naming a kind its node is not is refused here and the held tokens go
@@ -243,9 +243,9 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 // taggedValue is the JSON a tagged scalar is worth, and whether the tag names a
 // scalar type at all. It is [jsonWriter.taggedValue]'s reading, reported
 // through this converter's error state.
-func (t *jsonTokener) taggedValue(n *ast.TagNode) ([]byte, bool) {
+func (t *jsonTokener) taggedValue(n *ast.TagNode, key bool) ([]byte, bool) {
 	w := jsonWriter{}
-	text, ok := w.taggedValue(n)
+	text, ok := w.taggedValue(n, key)
 	if w.err != nil {
 		t.fail(w.err)
 	}
@@ -312,7 +312,7 @@ func (t *jsonTokener) emitTree(node ast.Node, at token.Position) {
 		t.emitTree(target, at)
 		t.expanding = t.expanding[:len(t.expanding)-1]
 	case *ast.TagNode:
-		if resolved, ok := t.taggedValue(n); ok {
+		if resolved, ok := t.taggedValue(n, false); ok {
 			t.emitJSONText(resolved, at)
 
 			return
@@ -508,7 +508,7 @@ func (t *jsonTokener) wrappedKeyName(node ast.Node) string {
 		return "null"
 	}
 	if tag, isTag := inner.(*ast.TagNode); isTag {
-		if resolved, ok := t.taggedValue(tag); ok {
+		if resolved, ok := t.taggedValue(tag, true); ok {
 			return unquoted(resolved)
 		}
 	}

@@ -18,8 +18,11 @@ import (
 //
 // A float keeps the digits the document wrote wherever JSON spells a number the
 // same way, so "1e3" stays "1e3" and a value of twenty-five significant digits
-// keeps all of them. Where JSON spells it differently -- ".5", "5.", "007.5" --
-// the value is written out instead.
+// keeps all of them. Where JSON spells it differently -- ".5", "5.", "007.5",
+// "+1.5" -- the text is rewritten to JSON's grammar, digit for digit. Written
+// through a Go value, "+0.12345678901234567890123" was rounded to seventeen
+// digits and ".5e10" came out as 5e+09. YAML 1.1's base-60 floats and its octal
+// integers under "!!float" have no such rewrite and are written as their value.
 //
 // TestToJSONMatchesTheValueConverter compares what json.Unmarshal reads back,
 // and JSON has one number type: it cannot tell 1.0 from 1, so a converter that
@@ -35,6 +38,21 @@ func TestToJSONSpelling(t *testing.T) {
 		{"a: .5\n", `{"a":0.5}`},
 		{"a: 5.\n", `{"a":5.0}`},
 		{"a: 007.5\n", `{"a":7.5}`},
+		{"a: +1.5\n", `{"a":1.5}`},
+		{"a: +0.12345678901234567890123\n", `{"a":0.12345678901234567890123}`},
+		{"a: .5e10\n", `{"a":0.5e10}`},
+		{"a: !!float +1.5\n", `{"a":1.5}`},
+		{"a: !!float 0.12345678901234567890123\n", `{"a":0.12345678901234567890123}`},
+		{"a: !!float .5e10\n", `{"a":0.5e10}`},
+		{"%YAML 1.1\n---\na: 1_000.5\n", `{"a":1000.5}`},
+		// A key is a string named after its value, as a bare "1e3" key names
+		// its entry 1000.0, so an anchored float written from its digits as a
+		// value still names the entry an alias keys by its value.
+		{"a: &a1 !!float 1e3\n*a1 : v\n", `{"a":1e3,"1000.0":"v"}`},
+		{"!!float &a 1e3: x\nb: *a\n", `{"1000.0":"x","b":1e3}`},
+		// No text rewrite spells these, so they are written as their value.
+		{"%YAML 1.1\n---\na: 190:20:30.15\n", `{"a":685230.15}`},
+		{"%YAML 1.1\n---\na: !!float 017\n", `{"a":15.0}`},
 		// Past and below what a float64 holds, both written as numbers. JSON
 		// bounds neither, and what a reader makes of them is the reader's:
 		// encoding/json refuses the first into a float64 and rounds the second

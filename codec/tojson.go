@@ -112,6 +112,11 @@ type jsonWriter struct {
 	// again. It is emptied at each document, since an alias names an anchor of
 	// its own document.
 	named map[string][]byte
+	// keyNamed holds the name an anchored tagged scalar gives the entry it
+	// stands as the key of, where it differs from what named holds: a float is
+	// written from its digits as a value and named after its value as a key.
+	// It is emptied with named.
+	keyNamed map[string]string
 	// open is the anchors being written, innermost last. Anchors nest.
 	open []anchorMark
 	// maps is the mappings being written, innermost last.
@@ -339,6 +344,7 @@ func (w *jsonWriter) closeKey(at parser.Step) {
 // "b: 2" convert the second document as though it were the first.
 func (w *jsonWriter) openDocument() {
 	clear(w.named)
+	clear(w.keyNamed)
 	w.maps = w.maps[:0]
 	w.open = w.open[:0]
 }
@@ -459,7 +465,7 @@ func appendScalarNode(out []byte, n ast.Node) []byte {
 			if isJSONNumber(tk.Value) {
 				return append(out, tk.Value...)
 			}
-			if text, ok := pastRangeJSON(tk.Value, tk.Type); ok {
+			if text, ok := decimalJSON(tk.Value, tk.Type); ok {
 				return append(out, text...)
 			}
 			if f, ok := token.ParseFloat(tk.Value, tk.Type); ok {
@@ -532,7 +538,7 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 	mark := w.tags[len(w.tags)-1]
 	w.tags = w.tags[:len(w.tags)-1]
 
-	switch resolved, ok := w.taggedValue(t); {
+	switch resolved, ok := w.taggedValue(t, mark.key); {
 	case ok:
 		// The tag names a scalar type, so it says what the value is whatever
 		// the value wrote for itself: "!!str" on an empty node is "", not null.
@@ -548,7 +554,18 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 		// tagged value, as the walk records it. A flow key written alone,
 		// "{!!null &a1 null, k: *a1}", hands the tag over without what it
 		// stands on, so the anchor never opened and is recorded only here.
-		w.remember(anchorName(anchor.Name), w.out[mark.at:])
+		// A tag standing as a key wrote the name it gives as one; the alias
+		// wants the value and the name both.
+		name, value := anchorName(anchor.Name), w.out[mark.at:]
+		if mark.key {
+			if written, ok := w.taggedValue(t, false); ok {
+				value = written
+			}
+		}
+		w.remember(name, value)
+		if keyName, ok := w.tagKeyName(t); ok {
+			w.rememberKey(name, keyName)
+		}
 	}
 
 	// Only while the first document is being written: ToJSON converts that one
@@ -633,7 +650,12 @@ func orderedMapJSON(text []byte, t *ast.TagNode, drop []int) ([]byte, error) {
 // A "%TAG" line gives the handle a prefix of the document's own, so "!!int"
 // under one names the document's type and not YAML's; Resolve reads the URI and
 // reports it unresolved, and the value stands as it is written.
-func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
+//
+// key says the tag stands as a mapping key. A key is a string named after the
+// value, as a bare key is -- "!!float 1e3" names its entry 1000.0, as "1e3"
+// does -- so a float there is read into a value first, where a float standing
+// as a value is written from its digits.
+func (w *jsonWriter) taggedValue(t *ast.TagNode, key bool) ([]byte, bool) {
 	res := t.Resolve()
 
 	switch res.Verdict {
@@ -672,8 +694,8 @@ func (w *jsonWriter) taggedValue(t *ast.TagNode) ([]byte, bool) {
 	case token.IntegerTag:
 		written = appendJSONScalar(nil, taggedInteger(res.Text, res.Schema))
 	case token.FloatTag:
-		if base, ok := token.FloatBase(res.Text, res.Schema); ok {
-			if text, past := pastRangeJSON(res.Text, base); past {
+		if base, ok := token.FloatBase(res.Text, res.Schema); ok && !key {
+			if text, ok := decimalJSON(res.Text, base); ok {
 				written = text
 
 				break
@@ -767,9 +789,45 @@ func (w *jsonWriter) closeAnchor(node *ast.AnchorNode) {
 	// "*a" as a value elsewhere is still the boolean.
 	w.remember(mark.name, w.out[mark.at:])
 
-	if mark.key {
-		w.out = appendJSONString(w.out[:mark.at], unquoted(w.out[mark.at:]))
+	// A tagged scalar names a key after its value, which a float writes
+	// differently as a value: "&a !!float 1e3" is 1e3 standing as a value and
+	// names its entry 1000.0 standing as a key. Both are kept for the aliases.
+	keyName, tagged := "", false
+	if tag, isTag := node.Value.(*ast.TagNode); isTag {
+		if keyName, tagged = w.tagKeyName(tag); tagged {
+			w.rememberKey(mark.name, keyName)
+		}
 	}
+
+	if mark.key {
+		if !tagged {
+			keyName = unquoted(w.out[mark.at:])
+		}
+		w.out = appendJSONString(w.out[:mark.at], keyName)
+	}
+}
+
+// tagKeyName is the name a tagged scalar gives the entry it stands as the key
+// of, and false where the tag names no scalar type.
+func (w *jsonWriter) tagKeyName(t *ast.TagNode) (string, bool) {
+	resolved, ok := w.taggedValue(t, true)
+	if !ok {
+		return "", false
+	}
+
+	return unquoted(resolved), true
+}
+
+// rememberKey keeps the name an anchored tagged scalar gives an entry it stands
+// as the key of, where remember keeps what it writes as a value.
+func (w *jsonWriter) rememberKey(name, keyName string) {
+	if name == "" {
+		return
+	}
+	if w.keyNamed == nil {
+		w.keyNamed = make(map[string]string)
+	}
+	w.keyNamed[name] = keyName
 }
 
 // remember keeps a copy of what an anchor wrote. The text is copied because out
@@ -799,8 +857,13 @@ func (w *jsonWriter) writeAlias(node *ast.AliasNode, at parser.Step) {
 		return
 	}
 	if at.Key {
-		// A JSON key is a string whatever the anchored node was.
-		w.out = appendJSONString(w.out, unquoted(text))
+		// A JSON key is a string whatever the anchored node was, and a tagged
+		// scalar's is the name it gives as a key.
+		keyName, tagged := w.keyNamed[name]
+		if !tagged {
+			keyName = unquoted(text)
+		}
+		w.out = appendJSONString(w.out, keyName)
 
 		return
 	}
@@ -1303,17 +1366,19 @@ func isJSONNumber(text string) bool {
 	return i == len(text)
 }
 
-// pastRangeJSON writes a float past the exponent bound as the number the
-// document wrote, spelled as JSON spells it, and reports false for any other
-// text.
+// decimalJSON writes a decimal float -- or a decimal integer standing under
+// "!!float" -- from its text, spelled as JSON spells a number, and reports false
+// for any other text.
 //
-// The decoder reads such a float as an infinity or zero, as Go's types require;
-// JSON bounds no number, so ToJSON writes the digits. A spelling JSON already
-// shares is copied before this is asked. One it does not -- "+1e1001",
-// "1.e1001", a YAML 1.1 "1_0e1001", or any of them under "!!float" -- was
-// read as the infinity and written as null, and "!!float 1e-1001" as 0.0.
-func pastRangeJSON(text string, typ token.Type) ([]byte, bool) {
-	if _, past := token.FloatPastRange(text, typ); !past {
+// JSON's number grammar is narrower than YAML's: no "+", no leading zero, a
+// digit on each side of a point, no "_". Rewriting the text keeps every digit
+// the document wrote. Read into a Go value first, a number was rounded to what
+// one holds -- "+0.12345678901234567890123" came out as 0.12345678901234568 --
+// and respelled -- ".5e10" as 5e+09 -- and one past 1e±1000, which the decoder
+// reads as an infinity or zero, was written as null or 0.0. YAML 1.1's base-60
+// floats and its octal, hex and binary integers still go through their value.
+func decimalJSON(text string, typ token.Type) ([]byte, bool) {
+	if typ != token.FloatType && typ != token.IntegerType {
 		return nil, false
 	}
 	spelled, ok := jsonNumberText(text)

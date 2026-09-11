@@ -154,11 +154,12 @@ func TestTheTwoReadersAgreeOnATaggedNumber(t *testing.T) {
 	}
 
 	// A number no float64 holds keeps its magnitude in JSON, which writes the
-	// digits and has no float64 to overflow.
+	// digits and has no float64 to overflow -- the digits the document wrote,
+	// where reading them into a *big.Float first respelled them as 1e+400.
 	t.Run("and a number past float64 keeps its magnitude", func(t *testing.T) {
 		got, err := codec.ToJSON([]byte("k: !!float 1e400\n"))
 		require.NoError(t, err)
-		assert.Equal(t, `{"k":1e+400}`, strings.TrimSpace(string(got)))
+		assert.Equal(t, `{"k":1e400}`, strings.TrimSpace(string(got)))
 	})
 }
 
