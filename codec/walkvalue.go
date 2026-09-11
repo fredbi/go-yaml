@@ -83,6 +83,10 @@ type buildFrame struct {
 	keyIsString bool
 	hasKey      bool
 	merging     bool
+	// broughtTime says a "<<" brought in a time.Time key. An own key at the
+	// same instant then takes that entry's place, since a Go map holds one
+	// instant written in two zones as two keys.
+	broughtTime bool
 	// keyErr is a key this destination cannot hold, kept until the mapping
 	// closes. The parser hangs a mapping's repeated keys on it as it closes, so
 	// reporting an unusable key where it is met would speak over a repeat --
@@ -412,7 +416,15 @@ func (f *buildFrame) put(value any) {
 	if f.anyKeyed == nil {
 		f.widen()
 	}
-	f.anyKeyed[f.mapKey()] = value
+	key := f.mapKey()
+	if f.broughtTime {
+		// The mapping's own key replaces what a "<<" brought in under it, and
+		// for a timestamp that means the same instant in any zone.
+		if held, found := instantKeyIn(f.anyKeyed, key); found {
+			delete(f.anyKeyed, held)
+		}
+	}
+	f.anyKeyed[key] = value
 }
 
 // mapKey is the key a widened mapping is written under: the arena's copy of the
@@ -452,7 +464,10 @@ func (f *buildFrame) value() any {
 // before bringing one in.
 func (f *buildFrame) holds(key any) bool {
 	if f.anyKeyed != nil {
-		_, held := f.anyKeyed[key]
+		if _, held := f.anyKeyed[key]; held {
+			return true
+		}
+		_, held := instantKeyIn(f.anyKeyed, key)
 
 		return held
 	}
@@ -474,6 +489,9 @@ func (f *buildFrame) bring(key any, value any) {
 	}
 	if f.anyKeyed == nil {
 		f.widen()
+	}
+	if isTimeKey(key) {
+		f.broughtTime = true
 	}
 	f.anyKeyed[key] = value
 }

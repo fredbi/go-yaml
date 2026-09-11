@@ -397,9 +397,16 @@ func newKeyedMap(size int) *keyedMap {
 }
 
 // holds reports whether the mapping already writes key.
+//
+// A mapping's own entries are written before the ones it merges, so this is
+// where an own key beats a merged one. A timestamp key stands for its instant
+// in any zone, which a Go map lookup does not find.
 func (k *keyedMap) holds(key any) bool {
 	if k.byKey != nil {
-		_, stands := k.byKey[key]
+		if _, stands := k.byKey[key]; stands {
+			return true
+		}
+		_, stands := instantKeyIn(k.byKey, key)
 
 		return stands
 	}
@@ -644,12 +651,47 @@ func mergeEntry(node ast.Node) bool {
 // Only a key mapKeyNodeToValue judged hashable reaches this as a value, so ==
 // on the interfaces cannot panic -- the guard is there for a MapSlice a caller
 // built by hand.
+//
+// Two time.Time keys are one key when they name the same instant, whatever
+// zone each was written in: the parser refuses a mapping that writes one
+// instant twice, and a merge or MapSlice.Set has to agree with it.
 func sameMapKey(a, b any) bool {
+	if at, isTime := a.(time.Time); isTime {
+		bt, isTime := b.(time.Time)
+
+		return isTime && at.Equal(bt)
+	}
 	if !hashableKey(a) || !hashableKey(b) {
 		return reflect.DeepEqual(a, b)
 	}
 
 	return a == b
+}
+
+// isTimeKey reports whether a decoded key is a timestamp.
+func isTimeKey(key any) bool {
+	_, isTime := key.(time.Time)
+
+	return isTime
+}
+
+// instantKeyIn returns the time.Time key of m that names the instant key does,
+// and whether m holds one. It finds nothing for a key that is not a timestamp.
+//
+// A scan, and only on a merge: a Go map keys a time.Time by its zone as well as
+// its instant, and 3.2.1.3 compares a timestamp by its canonical form in UTC.
+func instantKeyIn(m map[any]any, key any) (any, bool) {
+	t, isTime := key.(time.Time)
+	if !isTime {
+		return nil, false
+	}
+	for held := range m {
+		if other, isTime := held.(time.Time); isTime && other.Equal(t) {
+			return held, true
+		}
+	}
+
+	return nil, false
 }
 
 func (d *Decoder) setPathToCommentMap(node ast.Node) {

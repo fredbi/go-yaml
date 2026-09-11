@@ -95,6 +95,43 @@ func TestATimestampKeyIsItsInstant(t *testing.T) {
 		}
 	})
 
+	t.Run("an own key beats a merged key at the same instant", func(t *testing.T) {
+		t.Parallel()
+
+		// A "<<" skips the duplicate check, and a Go map holds one instant in
+		// two zones as two keys, so the override compares instants itself.
+		for _, pair := range [][2]string{
+			{"2001-12-14t21:59:43.10-05:00", "2001-12-15 02:59:43.10"},
+			{"2001-12-15T02:59:43.1+00:00", "2001-12-15T02:59:43.1Z"},
+			{"2001-12-14", "2001-12-14 00:00:00"},
+		} {
+			own := "b:\n  ? !!timestamp " + pair[1] + "\n  : own\n"
+			for _, src := range []string{
+				// The "<<" first, then the own key: the walk writes the merged
+				// entry and the own key has to take its place.
+				"%YAML 1.1\n---\na: &m\n  ? !!timestamp " + pair[0] + "\n  : merged\n" +
+					"b:\n  <<: *m\n  ? !!timestamp " + pair[1] + "\n  : own\n",
+				// The own key first.
+				"%YAML 1.1\n---\na: &m\n  ? !!timestamp " + pair[0] + "\n  : merged\n" +
+					own + "  <<: *m\n",
+			} {
+				var asAny map[string]any
+				require.NoErrorf(t, codec.Unmarshal([]byte(src), &asAny), "%q", src)
+				b, isMap := asAny["b"].(map[any]any)
+				require.Truef(t, isMap, "%q: b is %T", src, asAny["b"])
+				assert.Lenf(t, b, 1, "into an any: %q", src)
+				for _, value := range b {
+					assert.Equalf(t, "own", value, "into an any: %q", src)
+				}
+
+				var ordered map[string]codec.MapSlice
+				require.NoErrorf(t, codec.UnmarshalWithOptions([]byte(src), &ordered, codec.UseOrderedMap()), "%q", src)
+				require.Equalf(t, 1, ordered["b"].Len(), "into a MapSlice: %q", src)
+				assert.Equalf(t, "own", ordered["b"].At(0).Value, "into a MapSlice: %q", src)
+			}
+		}
+	})
+
 	t.Run("two instants are two keys", func(t *testing.T) {
 		t.Parallel()
 
