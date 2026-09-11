@@ -39,7 +39,7 @@ type keyEntry struct {
 }
 
 // anyKind stands in for the kind in the index ref that matches a key by name
-// alone. token.KeyKind runs from KeyOther to KeyTimestamp, so 255 is no key's type.
+// alone. token.KeyKind runs from KeyOther to KeyBinary, so 255 is no key's type.
 const anyKind = token.KeyKind(255)
 
 // Set finds a key a mapping has already used.

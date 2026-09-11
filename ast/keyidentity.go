@@ -172,7 +172,7 @@ func writeTaggedIdentity(b *strings.Builder, n *TagNode, depth int, anchors Anch
 	name, kind, tagged := TaggedKeyName(n)
 	if !tagged {
 		// A tag the schema does not resolve, or one naming a kind -- !!seq,
-		// !!map, !!binary. What it tags is what it is.
+		// !!map. What it tags is what it is.
 		return writeKeyIdentity(b, n.Value, depth, anchors)
 	}
 	writeScalarIdentity(b, CanonicalKeyName(name, kind), kind)

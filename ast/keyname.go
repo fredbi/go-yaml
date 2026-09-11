@@ -96,8 +96,8 @@ func keyNameAt(n Node, depth int) (string, token.KeyKind) {
 // TaggedKeyName names a key from the tag standing on it, for the tags that name
 // one of the types a key is told apart by. It reports false where the tag names
 // no such type, and the caller then names [TagNode.Value] instead: a tag the
-// schema does not resolve, one naming a kind -- !!seq, !!map, !!binary -- or one
-// the application declared.
+// schema does not resolve, one naming a kind -- !!seq, !!map -- or one the
+// application declared.
 //
 // Three walks reach a tagged key and all three must agree, or one names a key
 // that another does not: [KeyName], [KeyIdentity], and the parser's duplicate
@@ -140,6 +140,11 @@ func TaggedKeyName(n *TagNode) (string, token.KeyKind, bool) {
 		}
 
 		return stamp.Format(time.RFC3339Nano), token.KeyTimestamp, true
+	case token.BinaryTag:
+		// A type of its own, so "!!binary AA==" and the string "AA==" are two
+		// keys. Read as its node, it was the string and the pair was refused
+		// as a repeat, while the decoder held a Base64 and a string apart.
+		return token.CanonicalBase64(res.Text), token.KeyBinary, true
 	default:
 		return "", token.KeyOther, false
 	}

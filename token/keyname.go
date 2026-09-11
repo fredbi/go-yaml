@@ -32,6 +32,10 @@ const (
 	// "2001-12-14T00:00:00Z" and the timestamp written "2001-12-14" stay two
 	// keys.
 	KeyTimestamp
+	// KeyBinary is a "!!binary", named by its canonical base64 text
+	// ([CanonicalBase64]). YAML tells binary data from a string, so "!!binary
+	// AA==" and the string "AA==" are two keys.
+	KeyBinary
 )
 
 func (k KeyKind) String() string {
@@ -48,6 +52,8 @@ func (k KeyKind) String() string {
 		return "float"
 	case KeyTimestamp:
 		return "timestamp"
+	case KeyBinary:
+		return "binary"
 	default:
 		return "other"
 	}
@@ -184,6 +190,27 @@ func KeyNameOfBigFloat(f *big.Float) string {
 	}
 
 	return withDecimalPoint(f.Text('g', -1))
+}
+
+// CanonicalBase64 returns base64 text with the spaces, tabs and line breaks
+// taken out, which RFC 2045 lets a writer put anywhere in it. Two "!!binary"
+// scalars are one value when their canonical texts are equal.
+func CanonicalBase64(text string) string {
+	if !strings.ContainsAny(text, " \t\r\n") {
+		return text
+	}
+
+	var out strings.Builder
+	out.Grow(len(text))
+	for i := range len(text) {
+		switch c := text[i]; c {
+		case ' ', '\t', '\r', '\n':
+		default:
+			out.WriteByte(c)
+		}
+	}
+
+	return out.String()
 }
 
 // withDecimalPoint appends ".0" to a number written without one, so that a

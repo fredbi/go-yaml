@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 
 	"github.com/go-openapi/go-yaml/ast"
+	"github.com/go-openapi/go-yaml/token"
 )
 
 // The interfaces a type implements to encode itself.
@@ -129,23 +129,9 @@ func (b Base64) String() string { return string(b) }
 
 // Canonical returns the text with the line breaks and spacing RFC 2045 permits
 // inside an encoded stream taken out, which is base64's canonical spelling.
-func (b Base64) Canonical() string {
-	if !strings.ContainsAny(string(b), " \t\r\n") {
-		return string(b)
-	}
-
-	var out strings.Builder
-	out.Grow(len(b))
-	for i := range len(b) {
-		switch c := b[i]; c {
-		case ' ', '\t', '\r', '\n':
-		default:
-			out.WriteByte(c)
-		}
-	}
-
-	return out.String()
-}
+// [token.CanonicalBase64] holds the rule, which the parser also names a
+// "!!binary" key by.
+func (b Base64) Canonical() string { return token.CanonicalBase64(string(b)) }
 
 // MarshalJSON writes the base64 text as a JSON string, in canonical form.
 //
