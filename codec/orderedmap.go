@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"iter"
 	"strconv"
+
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 )
 
 // MapItem is one entry of a [MapSlice] or a [MapSliceSeq].
@@ -73,7 +75,7 @@ func NewMapSlice(items ...MapItem) (MapSlice, error) {
 			return MapSlice{}, unusableKey(item.Key)
 		}
 		if i := m.index(item.Key); i >= 0 {
-			return MapSlice{}, fmt.Errorf("key %v is given twice: %w", item.Key, ErrDuplicateKey)
+			return MapSlice{}, fmt.Errorf("key %v is given twice: %w", item.Key, yamlerrors.ErrDuplicateKey)
 		}
 		m.items = append(m.items, item)
 	}

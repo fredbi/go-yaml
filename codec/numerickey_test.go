@@ -98,9 +98,9 @@ func TestANumberKeyIsOneKeyWhateverItsGoType(t *testing.T) {
 
 		// Both would write "1:" and "0.5:" twice, which is no YAML mapping.
 		_, err := codec.NewMapSlice(codec.MapItem{Key: 1, Value: "a"}, codec.MapItem{Key: uint64(1), Value: "b"})
-		require.ErrorIs(t, err, codec.ErrDuplicateKey)
+		require.ErrorIs(t, err, yamlerrors.ErrDuplicateKey)
 		_, err = codec.NewMapSlice(codec.MapItem{Key: float32(0.5), Value: "a"}, codec.MapItem{Key: 0.5, Value: "b"})
-		require.ErrorIs(t, err, codec.ErrDuplicateKey)
+		require.ErrorIs(t, err, yamlerrors.ErrDuplicateKey)
 
 		// An integer and a float are two keys, as "1" and "1.0" are.
 		m, err := codec.NewMapSlice(codec.MapItem{Key: 1, Value: "a"}, codec.MapItem{Key: 1.0, Value: "b"})

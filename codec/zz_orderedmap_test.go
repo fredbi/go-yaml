@@ -10,6 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 )
 
 // mapSliceOf builds a MapSlice from entries a test knows are good.
@@ -58,7 +59,7 @@ func TestAMapSliceHoldsOneEntryPerKey(t *testing.T) {
 	t.Run("NewMapSlice reports one key given twice", func(t *testing.T) {
 		_, err := codec.NewMapSlice(item("a", 1), item("a", 2))
 
-		require.ErrorIs(t, err, codec.ErrDuplicateKey)
+		require.ErrorIs(t, err, yamlerrors.ErrDuplicateKey)
 	})
 
 	t.Run("Get reads a key back, and an unhashable one is absent", func(t *testing.T) {
