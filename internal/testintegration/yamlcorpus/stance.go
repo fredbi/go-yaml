@@ -246,6 +246,15 @@ type Departure struct {
 // documents every implementation reads today. That is deliberate: there is no
 // legitimate document that writes both, and a caller who has one reaches for
 // the option.
+//
+// The decoder and codec.ToJSON each answer within their own target, and a
+// difference that follows from the target is expected, not a defect (Fred's
+// ruling of 2026-09-11). ToJSON writes what JSON can say and the decoder builds
+// what Go's types can hold. So the decoder keeps "1: a" beside "\"1\": b" as two
+// keys, uint64(1) and "1", and ToJSON, naming every key by a string, rejects the
+// document with `two keys write the JSON member "1"`; an "!!omap" holding both
+// goes the same way. In the other direction, "a: 1e1001" decodes to +Inf and
+// ToJSON writes the number as it is spelled, which JSON can hold.
 
 // Departures is what the anchor patterns found, on first contact.
 //
