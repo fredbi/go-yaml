@@ -658,6 +658,10 @@ func (r *Renderer) value(n Node, keyCommented bool) rendered {
 		// is a value like any other and indents under its key.
 		return join(sepNone, leaf("\n"), text)
 	}
+	if statesWidth(n) {
+		// The header opens a line of its own, one level in from the key.
+		text = r.lifted(n, r.indent)
+	}
 
 	return join(sepNone, leaf("\n"), text.indentedBy(r.indent))
 }
@@ -668,7 +672,7 @@ func (r *Renderer) value(n Node, keyCommented bool) rendered {
 // A block sequence sits at its key's own indentation unless asked otherwise,
 // which is the one shape that does not take the extra level.
 func (r *Renderer) below(n Node) rendered {
-	text := r.render(n)
+	text := r.lifted(n, r.indent)
 	if sequence, ok := r.deref(n).(*SequenceNode); ok && !r.flowsInline(sequence.IsFlowStyle) && !r.indentSequence {
 		return join(sepNone, leaf("\n"), text)
 	}
@@ -959,20 +963,22 @@ func (r *Renderer) withOwnComment(comment *CommentGroupNode, text string) string
 // own is the comment withOwnComment will put back at the end of the marker's
 // line, which decides whether the value may share that line.
 func (r *Renderer) prefixed(marker string, value Node, own *CommentGroupNode) string {
-	return r.prefixedAt(marker, value, own, false)
+	return r.prefixedAt(marker, value, own, 0)
 }
 
-func (r *Renderer) prefixedAt(marker string, value Node, own *CommentGroupNode, atDocumentRoot bool) string {
+// prefixedAt is [Renderer.prefixed] for a marker whose line starts lift
+// columns in from the node enclosing it. See [Renderer.lifted].
+func (r *Renderer) prefixedAt(marker string, value Node, own *CommentGroupNode, lift int) string {
 	if value == nil {
 		return marker
 	}
 
 	text := r.String(value)
-	if atDocumentRoot {
+	if lift > 0 {
 		// A marker does not enclose what it names: "&a |2" is still the
-		// document's own node, and the width its header states is counted from
-		// the same place.
-		text = r.documentBody(value).string()
+		// enclosing node's child, and the width its header states is counted
+		// from the same place.
+		text = r.lifted(value, lift).string()
 	}
 	if text == "" {
 		return marker
@@ -995,6 +1001,10 @@ func (r *Renderer) prefixedAt(marker string, value Node, own *CommentGroupNode, 
 		// A comment runs to the end of its line, so either way the next read
 		// takes the two for one. A property may stand on its own line with its
 		// node underneath.
+		if statesWidth(value) {
+			text = r.lifted(value, lift+r.indent).string()
+		}
+
 		return marker + "\n" + r.indented(text)
 	}
 
@@ -1024,20 +1034,31 @@ func (r *Renderer) startsBlock(n Node) bool {
 
 // documentBody renders what a document holds.
 //
-// It differs from String in one respect, and only for a block scalar that
-// states its own indentation. That width is counted from the indentation of
-// whatever encloses the scalar, and a document encloses nothing: the spec gives
-// its node an indentation of -1, so content written one column in is stated as
-// two. Everywhere else the enclosing level is the start of the header's own
-// line and the two numbers agree.
-//
-// A property may stand between the document and the scalar -- "&a |2" is a
-// document whose node is an anchored block scalar -- so those are unwrapped
-// rather than handed to String.
+// A document encloses nothing: the spec gives its node an indentation of -1,
+// so a block scalar written one column in states a width of two. See
+// [Renderer.lifted].
 func (r *Renderer) documentBody(n Node) rendered {
+	return r.lifted(n, 1)
+}
+
+// lifted renders n with the start of its line lift columns in from the
+// indentation of the node enclosing it.
+//
+// It differs from render in one respect, and only for a block scalar that
+// states its own indentation. That width is counted from the indentation of
+// the enclosing node, not from the line the header stands on. The two agree
+// for "k: |2", where the header shares its key's line. They differ at the
+// document root, which is lifted by one, and for a header written on a line
+// below its key: "k: # c" over "  |2-" counts from the mapping in column 0, so
+// the content written four columns in states four.
+//
+// A property may stand between the enclosing node and the scalar -- "&a |2"
+// is still the node its header counts from -- so those are unwrapped rather
+// than handed to render.
+func (r *Renderer) lifted(n Node, lift int) rendered {
 	switch node := n.(type) {
 	case *LiteralNode:
-		return r.withHeadComment(n, leaf(r.literalAt(node, true)))
+		return r.withHeadComment(n, leaf(r.literalAt(node, lift)))
 	case *AnchorNode:
 		// The name without its comment, as Renderer.anchor does and for the
 		// same reason.
@@ -1045,21 +1066,45 @@ func (r *Renderer) documentBody(n Node) rendered {
 
 		return r.withHeadComment(n,
 			leaf(r.withOwnComment(own,
-				r.prefixedAt("&"+r.bare().String(node.Name), node.Value, own, true))))
+				r.prefixedAt("&"+r.bare().String(node.Name), node.Value, own, lift))))
 	case *TagNode:
+		if node.Implicit {
+			// No tag to write back, as in Renderer.tag.
+			return r.withHeadComment(n, leaf(r.withOwnComment(node.Comment, r.lifted(node.Value, lift).string())))
+		}
+
 		return r.withHeadComment(n,
-			leaf(r.withOwnComment(node.Comment, r.prefixedAt(node.Start.Value, node.Value, node.Comment, true))))
+			leaf(r.withOwnComment(node.Comment, r.prefixedAt(node.Start.Value, node.Value, node.Comment, lift))))
 	default:
 		// render wraps it already.
 		return r.render(n)
 	}
 }
 
-func (r *Renderer) literal(n *LiteralNode) string {
-	return r.literalAt(n, false)
+// statesWidth reports whether n is a block scalar whose header states its
+// indentation, looking through the properties in front of it.
+func statesWidth(n Node) bool {
+	for range maxPropertyDepth {
+		switch node := n.(type) {
+		case *LiteralNode:
+			return statedIndent(node.Start.Value) > 0
+		case *AnchorNode:
+			n = node.Value
+		case *TagNode:
+			n = node.Value
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
-func (r *Renderer) literalAt(n *LiteralNode, atDocumentRoot bool) string {
+func (r *Renderer) literal(n *LiteralNode) string {
+	return r.literalAt(n, 0)
+}
+
+func (r *Renderer) literalAt(n *LiteralNode, lift int) string {
 	header := n.Start.Value
 
 	// The content is written at the renderer's own width, so a header that
@@ -1067,11 +1112,7 @@ func (r *Renderer) literalAt(n *LiteralNode, atDocumentRoot bool) string {
 	// describing a layout that is no longer there, and the value gained a
 	// column on every cycle.
 	if statedIndent(header) > 0 {
-		stated := r.indent
-		if atDocumentRoot {
-			stated++
-		}
-		header = restateIndent(header, stated)
+		header = restateIndent(header, r.indent+lift)
 	}
 
 	if r.comments && !n.Comment.Blank() {
