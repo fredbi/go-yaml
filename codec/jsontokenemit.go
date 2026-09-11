@@ -604,7 +604,7 @@ func (t *jsonTokener) emitOrderedMapTree(n *ast.TagNode, at token.Position) {
 		return
 	}
 	for _, entry := range seq.Values {
-		if one, isOne := t.throughWrappers(entry).(*ast.MappingNode); !isOne || len(one.Values) != 1 {
+		if one, isOne := t.throughWrappers(entry).(*ast.MappingNode); !isOne || distinctKeys(one) != 1 {
 			t.fail(notAnOrderedMap(n.Value))
 
 			return

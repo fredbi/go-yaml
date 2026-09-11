@@ -97,6 +97,13 @@ func allowedRepeatEntries(seq *ast.SequenceNode) []int {
 	return drop
 }
 
+// distinctKeys returns how many keys m holds, a repeat the parse recorded
+// counting once: "{a: 1, a: 2}" holds one key written twice, which is a repeat
+// and not a second entry.
+func distinctKeys(m *ast.MappingNode) int {
+	return len(m.Values) - len(m.Duplicates)
+}
+
 // orderedMapSequence returns the sequence an "!!omap" tag stands on, looking
 // through an anchor, and nil where the tag stands on something else.
 func orderedMapSequence(n ast.Node) *ast.SequenceNode {

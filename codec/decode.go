@@ -2199,6 +2199,14 @@ func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resol
 // every other load does. Where the parse allowed the repeat, the later entry's
 // value replaces the earlier one's, as it does in a mapping.
 func (d *Decoder) orderedMapOf(ctx context.Context, seq *ast.SequenceNode) (MapSliceSeq, error) {
+	// An entry's own repeat first, then a repeat across entries: the walk and
+	// the converters meet the first as the entry's mapping closes, and the
+	// second only as the "!!omap" closes.
+	for _, entry := range seq.Values {
+		if err := refuseDuplicateKeys(entryMapping(entry)); err != nil {
+			return MapSliceSeq{}, err
+		}
+	}
 	if err := refuseOrderedMapDuplicates(seq); err != nil {
 		return MapSliceSeq{}, err
 	}
@@ -2255,12 +2263,21 @@ func notAnOrderedMap(node ast.Node) error {
 }
 
 // entryMapping is the one entry an "!!omap" element holds, or nil where the
-// element is not a mapping holding exactly one.
+// element is not a mapping holding exactly one key.
+//
+// A mapping that writes its one key twice, "{a: 1, a: 2}", comes back whole:
+// it is one key and a repeat, which orderedMapOf refuses as a mapping's repeat
+// is refused and reads under AllowDuplicateMapKey with the last value standing,
+// as the walk does. Counting the entries instead refused it as the wrong shape,
+// where every other reader reported the repeat.
 func entryMapping(entry ast.Node) ast.Node {
 	switch n := entry.(type) {
 	case *ast.MappingNode:
-		if len(n.Values) != 1 {
+		if distinctKeys(n) != 1 {
 			return nil
+		}
+		if len(n.Values) != 1 {
+			return n
 		}
 
 		return n.Values[0]

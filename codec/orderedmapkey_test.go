@@ -31,6 +31,11 @@ func TestAnAllowedOrderedMapRepeatKeepsOneEntryOnEveryPath(t *testing.T) {
 		"m: &m {x: 2}\nk: !!omap [{x: 1}, *m]\n": {`{"m":{"x":2},"k":{"x":1}}`, `{"m":{"x":2},"k":{"x":2}}`},
 		// An alias to an anchored "!!omap", which the tokens read off the tree.
 		"a: &o !!omap [{x: 1}, {x: 2}]\nb: *o\n": {`{"a":{"x":1},"b":{"x":1}}`, `{"a":{"x":2},"b":{"x":2}}`},
+		// An entry that repeats its own key is one key written twice, and the
+		// tree read it as the wrong shape.
+		"k: !!omap [{a: 1, a: 2}]\n":           {`{"k":{"a":1}}`, `{"k":{"a":2}}`},
+		"k: !!omap [{a: 1, a: 2}, {b: 3}]\n":   {`{"k":{"a":1,"b":3}}`, `{"k":{"a":2,"b":3}}`},
+		"o: &o !!omap [{a: 1, a: 2}]\np: *o\n": {`{"o":{"a":1},"p":{"a":1}}`, `{"o":{"a":2},"p":{"a":2}}`},
 	} {
 		t.Run(src, func(t *testing.T) {
 			allow := parser.WithAllowDuplicateMapKey()
@@ -84,6 +89,8 @@ func TestAnOrderedMapKeyIsUniqueOnEveryPath(t *testing.T) {
 		"k: !!omap [{null: a}, {~: b}]\n":                  repeat,
 		"a: &m {x: 1}\nk: !!omap [{x: 2}, *m]\n":           repeat,
 		"k: &o !!omap [{a: 1}, {a: 2}]\n":                  repeat,
+		"k: !!omap [{a: 1, a: 2}]\n":                       repeat,
+		"k: !!omap [{b: 0}, {a: 1, a: 2}]\n":               repeat,
 		"k: !!omap &o [{a: 1}, {a: 2}]\n":                  repeat,
 		"k: !!omap &o [{a: 1}, {b: 2}]\n":                  kept,
 		"k: !!omap &o [{a: 1}, {b: 2}]\nl: *o\n":           kept,
