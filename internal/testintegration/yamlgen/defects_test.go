@@ -329,61 +329,6 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 	})
 }
 
-// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree pins the split.
-//
-// `<<:` with no value asks to merge null, which is not a mapping and so not a
-// merge at all. The two decode paths answer differently: the walk drops the
-// entry and hands back an empty mapping, the tree refuses the document with
-// "null was used where mapping is expected".
-//
-// Every document declares `%YAML 1.1`, since 8acf11b merges under that version
-// and no other. Without the directive there is no merge to fail: `<<:` is a key
-// named "<<" holding null and both paths agree, which
-// TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12 pins. Every other non-mapping
-// merge -- "<<: 1", "<<: x", "<<: [x]" -- is refused by both paths under 1.1,
-// which TestFixedAMergeKeyResolvesUnderYAML11 pins; null and a "-" inside a
-// flow sequence are the two shapes left over.
-//
-// Whichever answer is right, one document should not have two. yamlcorpus's
-// MergeShapes holds "a merge key with no alias at all" under TagMergeNonMapping
-// for the stance question of what merging a non-mapping means; this is the
-// narrower fault of the two paths disagreeing about it.
-func TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree(t *testing.T) {
-	// A second shape, and a narrower one: the two paths read the element
-	// differently rather than the merge. "<<: [{a: 1}, - {b: 2}]" merges both
-	// mappings on the walk and is refused by the tree as "sequence was used
-	// where mapping is expected", so the tree sees a sequence where the walk
-	// sees the mapping.
-	//
-	// Reached on 2026-09-07 by a mutation that put a "-" inside a merge
-	// sequence, once the corpus grew to 3,000 drawn documents.
-	t.Run("a '-' inside a flow merge sequence", func(t *testing.T) {
-		const src = "%YAML 1.1\n---\n<<: [{a: 1}, - {b: 2}]\n"
-
-		var walked any
-		require.NoError(t, codec.Unmarshal([]byte(src), &walked))
-		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2)}, walked,
-			"today: the walk merges both")
-
-		var typed map[string]any
-		err := codec.Unmarshal([]byte(src), &typed)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "sequence was used where mapping is expected")
-	})
-
-	for _, src := range []string{"<<:\n", "<<: null\n", "a:\n  <<:\n"} {
-		full := "%YAML 1.1\n---\n" + src
-
-		var walked any
-		assert.NoErrorf(t, codec.Unmarshal([]byte(full), &walked), "today: the walk reads it: %q", src)
-
-		var typed map[string]any
-		err := codec.Unmarshal([]byte(full), &typed)
-		require.Errorf(t, err, "today: the tree refuses it: %q", src)
-		assert.Contains(t, err.Error(), "null was used where mapping is expected")
-	}
-}
-
 // TestDefectACollectionKeyWrittenAloneInFlowIsRefused pins it.
 //
 // 7.4.2 lets a flow mapping entry be a key with no value, and lets that key be

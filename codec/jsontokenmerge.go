@@ -24,6 +24,13 @@ func (t *jsonTokener) collectMerge(node ast.Node, at parser.Step) bool {
 
 	switch n := node.(type) {
 	case *ast.SequenceNode:
+		if frame.mergeSeq >= 0 {
+			// A sequence inside the sequence of merge sources. "<<" takes
+			// mappings, and the entries of both were handed over as one.
+			t.failMerge(frame, yamlerrors.NewUnexpectedNodeType(n.Type(), ast.MappingType, n.GetToken()))
+
+			return false
+		}
 		// "<<: [*a, *b]" merges each in turn, earliest first, so the flag
 		// stands until the sequence closes.
 		frame.mergeSeq = at.Depth
@@ -62,10 +69,21 @@ func (t *jsonTokener) collectMerge(node ast.Node, at parser.Step) bool {
 
 		return true
 	default:
-		t.fail(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+		t.failMerge(frame, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
 
 		return false
 	}
+}
+
+// failMerge refuses what a "<<" names, or the key the mapping repeats where it
+// repeats one, as jsonWriter.failMerge does.
+func (t *jsonTokener) failMerge(frame *tokenMapFrame, err error) {
+	if frame.node != nil {
+		if repeat := refuseDuplicateKeys(frame.node); repeat != nil {
+			err = repeat
+		}
+	}
+	t.fail(err)
 }
 
 // collectRun runs write with everything it hands over going to a run of its

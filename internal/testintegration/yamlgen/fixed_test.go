@@ -2147,9 +2147,8 @@ func TestFixedAMergeKeyResolvesUnderYAML11(t *testing.T) {
 		// the walk and the tree point at different columns of the same
 		// document, so only the sentence is asserted.
 		//
-		// "<<:" with no value is missing from this list on purpose: the walk
-		// reads it and the tree refuses it, which is
-		// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree.
+		// "<<:" with no value is held on its own, with the message both paths
+		// give, by TestFixedMergingNullIsRefusedOnEveryPath.
 		for _, src := range []string{
 			"<<: 1\n",
 			"<<: x\n",
@@ -3277,4 +3276,62 @@ func TestFixedATabBesideTheMergeKeyMerges(t *testing.T) {
 			assert.Equalf(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got, "%q", src)
 		}
 	})
+}
+
+// TestFixedMergingNullIsRefusedOnEveryPath holds the two decode paths to one
+// answer.
+//
+// `<<:` with no value asks to merge null, which is not a mapping and so not a
+// merge at all. The two decode paths answered differently: the walk dropped the
+// entry and handed back an empty mapping, the tree refused the document with
+// "null was used where mapping is expected". The walk now refuses it too.
+//
+// Every document declares `%YAML 1.1`, since 8acf11b merges under that version
+// and no other. Without the directive there is no merge to fail: `<<:` is a key
+// named "<<" holding null and both paths agree, which
+// TestFixedAMergeKeyIsAnOrdinaryKeyUnderYAML12 pins. Every other non-mapping
+// merge -- "<<: 1", "<<: x", "<<: [x]" -- is refused by both paths under 1.1,
+// which TestFixedAMergeKeyResolvesUnderYAML11 pins; null and a "-" inside a
+// flow sequence were the two shapes left over.
+//
+// yamlcorpus's MergeShapes holds "a merge key with no alias at all" under
+// TagMergeNonMapping for the stance question of what merging a non-mapping
+// means; this is the narrower fault of the two paths disagreeing about it.
+// codec.TestAMergeTakesOnlyMappingsOnEveryPath holds ToJSON and the tokens to
+// the same answer.
+func TestFixedMergingNullIsRefusedOnEveryPath(t *testing.T) {
+	// A second shape, and a narrower one: the two paths read the element
+	// differently rather than the merge. "<<: [{a: 1}, - {b: 2}]" merged both
+	// mappings on the walk and was refused by the tree as "sequence was used
+	// where mapping is expected". Both refuse it now.
+	//
+	// Reached on 2026-09-07 by a mutation that put a "-" inside a merge
+	// sequence, once the corpus grew to 3,000 drawn documents.
+	t.Run("a '-' inside a flow merge sequence", func(t *testing.T) {
+		const src = "%YAML 1.1\n---\n<<: [{a: 1}, - {b: 2}]\n"
+
+		var walked any
+		err := codec.Unmarshal([]byte(src), &walked)
+		require.Error(t, err, "the walk refuses it")
+		assert.Contains(t, err.Error(), "sequence was used where mapping is expected")
+
+		var typed map[string]any
+		err = codec.Unmarshal([]byte(src), &typed)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "sequence was used where mapping is expected")
+	})
+
+	for _, src := range []string{"<<:\n", "<<: null\n", "a:\n  <<:\n"} {
+		full := "%YAML 1.1\n---\n" + src
+
+		var walked any
+		err := codec.Unmarshal([]byte(full), &walked)
+		require.Errorf(t, err, "the walk refuses it: %q", src)
+		assert.Contains(t, err.Error(), "null was used where mapping is expected")
+
+		var typed map[string]any
+		err = codec.Unmarshal([]byte(full), &typed)
+		require.Errorf(t, err, "the tree refuses it: %q", src)
+		assert.Contains(t, err.Error(), "null was used where mapping is expected")
+	}
 }

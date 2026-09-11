@@ -95,6 +95,10 @@ type buildFrame struct {
 
 	// sequence
 	seq []any
+	// mergeSource says the sequence is the value of a "<<", so every element
+	// has to be a mapping. Each is checked as it arrives, where its node is to
+	// hand for the complaint to point at.
+	mergeSource bool
 
 	// property
 	node     ast.Node
@@ -133,7 +137,7 @@ func (b *valueBuilder) Enter(node ast.Node, at parser.Step) bool {
 		// An empty sequence is an empty slice and not a nil one, which is what
 		// the tree-walking decoder gives and what a caller comparing against
 		// "[]any{}" expects.
-		b.stack = append(b.stack, buildFrame{kind: frameSequence, at: at, seq: []any{}})
+		b.stack = append(b.stack, buildFrame{kind: frameSequence, at: at, seq: []any{}, mergeSource: b.mergingValue(at)})
 	case *ast.AnchorNode:
 		b.open = append(b.open, anchorName(n.Name))
 		b.stack = append(b.stack, buildFrame{kind: frameProperty, at: at, node: node})
@@ -391,6 +395,15 @@ func (b *valueBuilder) deliver(v any, node ast.Node, at parser.Step) {
 
 			return
 		case frameSequence:
+			if top.mergeSource && !isMapValue(v) {
+				// "<<" takes a mapping or a sequence of them, and nothing else:
+				// not a null, and not a sequence inside the sequence. mergingValue
+				// set the flag only on a sequence the merging mapping holds, so
+				// that mapping stands just below it.
+				b.stack[n-2].refuseMerge(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+
+				return
+			}
 			top.seq = append(top.seq, v)
 
 			return
@@ -529,12 +542,46 @@ func (b *valueBuilder) merge(top *buildFrame, v any, node ast.Node) {
 		}
 	case []any:
 		for _, one := range t {
+			if !isMapValue(one) {
+				// Reached through an anchor or an alias, where the element's own
+				// node is not to hand; a sequence written in place was checked
+				// element by element as it was built.
+				top.refuseMerge(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+
+				return
+			}
 			b.merge(top, one, node)
 		}
-	case nil:
 	default:
-		// "<<" takes a mapping or a sequence of them, and nothing else.
-		b.fail(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+		// "<<" takes a mapping or a sequence of them, and nothing else. A null
+		// is no mapping: "<<:" with no value is refused, as the tree refuses it.
+		top.refuseMerge(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+	}
+}
+
+// refuseMerge keeps err on the mapping a "<<" stands in, for its close to
+// report after the repeats the parse recorded. "{<<: {x: 1}, <<: }" repeats a
+// key before it merges a null, and the tree reports the repeat.
+func (f *buildFrame) refuseMerge(err error) {
+	if f.keyErr == nil {
+		f.keyErr = err
+	}
+}
+
+// mergingValue reports whether the node entering at at is the value of a "<<".
+func (b *valueBuilder) mergingValue(at parser.Step) bool {
+	n := len(b.stack)
+
+	return n > 0 && b.stack[n-1].kind == frameMapping && b.stack[n-1].merging && !at.Key
+}
+
+// isMapValue reports whether v is a mapping the walk built.
+func isMapValue(v any) bool {
+	switch v.(type) {
+	case map[string]any, map[any]any:
+		return true
+	default:
+		return false
 	}
 }
 

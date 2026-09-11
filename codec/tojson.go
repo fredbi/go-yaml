@@ -831,6 +831,13 @@ func (w *jsonWriter) collectMerge(node ast.Node, at parser.Step) bool {
 
 	switch n := node.(type) {
 	case *ast.SequenceNode:
+		if frame.mergeSeq >= 0 {
+			// A sequence inside the sequence of merge sources. "<<" takes
+			// mappings, and this wrote "{]" for "<<: [{a: 1}, [{b: 2}]]".
+			w.failMerge(frame, yamlerrors.NewUnexpectedNodeType(n.Type(), ast.MappingType, n.GetToken()))
+
+			return false
+		}
 		frame.mergeSeq = at.Depth
 
 		return true
@@ -846,7 +853,7 @@ func (w *jsonWriter) collectMerge(node ast.Node, at parser.Step) bool {
 			// "<<" takes a mapping, or a sequence of them. An anchor naming a
 			// scalar or a sequence brings in no entries and is refused, as it
 			// is when the document is read into Go values.
-			w.fail(yamlerrors.NewUnexpectedNodeType(n.Type(), ast.MappingType, n.GetToken()))
+			w.failMerge(frame, yamlerrors.NewUnexpectedNodeType(n.Type(), ast.MappingType, n.GetToken()))
 
 			return false
 		}
@@ -880,10 +887,23 @@ func (w *jsonWriter) collectMerge(node ast.Node, at parser.Step) bool {
 
 		return true
 	default:
-		w.fail(yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
+		w.failMerge(frame, yamlerrors.NewUnexpectedNodeType(node.Type(), ast.MappingType, node.GetToken()))
 
 		return false
 	}
+}
+
+// failMerge refuses what a "<<" names, or the key the mapping repeats where it
+// repeats one. The parse records a repeat as it reads the key, before the value
+// is handed over, and the tree reports it first: "{<<: {x: 1}, <<: 1}" repeats
+// "<<" before it merges an integer.
+func (w *jsonWriter) failMerge(frame *mapFrame, err error) {
+	if frame.node != nil {
+		if repeat := refuseDuplicateKeys(frame.node); repeat != nil {
+			err = repeat
+		}
+	}
+	w.fail(err)
 }
 
 // closeMapping writes what the mapping's "<<" entries bring in, and closes it.

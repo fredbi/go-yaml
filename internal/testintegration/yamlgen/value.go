@@ -1214,11 +1214,10 @@ func (a *aliaser) mappings() []Anchored {
 	for _, anchored := range a.pool {
 		// Non-empty, and that is not fussiness. An empty mapping writes nothing
 		// at all in block context, so "<<: *a" pointing at one comes out as
-		// "<<:" with no value -- a merge of null, which is not a merge. It is
-		// also a shape the two decode paths disagree about, held by
-		// TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree, so drawing
-		// it here would put a document in the corpus whose meaning this package
-		// cannot state.
+		// "<<:" with no value -- a merge of null, which is not a merge, and
+		// every path refuses it (TestFixedMergingNullIsRefusedOnEveryPath).
+		// Drawing it here would put a document in the corpus that has no
+		// value to state.
 		if m, isMap := anchored.V.(Map); isMap && len(m.Pairs) > 0 {
 			out = append(out, anchored)
 		}
