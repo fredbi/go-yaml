@@ -316,11 +316,9 @@ func isOriginSpace(c byte) bool { return c == ' ' || c == '\t' }
 // is admitted. Anything else in front is not: a space or a tab puts the mark
 // inside a line, where nb-char excludes it.
 //
-// Scanner.column does not answer this. A space advances it through
-// progressColumn and a tab does not -- the tab branch of the scan loop calls
-// progress, which moves the cursor and leaves the column alone -- so "\t\ufeff"
-// left the column at 1 and " \ufeff" did not, and only the space was refused.
-// Reading the source asks the question the production asks.
+// Reading the source asks the question the production asks: whether anything
+// but byte order marks stands between the line break and the cursor. The
+// column counts the characters in front and says nothing about what they are.
 func (c *Context) opensADocumentPrefix() bool {
 	at := c.idx
 	for at > 0 && !isNewLineChar(rune(c.src[at-1])) {

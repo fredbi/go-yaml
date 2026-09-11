@@ -94,7 +94,11 @@ func TestTheWalkHandsOverTheSameTree(t *testing.T) {
 }
 
 // fixedWalkDigest is the expected digest of a walk over the YAML Test Suite and the synthetic corpus.
-const fixedWalkDigest = "cbc3e1fec5d9852e7a5b1520f80e08e5357fc2ab052b40a69c5d4ac42011eb23"
+//
+// Re-baselined on 2026-09-11 when a tab began to move the column: the positions changed in 925 of the 19,838
+// sources, 9 of them Test Suite documents, and every one of the 925 holds a tab. No source is accepted or refused
+// differently.
+const fixedWalkDigest = "5f5ed67653e8163a156ceb1d8a6bc43ed2417016b688c0003110a7569d5f9854"
 
 // digestVisitor writes each node it is handed, so a node the walk reads from a reused cell changes the digest.
 type digestVisitor struct {

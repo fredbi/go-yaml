@@ -138,7 +138,7 @@ func (s *Scanner) scanTab(ctx *Context, c rune) (bool, error) {
 		// A line holding only whitespace is a blank line however it is spelled, and indents nothing: it separates the entries
 		// around it and belongs to neither.
 		ctx.addOriginBuf(c)
-		s.progress(ctx, 1)
+		s.progressColumn(ctx, 1)
 
 		return true, nil
 	}

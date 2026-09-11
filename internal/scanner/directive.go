@@ -20,9 +20,9 @@ func (s *Scanner) scanDirective(ctx *Context) bool {
 		// c-directive opens a line and takes no separation in front of it, so a '%' standing anywhere else opens no
 		// directive.
 		//
-		// Both counters are needed, and neither catches what the other does. indentNum is 0 for the '%' in "a: %foo",
-		// which the column refuses. A tab raises indentNum without advancing the column, so "\t%YAML 1.2" passes the
-		// column test and indentNum refuses it.
+		// indentNum is 0 for the '%' in "a: %foo", which the column refuses. A space and a tab in front of the '%'
+		// each raise both counters, so the column refuses "\t%YAML 1.2" and "  %YAML 1.2" as well, and the indentNum
+		// test refuses nothing the column test lets through.
 		//
 		// scanDocumentStart and scanDocumentEnd guard "---" and "..." with the same pair.
 		return false

@@ -79,14 +79,16 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
 	//
-	// The /tab bucket is 100% by construction, and reading it as a count of anything else is a mistake made once
-	// already. updateIndent takes a tab in leading whitespace, sets indentHasTab and returns without counting it,
-	// because s-indent(n) is s-space x n and a tab is separation and not indentation. The main loop advances the column
-	// for it regardless, so from that tab to the end of the line indentNum lags column-1 and every following space
-	// trips the probe. 11 of 11, from 12 of 12 and 5 of 5 before that: yamlgen began drawing tab separators, so the
-	// corpus holds spaces standing after a tab and a regeneration moves how many. The number counts those and nothing
-	// else, and it always reads 100%. It would catch a tab starting to count as indentation, which breaks
-	// s-indent(n).
+	// The /tab bucket counts the spaces that follow a tab among a line's leading whitespace. updateIndent takes such
+	// a tab, sets indentHasTab and returns without counting it, because s-indent(n) is s-space x n and a tab is
+	// separation and not indentation.
+	//
+	// 4 of 11, from 11 of 11 on 2026-09-11, when a tab began to move the column. The scan loop's tab arm counts a
+	// tab opening a line in indentNum, and it left the column alone, so indentNum stood one ahead of column-1 on
+	// every such line: "\t # c1" read indentNum 1 at column 1. Moving the column puts the two back in step, and 7 of
+	// the 11 agree now. The 4 left stand inside a block scalar's content, "  \t bar" under ">" among them, where
+	// scanMultiLine moves the column over the tab and leaves indentNum alone. Before that the bucket read 100%
+	// throughout -- 11 of 11, 12 of 12, 5 of 5 -- and its comment had the direction of the gap the wrong way round.
 	//
 	// The /spaces bucket is the one worth watching, and it holds one cause: a quoted scalar spanning a line break.
 	// The quote scanners call progressLine, marking the next character as opening a line, then read the rest of the
@@ -95,7 +97,7 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// the corpus keeps growing faster than the cause, and the count has now fallen while the denominator rose by half.
 	// The denominator fell for the first time on 2026-09-10, by 186, and the corpus did not move: 16dd5be ends a plain
 	// scalar at a comment whatever its column, so fewer lines open inside one.
-	"indent.indentNum==column-1/tab":    {11, 11},
+	"indent.indentNum==column-1/tab":    {4, 11},
 	"indent.indentNum==column-1/spaces": {7, 29872},
 
 	// The indent level a token was given and the level the scanner stands at part company where a block opens, so the

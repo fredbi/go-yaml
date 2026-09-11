@@ -469,18 +469,17 @@ func (s *Scanner) scan(ctx *Context) error {
 			if (ctx.existsBuffer() && s.lastDelimColumn == 0) || s.lastDelimColumn < s.column {
 				s.indentNum++
 				ctx.addOriginBuf(c)
-				if s.isFirstCharAtLine || len(ctx.buf) == 0 {
-					s.progress(ctx, 1)
-
-					continue
+				if !s.isFirstCharAtLine && len(ctx.buf) > 0 {
+					// A tab that follows a plain scalar's text on the same line is content:
+					// nb-ns-plain-in-line is (s-white* ns-plain-char)*, and s-white is a space or a tab.
+					// It goes into the buffer, and bufferedSrc drops it again when no text follows.
+					ctx.addBuf(c)
 				}
 
-				// A tab that follows a plain scalar's text on the same line is content:
-				// nb-ns-plain-in-line is (s-white* ns-plain-char)*, and s-white is a space or a tab.
-				// It goes into the buffer and moves the column, as a space does,
-				// because bufferedToken finds where the scalar starts by counting the buffer back from the column.
-				// bufferedSrc drops it again when no text follows.
-				ctx.addBuf(c)
+				// The tab moves the column as any character does, wherever it stands.
+				// bufferedToken finds where a scalar starts by counting the buffer back from the column,
+				// and a column one short for every tab in front put each later token on the line one column early:
+				// "k:\tv" put the v at 1:3.
 				s.progressColumn(ctx, 1)
 
 				continue

@@ -16,6 +16,37 @@ import (
 	"github.com/go-openapi/go-yaml/token"
 )
 
+// TestATabMovesTheColumn checks that a tab counts one column, as a space does, wherever it stands.
+//
+// The tab arm of Scanner.scan stepped over a tab that opened a line or separated two tokens without moving the column,
+// so every token after it on the line stood one column early: "k:\tv" put the v at 1:3.
+func TestATabMovesTheColumn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		src    string
+		value  string
+		column int32
+	}{
+		{"k:\tv\n", "v", 4},
+		{"k: \tv\n", "v", 5},
+		{"k:\t\tv\n", "v", 5},
+		{"{\ta: 1}\n", "a", 3},
+		{"[a,\tb]\n", "b", 5},
+		{"- \t\"x\"\n", "x", 4},
+		{"&a\tv\n", "v", 4},
+		// A tab inside a scalar's text counted already, and still does.
+		{"a\tb: c\n", ":", 4},
+	} {
+		tokens, err := scanTokens(tc.src)
+		require.NoErrorf(t, err, "%q", tc.src)
+
+		i := slices.IndexFunc(tokens, func(tk token.Token) bool { return tk.Value == tc.value })
+		require.GreaterOrEqualf(t, i, 0, "no %q in %q", tc.value, tc.src)
+		assert.Equalf(t, tc.column, tokens[i].Position.Column, "%q in %q", tc.value, tc.src)
+	}
+}
+
 // TestBlockScalarPositionDoesNotDependOnWhatFollows holds the two paths that end a block scalar to the same position.
 //
 // A block ends either at the end of the source, through emitMultiLine, or at a dedent, through
