@@ -59,7 +59,7 @@ func poisonLeaves(cells []TapeToken) {
 }
 
 func poisonGroups(cells []TokenGroup) {
-	probe.Count("grouper.released", int64(len(cells)))
+	probe.Count("grouper.group.released", int64(len(cells)))
 	for i := range cells {
 		cells[i].Type = deadGroup
 	}
@@ -86,7 +86,7 @@ func (g *TokenGroup) checkLive(at string) {
 	if g == nil || g.Type != deadGroup {
 		return
 	}
-	probe.Check("grouper.live", false, func() string {
+	probe.Check("grouper.group.live", false, func() string {
 		var keyed int32
 		if g.a != nil {
 			keyed = g.a.seq
