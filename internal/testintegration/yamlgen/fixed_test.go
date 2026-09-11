@@ -3223,3 +3223,58 @@ func TestFixedAMergeKeyAloneInFlowIsRefused(t *testing.T) {
 			"the empty entry stands rather than being dropped")
 	})
 }
+
+// TestFixedATabBesideTheMergeKeyMerges: under "%YAML 1.1", a tab between "<<"
+// and its ':', or between the ':' and the value, separates them as a space does,
+// and the entry merges.
+//
+// 6.1 puts a tab in s-white and s-separate-in-line is s-white+, the rule
+// TestFixedATabSeparatesAsASpaceDoes holds for a node's properties.
+// cursor.isMergeKey accepted a space alone, so `<<:<TAB>{m: 1}` and
+// `<<<TAB>: {m: 1}` came back as a key named "<<". The layout renderer writes
+// the tab back as a space, so a rendering merged what the document did not.
+// go.yaml.in/yaml/v3 v3.0.5 merges every one of them.
+//
+// Found on 2026-09-08 by yamlcorpus's
+// TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading, once merge documents
+// carried a meaning under each reading. Pre-existing at the fork point.
+func TestFixedATabBesideTheMergeKeyMerges(t *testing.T) {
+	const base = "%YAML 1.1\n---\n"
+
+	t.Run("a tab merges as a space does, and so does the rendering", func(t *testing.T) {
+		for _, src := range []string{
+			base + "<<: {m: 1}\nk: 1\n",
+			base + "<<:  {m: 1}\nk: 1\n",
+			base + "<<:\t{m: 1}\nk: 1\n",
+			base + "{<<:\t{m: 1}, k: 1}\n",
+			base + "<<\t: {m: 1}\nk: 1\n",
+			base + "<<:\t\n  m: 1\nk: 1\n",
+		} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"m": uint64(1), "k": uint64(1)}, got, "%q", src)
+
+			file, err := parser.ParseBytes([]byte(src))
+			require.NoErrorf(t, err, "%q", src)
+			var rendered any
+			require.NoErrorf(t, codec.Unmarshal([]byte(file.String()), &rendered), "%q", file.String())
+			assert.Equalf(t, got, rendered, "%q renders as %q", src, file.String())
+		}
+	})
+
+	t.Run("an alias behind the tab", func(t *testing.T) {
+		const src = base + "b: &a {m: 1}\nd:\n  <<:\t*a\n  k: 1\n"
+
+		var got map[string]any
+		require.NoError(t, codec.Unmarshal([]byte(src), &got))
+		assert.Equal(t, map[string]any{"m": uint64(1), "k": uint64(1)}, got["d"])
+	})
+
+	t.Run("without the directive nothing merges, whatever separates the key", func(t *testing.T) {
+		for _, src := range []string{"<<: {m: 1}\nk: 1\n", "<<:\t{m: 1}\nk: 1\n", "<<\t: {m: 1}\nk: 1\n"} {
+			var got any
+			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
+			assert.Equalf(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got, "%q", src)
+		}
+	})
+}

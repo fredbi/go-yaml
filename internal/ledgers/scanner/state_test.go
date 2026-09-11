@@ -69,12 +69,12 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
 	// 2 of 2,738 re-baselined 2026-09-10 after 16dd5be, from 2 of 2,744 the same day, 2 of 2,743 and 2 of 2,742 on
 	// 2026-09-09 and 3 of 1,348 on 2026-09-07. The ratio has held at 0.07% across all four.
-	"buf.notSpaceCharPos==trimmed/plain": {0, 317633},
+	"buf.notSpaceCharPos==trimmed/plain": {0, 317736},
 	"buf.notSpaceCharPos==trimmed/block": {2, 2767},
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
-	"buf.notSpaceCharPos<=len(buf)": {0, 320400},
+	"buf.notSpaceCharPos<=len(buf)": {0, 320503},
 
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
@@ -146,15 +146,22 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// while plain-trimmed reads rise by 89. 5,403 of 158,781 -> 5,401 of 158,673, 3.4028% -> 3.4039%. Two
 	// disagreements fewer on a smaller denominator, which is a ratio holding rather than a scanner regressing.
 	//
+	// Re-baselined on 2026-09-11 with the fingerprint holding, for a "<<" separated from its ":" by a tab. The
+	// corpus holds 111 such keys, and they scan as a merge key now instead of a plain scalar. Scanner.scanMergeKey
+	// calls pos() for each, where bufferedToken worked the plain scalar's position out without it: indent levels
+	// 158,394 -> 158,505 and extents 48,513 -> 48,402, both by 111, with 103 more buffer reads. 17 of the 111
+	// disagree, so 5,385 -> 5,402 and 3.3997% -> 3.4081%, a move of 0.0084 points where the documented range is
+	// 0.75. The same keys written with a space took that path already.
+	//
 	// A count re-baselined without the ratio beside it says nothing about whether the scanner changed, which is why
 	// the ledger records the denominator.
-	"indent.lastIndentLevel==indentLevel": {5385, 158394},
+	"indent.lastIndentLevel==indentLevel": {5402, 158505},
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.
 	// This compares that extent against token.MeasureOrigin's, which token.Make used.
 	// Nothing may raise it: a disagreement is a token pointing at the wrong stretch of source.
-	"token.extentMatchesTheOrigin": {0, 48513},
+	"token.extentMatchesTheOrigin": {0, 48402},
 }
 
 // TestStateLedger holds the scanner's state pairs to what they were measured at.

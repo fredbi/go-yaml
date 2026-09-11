@@ -8,6 +8,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
+	"github.com/go-openapi/testify/v2/require"
+
 	"github.com/go-openapi/go-yaml/internal/scanner/internal/testscanner"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -19,6 +22,43 @@ func TestTokenizeBlockMappings(t *testing.T) {
 	t.Parallel()
 
 	runCases(t, blockMappingTestCases())
+}
+
+// TestAMergeKeyTakesATabAsSeparation checks that a tab around a merge key's ':' separates as a space does.
+//
+// s-separate-in-line is s-white+, and s-white is a space or a tab.
+// cursor.isMergeKey accepted a space alone, so "<<:\t{a: 1}" and "<<\t: {a: 1}" scanned "<<" as a plain string,
+// and the parser read an ordinary key where "<<: {a: 1}" merges.
+func TestAMergeKeyTakesATabAsSeparation(t *testing.T) {
+	t.Parallel()
+
+	isMergeKey := func(tk token.Token) bool { return tk.Type == token.MergeKeyType }
+
+	t.Run("a tab before or after the ':' leaves a merge key", func(t *testing.T) {
+		for _, src := range []string{
+			"<<: {a: 1}\n",
+			"<<:\t{a: 1}\n",
+			"<<\t: {a: 1}\n",
+			"<< \t : {a: 1}\n",
+			"<<\t:\t*a\n",
+			"<<:\t\n  a: 1\n",
+			"{<<:\t{a: 1}}\n",
+			"k:\n  <<\t: {a: 1}\n",
+			"- <<\t: {a: 1}\n",
+		} {
+			tokens, err := scanTokens(src)
+			require.NoErrorf(t, err, "%q", src)
+			assert.Truef(t, slices.ContainsFunc(tokens, isMergeKey), "%q", src)
+		}
+	})
+
+	t.Run("anything else after the '<<' leaves a plain scalar", func(t *testing.T) {
+		for _, src := range []string{"<<x: 1\n", "<<:x\n"} {
+			tokens, err := scanTokens(src)
+			require.NoErrorf(t, err, "%q", src)
+			assert.Falsef(t, slices.ContainsFunc(tokens, isMergeKey), "%q", src)
+		}
+	})
 }
 
 func blockMappingTestCases() iter.Seq[testscanner.Case] {

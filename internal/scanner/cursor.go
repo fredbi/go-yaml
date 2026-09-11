@@ -280,6 +280,10 @@ func (c *cursor) resetBuffer() {
 	c.originTrimmed = 0
 }
 
+// isMergeKey reports whether the cursor stands on a "<<" key:
+// "<<", any run of blanks, then a ':' followed by a blank or a line break.
+//
+// A blank is a space or a tab. s-separate-in-line is s-white+, and s-white admits both.
 func (c *cursor) isMergeKey() bool {
 	if c.repeatNum('<') != 2 {
 		return false
@@ -288,7 +292,7 @@ func (c *cursor) isMergeKey() bool {
 	size := int32(len(src))
 	for idx := c.idx + 2; idx < size; idx++ {
 		char := src[idx]
-		if char == ' ' {
+		if char == ' ' || char == '\t' {
 			continue
 		}
 		if char != ':' {
@@ -296,7 +300,7 @@ func (c *cursor) isMergeKey() bool {
 		}
 		if idx+1 < size {
 			nc := rune(src[idx+1])
-			if nc == ' ' || isNewLineChar(nc) {
+			if nc == ' ' || nc == '\t' || isNewLineChar(nc) {
 				return true
 			}
 		}

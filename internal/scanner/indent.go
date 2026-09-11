@@ -123,8 +123,19 @@ func (s *Scanner) indentHoldsATab() bool { return s.indentHasTab }
 // A flow collection admits a tab in either place, so callers ask this together
 // with [Scanner.isFlowMode]: "{\ta: 1}" is read by the grammar, by v3 and by
 // libfyaml.
+//
+// A merge key is cut as a token of its own before its ':' is read, so in
+// "<<\t: {a: 1}" the tab is all the second run holds. That tab separates the key
+// from its ':', as it does after the plain key "a\t: 1", and is not indentation.
 func (s *Scanner) tabStandsWhereAnEntryNeedsIndent(ctx *Context) bool {
-	return s.indentHoldsATab() || ctx.leadingBlanksHoldATab()
+	if s.indentHoldsATab() {
+		return true
+	}
+	if last := ctx.lastToken(); last != nil && last.Type == token.MergeKeyType {
+		return false
+	}
+
+	return ctx.leadingBlanksHoldATab()
 }
 
 func (s *Scanner) isChangedToIndentStateDown() bool {

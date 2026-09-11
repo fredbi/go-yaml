@@ -259,26 +259,6 @@ var Ledger = []Divergence{
 		Property: Decode | DecodeTyped | Render,
 		Match:    writesAMergeKeyTheLongWay,
 	},
-	{
-		Name: "decode/a-tab-beside-the-merge-key-suppresses-the-merge",
-		Pin:  "TestDefectATabBesideTheMergeKeySuppressesTheMerge",
-		Reason: "Under `%YAML 1.1`, a tab standing where a space would separate the `<<` from its `:`, or " +
-			"the `:` from the value, stops the entry merging: `<<:<TAB>{m: 1}` and `<<<TAB>: {m: 1}` " +
-			"both come back as a key named `<<`, where `<<: {m: 1}` and `<<:  {m: 1}` merge. Two " +
-			"spaces are fine, so it is the tab and not the width.\n\n" +
-			"6.1 puts a tab in s-white and s-separate-in-line is s-white+, which is the same rule " +
-			"a0182a6 fixed for a node's properties -- `a: !!str<TAB>x` was refused there. The merge key " +
-			"is the same distinction one indicator further on.\n\n" +
-			"Block and flow, an alias and a mapping written in place, all four the same. " +
-			"go.yaml.in/yaml/v3 v3.0.5 merges every one of them.\n\n" +
-			"⚠️ **Older than the version rule.** The tab suppressed the merge on master at 2abdd2f too, " +
-			"where every document merged; no property could see it, because a merge document stated no " +
-			"meaning at all until 8acf11b made the two readings answerable. Found on 2026-09-08, on the " +
-			"first run of TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading after merge documents " +
-			"began carrying a meaning under each reading.",
-		Property: Decode | DecodeTyped | Render,
-		Match:    writesATabBesideAMergeKey,
-	},
 }
 
 // writesAPropertiedKeyBeforeABlockScalar reports whether an entry writes a key
@@ -459,17 +439,6 @@ func holdsAMergeKey(v Value) bool {
 // merges without it and both spellings then agree.
 func writesAMergeKeyTheLongWay(v Value, st Style) bool {
 	return st.Version == Reading11Version && writesAnExplicitKey(v, st) && holdsAMergeKey(v)
-}
-
-// writesATabBesideAMergeKey reports whether a "<<" entry is written with a tab
-// separating it from its ":" or its value.
-//
-// Style.TabSeparation writes the tab for every indicator of the document, so a
-// merge key drawn under it always gets one; the version is the other half,
-// since nothing merges without a "%YAML 1.1" directive and there is then no
-// merge to suppress.
-func writesATabBesideAMergeKey(v Value, st Style) bool {
-	return st.Version == Reading11Version && st.TabSeparation && holdsAMergeKey(v)
 }
 
 // holdsACollectionKey reports whether a mapping's key is a collection anywhere

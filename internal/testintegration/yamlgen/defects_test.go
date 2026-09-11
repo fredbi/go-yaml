@@ -329,67 +329,6 @@ func TestDefectAMergeKeyWrittenTheLongWayDoesNotMerge(t *testing.T) {
 	})
 }
 
-// TestDefectATabBesideTheMergeKeySuppressesTheMerge pins the tab.
-//
-// 6.1 puts a tab in s-white and s-separate-in-line is s-white+, so a tab
-// separates an indicator from what follows it exactly as a space does. Beside
-// the merge key it does not: `<<:<TAB>{m: 1}` comes back as a key named "<<"
-// where `<<: {m: 1}` merges, and so does a tab written before the ":". Two
-// spaces merge, so the width is not what decides.
-//
-// The same distinction one indicator earlier is TestFixedATabSeparatesAsASpaceDoes,
-// which a0182a6 closed for an anchor, an alias and a tag shorthand. This is the
-// piece of that family nobody had looked at.
-//
-// Older than the version rule: the tab suppressed the merge on master at
-// 2abdd2f as well, where every document merged. Nothing could see it, because a
-// merge document stated no meaning until 8acf11b made each reading answerable.
-// Found on 2026-09-08 by yamlcorpus's
-// TestTheLibraryMeansWhatTheCorpusSaysUnderEachReading on its first run after
-// that.
-func TestDefectATabBesideTheMergeKeySuppressesTheMerge(t *testing.T) {
-	const base = "%YAML 1.1\n---\n"
-
-	t.Run("a space merges, and so do two", func(t *testing.T) {
-		for _, src := range []string{
-			base + "<<: {m: 1}\nk: 1\n",
-			base + "<<:  {m: 1}\nk: 1\n",
-			base + "<<:\n  m: 1\nk: 1\n",
-		} {
-			var got any
-			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, map[string]any{"m": uint64(1), "k": uint64(1)}, got, "%q", src)
-		}
-	})
-
-	t.Run("today a tab does not", func(t *testing.T) {
-		for _, src := range []string{
-			// After the ":", in block and in flow.
-			base + "<<:\t{m: 1}\nk: 1\n",
-			base + "{<<:\t{m: 1}, k: 1}\n",
-			// Before the ":".
-			base + "<<\t: {m: 1}\nk: 1\n",
-			// And with the value on the lines below, which is the shape the
-			// corpus drew.
-			base + "<<:\t\n  m: 1\nk: 1\n",
-		} {
-			var got any
-			require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "%q", src)
-			assert.Equalf(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got,
-				"today: the tab leaves an ordinary key named \"<<\": %q", src)
-		}
-	})
-
-	t.Run("an alias behind the tab is no different", func(t *testing.T) {
-		const src = base + "b: &a {m: 1}\nd:\n  <<:\t*a\n  k: 1\n"
-
-		var got map[string]any
-		require.NoError(t, codec.Unmarshal([]byte(src), &got))
-		assert.Equal(t, map[string]any{"<<": map[string]any{"m": uint64(1)}, "k": uint64(1)}, got["d"],
-			"today: the alias resolves and the merge does not happen")
-	})
-}
-
 // TestDefectMergingNullIsReadByTheWalkAndRefusedByTheTree pins the split.
 //
 // `<<:` with no value asks to merge null, which is not a mapping and so not a
