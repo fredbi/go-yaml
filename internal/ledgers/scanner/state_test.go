@@ -42,7 +42,7 @@ type disagreement struct {
 // TestStateLedger checks this before it compares anything, so a regenerated corpus fails saying to re-baseline
 // instead of accusing the scanner. It earned that on 2026-09-10: 014db89 regenerated the corpus for two 1.1
 // number spellings, seven counts moved at once, and the check named the corpus instead of the scanner.
-const corpusFingerprint = "0e37598a5b9d1f8e"
+const corpusFingerprint = "3318075c314e70a4"
 
 // stateLedger records how often two pieces of the scanner's state that look like the same number disagree, over the
 // fuzz corpus.
@@ -69,12 +69,12 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
 	// 2 of 2,738 re-baselined 2026-09-10 after 16dd5be, from 2 of 2,744 the same day, 2 of 2,743 and 2 of 2,742 on
 	// 2026-09-09 and 3 of 1,348 on 2026-09-07. The ratio has held at 0.07% across all four.
-	"buf.notSpaceCharPos==trimmed/plain": {0, 318682},
-	"buf.notSpaceCharPos==trimmed/block": {2, 2768},
+	"buf.notSpaceCharPos==trimmed/plain": {0, 318514},
+	"buf.notSpaceCharPos==trimmed/block": {2, 2765},
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
-	"buf.notSpaceCharPos<=len(buf)": {0, 321450},
+	"buf.notSpaceCharPos<=len(buf)": {0, 321279},
 
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
@@ -98,7 +98,7 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// The denominator fell for the first time on 2026-09-10, by 186, and the corpus did not move: 16dd5be ends a plain
 	// scalar at a comment whatever its column, so fewer lines open inside one.
 	"indent.indentNum==column-1/tab":    {4, 11},
-	"indent.indentNum==column-1/spaces": {7, 29872},
+	"indent.indentNum==column-1/spaces": {7, 29756},
 
 	// The indent level a token was given and the level the scanner stands at part company where a block opens, so the
 	// two are not a redundant pair. 5,403 of 158,781, from 5,398 of 158,695, 5,399 of 158,692, 4,213 of 129,685,
@@ -170,15 +170,28 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// such tab cuts a token where the tab arm read on, so 20 more extents are measured, and 2 fewer buffer reads and
 	// 2 fewer pos() calls are made. No count moved: 5,403 of 158,498 is 3.4088%, as 5,403 of 158,500 was.
 	//
+	// Re-baselined on 2026-09-11 over four moves, three of them the scanner's with the fingerprint holding. The fix
+	// that starts a block scalar of spaces at its first content space has addIndent report a content space, and its
+	// caller records s.pos() for it: 329 more pos() calls, 2 of them disagreeing, so 5,403 of 158,498 -> 5,405 of
+	// 158,827, 3.4089% -> 3.4031%, and no other entry moved. The regeneration that capped yamlgen's float exponents at
+	// 995 then moved the fingerprint to 3318075c314e70a4 and every denominator with it, by at most 0.34%, and every
+	// count held but this one: 5,388 of 158,906, 3.3907%. Last, the fix that reads a '&' or '*' in a directive line
+	// as a character lets the seeds holding one scan further: 22 more pos() calls with one disagreement, 39 more
+	// buffer-length checks, 3 more line openings and 7 more extents: 5,389 of 158,928, 3.3908%. Then the fix that reads
+	// an anchor name opening with '!', '|', '>', '&' or '*' scans such a name as one name where a tag, a block scalar
+	// header or a second anchor used to begin: 61 fewer pos() calls with the disagreements unchanged, 17 fewer line
+	// openings, 13 more extents, 5 more buffer-length checks, 6 more plain-trimmed reads and one fewer block-trimmed
+	// read. 5,389 of 158,867 is 3.3921%.
+	//
 	// A count re-baselined without the ratio beside it says nothing about whether the scanner changed, which is why
 	// the ledger records the denominator.
-	"indent.lastIndentLevel==indentLevel": {5403, 158498},
+	"indent.lastIndentLevel==indentLevel": {5389, 158867},
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.
 	// This compares that extent against token.MeasureOrigin's, which token.Make used.
 	// Nothing may raise it: a disagreement is a token pointing at the wrong stretch of source.
-	"token.extentMatchesTheOrigin": {0, 48435},
+	"token.extentMatchesTheOrigin": {0, 48483},
 }
 
 // TestStateLedger holds the scanner's state pairs to what they were measured at.
