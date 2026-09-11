@@ -10,6 +10,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml"
+	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/parser"
 )
 
@@ -313,6 +314,87 @@ func TestParseReadsACollectionTagBeforeAnAnchor(t *testing.T) {
 			assert.Equal(t, source, f.String())
 		})
 	}
+}
+
+// TestParseRefusesASecondTagOrAnchorOnANode covers two tags, or two anchors, written on one node.
+//
+// c-ns-properties gives a node at most one tag and one anchor, in either order.
+// A line break may separate a node's properties, so "!a" over "!b x" puts two tags on the scalar "x".
+// The test catches a parse that reads the second tag as the value of the first, and the document as "x".
+// grammar.NewRecognizer, libfyaml and go.yaml.in/yaml/v3 all refuse every document here.
+func TestParseRefusesASecondTagOrAnchorOnANode(t *testing.T) {
+	for source, want := range map[string]string{
+		"!a\n!b x\n":        "a node takes at most one tag",
+		"!a !b x\n":         "a node takes at most one tag",
+		"---\n!\n!int 23\n": "a node takes at most one tag",
+		"!!str\n!!int 2\n":  "a node takes at most one tag",
+		"!a\n!b\nk: v\n":    "a node takes at most one tag",
+		"!a\n!b [1]\n":      "a node takes at most one tag",
+		"k: !a\n  !b x\n":   "a node takes at most one tag",
+		"- !a\n  !b x\n":    "a node takes at most one tag",
+		"? !a\n  !b x\n":    "a node takes at most one tag",
+		"[!a\n !b x]\n":     "a node takes at most one tag",
+
+		// An anchor between the two tags does not part them.
+		"!a &x\n!b y\n": "a node takes at most one tag",
+		"!a &x !b y\n":  "a node takes at most one tag",
+
+		// Nor does a tag between two anchors.
+		"&x\n&y y\n":    "anchors cannot be used consecutively",
+		"&x !a\n&y y\n": "anchors cannot be used consecutively",
+	} {
+		t.Run(source, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), want)
+		})
+	}
+}
+
+// TestParseKeepsOneTagAndOneAnchorOnANode holds the accepting side of TestParseRefusesASecondTagOrAnchorOnANode.
+//
+// A tag and an anchor may stand on separate lines.
+// A block mapping and its first key may each carry a tag:
+// "!a" over "!b k: v" types the mapping with "!a" and the key with "!b", so the second tag stands inside the mapping.
+func TestParseKeepsOneTagAndOneAnchorOnANode(t *testing.T) {
+	for _, source := range []string{
+		"!a\n&x y\n",
+		"&x\n!a y\n",
+		"!a &x\nk: v\n",
+		"!a\n&x\nk: v\n",
+		"!a\n!b k: v\n",
+		"&x\n&y k: v\n",
+		"!a &x\n!b &y k: v\n",
+		"- !a\n  !b k: v\n",
+		"k: !a\n  !b k2: v\n",
+
+		// Under YAML 1.1 the parse stands a tag the document did not write on a timestamp, and that tag is no second tag.
+		"%YAML 1.1\n---\n!a &x 2001-12-14\n",
+		"%YAML 1.1\n---\n&x !a 2001-12-14\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			_, err := parser.ParseBytes([]byte(source))
+			assert.NoError(t, err)
+		})
+	}
+
+	t.Run("and the second tag types the first key", func(t *testing.T) {
+		f, err := parser.ParseBytes([]byte("!a\n!b k: v\n"))
+		require.NoError(t, err)
+		require.Len(t, f.Docs, 1)
+
+		outer, ok := f.Docs[0].Body.(*ast.TagNode)
+		require.True(t, ok, "the document body is %T", f.Docs[0].Body)
+		assert.Equal(t, "!a", outer.Start.Value)
+
+		mapping, ok := outer.Value.(*ast.MappingNode)
+		require.True(t, ok, "the tag stands on %T", outer.Value)
+		require.Len(t, mapping.Values, 1)
+
+		key, ok := mapping.Values[0].Key.(*ast.TagNode)
+		require.True(t, ok, "the first key is %T", mapping.Values[0].Key)
+		assert.Equal(t, "!b", key.Start.Value)
+	})
 }
 
 // TestParseKeepsTheTagOnAnEmptyCollection holds the line between a tag standing on nothing

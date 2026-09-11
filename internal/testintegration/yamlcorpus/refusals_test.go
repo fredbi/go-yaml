@@ -173,6 +173,11 @@ func TestARefusalSignatureKeepsTheParserAndDropsTheDocument(t *testing.T) {
 // It came back on 2026-09-10, and nothing about the parser changed: narrowing
 // the "!!omap" draw to the shape the tag names reshuffled every seed, and the
 // reshuffled corpus draws the complaint again. One added, none gone.
+//
+// "a node takes at most one tag" arrived on 2026-09-11, when the parser began
+// refusing a second tag on one node. 8 documents of the corpus draw it, and the
+// grammar refuses all 8. 4 of them were read before, and the other 4 were
+// refused with "value is not allowed in this context".
 var parserComplaints = []string{
 	"YAML version has already been specified",
 	"_ is a reserved character",
@@ -181,6 +186,7 @@ var parserComplaints = []string{
 	"a _ in a tag must be followed by two hexadecimal digits",
 	"a comment must be preceded by a space, and a scalar cannot begin with _",
 	"a flow collection continues on a line that is not indented past the one it started on",
+	"a node takes at most one tag",
 	"a plain scalar cannot begin with _",
 	"a scalar continues on a line that is not indented past the one it started on",
 	"a tag handle takes letters, digits and _ between its _ characters",

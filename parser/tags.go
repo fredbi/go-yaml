@@ -58,6 +58,9 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if second := secondTag(tagValue); second != nil {
+		return nil, yamlerrors.NewSyntax("a node takes at most one tag", second.GetToken())
+	}
 	if err := setHeadComment(comment, tagValue); err != nil {
 		return nil, err
 	}
@@ -65,6 +68,27 @@ func (p *Parser) parseTag(ctx context) (*ast.TagNode, error) {
 	p.anchors.retag(node)
 
 	return node, nil
+}
+
+// secondTag returns the tag written on the node a tag stands on, or nil.
+//
+// A node takes at most one tag and one anchor, in either order: c-ns-properties is a tag and an optional anchor,
+// or an anchor and an optional tag.
+// The two may stand on separate lines, so the parse reads "!a" over "!b x" as a tag whose value is a tag,
+// and "!a &x" over "!b y" as a tag whose value is an anchor on a tag.
+//
+// A tag on the first key of a block mapping stands inside the mapping node,
+// so "!a" over "!b k: v" types the mapping and its key, and is no second tag.
+// Nor is the implicit tag resolveTimestamp stands on a timestamp, which the document did not write.
+func secondTag(value ast.Node) *ast.TagNode {
+	if anchor, ok := value.(*ast.AnchorNode); ok {
+		value = anchor.Value
+	}
+	if tag, ok := value.(*ast.TagNode); ok && !tag.Implicit {
+		return tag
+	}
+
+	return nil
 }
 
 func (p *Parser) clearTagDirectives() {

@@ -356,6 +356,17 @@ func Refusals() []Refusal {
 			Src:  "a: &x\n  &y 1\n", Says: "anchors cannot be used consecutively",
 		},
 		{
+			Name: "two anchors on one node, with a tag between them",
+			Src:  "&x !a\n&y y\n", Says: "anchors cannot be used consecutively",
+		},
+		{
+			// 6.9.1 gives a node one tag as well. A line break may separate
+			// a node's properties, so the second tag here stands on the same
+			// scalar as the first.
+			Name: "two tags on one node",
+			Src:  "!a\n!b x\n", Says: "a node takes at most one tag",
+		},
+		{
 			// 7.4.1: inside a flow sequence an implicit key and its ':' are on
 			// one line. The generator reaches this only when a mutation puts a
 			// break in the right place, which the draws stopped doing when the

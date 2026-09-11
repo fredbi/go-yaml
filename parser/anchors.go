@@ -390,14 +390,27 @@ func (p *Parser) readAnchorValue(ctx context, anchor *ast.AnchorNode) (ast.Node,
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := value.(*ast.AnchorNode); ok {
-		return nil, yamlerrors.NewSyntax("anchors cannot be used consecutively", value.GetToken())
+	if second := secondAnchor(value); second != nil {
+		return nil, yamlerrors.NewSyntax("anchors cannot be used consecutively", second.GetToken())
 	}
 	// Set here as well as in parseAnchor, which runs after this returns:
 	// the Leave deferred above fires first, and the visitor must see the anchor holding its value.
 	anchor.Value = value
 
 	return value, nil
+}
+
+// secondAnchor returns the anchor written on the node an anchor names, or nil.
+//
+// A node takes one anchor, and a tag may stand between two: "&x !a" over "&y y" names the scalar twice.
+// secondTag holds the same rule for tags.
+func secondAnchor(value ast.Node) *ast.AnchorNode {
+	if tag, ok := value.(*ast.TagNode); ok && !tag.Implicit {
+		value = tag.Value
+	}
+	anchor, _ := value.(*ast.AnchorNode)
+
+	return anchor
 }
 
 func (p *Parser) parseAnchorName(ctx context) (*ast.AnchorNode, error) {
