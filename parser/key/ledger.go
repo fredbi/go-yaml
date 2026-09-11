@@ -53,9 +53,9 @@ type Ledger struct {
 
 	// openMaps holds the mapping node at each level of the descent, innermost
 	// last, so a repeated key is recorded on the mapping that holds it as it is
-	// read. One pointer per mapping open at once, which is the document's
-	// nesting and not its width.
-	openMaps []*ast.MappingNode
+	// read. One entry per mapping open at once, which is the document's nesting
+	// and not its width.
+	openMaps []openMap
 	// builtKeys holds, for each mapping being read, the identity of every key a
 	// single token could not name, under the position it was first written at.
 	// It stands beside openMaps and is pushed and popped with it.
@@ -64,6 +64,98 @@ type Ledger struct {
 	// allowRepeats marks each repeat [ast.DuplicateKey.Allowed]. The parser
 	// sets it from its WithAllowDuplicateMapKey option.
 	allowRepeats bool
+
+	// orderedMaps holds one key set for each "!!omap" being read, innermost
+	// last, with the sequence the tag stands on. An ordered map's keys are
+	// spread over one entry each, so every entry's key is recorded there as
+	// well, and a repeat across entries is recorded on the sequence.
+	orderedMaps []orderedMapScope
+	// pending is the "!!omap" whose entry is about to be read, as its index plus
+	// one, and 0 for none; pendingIndex is that entry's place in the sequence.
+	// The next mapping to open takes both.
+	pending      int
+	pendingIndex int
+	// expectOrderedMap marks the next sequence to open as the one an "!!omap"
+	// tag stands on. A mapping opening first clears it, so "!!omap {a: [1]}"
+	// makes no ordered map of the "[1]".
+	expectOrderedMap bool
+}
+
+// ExpectOrderedMap marks the next sequence to open as the one an "!!omap" tag
+// stands on. An anchor may stand between the two, as in "!!omap &a [{x: 1}]".
+func (l *Ledger) ExpectOrderedMap() { l.expectOrderedMap = true }
+
+// TakeOrderedMap reports whether the sequence opening now is the one an
+// "!!omap" tag stands on, and clears the mark.
+func (l *Ledger) TakeOrderedMap() bool {
+	expected := l.expectOrderedMap
+	l.expectOrderedMap = false
+
+	return expected
+}
+
+// openMap is one mapping being read: its node, and where it stands in an
+// "!!omap" -- the index in orderedMaps of the one it is a direct entry of, or
+// -1, and its place in that sequence. Pushed and popped together, so they share
+// one slice and one growth.
+type openMap struct {
+	node       *ast.MappingNode
+	entryOf    int
+	entryIndex int
+}
+
+// orderedMapScope is one "!!omap" being read: the keys its entries have written
+// so far, and the sequence a repeat is recorded on.
+type orderedMapScope struct {
+	keys *Set
+	seq  *ast.SequenceNode
+}
+
+// OpenOrderedMap starts the key set of the "!!omap" whose sequence seq is, as
+// its entries are about to be read, and returns what ends it.
+//
+// Section 3.2.1.1 holds an ordered map's keys to being unique as it holds a
+// mapping's. The keys stand in separate entries, so a repeat across them is
+// recorded on the sequence, in [ast.SequenceNode.Duplicates], with the index of
+// the entry that repeats the key. Every load reads that one record.
+func (l *Ledger) OpenOrderedMap(seq *ast.SequenceNode) func() {
+	keys := &Set{}
+	keys.UseJSONNames(l.keys.jsonNames)
+	l.orderedMaps = append(l.orderedMaps, orderedMapScope{keys: keys, seq: seq})
+
+	return func() {
+		l.orderedMaps = l.orderedMaps[:len(l.orderedMaps)-1]
+		l.pending = 0
+	}
+}
+
+// MarkEntry says that the next mapping to open is the entry at index of the
+// innermost "!!omap".
+func (l *Ledger) MarkEntry(index int) { l.pending, l.pendingIndex = len(l.orderedMaps), index }
+
+// UnmarkEntry forgets a mark no mapping took: an entry that is not a mapping,
+// or a sequence opening inside one.
+func (l *Ledger) UnmarkEntry() { l.pending = 0 }
+
+// RecordEntry records text as the key of the "!!omap" entry MarkEntry marked,
+// for an entry that opened no mapping of its own: an alias naming a one-entry
+// mapping. The parser names the key from what the anchor recorded.
+func (l *Ledger) RecordEntry(text string, kind token.KeyKind, pos token.Position) {
+	if l.pending > 0 {
+		l.recordInOrderedMap(l.orderedMaps[l.pending-1], text, kind, pos, l.pendingIndex)
+	}
+}
+
+// recordInOrderedMap records a key among the entries of scope, and a repeat on
+// its sequence.
+func (l *Ledger) recordInOrderedMap(scope orderedMapScope, text string, kind token.KeyKind, pos token.Position, index int) {
+	first, jsonOnly, defined := scope.keys.Record(0, text, kind, pos)
+	if !defined || scope.seq == nil {
+		return
+	}
+	scope.seq.Duplicates = append(scope.seq.Duplicates, ast.DuplicateKey{
+		Name: text, At: pos, FirstAt: first, JSONNameOnly: jsonOnly, Index: index, Allowed: l.allowRepeats,
+	})
 }
 
 // AllowRepeats marks every repeat recorded from now on as allowed, so a load
@@ -98,11 +190,18 @@ func (l *Ledger) Record(base int, text string, kind token.KeyKind, pos token.Pos
 // notes a repeat on the mapping being read.
 func (l *Ledger) RecordOnce(base int, text string, kind token.KeyKind, pos token.Position) {
 	first, jsonOnly, defined := l.Record(base, text, kind, pos)
-	if !defined {
+	if defined {
+		l.noteDuplicate(ast.DuplicateKey{Name: text, At: pos, FirstAt: first, JSONNameOnly: jsonOnly})
+
 		return
 	}
 
-	l.noteDuplicate(ast.DuplicateKey{Name: text, At: pos, FirstAt: first, JSONNameOnly: jsonOnly})
+	n := len(l.openMaps)
+	if n == 0 || l.openMaps[n-1].entryOf < 0 {
+		return
+	}
+	top := l.openMaps[n-1]
+	l.recordInOrderedMap(l.orderedMaps[top.entryOf], text, kind, pos, top.entryIndex)
 }
 
 // RecordBuilt records identity among the built keys of the mapping being read,
@@ -128,7 +227,7 @@ func (l *Ledger) RecordBuilt(identity, display string, pos token.Position) {
 func (l *Ledger) noteDuplicate(dup ast.DuplicateKey) {
 	dup.Allowed = l.allowRepeats
 	if n := len(l.openMaps); n > 0 {
-		l.openMaps[n-1].Duplicates = append(l.openMaps[n-1].Duplicates, dup)
+		l.openMaps[n-1].node.Duplicates = append(l.openMaps[n-1].node.Duplicates, dup)
 	}
 }
 
@@ -185,8 +284,10 @@ func (l *Ledger) Close(base int) {
 
 // Open records the mapping being read, and returns what takes it off.
 func (l *Ledger) Open(node *ast.MappingNode) func() {
-	l.openMaps = append(l.openMaps, node)
+	l.openMaps = append(l.openMaps, openMap{node: node, entryOf: l.pending - 1, entryIndex: l.pendingIndex})
 	l.builtKeys = append(l.builtKeys, nil)
+	l.pending = 0
+	l.expectOrderedMap = false
 
 	return func() {
 		l.openMaps = l.openMaps[:len(l.openMaps)-1]
@@ -204,4 +305,8 @@ func (l *Ledger) Reset() {
 	l.probeBases = l.probeBases[:0]
 	l.openMaps = l.openMaps[:0]
 	l.builtKeys = l.builtKeys[:0]
+	clear(l.orderedMaps[:cap(l.orderedMaps)])
+	l.orderedMaps = l.orderedMaps[:0]
+	l.pending = 0
+	l.expectOrderedMap = false
 }

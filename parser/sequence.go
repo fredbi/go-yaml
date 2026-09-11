@@ -72,6 +72,11 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 
 	p.enter(ctx, seqNode, KindSequence)
 	defer p.leave(ctx, seqNode)
+	orderedMap := p.keys.TakeOrderedMap()
+	if orderedMap {
+		defer p.keys.OpenOrderedMap(seqNode)()
+	}
+	p.keys.UnmarkEntry()
 
 	// The entries gather on a stack that every sequence reuses, so fillSequence allocates this one's slices once.
 	// base indexes the start of this sequence's entries on the stack.
@@ -88,8 +93,15 @@ func (p *Parser) parseSequence(ctx context) (*ast.SequenceNode, error) {
 		ctx.goNext() // Skip the '-'.
 
 		ctx := ctx.withIndex(p, index)
+		if orderedMap {
+			p.keys.MarkEntry(int(index))
+		}
 		index++
 		value, err := p.parseSequenceValue(ctx, seqTk)
+		if orderedMap {
+			p.recordAliasEntry(value)
+		}
+		p.keys.UnmarkEntry()
 		if err != nil {
 			return nil, err
 		}

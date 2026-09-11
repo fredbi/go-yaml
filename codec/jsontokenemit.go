@@ -550,23 +550,19 @@ func (t *jsonTokener) releaseOrderedMap(n *ast.TagNode) {
 	mark := t.omaps[len(t.omaps)-1]
 	t.omaps = t.omaps[:len(t.omaps)-1]
 
-	folded, ordered, twice := foldOrderedMapTokens(mark.toks)
-	if twice != "" {
-		at := n.GetToken()
-		if n.Value != nil {
-			at = n.Value.GetToken()
-		}
-		t.fail(yamlerrors.NewDuplicateKey(
-			fmt.Sprintf("mapping key %q is written twice in an !!omap", twice), at))
-
-		return
-	}
+	seq := orderedMapSequence(n.Value)
+	folded, ordered := foldOrderedMapTokens(mark.toks, allowedRepeatEntries(seq))
 	if !ordered {
 		at := n.GetToken()
 		if n.Value != nil {
 			at = n.Value.GetToken()
 		}
 		t.fail(yamlerrors.NewSyntax("!!omap names a sequence of one-entry mappings", at))
+
+		return
+	}
+	if err := refuseOrderedMapDuplicates(seq); err != nil {
+		t.fail(err)
 
 		return
 	}
@@ -578,9 +574,10 @@ func (t *jsonTokener) releaseOrderedMap(n *ast.TagNode) {
 // emitOrderedMapTree hands an "!!omap" over from the tree as the object the tag
 // names, for an alias that reaches one.
 //
-// The shape and the repeated key are the rules foldOrderedMapTokens holds the
-// streaming path to, asked of the nodes instead: an alias target is a retained
-// node, so its children are there to read where a walked one's are not.
+// The shape is the rule foldOrderedMapTokens holds the streaming path to, asked
+// of the nodes instead: an alias target is a retained node, so its children are
+// there to read where a walked one's are not. A repeated key is read off the
+// record the parser keeps on the sequence, as on the streaming path.
 func (t *jsonTokener) emitOrderedMapTree(n *ast.TagNode, at token.Position) {
 	seq, isSeq := t.throughWrappers(n.Value).(*ast.SequenceNode)
 	if !isSeq {
@@ -588,24 +585,27 @@ func (t *jsonTokener) emitOrderedMapTree(n *ast.TagNode, at token.Position) {
 
 		return
 	}
-
-	t.open(JSONObjectStart, at)
-	var held []string
 	for _, entry := range seq.Values {
-		one, isOne := t.throughWrappers(entry).(*ast.MappingNode)
-		if !isOne || len(one.Values) != 1 {
+		if one, isOne := t.throughWrappers(entry).(*ast.MappingNode); !isOne || len(one.Values) != 1 {
 			t.fail(notAnOrderedMap(n.Value))
 
 			return
 		}
-		name := t.keyName(one.Values[0].Key)
-		if slices.Contains(held, name) {
-			t.fail(yamlerrors.NewDuplicateKey(
-				fmt.Sprintf("mapping key %q is written twice in an !!omap", name), n.Value.GetToken()))
+	}
+	if err := refuseOrderedMapDuplicates(seq); err != nil {
+		t.fail(err)
 
-			return
+		return
+	}
+
+	drop := allowedRepeatEntries(seq)
+	t.open(JSONObjectStart, at)
+	for i, entry := range seq.Values {
+		if slices.Contains(drop, i) {
+			continue
 		}
-		held = append(held, name)
+		one, _ := t.throughWrappers(entry).(*ast.MappingNode)
+		name := t.keyName(one.Values[0].Key)
 		t.emit(JSONToken{Kind: JSONKey, Value: name, At: at})
 		t.emitTree(one.Values[0].Value, at)
 	}

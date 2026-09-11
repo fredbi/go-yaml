@@ -160,6 +160,10 @@ type anchorIdentity struct {
 	text     string
 	kind     token.KeyKind
 	identity string
+	// entryText and entryKind name the key of a mapping holding one entry, as text and kind name a scalar,
+	// for an alias that stands as an entry of an "!!omap". See recordAliasEntry.
+	entryText string
+	entryKind token.KeyKind
 }
 
 // keepAnchorIdentity records what the anchored node resolves to, for an alias that later stands as a mapping key.
@@ -173,10 +177,13 @@ type anchorIdentity struct {
 func (p *Parser) keepAnchorIdentity(name string, value ast.Node) {
 	text, kind := p.mapKeyIdentity(value)
 	identity := ast.KeyIdentityWithAnchors(value, p.anchors.identityOf)
-	if unnamedKey(text, kind) && ast.Unnamed(identity) {
+	entryText, entryKind := p.oneEntryKeyIdentity(value)
+	if unnamedKey(text, kind) && ast.Unnamed(identity) && unnamedKey(entryText, entryKind) {
 		return
 	}
-	p.anchors.keepIdentity(name, anchorIdentity{text: text, kind: kind, identity: identity})
+	p.anchors.keepIdentity(name, anchorIdentity{
+		text: text, kind: kind, identity: identity, entryText: entryText, entryKind: entryKind,
+	})
 }
 
 // dropName closes the innermost open name.

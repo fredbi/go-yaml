@@ -652,7 +652,8 @@ func oneEntryOf(value any) (MapItem, bool) {
 // The walk has already built the sequence and each of its mappings, so this
 // reads the values and not the nodes. It holds the shape Decoder.orderedMapOf
 // holds and is lenient the same way: a sequence that is not one-entry mappings
-// stands as it is written.
+// stands as it is written. A key repeated across entries is refused through the
+// record the parser keeps on the sequence, as Decoder.orderedMapOf refuses it.
 //
 // The key keeps the value it resolves to, as it does on the tree: a mapping
 // widens to map[any]any on the first key that is not a string, so
@@ -662,19 +663,18 @@ func orderedMapOfWalked(value any, n *ast.TagNode) (any, error) {
 	if !isSeq {
 		return nil, notAnOrderedMap(n.Value)
 	}
+	for _, entry := range seq {
+		if _, isMapping := oneEntryOf(entry); !isMapping {
+			return nil, notAnOrderedMap(n.Value)
+		}
+	}
+	if err := refuseOrderedMapDuplicates(orderedMapSequence(n.Value)); err != nil {
+		return nil, err
+	}
 
 	var m MapSlice
 	for _, entry := range seq {
-		one, isMapping := oneEntryOf(entry)
-		if !isMapping {
-			return nil, notAnOrderedMap(n.Value)
-		}
-		if m.index(one.Key) >= 0 {
-			return nil, yamlerrors.NewDuplicateKey(
-				fmt.Sprintf("mapping key %v is written twice in an !!omap", one.Key),
-				n.Value.GetToken(),
-			)
-		}
+		one, _ := oneEntryOf(entry)
 		if err := m.Set(one.Key, one.Value); err != nil {
 			return nil, err
 		}

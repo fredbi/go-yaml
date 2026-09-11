@@ -1321,6 +1321,10 @@ type DuplicateKey struct {
 	// of refusing the document: a decoder filling a map keeps the last, a
 	// converter writing JSON keeps the first.
 	Allowed bool
+	// Index is the position in the sequence of the "!!omap" entry that repeats
+	// the key, for a repeat recorded on [SequenceNode.Duplicates]. It is 0 on a
+	// mapping's record.
+	Index int
 }
 
 type MappingNode struct {
@@ -1610,6 +1614,14 @@ type SequenceNode struct {
 	// A block sequence opens on the '-' of its first entry, where a comment
 	// belongs to that entry, and never fills this.
 	StartComment *CommentGroupNode
+	// Duplicates holds, for the sequence an "!!omap" tag stands on, the entries
+	// whose key an earlier entry already wrote, in the order they were written.
+	// [DuplicateKey.Index] names the entry. It is nil for every other sequence.
+	//
+	// The YAML 1.1 type repository holds an ordered map's keys to being unique
+	// as it holds a mapping's, and each entry is a mapping of its own, so a
+	// repeat across entries shows on no [MappingNode.Duplicates].
+	Duplicates []DuplicateKey
 }
 
 // Replace replace value node.

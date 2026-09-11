@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/go-openapi/testify/v2/assert"
+
+	"github.com/go-openapi/go-yaml/parser"
 )
 
 // rebuildJSON writes the JSON a run of tokens stands for, putting back the
@@ -65,8 +67,8 @@ func rebuildJSON(toks []JSONToken) []byte {
 	return out
 }
 
-func collectJSONTokens(src []byte) ([]JSONToken, error) {
-	s := ToJSONTokens(src)
+func collectJSONTokens(src []byte, opts ...parser.Option) ([]JSONToken, error) {
+	s := ToJSONTokens(src, opts...)
 	var toks []JSONToken
 	for tk := range s.Tokens() {
 		toks = append(toks, tk)

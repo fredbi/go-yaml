@@ -198,6 +198,13 @@ func (p *Parser) parseTagValue(ctx context, uri string, tagRawTk *token.Token, t
 		ctx.goNext()
 		return scalar, nil
 	case token.SequenceTag, token.OrderedMapTag:
+		if tag == token.OrderedMapTag {
+			// An ordered map's keys are unique across its entries, and each entry is a mapping of its own.
+			// The sequence under the tag takes the mark and has the ledger record every entry's key in one set.
+			// A mapping opening first clears the mark, and so does the end of the tagged node.
+			p.keys.ExpectOrderedMap()
+			defer p.keys.TakeOrderedMap()
+		}
 		if tk.Type() == token.SequenceStartType {
 			return p.parseFlowSequence(ctx.withFlowSequence())
 		}

@@ -63,8 +63,9 @@ func TestAnOrderedMapTagReadsAsTheMapItNames(t *testing.T) {
 	})
 
 	t.Run("a key written twice is refused", func(t *testing.T) {
-		// Each mapping of an "!!omap" holds one key, so the parser records no
-		// repeat and refuseDuplicateKeys has nothing to read. The loader looks.
+		// Each mapping of an "!!omap" holds one key, and the parser records a
+		// repeat across them on the sequence, so every reader refuses it as it
+		// refuses a mapping's repeat.
 		for _, reader := range []func([]byte) error{
 			func(b []byte) error { var v any; return codec.Unmarshal(b, &v) },
 			func(b []byte) error {
@@ -76,7 +77,7 @@ func TestAnOrderedMapTagReadsAsTheMapItNames(t *testing.T) {
 		} {
 			err := reader([]byte("!!omap [{x: 1}, {x: 2}]\n"))
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "written twice in an !!omap")
+			assert.Contains(t, err.Error(), `mapping key "x" already defined at [1:10]`)
 		}
 	})
 

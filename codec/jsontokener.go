@@ -340,21 +340,24 @@ type omapMark struct {
 // The tokens are held rather than rewritten as they arrive because this cannot
 // take a token back: whether the tag names the shape is only known at the ']',
 // and a node it does not name stands as it was written.
-func foldOrderedMapTokens(toks []JSONToken) ([]JSONToken, bool, string) {
+//
+// The entries at the indexes in drop are left out: each repeats a key an
+// earlier entry wrote, and the parse allowed it.
+func foldOrderedMapTokens(toks []JSONToken, drop []int) ([]JSONToken, bool) {
 	last := len(toks) - 1
 	if last < 1 || toks[0].Kind != JSONArrayStart || toks[last].Kind != JSONArrayEnd {
-		return nil, false, ""
+		return nil, false
 	}
 
 	out := make([]JSONToken, 0, len(toks))
 	out = append(out, JSONToken{Kind: JSONObjectStart, At: toks[0].At})
 
-	var keys []string
-	for i := 1; i < last; {
+	for i, index := 1, 0; i < last; index++ {
 		if toks[i].Kind != JSONObjectStart {
-			return nil, false, ""
+			return nil, false
 		}
 		i++
+		keep := !slices.Contains(drop, index)
 		depth, entryKeys := 1, 0
 		for i < last && depth > 0 {
 			switch toks[i].Kind {
@@ -365,23 +368,19 @@ func foldOrderedMapTokens(toks []JSONToken) ([]JSONToken, bool, string) {
 			case JSONKey:
 				if depth == 1 {
 					entryKeys++
-					if slices.Contains(keys, toks[i].Value) {
-						return nil, false, toks[i].Value
-					}
-					keys = append(keys, toks[i].Value)
 				}
 			}
-			if depth > 0 {
+			if depth > 0 && keep {
 				out = append(out, toks[i])
 			}
 			i++
 		}
 		if depth != 0 || entryKeys != 1 {
-			return nil, false, ""
+			return nil, false
 		}
 	}
 
-	return append(out, JSONToken{Kind: JSONObjectEnd, At: toks[last].At}), true, ""
+	return append(out, JSONToken{Kind: JSONObjectEnd, At: toks[last].At}), true
 }
 
 // releasePeeked stops the tags naming a kind holding back what they stand on,// releasePeeked stops the tags naming a kind holding back what they stand on,

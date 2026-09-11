@@ -183,3 +183,43 @@ func (p *Parser) aliasKeyIdentity(a *ast.AliasNode) (string, token.KeyKind, bool
 
 	return at.text, at.kind, true
 }
+
+// oneEntryKeyIdentity names the key of a mapping holding exactly one entry, as mapKeyIdentity names a scalar key,
+// looking through the tags and anchors on the mapping. It returns no name for any other node.
+func (p *Parser) oneEntryKeyIdentity(n ast.Node) (string, token.KeyKind) {
+	for {
+		switch nn := n.(type) {
+		case *ast.TagNode:
+			n = nn.Value
+		case *ast.AnchorNode:
+			n = nn.Value
+		case *ast.MappingNode:
+			if len(nn.Values) != 1 {
+				return "", token.KeyOther
+			}
+
+			return p.mapKeyIdentity(nn.Values[0].Key)
+		case *ast.MappingValueNode:
+			return p.mapKeyIdentity(nn.Key)
+		default:
+			return "", token.KeyOther
+		}
+	}
+}
+
+// recordAliasEntry records the key of an "!!omap" entry written as an alias, from the one-entry mapping its anchor named.
+//
+// The entry opens no mapping, so no key is recorded for it as it is read:
+// under "m: &m {x: 2}", the entries of "!!omap [{x: 1}, *m]" write x twice.
+// keepAnchorIdentity named the key while the anchored mapping was whole; on a walk AliasNode.Target is a reused cell.
+func (p *Parser) recordAliasEntry(value ast.Node) {
+	alias, isAlias := value.(*ast.AliasNode)
+	if !isAlias {
+		return
+	}
+	at := p.anchors.identity(anchorNameOf(alias.Value))
+	if unnamedKey(at.entryText, at.entryKind) {
+		return
+	}
+	p.keys.RecordEntry(at.entryText, at.entryKind, alias.GetToken().Position)
+}

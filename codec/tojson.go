@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -504,7 +505,11 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 	// and walks the rest, so a later document's shape decides nothing here.
 	if res := t.Resolve(); w.firstEnd < 0 &&
 		res.Verdict == ast.TagResolved && res.Tag == token.OrderedMapTag && !res.Empty {
-		written, err := orderedMapJSON(w.out[mark.at:], t)
+		seq := orderedMapSequence(t.Value)
+		written, err := orderedMapJSON(w.out[mark.at:], t, allowedRepeatEntries(seq))
+		if err == nil {
+			err = refuseOrderedMapDuplicates(seq)
+		}
 		if err != nil {
 			w.fail(err)
 
@@ -527,17 +532,16 @@ func (w *jsonWriter) closeTag(t *ast.TagNode) {
 // the encoder writes that as an object too.
 //
 // A node that is not a sequence of one-entry mappings has no ordered map to be
-// and is refused, as it is on the way into a value. So is a key written twice,
-// since each mapping of an "!!omap" holds one key and the parser records no
-// repeat for refuseDuplicateKeys to find.
-func orderedMapJSON(text []byte, t *ast.TagNode) ([]byte, error) {
+// and is refused, as it is on the way into a value. The entries at the indexes
+// in drop are left out: each repeats a key an earlier entry wrote, and the parse
+// allowed it. The caller refuses a repeat the parse did not allow.
+func orderedMapJSON(text []byte, t *ast.TagNode, drop []int) ([]byte, error) {
 	if len(text) == 0 || text[0] != '[' {
 		return nil, notAnOrderedMap(t.Value)
 	}
 
 	out := []byte{'{'}
-	seen := make(map[string]struct{})
-	i := 1
+	i, index := 1, 0
 	for i < len(text) && text[i] != ']' {
 		if text[i] == ',' {
 			i++
@@ -550,18 +554,14 @@ func orderedMapJSON(text []byte, t *ast.TagNode) ([]byte, error) {
 		if len(pairs) != 1 {
 			return nil, notAnOrderedMap(t.Value)
 		}
-		if _, twice := seen[pairs[0].key]; twice {
-			return nil, yamlerrors.NewDuplicateKey(
-				fmt.Sprintf("mapping key %q is written twice in an !!omap", pairs[0].key),
-				t.Value.GetToken(),
-			)
+		if !slices.Contains(drop, index) {
+			if len(out) > 1 {
+				out = append(out, ',')
+			}
+			out = append(out, entry[pairs[0].from:pairs[0].to]...)
 		}
-		seen[pairs[0].key] = struct{}{}
-		if len(out) > 1 {
-			out = append(out, ',')
-		}
-		out = append(out, entry[pairs[0].from:pairs[0].to]...)
 		i = end
+		index++
 	}
 	if i >= len(text) {
 		return nil, notAnOrderedMap(t.Value)

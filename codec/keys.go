@@ -29,35 +29,95 @@ func refuseDuplicateKeys(n ast.Node) error {
 	if !ok {
 		return nil
 	}
-	d, refused := firstRefusedDuplicate(m)
+	d, refused := firstRefusedDuplicate(m.Duplicates)
 	if !refused {
 		return nil
 	}
 
-	if d.JSONNameOnly {
-		return yamlerrors.NewNotJSON(
-			fmt.Sprintf("two keys write the JSON member %q, first defined at [%d:%d]",
-				d.Name, d.FirstAt.Line, d.FirstAt.Column),
-			keyTokenAt(m, d),
-		)
-	}
-
-	return yamlerrors.NewDuplicateKey(
-		fmt.Sprintf("mapping key %q already defined at [%d:%d]", d.Name, d.FirstAt.Line, d.FirstAt.Column),
-		keyTokenAt(m, d),
-	)
+	return duplicateKeyError(d, keyTokenAt(m, d))
 }
 
-// firstRefusedDuplicate returns the first repeat the mapping holds that the
-// parse did not allow, and whether there is one.
-func firstRefusedDuplicate(m *ast.MappingNode) (ast.DuplicateKey, bool) {
-	for _, d := range m.Duplicates {
+// refuseOrderedMapDuplicates reports the first key the parse recorded as
+// repeated across the entries of an "!!omap", as refuseDuplicateKeys does for a
+// mapping. seq is the sequence the tag stands on, and may be nil.
+//
+// Each entry is a mapping of its own, so the parse records a repeat across
+// entries on the sequence, and every load reads it there.
+func refuseOrderedMapDuplicates(seq *ast.SequenceNode) error {
+	if seq == nil {
+		return nil
+	}
+	d, refused := firstRefusedDuplicate(seq.Duplicates)
+	if !refused {
+		return nil
+	}
+
+	// A walk hands the sequence over without its entries, so the key's token
+	// is not to hand. See keyTokenAt.
+	return duplicateKeyError(d, token.New(d.Name, d.Name, d.At))
+}
+
+// allowedRepeatEntries returns the index of each "!!omap" entry whose key an
+// earlier entry wrote, where the parse allowed the repeat. A converter writing
+// JSON drops these entries and keeps the first. It is nil for nearly every
+// ordered map.
+func allowedRepeatEntries(seq *ast.SequenceNode) []int {
+	if seq == nil {
+		return nil
+	}
+
+	var drop []int
+	for _, d := range seq.Duplicates {
+		if d.Allowed {
+			drop = append(drop, d.Index)
+		}
+	}
+
+	return drop
+}
+
+// orderedMapSequence returns the sequence an "!!omap" tag stands on, looking
+// through an anchor, and nil where the tag stands on something else.
+func orderedMapSequence(n ast.Node) *ast.SequenceNode {
+	for {
+		switch nn := n.(type) {
+		case *ast.AnchorNode:
+			n = nn.Value
+		case *ast.SequenceNode:
+			return nn
+		default:
+			return nil
+		}
+	}
+}
+
+// firstRefusedDuplicate returns the first repeat of dups that the parse did not
+// allow, and whether there is one.
+func firstRefusedDuplicate(dups []ast.DuplicateKey) (ast.DuplicateKey, bool) {
+	for _, d := range dups {
 		if !d.Allowed {
 			return d, true
 		}
 	}
 
 	return ast.DuplicateKey{}, false
+}
+
+// duplicateKeyError is the error a load returns for the repeat d, pointing at
+// tk.
+func duplicateKeyError(d ast.DuplicateKey, tk *token.Token) error {
+	if d.JSONNameOnly {
+		return yamlerrors.NewNotJSON(
+			fmt.Sprintf("two keys write the JSON member %q, first defined at [%d:%d]",
+				d.Name, d.FirstAt.Line, d.FirstAt.Column),
+			tk,
+		)
+	}
+
+	return yamlerrors.NewDuplicateKey(
+		fmt.Sprintf("mapping key %q already defined at [%d:%d]", d.Name, d.FirstAt.Line, d.FirstAt.Column),
+		tk,
+	)
 }
 
 // keyTokenAt returns the key the mapping wrote at pos for the complaint to

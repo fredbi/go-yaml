@@ -2194,11 +2194,15 @@ func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resol
 // orderedMapOf reads a sequence an "!!omap" names into a [MapSliceSeq].
 //
 // The shape is orderedMapShape's, so every element holds one entry and the
-// ordered map is the sequence's order. A key given twice is refused: the parser
-// records a repeat on the mapping that holds it and refuseDuplicateKeys reads
-// that record, but each mapping of an "!!omap" holds one key, so a repeat
-// across two of them leaves nothing to record and the check has to run here.
+// ordered map is the sequence's order. The parser records a key repeated across
+// entries on the sequence, and refuseOrderedMapDuplicates reads that record as
+// every other load does. Where the parse allowed the repeat, the later entry's
+// value replaces the earlier one's, as it does in a mapping.
 func (d *Decoder) orderedMapOf(ctx context.Context, seq *ast.SequenceNode) (MapSliceSeq, error) {
+	if err := refuseOrderedMapDuplicates(seq); err != nil {
+		return MapSliceSeq{}, err
+	}
+
 	var m MapSlice
 	for _, entry := range seq.Values {
 		var one MapSlice
@@ -2206,12 +2210,6 @@ func (d *Decoder) orderedMapOf(ctx context.Context, seq *ast.SequenceNode) (MapS
 			return MapSliceSeq{}, err
 		}
 		for _, item := range one.items {
-			if m.index(item.Key) >= 0 {
-				return MapSliceSeq{}, yamlerrors.NewDuplicateKey(
-					fmt.Sprintf("mapping key %v is written twice in an !!omap", item.Key),
-					entry.GetToken(),
-				)
-			}
 			if err := m.Set(item.Key, item.Value); err != nil {
 				return MapSliceSeq{}, err
 			}
@@ -2271,6 +2269,15 @@ func entryMapping(entry ast.Node) ast.Node {
 		return entryMapping(n.Value)
 	case *ast.TagNode:
 		return entryMapping(n.Value)
+	case *ast.AliasNode:
+		// "!!omap [{x: 1}, *m]" is an ordered map where m names a one-entry
+		// mapping. The tree keeps the node an alias names, so it is read
+		// through; without this the element was refused as no entry at all.
+		if n.Target == nil {
+			return nil
+		}
+
+		return entryMapping(n.Target)
 	default:
 		return nil
 	}

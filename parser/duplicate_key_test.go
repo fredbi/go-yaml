@@ -192,6 +192,75 @@ func TestDuplicateMapKeyAllowed(t *testing.T) {
 	assert.False(t, found[0].Allowed, "without the option a repeat is not allowed")
 }
 
+// TestOrderedMapRepeatIsRecordedOnTheSequence checks where the parse records a key two entries of an "!!omap" write.
+//
+// Each entry is a mapping of its own, so the repeat is recorded on the sequence the tag stands on,
+// with the index of the entry that repeats the key, and on no mapping.
+// An entry written as an alias opens no mapping, and is named from the mapping its anchor named.
+func TestOrderedMapRepeatIsRecordedOnTheSequence(t *testing.T) {
+	type repeat struct {
+		name  string
+		index int
+	}
+
+	for src, want := range map[string][]repeat{
+		"!!omap [{a: 1}, {b: 2}, {a: 3}]\n":         {{"a", 2}},
+		"k: !!omap\n- a: 1\n- b: 2\n- a: 3\n":       {{"a", 2}},
+		"k: !!omap [{1: a}, {0x1: b}, {1: c}]\n":    {{"1", 1}, {"1", 2}},
+		"m: &m {x: 2}\nk: !!omap [{x: 1}, *m]\n":    {{"x", 1}},
+		"m: &m {x: 2}\nk: !!omap [*m, {x: 1}]\n":    {{"x", 1}},
+		"k: !!omap &o [{a: 1}, {a: 2}]\n":           {{"a", 1}},
+		"k: &o !!omap [{a: 1}, {a: 2}]\n":           {{"a", 1}},
+		"k: !!omap [{a: !!omap [{a: 1}]}, {a: 2}]":  {{"a", 1}},
+		"k: !!omap [{a: [{a: 1}]}, {b: 2}]\n":       nil,
+		"k: !!omap {a: [{a: 1}, {a: 2}]}\n":         nil,
+		"k: !!omap [[{a: 1}, {a: 2}]]\n":            nil,
+		"k: [{a: 1}, {a: 2}]\n":                     nil,
+		"k: !!omap [{a: 1}]\nl: [{a: 1}, {a: 1}]\n": nil,
+		"k: !!omap\nl: [{a: 1}, {a: 1}]\n":          nil,
+	} {
+		t.Run(src, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(src))
+			require.NoError(t, err)
+			assert.Empty(t, duplicatesOf(f), "a repeat across entries is recorded on no mapping")
+
+			var got []repeat
+			for _, d := range sequenceDuplicatesOf(f) {
+				got = append(got, repeat{d.Name, d.Index})
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+
+	t.Run("under WithAllowDuplicateMapKey the repeat is marked allowed", func(t *testing.T) {
+		f, err := parser.ParseBytes([]byte("k: !!omap [{a: 1}, {a: 2}]\n"), parser.WithAllowDuplicateMapKey())
+		require.NoError(t, err)
+		found := sequenceDuplicatesOf(f)
+		require.Len(t, found, 1)
+		assert.True(t, found[0].Allowed)
+	})
+}
+
+// sequenceDuplicatesOf returns every key the parse recorded as repeated across the entries of an "!!omap" in f.
+func sequenceDuplicatesOf(f *ast.File) []ast.DuplicateKey {
+	var found []ast.DuplicateKey
+	for _, doc := range f.Docs {
+		ast.Walk(sequenceDuplicateWalker{&found}, doc)
+	}
+
+	return found
+}
+
+type sequenceDuplicateWalker struct{ out *[]ast.DuplicateKey }
+
+func (w sequenceDuplicateWalker) Visit(n ast.Node) ast.Visitor {
+	if s, ok := n.(*ast.SequenceNode); ok {
+		*w.out = append(*w.out, s.Duplicates...)
+	}
+
+	return w
+}
+
 // TestDuplicateMapKeyIsPerType checks that two keys repeat when they resolve to the same node,
 // as section 3.2.1.1 defines.
 //

@@ -218,6 +218,11 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 	}
 	p.enter(ctx, node, KindSequence)
 	defer p.leave(ctx, node)
+	orderedMap := p.keys.TakeOrderedMap()
+	if orderedMap {
+		defer p.keys.OpenOrderedMap(node)()
+	}
+	p.keys.UnmarkEntry()
 
 	ctx.goNext() // Skip the '['.
 
@@ -268,9 +273,16 @@ func (p *Parser) parseFlowSequence(ctx context) (*ast.SequenceNode, error) {
 		}
 
 		ctx := ctx.withIndex(p, index)
+		if orderedMap {
+			p.keys.MarkEntry(int(index))
+		}
 		index++
 		p.markNodes(ctx)
 		value, err := p.parseToken(ctx, ctx.currentToken())
+		if orderedMap {
+			p.recordAliasEntry(value)
+		}
+		p.keys.UnmarkEntry()
 		if err != nil {
 			return nil, err
 		}
