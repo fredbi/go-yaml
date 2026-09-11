@@ -15,7 +15,9 @@ import "github.com/go-openapi/go-yaml/token"
 //
 // [Scanner.validateAnchorName] refuses a '&' naming nothing and one pressed up against a flow collection.
 func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.isDirective {
+		// A directive's name and parameters are ns-char+, and a '&' in one is
+		// a character of the line, as scanTag reads a '!' there.
 		return false, nil
 	}
 
@@ -43,7 +45,10 @@ func (s *Scanner) scanAnchor(ctx *Context) (bool, error) {
 // A '*' arriving with something already buffered is an ordinary character of the plain scalar being read, so this
 // returns false and leaves it to the scalar scan.
 func (s *Scanner) scanAlias(ctx *Context) (bool, error) {
-	if ctx.existsBuffer() {
+	if ctx.existsBuffer() || s.isDirective {
+		// A '*' in a directive line is a character of its name or a
+		// parameter. Read as an alias, "%*x y" -- a reserved directive, which
+		// 6.8 says to ignore -- was refused with `could not find alias "x"`.
 		return false, nil
 	}
 

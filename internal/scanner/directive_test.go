@@ -89,6 +89,29 @@ func TestDirectiveOpensALine(t *testing.T) {
 	})
 }
 
+// TestADirectiveLineHoldsNoAnchorOrAlias checks that a '&' or a '*' in a
+// directive line is a character of its name or a parameter.
+//
+// 6.8 makes the name and the parameters ns-char+, and '&' and '*' are ns-chars.
+// Read as an alias, "%*x y" -- a reserved directive, which 6.8 says to ignore --
+// was refused with `could not find alias "x"`.
+func TestADirectiveLineHoldsNoAnchorOrAlias(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{
+		"%*x y\n---\n-8.5\n",
+		"%*x\n---\n-8.5\n",
+		"%&x y\n---\n-8.5\n",
+		"%FOO *bar &baz\n---\n-8.5\n",
+	} {
+		got, err := scanDirectiveTokens(t, src)
+		require.NoErrorf(t, err, "%q", src)
+		assert.Containsf(t, got, token.DirectiveType, "%q opens with a directive", src)
+		assert.NotContainsf(t, got, token.AliasType, "%q holds no alias", src)
+		assert.NotContainsf(t, got, token.AnchorType, "%q holds no anchor", src)
+	}
+}
+
 func scanDirectiveTokens(t *testing.T, src string) ([]token.Type, error) {
 	t.Helper()
 

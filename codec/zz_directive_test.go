@@ -28,9 +28,9 @@ import (
 // mapping, which is what made it the walk's defect and not the scanner's.
 //
 // A directive's name and parameters are not nodes of the document, so nothing
-// built for them goes over to a walk now. The anchor is still built and still
-// registers nothing -- "*AML" after "%&AML 1.2" has never resolved -- so this
-// is the hand-over alone.
+// built for them goes over to a walk now. Nor is anything built: the scanner
+// reads a '&' or a '*' in a directive line as a character of it, so "*AML"
+// after "%&AML 1.2" still resolves to nothing.
 //
 // libfyaml 1.0.0b1 reads the document in every case and the reference parser
 // passes them; go.yaml.in/yaml/v3 refuses the directive line outright, which is
@@ -84,26 +84,25 @@ func TestFixedADirectiveNamedLikeAnAnchorIsStillADirective(t *testing.T) {
 	})
 }
 
-// TestDefectADirectiveNamedLikeAnAliasIsRefused is the half still open.
+// TestFixedADirectiveNamedLikeAnAliasIsIgnored: "%*x y" is a well-formed
+// directive named "*x", and 6.8 makes an unknown directive one to ignore.
 //
-// "%*x y" is a well-formed directive named "*x", and all three readers refuse
-// it with `could not find alias "x"` -- a message about a node, for a line that
-// holds none. libfyaml 1.0.0b1 reads the document and the reference parser
-// passes it; go.yaml.in/yaml/v3 refuses the directive line, so refusing is
-// defensible and the message is not. Unlike the anchor half this was never a
-// silent loss: the three paths agree, and they agree on an error.
-func TestDefectADirectiveNamedLikeAnAliasIsRefused(t *testing.T) {
-	for _, src := range []string{"%*x y\n---\n-8.5\n", "%*x\n---\n-8.5\n"} {
+// All three readers refused it with `could not find alias "x"` -- a message
+// about a node, for a line that holds none -- because the scanner read the '*'
+// as an alias. libfyaml 1.0.0b1 reads the document and the reference parser
+// passes it; go.yaml.in/yaml/v3 refuses the directive line. Fred ruled on
+// 2026-09-11 to ignore it, as every other reserved directive is ignored here.
+func TestFixedADirectiveNamedLikeAnAliasIsIgnored(t *testing.T) {
+	for _, src := range []string{"%*x y\n---\n-8.5\n", "%*x\n---\n-8.5\n", "%FOO *x\n---\n-8.5\n"} {
 		var got any
-		err := codec.Unmarshal([]byte(src), &got)
-		require.Errorf(t, err, "%q", src)
-		assert.Containsf(t, err.Error(), `could not find alias "x"`, "today: %q", src)
+		require.NoErrorf(t, codec.Unmarshal([]byte(src), &got), "the walk: %q", src)
+		assert.InDeltaf(t, -8.5, got, 0, "the walk: %q", src)
 
-		terr := codec.UnmarshalWithOptions([]byte(src), &got, codec.UseOrderedMap())
-		require.Errorf(t, terr, "%q", src)
-		assert.Containsf(t, terr.Error(), `could not find alias "x"`, "today: %q", src)
+		require.NoErrorf(t, codec.UnmarshalWithOptions([]byte(src), &got, codec.UseOrderedMap()), "the tree: %q", src)
+		assert.InDeltaf(t, -8.5, got, 0, "the tree: %q", src)
 
-		_, jerr := codec.ToJSON([]byte(src))
-		assert.Errorf(t, jerr, "%q", src)
+		out, err := codec.ToJSON([]byte(src))
+		require.NoErrorf(t, err, "ToJSON: %q", src)
+		assert.Equalf(t, "-8.5", string(out), "ToJSON: %q", src)
 	}
 }
