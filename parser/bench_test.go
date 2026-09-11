@@ -46,6 +46,20 @@ func BenchmarkParseBytesWithComments(b *testing.B) {
 	})
 }
 
+// BenchmarkParseReset parses each document with one Parser, Reset before every parse,
+// so its allocations against BenchmarkParseBytes show what Reset keeps.
+func BenchmarkParseReset(b *testing.B) {
+	corpus.ForEachDocument(b, func(b *testing.B, src []byte) {
+		p := parser.New()
+		for b.Loop() {
+			p.Reset()
+			if _, err := p.Parse(src); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 // BenchmarkScanTokens in internal/analysis measures the scan alone, over the same workloads.
 
 // BenchmarkRender measures turning an AST back into text, the other half of the round trip.

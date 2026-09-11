@@ -104,7 +104,22 @@ func New(opts ...Option) *Parser {
 // Reset may reuse the memory of the previous parse:
 // do not use the [ast.File] that an earlier [Parser.Parse] or [Parser.Walk] returned once Reset has been called.
 func (p *Parser) Reset(opts ...Option) {
-	*p = Parser{}
+	// The key ledger, the descent and anchor stacks and the token references are the parse's own scratch space:
+	// they keep their room, emptied. Every other field starts from zero, as in a new Parser.
+	p.keys.Reset()
+	p.descent.reset()
+	p.anchors.reset()
+	for _, ref := range p.refs {
+		*ref = tokenRef{}
+	}
+
+	*p = Parser{
+		keys:       p.keys,
+		descent:    p.descent,
+		anchors:    p.anchors,
+		anchorFrom: p.anchorFrom[:0],
+		refs:       p.refs,
+	}
 	for _, opt := range opts {
 		opt(p)
 	}

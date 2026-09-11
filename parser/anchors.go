@@ -68,6 +68,15 @@ type anchorTable struct {
 	declared map[string]ast.Node
 }
 
+// reset empties the table and drops the published anchors, and keeps the room its two stacks have grown.
+//
+// nodes and identities are dropped, not cleared: a document of the previous parse may hold the nodes map.
+func (t *anchorTable) reset() {
+	clear(t.open[:cap(t.open)])
+	clear(t.cyclic[:cap(t.cyclic)])
+	*t = anchorTable{open: t.open[:0], cyclic: t.cyclic[:0]}
+}
+
 // openName records that the node name stands for is being read.
 //
 // open is a stack because anchors nest, as in "&x [&y 1]", and the last name opened closes first.

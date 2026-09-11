@@ -202,3 +202,12 @@ func (k *Set) Close(base int) {
 	k.filter = k.filter[:base]
 	k.entries = k.entries[:base]
 }
+
+// Reset forgets every key and turns UseJSONNames off, and keeps the room the Set has grown.
+func (k *Set) Reset() {
+	clear(k.entries[:cap(k.entries)])
+	clear(k.index)
+	k.filter = k.filter[:0]
+	k.entries = k.entries[:0]
+	k.jsonNames = false
+}

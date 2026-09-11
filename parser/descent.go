@@ -63,6 +63,13 @@ type descentState struct {
 	readingKey int
 }
 
+// reset empties every stack and counter, and keeps the room the two stacks have grown.
+func (d *descentState) reset() {
+	clear(d.entries[:cap(d.entries)])
+	clear(d.seqEntries[:cap(d.seqEntries)])
+	*d = descentState{entries: d.entries[:0], seqEntries: d.seqEntries[:0]}
+}
+
 // enterEntry records the entry being read and returns a func that restores the enclosing one.
 func (d *descentState) enterEntry(col int, inMap bool) func() {
 	wasCol, wasMap := d.entryCol, d.entryInMap

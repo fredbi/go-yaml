@@ -184,3 +184,15 @@ func (l *Ledger) Open(node *ast.MappingNode) func() {
 		l.builtKeys = l.builtKeys[:len(l.builtKeys)-1]
 	}
 }
+
+// Reset forgets every key and every open mapping, and keeps the room the Ledger has grown.
+//
+// A parse that stops on an error leaves mappings open, so call Reset before the Ledger reads another stream.
+func (l *Ledger) Reset() {
+	l.keys.Reset()
+	clear(l.openMaps[:cap(l.openMaps)])
+	clear(l.builtKeys[:cap(l.builtKeys)])
+	l.probeBases = l.probeBases[:0]
+	l.openMaps = l.openMaps[:0]
+	l.builtKeys = l.builtKeys[:0]
+}
