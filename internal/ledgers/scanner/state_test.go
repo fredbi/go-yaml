@@ -69,12 +69,12 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// folds a line and dropping the tab that ends one, and no scan of the bytes tells those apart from content.
 	// 2 of 2,738 re-baselined 2026-09-10 after 16dd5be, from 2 of 2,744 the same day, 2 of 2,743 and 2 of 2,742 on
 	// 2026-09-09 and 3 of 1,348 on 2026-09-07. The ratio has held at 0.07% across all four.
-	"buf.notSpaceCharPos==trimmed/plain": {0, 317736},
+	"buf.notSpaceCharPos==trimmed/plain": {0, 318680},
 	"buf.notSpaceCharPos==trimmed/block": {2, 2767},
 
 	// A mark past the end of the buffer made bufferedSrc slice a byte the last token wrote.
 	// Fixed; nothing may raise this.
-	"buf.notSpaceCharPos<=len(buf)": {0, 320503},
+	"buf.notSpaceCharPos<=len(buf)": {0, 321447},
 
 	// Both entries count a space opening a line where indentNum has stopped tracking the column. They have different
 	// causes, and only the second is a surprise.
@@ -153,15 +153,20 @@ var stateLedger = map[string]disagreement{ //nolint:gochecknoglobals // ok to st
 	// disagree, so 5,385 -> 5,402 and 3.3997% -> 3.4081%, a move of 0.0084 points where the documented range is
 	// 0.75. The same keys written with a space took that path already.
 	//
+	// And again the same day, for a "<<" after a plain scalar's text, which stays in that text now. 13 such keys
+	// stop being cut as merge keys: indent levels 158,505 -> 158,492 and extents 48,402 -> 48,415, and none of the
+	// 13 disagreed, so 3.4081% -> 3.4084%. scanMergeKey reads the buffer for every merge key it cuts, which adds
+	// 944 buffer reads.
+	//
 	// A count re-baselined without the ratio beside it says nothing about whether the scanner changed, which is why
 	// the ledger records the denominator.
-	"indent.lastIndentLevel==indentLevel": {5402, 158505},
+	"indent.lastIndentLevel==indentLevel": {5402, 158492},
 
 	// bufferedToken assembles a token's extent from what the scanner already holds: where the origin began, how long
 	// it is, and the line the text ends on. It does not read the origin back to work the extent out.
 	// This compares that extent against token.MeasureOrigin's, which token.Make used.
 	// Nothing may raise it: a disagreement is a token pointing at the wrong stretch of source.
-	"token.extentMatchesTheOrigin": {0, 48402},
+	"token.extentMatchesTheOrigin": {0, 48415},
 }
 
 // TestStateLedger holds the scanner's state pairs to what they were measured at.

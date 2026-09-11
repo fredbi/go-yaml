@@ -52,6 +52,39 @@ func TestAMergeKeyTakesATabAsSeparation(t *testing.T) {
 		}
 	})
 
+	t.Run("text in front of the '<<' leaves a plain scalar", func(t *testing.T) {
+		// Scanner.scanMergeKey runs at every '<', and cursor.isMergeKey reads only what follows it.
+		// Without a look at the buffer, "a<<: 1" was cut into "a" and a merge key, and the parser lost the "a".
+		for _, tc := range []struct{ src, key string }{
+			{"a<<: 1\n", "a<<"},
+			{"<<<: 1\n", "<<<"},
+			{"x <<: {a: 1}\n", "x <<"},
+			{"x\t<<: 1\n", "x\t<<"},
+			{"[a<<: 1]\n", "a<<"},
+		} {
+			tokens, err := scanTokens(tc.src)
+			require.NoErrorf(t, err, "%q", tc.src)
+			assert.Falsef(t, slices.ContainsFunc(tokens, isMergeKey), "%q", tc.src)
+			assert.Truef(t, slices.ContainsFunc(tokens, func(tk token.Token) bool { return tk.Value == tc.key }),
+				"no key %q in %q", tc.key, tc.src)
+		}
+	})
+
+	t.Run("a merge key after another entry is still one", func(t *testing.T) {
+		for _, src := range []string{
+			"k: v\n<<: {a: 1}\n",
+			"k:\n  a: 1\n  <<: {b: 2}\n",
+			"- a\n- <<: {b: 1}\n",
+			"{a: 1, <<: {b: 2}}\n",
+			"k: v\n\n<<: {a: 1}\n",
+			"k: v # c\n<<: {a: 1}\n",
+		} {
+			tokens, err := scanTokens(src)
+			require.NoErrorf(t, err, "%q", src)
+			assert.Truef(t, slices.ContainsFunc(tokens, isMergeKey), "%q", src)
+		}
+	})
+
 	t.Run("anything else after the '<<' leaves a plain scalar", func(t *testing.T) {
 		for _, src := range []string{"<<x: 1\n", "<<:x\n"} {
 			tokens, err := scanTokens(src)

@@ -42,6 +42,37 @@ func TestMergeKeysFoldWithoutTheRestOf11(t *testing.T) {
 	})
 }
 
+// TestAKeyEndingInAMergeKeyIsAnOrdinaryKey checks that "<<" after the text of a key belongs to that key.
+//
+// go.yaml.in/yaml/v3 reads "a<<: 1" as {"a<<": 1}. The scanner cut the "<<" out as a merge key and the parse read
+// {"<<": 1}, so the "a" was lost; "x <<: {a: 1}" over "b: 2" was refused as "value is not allowed in this context".
+func TestAKeyEndingInAMergeKeyIsAnOrdinaryKey(t *testing.T) {
+	for _, tc := range []struct{ src, key string }{
+		{"a<<: 1\n", "a<<"},
+		{"<<<: 1\n", "<<<"},
+		{"x <<: {a: 1}\nb: 2\n", "x <<"},
+	} {
+		for _, opts := range [][]parser.Option{nil, {parser.WithMergeKeys()}, {parser.WithYAMLVersion(parser.YAML11)}} {
+			f, err := parser.New(opts...).Parse([]byte(tc.src))
+			require.NoErrorf(t, err, "%q", tc.src)
+			assert.Falsef(t, holdsAMergeKey(t, tc.src, opts...), "%q", tc.src)
+			assert.Equalf(t, tc.key, firstKeyOf(f), "%q", tc.src)
+		}
+	}
+}
+
+// firstKeyOf returns the text of the first mapping key in f.
+func firstKeyOf(f *ast.File) string {
+	var key string
+	ast.Walk(nodeFunc(func(n ast.Node) {
+		if mv, ok := n.(*ast.MappingValueNode); ok && key == "" {
+			key = mv.Key.GetToken().Value
+		}
+	}), f.Docs[0].Body)
+
+	return key
+}
+
 // holdsAMergeKey reports whether the parse built an [ast.MergeKeyNode].
 func holdsAMergeKey(t *testing.T, src string, opts ...parser.Option) bool {
 	t.Helper()

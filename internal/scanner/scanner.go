@@ -706,8 +706,11 @@ func (s *Scanner) progress(ctx *Context, num int32) {
 	}
 }
 
+// scanMergeKey cuts a "<<" key, and reports whether it did.
+//
+// A "<<" after the text of a plain scalar belongs to that text: "a<<: 1" is the key "a<<", and "x <<: 1" the key "x <<".
 func (s *Scanner) scanMergeKey(ctx *Context) bool {
-	if !ctx.isMergeKey() {
+	if !ctx.isMergeKey() || ctx.existsBuffer() {
 		return false
 	}
 

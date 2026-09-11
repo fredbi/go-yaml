@@ -54,9 +54,9 @@ func at(src string, offset int) string {
 // halves of the position and back in the extent.
 //
 // This measurement cannot see a token whose extent does not tile. originsOf reads a token's text back from the
-// extents and returns "" where they break, and the loop below skips an empty want. Six of the 402 documents break
-// the extents, so six tokens are counted nowhere here. extentLedger in extent_test.go records them, and the break
-// falls on the last token in all six, so no token after one has its origin shifted into a miss.
+// extents and returns "" where they break, and the loop below skips an empty want. Four of the 402 documents break
+// the extents, so four tokens are counted nowhere here. extentLedger in extent_test.go records them, and the break
+// falls on the last token in all four, so no token after one has its origin shifted into a miss.
 //
 // It was 25 while this read the source through Scan, which returns a refusal as an error where NextToken hands over the
 // token the refusal names.

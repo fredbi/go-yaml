@@ -288,10 +288,16 @@ type placement struct {
 // everything in front of the key on its line, blanks or not. It admits a
 // single pair inside a flow sequence, where an inserted entry has no line of
 // its own to go on.
+//
+// 1776 -> 1775 when a "<<" after a plain scalar's text stayed in that text.
+// seed/10138 writes ` i    <<:` under a sequence entry, and read only because
+// the scanner cut "<<" out as a merge key and dropped the "i". It is refused
+// now, as go.yaml.in/yaml/v3 refuses it, and it read at every placement, so
+// the other counts stand.
 var insertionCensus = map[string]placement{
-	"front":  {tested: 1776, unreadable: 58, disturbed: 0},
-	"middle": {tested: 1776, unreadable: 58, disturbed: 17},
-	"back":   {tested: 1776, unreadable: 13, disturbed: 192},
+	"front":  {tested: 1775, unreadable: 58, disturbed: 0},
+	"middle": {tested: 1775, unreadable: 58, disturbed: 17},
+	"back":   {tested: 1775, unreadable: 13, disturbed: 192},
 }
 
 // TestInsertingIntoTheCorpus puts one entry into every document the corpus holds

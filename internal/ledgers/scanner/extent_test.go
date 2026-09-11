@@ -25,16 +25,18 @@ import (
 // TestOriginsTileTheSource asserts in internal/scanner, and the one github.com/go-openapi/go-yaml/transform stands on:
 // its pieces tile the source, so a transform that changes nothing gives the document back byte for byte.
 //
-// Six documents of the 12,281 the parse accepts break it, and they break it in two ways:
+// Four documents of the 12,384 the parse accepts break it. Each ends a String token past the end of the document,
+// by 9 to 45 bytes. Every one of them holds a multi-line plain scalar, and "- single multiline\n - sequence entry\n"
+// is the whole of the smallest: 37 bytes, and the second token reports Offset() 21 and EndOffset() 56. Both ends come
+// from the scalar's last line: the start is wrong too, since the scalar begins at offset 2 and 21 is the "-" on the
+// second line.
 //
-//   - Five end a String token past the end of the document, by 9 to 45 bytes. Every one of them holds a multi-line
-//     plain scalar, and "- single multiline\n - sequence entry\n" is the whole of the smallest: 37 bytes, and the
-//     second token reports Offset() 21 and EndOffset() 56. Both ends come from the scalar's last line: the start is
-//     wrong too, since the scalar begins at offset 2 and 21 is the "-" on the second line.
-//   - One starts a token before the one before it ended, by one byte, writing its line breaks as "\r\n" and "\n"
-//     together.
+// It was six. Two more started a MappingValue token before the one before it ended,
+// because the scanner cut a "<<" out of a plain scalar as a merge key:
+// seed/17860 writes "{<<<: ...}" and seed/10138 " i    <<:".
+// The first reads whole now, and this parse and go.yaml.in/yaml/v3 both refuse the second.
 //
-// It was seven. "---\r\n&a1 \nFalse\t# c1\r\n" put the Comment one byte inside the anchor before it, because
+// It was seven before that. "---\r\n&a1 \nFalse\t# c1\r\n" put the Comment one byte inside the anchor before it, because
 // removeRightSpaceFromBuf cut the space closing "&a1 " off the origin and the extent was taken from what was left.
 // cursor.originTrimmed counts those bytes back into the end.
 //
@@ -72,12 +74,6 @@ var extentLedger = map[string]string{
 	"59cf8381": "a String token ends 9 bytes past the document",
 	// seed/9354: "- {}\r\n- null\r\n    - '-1'\r\n".
 	"a1258ce0": "a String token ends 11 bytes past the document",
-	// seed/17802: a flow mapping after a "%TAG" directive, with "\r\n" breaks.
-	"c49d6b9d": "a MappingValue token starts 1 bytes before the one before it",
-	// A second of the same kind, drawn on 2026-09-10 when narrowing the "!!omap" draw reshuffled every seed.
-	// Five bytes rather than one, so it is a different document and not the same one re-keyed: the other five
-	// entries all still match, and only this arrived unrecorded.
-	"c70d7289": "a MappingValue token starts 5 bytes before the one before it",
 }
 
 // TestExtentsTileTheAcceptedCorpus scans every document the parse accepts and holds what fails to tile against
