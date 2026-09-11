@@ -584,13 +584,6 @@ func (r *readings) legacy(v Value) any {
 			return n.Decoded()
 		}
 
-		// "!!int" comes back as a plain int where the same number untagged
-		// comes back as a uint64, so the tag keeps deciding the Go type and
-		// only the magnitude moves.
-		if _, isInt := n.Decoded().(int); isInt {
-			return int(other)
-		}
-
 		return other
 	default:
 		return v.Decoded()

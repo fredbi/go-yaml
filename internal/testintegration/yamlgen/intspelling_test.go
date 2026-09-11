@@ -45,12 +45,12 @@ func TestATaggedIntegerDropsALeadingZeroItsDigitsCannotCarry(t *testing.T) {
 		want    string
 		reads   any
 	}{
-		"a non-octal digit drops the leading zero under a tag": {value: 8, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 8\n", reads: 8},
-		"and so does the digit above it":                       {value: 9, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 9\n", reads: 9},
-		"octal digits keep it under a tag":                     {value: 511, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 0511\n", reads: 329},
+		"a non-octal digit drops the leading zero under a tag": {value: 8, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 8\n", reads: uint64(8)},
+		"and so does the digit above it":                       {value: 9, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 9\n", reads: uint64(9)},
+		"octal digits keep it under a tag":                     {value: 511, tag: yamlgen.TagInt, version: "1.1", want: "%YAML 1.1\n---\n\"k\": !!int 0511\n", reads: uint64(329)},
 		"a non-octal digit keeps it untagged":                  {value: 9, tag: "", version: "1.1", want: "%YAML 1.1\n---\n\"k\": 09\n", reads: "09"},
 		"octal digits keep it untagged":                        {value: 511, tag: "", version: "1.1", want: "%YAML 1.1\n---\n\"k\": 0511\n", reads: uint64(329)},
-		"core keeps it under a tag, whatever the digits":       {value: 878, tag: yamlgen.TagInt, version: "", want: "\"k\": !!int 0878\n", reads: 878},
+		"core keeps it under a tag, whatever the digits":       {value: 878, tag: yamlgen.TagInt, version: "", want: "\"k\": !!int 0878\n", reads: uint64(878)},
 	}
 
 	for name, tc := range cases {

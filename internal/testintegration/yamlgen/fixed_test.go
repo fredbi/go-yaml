@@ -844,7 +844,7 @@ func TestFixedAnAnchorAfterATagNamesTheTaggedNode(t *testing.T) {
 		{
 			tagFirst:    "a: !!int &a1 \"5\"\nb: *a1\n",
 			anchorFirst: "a: &a1 !!int \"5\"\nb: *a1\n",
-			want:        map[string]any{"a": 5, "b": 5},
+			want:        map[string]any{"a": uint64(5), "b": uint64(5)},
 		},
 		{
 			tagFirst:    "a: !!str &a1 5\nb: *a1\n",
@@ -1199,12 +1199,13 @@ func TestFixedAScalarUnderAnUnresolvedTagIsRead(t *testing.T) {
 // TestFixedAnIntTagReadsIntoAGoInteger: "!!int" on a value reads into a Go
 // integer, as the same value untagged always did.
 //
-// [yamlgen.Tagged.Decoded] says where the two parted company: an untagged
-// non-negative integer comes back as a uint64 and a negative one as an int64,
-// where "!!int" hands back a plain int for a number that fits one -- which is
-// what strconv.Atoi gave. Decoder.decodeValue read a uint64, an int64, a
-// float64 and a string into an integer field and had no case for an int, so it
-// reported `cannot unmarshal int into Go struct field box.N of type int64`.
+// The two parted company here: an untagged non-negative integer came back as a
+// uint64 and a negative one as an int64, where "!!int" handed back a plain int
+// for a number that fits one -- which is what strconv.Atoi gave.
+// Decoder.decodeValue read a uint64, an int64, a float64 and a string into an
+// integer field and had no case for an int, so it reported `cannot unmarshal
+// int into Go struct field box.N of type int64`. A "!!int" decodes to the
+// untagged number's Go type now, so the two no longer part.
 func TestFixedAnIntTagReadsIntoAGoInteger(t *testing.T) {
 	type box struct {
 		N  int64   `yaml:"n"`
@@ -1333,7 +1334,7 @@ func TestFixedAnAnchorBetweenATagAndItsScalarKeepsTheText(t *testing.T) {
 
 	t.Run("and a tag that does resolve still types its scalar", func(t *testing.T) {
 		for src, want := range map[string]any{
-			"!!int &a1 12\n":     12, // "!!int" hands back a plain int for a number that fits one.
+			"!!int &a1 12\n":     uint64(12), // "!!int" hands back the Go type the untagged number takes.
 			"!!float &a1 12\n":   float64(12),
 			"!!seq &a1 [1, 2]\n": []any{uint64(1), uint64(2)},
 			"!foo &a1 [1, 2]\n":  []any{uint64(1), uint64(2)},
@@ -1628,7 +1629,7 @@ func TestFixedATagOnItsOwnLineTakesTheBlockScalarUnderIt(t *testing.T) {
 		for src, want := range map[string]any{
 			"!!null\n>\n":           nil,
 			"!!str\n>-\n x\n":       "x",
-			"!!int\n>-\n 5\n":       5,
+			"!!int\n>-\n 5\n":       uint64(5),
 			"!!bool\n>-\n true\n":   true,
 			"!!null\n|\n":           nil,
 			"k: !!null\n  >\n":      map[string]any{"k": nil},

@@ -80,10 +80,12 @@ type (
 	//
 	// The tag is not optional. YAML 1.2's core schema resolves null, bool, int,
 	// float and str and no timestamp, so "2001-12-14" written plain is the
-	// string "2001-12-14" under every version this library reads --
-	// codec.TestATimestampIsATextualScalar holds that down. A Timestamp is
-	// therefore always drawn inside a [Tagged], and drawTextual is the only
-	// place one is made.
+	// string "2001-12-14" under 1.2 -- codec.TestATimestampIsATextualScalar
+	// holds that down. YAML 1.1 resolves it as a timestamp, and so does this
+	// library under a "%YAML 1.1" directive. The emitter never writes one plain:
+	// plainSafe wants a leading letter, so every drawn date is quoted. A
+	// Timestamp is therefore always drawn inside a [Tagged], and drawTextual is
+	// the only place one is made.
 	//
 	// The time is always UTC and carries no monotonic reading, so the value the
 	// document decodes to compares equal to this one under reflect's equality.
@@ -310,18 +312,11 @@ func (MergeKey) Decoded() any {
 
 // Decoded returns what the tagged value decodes to.
 //
-// One tag changes it. An untagged non-negative integer comes back as a uint64
-// and a negative one as an int64, and `!!int` overrides both with a plain int
-// -- so 5, !!int 5 and -5 are three spellings that produce three Go types. The
-// asymmetry is the library's rather than YAML's, and it is written down here
-// for the same reason [Int.Decoded] writes down the other half of it: a
-// generator that normalized it would stop noticing if it changed.
+// A tag settles the type and the scalar under it supplies the value, so a
+// tagged scalar decodes as the untagged one does: "!!int 5" is uint64(5), as 5
+// is, and "!!int -5" is int64(-5). "!!omap" is the one tag that changes it,
+// since it names the shape of the sequence under it.
 func (t Tagged) Decoded() any {
-	if t.Tag == TagInt {
-		if n, ok := t.V.(Int); ok {
-			return n.V
-		}
-	}
 	if t.Tag == TagOMap {
 		if ordered, isOrdered := orderedMapDecoded(t.V); isOrdered {
 			return ordered
@@ -431,11 +426,29 @@ func newKeyedMap(size int) *keyedMap {
 }
 
 // holds reports whether the mapping already holds key.
+//
+// A time.Time key is held where one at the same instant is, in any zone, as
+// codec's keyedMap decides it for a merge: "2001-12-14t21:59:43.10-05:00" and
+// "2001-12-15 02:59:43.10" are one key to the override, and the map keeps the
+// own key's zone.
 func (k *keyedMap) holds(key any) bool {
 	if k.byKey != nil {
-		_, held := k.byKey[key]
+		if _, held := k.byKey[key]; held {
+			return true
+		}
 
-		return held
+		stamp, isTime := key.(time.Time)
+		if !isTime {
+			return false
+		}
+
+		for held := range k.byKey {
+			if other, ok := held.(time.Time); ok && other.Equal(stamp) {
+				return true
+			}
+		}
+
+		return false
 	}
 
 	name, isString := key.(string)
@@ -740,8 +753,9 @@ func Values() *rapid.Generator[Value] {
 // It runs before [withAliases], because an [Alias] holds the value it stands
 // for rather than looking it up, and a tag put on the anchored node afterwards
 // would leave every alias to it decoding to what it meant before the tag. That
-// is not hypothetical: `!!int` turns a uint64 into an int, so the document and
-// the expected value disagreed on one node the first time round.
+// was not hypothetical: `!!int` decoded to an int then, where the untagged
+// number was a uint64, so the document and the expected value disagreed on one
+// node the first time round.
 func withTags(t *rapid.T, v Value) Value {
 	return (&tagger{t: t}).walk(v)
 }

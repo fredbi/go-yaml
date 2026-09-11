@@ -290,7 +290,7 @@ func TestATagIsNoLaxerThanTheBareSpelling(t *testing.T) {
 	})
 
 	t.Run("and 1.1's sexagesimal reaches both tags", func(t *testing.T) {
-		assert.Equal(t, 685230, valueOf(t, under11+"k: !!int 190:20:30\n"))
+		assert.Equal(t, uint64(685230), valueOf(t, under11+"k: !!int 190:20:30\n"))
 		assert.Equal(t, 685230.5, valueOf(t, under11+"k: !!float 190:20:30.5\n"))
 		// Neither is a number under the core schema.
 		assert.Contains(t, refuses(t, "k: !!int 190:20:30\n"), "as !!int")
