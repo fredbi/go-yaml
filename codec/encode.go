@@ -47,6 +47,7 @@ type Encoder struct {
 	writeInferredNames         bool
 	autoInt                    bool
 	useLiteralStyleIfMultiline bool
+	skipDuplicateMapKey        bool
 	commentMap                 map[nodeFilter][]*Comment
 	written                    bool
 
@@ -813,9 +814,27 @@ func (e *Encoder) encodeMap(ctx context.Context, value reflect.Value, column int
 		keys[i] = k.Interface()
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j])
+		a, b := fmt.Sprint(keys[i]), fmt.Sprint(keys[j])
+		if a != b {
+			return a < b
+		}
+
+		// int(1) and uint64(1) print alike. Ordered by their Go types, the
+		// entry SkipDuplicateMapKey keeps does not depend on map iteration.
+		return fmt.Sprintf("%T", keys[i]) < fmt.Sprintf("%T", keys[j])
 	})
+	seen := repeatableKeys(value.Type().Key())
 	for _, key := range keys {
+		if seen != nil {
+			first, repeated := seen.add(key)
+			if repeated && e.skipDuplicateMapKey {
+				continue
+			}
+			if repeated {
+				return nil, fmt.Errorf("map keys %#v and %#v are one YAML key: %w", first, key, yamlerrors.ErrDuplicateKey)
+			}
+		}
+
 		k := reflect.ValueOf(key)
 		v := value.MapIndex(k)
 		encoded, err := e.encodeValue(ctx, v, column)
@@ -854,6 +873,50 @@ func (e *Encoder) encodeMap(ctx context.Context, value reflect.Value, column int
 		e.setSmartAnchor(vRef, keyText)
 	}
 	return node, nil
+}
+
+// keySet records the YAML identity of each key a Go map writes, for a map
+// whose Go keys can be one YAML key.
+type keySet map[keyIdentity]any
+
+// keyIdentity is the kind and compared name keyIDOf gives a key.
+type keyIdentity struct {
+	kind token.KeyKind
+	name string
+}
+
+// repeatableKeys returns an empty keySet for a map whose key type can hold two
+// Go keys that are one YAML key, and nil for one whose keys == already tells
+// apart the way YAML does.
+//
+// An interface holds int(1) beside uint64(1); a float, one NaN beside another;
+// a time.Time, one instant in two zones. A string, integer or bool key type
+// holds one Go key per YAML key, and costs nothing.
+func repeatableKeys(t reflect.Type) keySet {
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return nil
+	default:
+		return keySet{}
+	}
+}
+
+// add records key, and returns the key already recorded under its identity
+// and whether there was one. A key keyIDOf has no kind for is never a repeat.
+func (s keySet) add(key any) (any, bool) {
+	kind, name, named := keyIDOf(key)
+	if !named {
+		return nil, false
+	}
+	id := keyIdentity{kind: kind, name: name}
+	if first, repeated := s[id]; repeated {
+		return first, true
+	}
+	s[id] = key
+
+	return nil, false
 }
 
 // IsZeroer is used to check whether an object is zero to determine

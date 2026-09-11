@@ -469,6 +469,26 @@ func OmitZero() EncodeOption {
 	}
 }
 
+// SkipDuplicateMapKey writes the first of two map keys that are one YAML key,
+// and drops the rest.
+//
+// A Go map can hold two keys YAML holds as one: int(1) and uint64(1) in a
+// map[any]any, two NaN in a map[float64]T, one instant in two zones in a
+// map[time.Time]T. Without this option the encoder returns an error wrapping
+// [errors.ErrDuplicateKey] for such a map, as the decoder refuses a document
+// that writes one key twice.
+//
+// The encoder orders a map's keys by their text and then by their Go type, so
+// the first is the same whatever order the map iterates in. [AllowDuplicateMapKey]
+// keeps the last on the way in instead: the decoder has every entry before it
+// fills a map, and the encoder writes each key as it comes to it.
+func SkipDuplicateMapKey() EncodeOption {
+	return func(e *Encoder) error {
+		e.skipDuplicateMapKey = true
+		return nil
+	}
+}
+
 // CommentPosition says where a comment stands relative to the value it belongs
 // to.
 //
