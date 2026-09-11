@@ -203,7 +203,7 @@ func (p *Parser) mapKeyIdentity(n ast.Node) (string, token.KeyKind) {
 		// the string "1" and not the integer, and the two are two keys.
 		// Unwrapping to the node under it read the tag off and made them one.
 		if name, kind, tagged := ast.TaggedKeyName(nn); tagged {
-			return name, kind
+			return ast.CanonicalKeyName(name, kind), kind
 		}
 
 		return p.mapKeyIdentity(nn.Value)

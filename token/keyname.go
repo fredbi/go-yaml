@@ -26,6 +26,11 @@ const (
 	KeyBool
 	KeyInt
 	KeyFloat
+	// KeyTimestamp is a "!!timestamp", named in RFC 3339 and compared as its
+	// instant in UTC. It has a kind of its own so the string
+	// "2001-12-14T00:00:00Z" and the timestamp written "2001-12-14" stay two
+	// keys.
+	KeyTimestamp
 )
 
 func (k KeyKind) String() string {
@@ -40,6 +45,8 @@ func (k KeyKind) String() string {
 		return "int"
 	case KeyFloat:
 		return "float"
+	case KeyTimestamp:
+		return "timestamp"
 	default:
 		return "other"
 	}

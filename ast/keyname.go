@@ -4,6 +4,8 @@
 package ast
 
 import (
+	"time"
+
 	"github.com/go-openapi/go-yaml/token"
 )
 
@@ -128,9 +130,45 @@ func TaggedKeyName(n *TagNode) (string, token.KeyKind, bool) {
 		name, kind := token.KeyName(res.Text, token.FloatType)
 
 		return name, kind, true
+	case token.TimestampTag:
+		// Named in RFC 3339 in the zone the document wrote, which is how
+		// ToJSON writes a timestamp, so a string-keyed map and the JSON name
+		// the entry alike. [CanonicalKeyName] compares it in UTC.
+		stamp, ok := ParseTimestamp(res.Text)
+		if !ok {
+			return "", token.KeyOther, false
+		}
+
+		return stamp.Format(time.RFC3339Nano), token.KeyTimestamp, true
 	default:
 		return "", token.KeyOther, false
 	}
+}
+
+// CanonicalKeyName returns the name two keys are compared by, given the name
+// and kind [KeyName] or [TaggedKeyName] returned.
+//
+// It differs from the name only for a timestamp, which it writes as its instant
+// in UTC: yaml.org/type/timestamp.html gives that as the canonical form, and
+// 3.2.1.3 compares scalars by their canonical forms. So "2001-12-14" and
+// "2001-12-14 00:00:00" are one key, and so is one instant written at "-05:00"
+// and in UTC.
+//
+// Compared by the text, two spellings passed the duplicate check and then met
+// in the decoder as one time.Time, which kept the second value and dropped the
+// first with nothing reported. The decoder's own == is no help: it compares a
+// time.Time's *time.Location and not its offset, so "+00:00" and "Z" are two
+// keys to a Go map.
+func CanonicalKeyName(name string, kind token.KeyKind) string {
+	if kind != token.KeyTimestamp {
+		return name
+	}
+	stamp, err := time.Parse(time.RFC3339Nano, name)
+	if err != nil {
+		return name
+	}
+
+	return stamp.UTC().Format(time.RFC3339Nano)
 }
 
 // maxKeyNameDepth bounds the descent through the properties standing in front
