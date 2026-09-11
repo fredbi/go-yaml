@@ -51,16 +51,36 @@ func TestFixedAFloatUnderAnIntegerTagIsRefused(t *testing.T) {
 			src  string
 			want any
 		}{
-			{src: "k: !!int 16\n", want: 16},
-			{src: "k: !!int 0x10\n", want: 16},
-			{src: "k: !!int 0o17\n", want: 15},
-			{src: "k: !!int -5\n", want: -5},
+			// The Go type the untagged number decodes to.
+			{src: "k: !!int 16\n", want: uint64(16)},
+			{src: "k: !!int 0x10\n", want: uint64(16)},
+			{src: "k: !!int 0o17\n", want: uint64(15)},
+			{src: "k: !!int -5\n", want: int64(-5)},
 			// A tag standing on nothing keeps taking the tag's own default.
 			{src: "k: !!int\n", want: uint64(0)},
 		} {
 			var v map[string]any
 			require.NoErrorf(t, codec.NewDecoder(strings.NewReader(tc.src)).Decode(&v), "%q", tc.src)
 			assert.Equalf(t, tc.want, v["k"], "%q", tc.src)
+		}
+	})
+
+	t.Run("and a tagged and an untagged integer are one key", func(t *testing.T) {
+		// "!!int 1" decoded to int(1) and "1" to uint64(1): two keys to a Go
+		// map, so an own "!!int 1" did not beat the "1" a "<<" brought in and
+		// the mapping held both entries, whichever side carried the tag.
+		for _, pair := range [][2]string{{"1", "!!int 1"}, {"!!int 1", "1"}, {"-1", "!!int -1"}} {
+			src := "%YAML 1.1\n---\na: &m\n  ? " + pair[0] + "\n  : merged\n" +
+				"b:\n  <<: *m\n  ? " + pair[1] + "\n  : own\n"
+
+			var v map[string]any
+			require.NoErrorf(t, codec.NewDecoder(strings.NewReader(src)).Decode(&v), "%q", src)
+			b, isMap := v["b"].(map[any]any)
+			require.Truef(t, isMap, "%q: b is %T", src, v["b"])
+			assert.Lenf(t, b, 1, "%q", src)
+			for _, value := range b {
+				assert.Equalf(t, "own", value, "%q", src)
+			}
 		}
 	})
 

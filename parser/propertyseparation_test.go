@@ -67,7 +67,7 @@ func TestATabSeparatesAPropertyFromItsNode(t *testing.T) {
 			want any
 		}{
 			{"a: !!str\tx\n", map[string]any{"a": "x"}},
-			{"a: !!int\t7\n", map[string]any{"a": 7}},
+			{"a: !!int\t7\n", map[string]any{"a": uint64(7)}},
 			{"a: !foo\tx\n", map[string]any{"a": "x"}},
 			{"a: !\tx\n", map[string]any{"a": "x"}},
 			{"a: !!str\t\tx\n", map[string]any{"a": "x"}},

@@ -186,7 +186,7 @@ func TestDecodeTagOnTheEmptyNodeInAFlowCollection(t *testing.T) {
 		"the non-specific tag": {source: "[!]\n", want: []any{nil}},
 		"a local tag":          {source: "[!str]\n", want: []any{nil}},
 		"the string tag":       {source: "[!!str]\n", want: []any{""}},
-		"the integer tag":      {source: "[!!int]\n", want: []any{0}},
+		"the integer tag":      {source: "[!!int]\n", want: []any{uint64(0)}},
 		"mixed with entries":   {source: "[a, !, b]\n", want: []any{"a", nil, "b"}},
 	}
 

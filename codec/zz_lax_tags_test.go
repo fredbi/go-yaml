@@ -63,7 +63,7 @@ func TestLaxTagsReadsTheTextTheScalarWasWrittenWith(t *testing.T) {
 func TestLaxTagsLeavesEveryOtherAnswerAlone(t *testing.T) {
 	for src, want := range map[string]any{
 		// A tag naming what the scalar is.
-		"k: !!int 5\n":     5,
+		"k: !!int 5\n":     uint64(5),
 		"k: !!bool true\n": true,
 		"k: !!str 0x10\n":  "0x10",
 		// A tag this library has no rule for is read by its kind, option or no.

@@ -574,8 +574,9 @@ func (b *valueBuilder) taggedWalkValue(n *ast.TagNode, value any) (any, error) {
 	case token.IntegerTag:
 		// From the text and the document's schema, as Decoder.taggedValue
 		// reads it. Converting the walked value instead took a quoted scalar
-		// as the string it is, and the two paths parted on `!!float -0`.
-		return castToInteger(taggedInteger(res.Text, res.Schema)), nil
+		// as the string it is, and the two paths parted on `!!float -0`. It
+		// keeps the Go type the untagged number decodes to.
+		return taggedInteger(res.Text, res.Schema), nil
 	case token.FloatTag:
 		return castToFloatValue(taggedFloat(res.Text, res.Schema)), nil
 	case token.BooleanTag:

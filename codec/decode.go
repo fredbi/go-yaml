@@ -166,55 +166,6 @@ func (d *Decoder) refuseOverBudget(at ast.Node) error {
 	return yamlerrors.NewExcessiveAliasing(d.built, d.budget, tk)
 }
 
-// castToInteger reads what "!!int" was written over.
-//
-// A number that fits an int is handed back as one, which is what the tag gave
-// through strconv.Atoi. One that does not keeps the width it was read at -- a
-// uint64 or a big.Int -- rather than being truncated to fit: Atoi returned
-// math.MaxInt64 for a number past that and 0 for one it could not read at all,
-// both silently.
-func castToInteger(v interface{}) interface{} {
-	switch vv := v.(type) {
-	case int:
-		return vv
-	case int64:
-		if vv >= math.MinInt && vv <= math.MaxInt {
-			return int(vv)
-		}
-
-		return vv
-	case uint64:
-		if vv <= math.MaxInt {
-			return int(vv)
-		}
-
-		return vv
-	case *big.Int:
-		if vv.IsInt64() {
-			return castToInteger(vv.Int64())
-		}
-
-		return vv
-	case float32:
-		return int(vv)
-	case float64:
-		return int(vv)
-	case string:
-		// The text came from a node the "!!int" tag stands over, which the
-		// resolver left as a string, so its spelling is 1.2's.
-		if i, ok := token.ParseInteger(vv, token.ScalarType(vv, token.Schema12)); ok {
-			return castToInteger(i)
-		}
-		if i, ok := token.ParseBigInteger(vv, token.ScalarType(vv, token.Schema12)); ok {
-			return castToInteger(i)
-		}
-
-		return 0
-	}
-
-	return 0
-}
-
 func (d *Decoder) castToFloat(v interface{}) interface{} {
 	return castToFloatValue(v)
 }
@@ -2076,7 +2027,12 @@ func (d *Decoder) taggedValue(ctx context.Context, n *ast.TagNode, res ast.Resol
 		// was 0 where the plain spelling was 5. 3.3.2 gives the "!"
 		// non-specific tag only to a node lacking an explicit tag, so the two
 		// spellings are one node.
-		return castToInteger(taggedInteger(res.Text, res.Schema)), nil
+		//
+		// And one Go value: uint64, int64 or *big.Int, as the untagged number
+		// decodes. Narrowed to int, "!!int 1" was int(1) where "1" was
+		// uint64(1), two keys to a Go map, so an own "!!int 1" did not beat the
+		// "1" a "<<" brought in and the mapping held both.
+		return taggedInteger(res.Text, res.Schema), nil
 	case token.FloatTag:
 		return d.castToFloat(taggedFloat(res.Text, res.Schema)), nil
 	case token.NullTag:
