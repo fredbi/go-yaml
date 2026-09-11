@@ -279,10 +279,19 @@ type placement struct {
 // arrived. Read the ratios: 10.86% -> 10.83% disturbed at the back and 3.26% ->
 // 3.23% unreadable at the front, so both counts followed the corpus and the
 // placement stood still.
+//
+// 1775 -> 1776 when a tab inside a plain scalar began to move the column, and
+// the one document it adds is unreadable at the front and the middle and
+// disturbed at the back. seed/17697 writes `Nul<TAB>l, 0841: ...` inside a
+// flow sequence. The key 0841 now stands at its true column, which passes the
+// column test in firstPlainMapping, and that test compares the column with
+// everything in front of the key on its line, blanks or not. It admits a
+// single pair inside a flow sequence, where an inserted entry has no line of
+// its own to go on.
 var insertionCensus = map[string]placement{
-	"front":  {tested: 1764, unreadable: 57, disturbed: 0},
-	"middle": {tested: 1764, unreadable: 57, disturbed: 17},
-	"back":   {tested: 1764, unreadable: 13, disturbed: 191},
+	"front":  {tested: 1776, unreadable: 58, disturbed: 0},
+	"middle": {tested: 1776, unreadable: 58, disturbed: 17},
+	"back":   {tested: 1776, unreadable: 13, disturbed: 192},
 }
 
 // TestInsertingIntoTheCorpus puts one entry into every document the corpus holds

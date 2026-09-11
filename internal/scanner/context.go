@@ -295,20 +295,14 @@ func (c *Context) removeRightSpaceFromBuf() {
 	c.buf = c.bufferedSrc()
 }
 
-// trailingBlankColumns counts the columns the blanks a line ends with have advanced, from the cursor
-// back to the last character that is not one.
+// trailingBlankColumns counts the columns the blanks a line ends with have advanced: the blanks the buffer holds
+// past its text.
 //
-// A space advances the column and a tab does not -- the scan loop's tab branch calls progress, which
-// moves the cursor and leaves the column alone -- so a run holding both advances by its spaces only.
+// scanNewLine calls it on the line a plain scalar starts on, with the cursor on the line break.
+// The scan loop puts a space or a tab that follows the scalar's text into the buffer and moves the column over it.
+// A tab it leaves out of the buffer -- in a directive -- does not move the column, and is not counted.
 func (c *Context) trailingBlankColumns() int {
-	var columns int
-	for at := min(c.idx, int32(len(c.src))); at > 0 && isOriginSpace(c.src[at-1]); at-- {
-		if c.src[at-1] == ' ' {
-			columns++
-		}
-	}
-
-	return columns
+	return len(c.buf) - int(c.notSpaceCharPos)
 }
 
 // isOriginSpace reports whether c is whitespace a line may end with.

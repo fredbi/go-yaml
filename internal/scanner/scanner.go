@@ -458,7 +458,22 @@ func (s *Scanner) scan(ctx *Context) error {
 			if (ctx.existsBuffer() && s.lastDelimColumn == 0) || s.lastDelimColumn < s.column {
 				s.indentNum++
 				ctx.addOriginBuf(c)
-				s.progress(ctx, 1)
+				if s.isFirstCharAtLine || s.isDirective || len(ctx.buf) == 0 {
+					s.progress(ctx, 1)
+
+					continue
+				}
+
+				// A tab that follows a plain scalar's text on the same line is content:
+				// nb-ns-plain-in-line is (s-white* ns-plain-char)*, and s-white is a space or a tab.
+				// It goes into the buffer and moves the column, as a space does,
+				// because bufferedToken finds where the scalar starts by counting the buffer back from the column.
+				// bufferedSrc drops it again when no text follows.
+				//
+				// A directive is not a plain scalar, and its tabs stay out of the buffer.
+				// They do not separate its parameters either: "%YAML\t1.1" reads as a directive named "YAML1.1".
+				ctx.addBuf(c)
+				s.progressColumn(ctx, 1)
 
 				continue
 			}

@@ -9,8 +9,48 @@ import (
 	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
+	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/parser"
 )
+
+// TestATabInsideAPlainScalarIsKept checks a tab between two characters of a plain scalar through a parse and a
+// layout rendering.
+//
+// nb-ns-plain-in-line is (s-white* ns-plain-char)*, and s-white is a space or a tab, so an interior tab is content.
+// The scanner dropped it, so "k: a\tb" read "ab" and File.String() wrote "k: ab".
+// go.yaml.in/yaml/v3 and libfyaml 1.0.0b1 keep it.
+func TestATabInsideAPlainScalarIsKept(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"k: a\tb\n", "a\tb"},
+		{"k: a \t b\n", "a \t b"},
+		{"k: a\n  b\tc\n", "a b\tc"},
+		{"k: a\t\n", "a"},
+		{"k:\ta\t\n", "a"},
+	} {
+		file, err := parser.ParseBytes([]byte(tc.src))
+		require.NoErrorf(t, err, "%q", tc.src)
+		assert.Equalf(t, tc.want, firstMappedString(file), "%q", tc.src)
+
+		rendered, err := parser.ParseBytes([]byte(file.String()))
+		require.NoErrorf(t, err, "%q renders as %q", tc.src, file.String())
+		assert.Equalf(t, tc.want, firstMappedString(rendered), "%q renders as %q", tc.src, file.String())
+	}
+}
+
+// firstMappedString returns the value of the first mapping entry whose value is a string.
+func firstMappedString(file *ast.File) string {
+	var got *ast.StringNode
+	ast.Walk(nodeFunc(func(n ast.Node) {
+		if mv, ok := n.(*ast.MappingValueNode); ok && got == nil {
+			got, _ = mv.Value.(*ast.StringNode)
+		}
+	}), file.Docs[0].Body)
+	if got == nil {
+		return ""
+	}
+
+	return got.Value
+}
 
 // TestATabIsSeparationAndNotIndentation checks that a tab is rejected in a block entry's indentation
 // and admitted as separation.

@@ -151,6 +151,92 @@ func TestTokenizePlainScalars(t *testing.T) {
 	testscanner.RunCases(t, scanPlain, plainScalarTestCases())
 }
 
+// TestATabInsideAPlainScalarIsContent checks that a tab between two characters of a plain scalar stays in its value,
+// and that the column counts it.
+//
+// nb-ns-plain-in-line is (s-white* ns-plain-char)*, and s-white is a space or a tab, so an interior tab is content.
+// The tab arm of Scanner.scan put the tab in the origin and not in the buffer, so "k: a\tb" read "ab".
+// A tab that opens a line, or that no text follows, separates and stays out of the value.
+func TestATabInsideAPlainScalarIsContent(t *testing.T) {
+	t.Parallel()
+
+	scan := func(t *testing.T, src string) []token.Token {
+		t.Helper()
+
+		tokens, err := scanPlain(src)
+		require.NoErrorf(t, err, "%q", src)
+
+		return tokens
+	}
+
+	valuesOf := func(t *testing.T, src string) []string {
+		t.Helper()
+
+		var values []string
+		for _, tk := range scan(t, src) {
+			if tk.Type == token.StringType {
+				values = append(values, tk.Value)
+			}
+		}
+
+		return values
+	}
+
+	t.Run("the value keeps an interior tab", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want []string
+		}{
+			{"k: a\tb\n", []string{"k", "a\tb"}},
+			{"k: a \t b\n", []string{"k", "a \t b"}},
+			{"a\tb: c\n", []string{"a\tb", "c"}},
+			{"- a\tb\n", []string{"a\tb"}},
+			{"[a\tb, c]\n", []string{"a\tb", "c"}},
+			{"{a\tb: c\td}\n", []string{"a\tb", "c\td"}},
+			{"k: a\n  b\tc\n", []string{"k", "a b\tc"}},
+		} {
+			assert.Equalf(t, tc.want, valuesOf(t, tc.src), "%q", tc.src)
+		}
+	})
+
+	t.Run("and leaves out a tab that opens a line or ends the text", func(t *testing.T) {
+		for _, tc := range []struct {
+			src  string
+			want []string
+		}{
+			{"k:\ta\t\n", []string{"k", "a"}},
+			{"[a\t, b]\n", []string{"a", "b"}},
+			{"k: a\t\n  b\n", []string{"k", "a b"}},
+			// yaml-test-suite's spec-example-7-12-plain-lines.
+			{"1st non-empty\n\n 2nd non-empty \n\t3rd non-empty\n", []string{"1st non-empty\n2nd non-empty 3rd non-empty"}},
+		} {
+			assert.Equalf(t, tc.want, valuesOf(t, tc.src), "%q", tc.src)
+		}
+	})
+
+	t.Run("the column counts the tab", func(t *testing.T) {
+		// bufferedToken counts the buffer back from the column to find where a scalar starts,
+		// so a tab in the buffer that left the column alone put the scalar one column early.
+		for _, tc := range []struct {
+			src    string
+			value  string
+			column int32
+		}{
+			{"k: a\tb\n", "a\tb", 4},
+			{"a\tb: c\n", ":", 4},
+			{"a\tb: c\n", "c", 6},
+			{"[a\tb, c]\n", ",", 5},
+			{"k: a\t\n  b\n", "a b", 4},
+			// A directive keeps its tab out of the buffer, and out of the column.
+			{"%YAML 1.\t\n---\nx\n", "1.", 7},
+		} {
+			i := slices.IndexFunc(scan(t, tc.src), func(tk token.Token) bool { return tk.Value == tc.value })
+			require.GreaterOrEqualf(t, i, 0, "no %q in %q", tc.value, tc.src)
+			assert.Equalf(t, tc.column, scan(t, tc.src)[i].Position.Column, "%q in %q", tc.value, tc.src)
+		}
+	})
+}
+
 func plainScalarTestCases() iter.Seq[testscanner.Case] {
 	return slices.Values([]testscanner.Case{
 		{
