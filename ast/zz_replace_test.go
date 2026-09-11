@@ -165,15 +165,14 @@ func TestReplacingAValueDropsTheCommentOnIt(t *testing.T) {
 	require.Equal(t, "# top\na: replaced\nb: 2\n", out.String())
 }
 
-// TestAssigningOverACollectionEntryInsertsInstead records the limit of the
-// design, so that it fails here rather than surprising a caller.
+// TestAssigningOverACollectionEntryReplacesIt checks what VerbatimFile makes of
+// a tree where SequenceNode.Values[i] was assigned over.
 //
-// Assigning to MappingNode.Values[i] or SequenceNode.Values[i] leaves a tree
-// that cannot be told from one where an entry was inserted at i: both hold a
-// node the document does not, at the same index, with the same siblings. The
-// renderer reads it as an insertion and the entry that was there stays. Replace
-// the entry's Value or Key instead, which name one slot each.
-func TestAssigningOverACollectionEntryInsertsInstead(t *testing.T) {
+// The entry that was there is no longer in the tree, so its line goes, and the
+// node put in its place is written where it stood. Until the renderer could
+// leave a removed node out, it wrote the old entry back and the tree read as an
+// insertion: "- 1" over "- 9" over "- 2".
+func TestAssigningOverACollectionEntryReplacesIt(t *testing.T) {
 	t.Parallel()
 
 	const src = "- 1\n- 2\n"
@@ -186,7 +185,7 @@ func TestAssigningOverACollectionEntryInsertsInstead(t *testing.T) {
 
 	var out bytes.Buffer
 	require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, file))
-	require.Equal(t, "- 1\n- 9\n- 2\n", out.String())
+	require.Equal(t, "- 9\n- 2\n", out.String())
 }
 
 func setValue(t *testing.T, f *ast.File, i int, v any) {

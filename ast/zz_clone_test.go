@@ -77,14 +77,15 @@ func TestCloneLetsANodeBePutSomewhereElse(t *testing.T) {
 	}
 }
 
-// TestTheSameNodeInTwoPlacesIsWrittenOnce records the constraint Clone exists to
+// TestTheSameNodeInTwoPlacesIsRefused records the constraint Clone exists to
 // work around, so that it fails here if it ever changes.
 //
-// Putting the node itself rather than a copy of it leaves the document as it
-// was, and says so with a nil error. There is nothing to write: the bytes the
-// node names stand where the document put them, and the copy has already gone
-// past.
-func TestTheSameNodeInTwoPlacesIsWrittenOnce(t *testing.T) {
+// Putting the node itself rather than a copy of it in a second place leaves
+// nothing to write there: the bytes the node names stand where the document put
+// them, and the copy has already gone past. VerbatimFile returns ErrMove. It
+// returned the document unchanged with a nil error while it copied a removed
+// node's text back, which here was the "2" the assignment took out.
+func TestTheSameNodeInTwoPlacesIsRefused(t *testing.T) {
 	t.Parallel()
 
 	const src = "a: 1\nb: 2\n"
@@ -95,8 +96,8 @@ func TestTheSameNodeInTwoPlacesIsWrittenOnce(t *testing.T) {
 	mapping.Values[1].Value = mapping.Values[0].Value
 
 	var out bytes.Buffer
-	require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, file))
-	require.Equal(t, src, out.String(), "the second use of a node is written as nothing")
+	err = ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, file)
+	require.ErrorIs(t, err, ast.ErrMove)
 }
 
 // TestACloneSharesNothingWithWhatItCopied checks the copy is deep: editing one
