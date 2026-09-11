@@ -38,6 +38,8 @@
 //
 // # Concurrency
 //
-// A [Parser] holds the state of one parse. Use a new Parser for each stream, and do not share one between goroutines.
+// A [Parser] holds the state of one parse, and is not safe for concurrent use.
+// It reads one stream: call [Parser.Reset] before passing it the next.
+// Reset may reuse the memory of the previous parse, so stop using the file that parse returned.
 // [ParseBytes] builds a new Parser on every call, so it is safe to call from several goroutines at once.
 package parser

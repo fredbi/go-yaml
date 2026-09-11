@@ -4,6 +4,8 @@
 package parser
 
 import (
+	"errors"
+
 	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/internal/scanner"
 	"github.com/go-openapi/go-yaml/internal/tokenarena"
@@ -20,11 +22,19 @@ func ParseBytes(src []byte, opts ...Option) (*ast.File, error) {
 	return New(opts...).Parse(src)
 }
 
+// ErrParserReused is returned by [Parser.Parse] and [Parser.Walk] on a Parser that has already read a stream
+// since [New] or the last [Parser.Reset].
+var ErrParserReused = errors.New("parser: Parse or Walk called again without Reset")
+
 // Parser reads a YAML stream into an [ast.File].
 //
-// Build one with [New], and use it for one stream: call [Parser.Parse] or [Parser.Walk] once.
+// Build one with [New]. A Parser reads one stream:
+// a second call to [Parser.Parse] or [Parser.Walk] returns [ErrParserReused] until [Parser.Reset] is called.
 // A Parser is not safe for concurrent use.
 type Parser struct {
+	// used records that Parse or Walk has started on this Parser. Reset clears it.
+	used bool
+
 	// tokens holds every token.Token the tree points at, in chunks the arena refills once the parse has read them.
 	// Parse pins it for the whole parse, so no chunk is refilled and every token survives.
 	tokens *tokenarena.TokenArena[group.TapeToken]
@@ -83,11 +93,21 @@ type Parser struct {
 // It reads nothing. Pass a stream to [Parser.Parse] or [Parser.Walk].
 func New(opts ...Option) *Parser {
 	p := &Parser{}
+	p.Reset(opts...)
+
+	return p
+}
+
+// Reset prepares p to read another stream, configured with opts as [New] configures a new Parser.
+//
+// Options given to New or to an earlier Reset are dropped, so pass every option the next stream needs.
+// Reset may reuse the memory of the previous parse:
+// do not use the [ast.File] that an earlier [Parser.Parse] or [Parser.Walk] returned once Reset has been called.
+func (p *Parser) Reset(opts ...Option) {
+	*p = Parser{}
 	for _, opt := range opts {
 		opt(p)
 	}
-
-	return p
 }
 
 // Parse reads the YAML stream src and returns its documents as an [ast.File].
@@ -95,9 +115,12 @@ func New(opts ...Option) *Parser {
 // src is not copied. The file keeps slices of it, so do not write to src while the file is in use.
 // On error the file is nil, and the error carries the source around the failure.
 //
-// Call Parse once per Parser.
-// The parse attaches each comment to its node as it builds the tree, and a second call finds no comment left to attach.
+// Parse returns [ErrParserReused] when p has already read a stream since [New] or the last [Parser.Reset].
 func (p *Parser) Parse(src []byte) (*ast.File, error) {
+	if p.used {
+		return nil, ErrParserReused
+	}
+	p.used = true
 	p.begin(src)
 
 	file, err := p.parse(p.newContext())

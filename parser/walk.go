@@ -133,7 +133,13 @@ type walkState struct {
 //
 // An anchor is handed over before the node it names and left after it, with [KindAnchor] as the step's In,
 // so a writer has the anchor open while it writes the node.
+//
+// Walk returns [ErrParserReused] when p has already read a stream since [New] or the last [Parser.Reset].
 func (p *Parser) Walk(src []byte, v Visitor) (*ast.File, error) {
+	if p.used {
+		return nil, ErrParserReused
+	}
+	p.used = true
 	p.walk = &walkState{visitor: v}
 	defer func() { p.walk = nil }()
 
