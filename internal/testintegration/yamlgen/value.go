@@ -16,7 +16,6 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/go-openapi/go-yaml/ast"
 	"github.com/go-openapi/go-yaml/codec"
 	"github.com/go-openapi/go-yaml/token"
 )
@@ -176,9 +175,9 @@ type Pair struct {
 // uint64(1) and "1". The duplicate check tells them apart by kind. Compare two
 // keys with [SameKey], not by their names.
 //
-// A !!binary key is named by the characters the document wrote:
-// ast.TaggedKeyName hands a tag it does not resolve back to the scalar under
-// it, so "!!binary AA==" is the key "AA==" and not the byte. A !!timestamp key
+// A !!binary key is named by its canonical base64 text, so "!!binary AA==" is
+// the key "AA==" and not the byte, and it has a kind of its own: it and the
+// string "AA==" are two keys. A !!timestamp key
 // is named in RFC 3339 in its own zone, as ToJSON writes it, and the duplicate
 // check compares it in UTC.
 func KeyText(v Value) string {
@@ -224,12 +223,11 @@ func KeyText(v Value) string {
 	case Tagged:
 		return KeyText(n.V)
 	case Binary:
-		// The base64 characters, which is what the library names the key by:
-		// ast.TaggedKeyName resolves !!str, !!null, !!bool, !!int and !!float
-		// and hands every other tag back to the scalar under it, so
+		// The canonical base64 text, which the library names the key by:
 		// "!!binary AA==" is the key "AA==" and not the byte it decodes to.
-		// Emit writes the same base64, so this names the characters the
-		// document wrote.
+		// Emit writes the same base64 through base64.StdEncoding, with no line
+		// breaks, so this is also the text the document holds. The kind, not
+		// the name, keeps it apart from the string "AA==" -- see keyKind.
 		//
 		// Keys() draws no Binary. One arrives through aliasAKey, which takes a
 		// key from the anchor pool, and the pool holds what drawTextual makes
@@ -426,12 +424,13 @@ func newKeyedMap(size int) *keyedMap {
 
 // holds reports whether the mapping already holds key.
 //
-// Three kinds of key are found by value where a Go map lookup cannot find
-// them, as codec's keyedMap decides it for a merge. A time.Time is held where
-// one at the same instant is, in any zone: "2001-12-14t21:59:43.10-05:00" and
+// Four kinds of key are found by value where a Go map lookup cannot find them,
+// as codec's keyedMap decides it for a merge. A time.Time is held where one at
+// the same instant is, in any zone: "2001-12-14t21:59:43.10-05:00" and
 // "2001-12-15 02:59:43.10" are one key to the override, and the map keeps the
 // own key's zone. A *big.Int or a *big.Float is a pointer, so == compares the
-// pointers and not the numbers.
+// pointers and not the numbers. A codec.Base64 is held where one with the same
+// canonical text is, since RFC 2045 lets the text carry line breaks.
 func (k *keyedMap) holds(key any) bool {
 	if k.byKey != nil {
 		if _, held := k.byKey[key]; held {
@@ -498,10 +497,14 @@ func bigFloatKeyText(f *big.Float) string {
 }
 
 // sameKeyValue reports whether a and b are one key though == says they are not:
-// a time.Time at the same instant, or a *big.Int or *big.Float of the same
-// value.
+// a time.Time at the same instant, a *big.Int or *big.Float of the same value,
+// or a codec.Base64 of the same canonical text.
 func sameKeyValue(a, b any) bool {
 	switch x := a.(type) {
+	case codec.Base64:
+		y, ok := b.(codec.Base64)
+
+		return ok && x.Canonical() == y.Canonical()
 	case time.Time:
 		y, ok := b.(time.Time)
 
@@ -542,22 +545,53 @@ func eachEntry(m any, fn func(key, value any)) {
 	}
 }
 
-// SameKey reports whether the parser's duplicate check takes a and b for one
-// key: the same kind and the same [KeyText], with a timestamp compared as its
-// instant in UTC through ast.CanonicalKeyName.
+// SameKey reports whether a and b are one YAML key: the same kind, and the same
+// [KeyText] once a timestamp is put in UTC.
 //
 // The name alone is not enough. Int{1} and Str{"1"} are both named "1", and a
 // mapping holds them as two keys, uint64(1) and "1".
+//
+// The rule is stated here and borrows nothing from ast or codec. codec's
+// TestAKeyNodeAndItsValueHaveOneIdentity holds the library's two constructors
+// together; a generator that called one of them would agree with the library
+// wherever the library is wrong.
 func SameKey(a, b Value) bool {
-	ka, kb := keyKind(a), keyKind(b)
-
-	return ka == kb && ast.CanonicalKeyName(KeyText(a), ka) == ast.CanonicalKeyName(KeyText(b), kb)
+	return keyKind(a) == keyKind(b) && comparedKeyText(a) == comparedKeyText(b)
 }
 
-// keyKind returns the kind the parser's duplicate check files a key under.
+// comparedKeyText is [KeyText] as two keys are compared. A timestamp is put in
+// UTC: 3.2.1.3 compares scalars by canonical form, and a timestamp's canonical
+// form is in UTC, so one instant written in two zones is one key.
+func comparedKeyText(v Value) string {
+	if stamp, isTime := timestampOf(v); isTime {
+		return stamp.UTC().Format(time.RFC3339Nano)
+	}
+
+	return KeyText(v)
+}
+
+// timestampOf returns the time a key holds, looking through the properties in
+// front of it.
+func timestampOf(v Value) (time.Time, bool) {
+	switch n := v.(type) {
+	case Anchored:
+		return timestampOf(n.V)
+	case Alias:
+		return timestampOf(n.V)
+	case Tagged:
+		return timestampOf(n.V)
+	case Timestamp:
+		return n.V, true
+	default:
+		return time.Time{}, false
+	}
+}
+
+// keyKind returns the YAML type a key has, which is what tells two keys with
+// one name apart.
 //
-// A "!!binary" key is a string there: ast.TaggedKeyName does not resolve the
-// tag and hands the key back to the scalar under it.
+// A "!!binary" key has a kind of its own: binary and str are two YAML types, so
+// "!!binary AA==" and the string "AA==" are two keys.
 func keyKind(v Value) token.KeyKind {
 	switch n := v.(type) {
 	case Anchored:
@@ -576,7 +610,9 @@ func keyKind(v Value) token.KeyKind {
 		return token.KeyFloat
 	case Timestamp:
 		return token.KeyTimestamp
-	case Str, Binary, MergeKey:
+	case Binary:
+		return token.KeyBinary
+	case Str, MergeKey:
 		return token.KeyString
 	default:
 		return token.KeyOther

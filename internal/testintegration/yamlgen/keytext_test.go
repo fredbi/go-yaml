@@ -13,6 +13,7 @@ import (
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/codec"
+	yamlerrors "github.com/go-openapi/go-yaml/errors"
 	"github.com/go-openapi/go-yaml/internal/testintegration/yamlgen"
 )
 
@@ -26,11 +27,10 @@ import (
 // TestABinaryKeyIsNamedByTheCharactersTheDocumentWrote pins both halves of one
 // name.
 //
-// ast.TaggedKeyName resolves !!str, !!null, !!bool, !!int and !!float and hands
-// every other tag back to the scalar under it, so "!!binary AA==" is the key
-// "AA==" -- the base64 as written, not the byte it decodes to. Emit writes that
-// same base64 through base64.StdEncoding, and quoting does not reach it: the
-// identity comes from the token's unquoted value, so "!!binary AA==" and
+// A "!!binary" key is named by its canonical base64 text -- "!!binary AA==" is
+// the key "AA==", not the byte it decodes to -- and has a kind of its own, so it
+// and the string "AA==" are two keys. Emit writes that same base64 through
+// base64.StdEncoding, and quoting does not reach it: "!!binary AA==" and
 // "!!binary \"AA==\"" are one key.
 //
 // KeyText had no Binary case until 2026-09-10, so a Binary fell to the
@@ -98,6 +98,61 @@ func TestATimestampKeyIsNamedAsTheLibraryNamesIt(t *testing.T) {
 		out, err := codec.ToJSON([]byte(tc.src))
 		require.NoErrorf(t, err, "%q", tc.src)
 		assert.JSONEq(t, `{"`+key+`":"v"}`, string(out), "and so does ToJSON: %q", tc.src)
+	}
+}
+
+// TestSameKeyAgreesWithTheDuplicateCheck holds yamlgen.SameKey to the library:
+// a mapping written with both keys of a pair is refused as a repeat exactly when
+// SameKey calls them one key.
+//
+// SameKey states its own rule and borrows none of the library's, so this
+// compares two models and not one model with itself. Each pair sits on a
+// boundary the rule draws: a YAML type against the string that spells it, one
+// value in two Go types, zero's sign, and one instant in two zones.
+func TestSameKeyAgreesWithTheDuplicateCheck(t *testing.T) {
+	instant := time.Date(2001, 12, 15, 2, 59, 43, 100_000_000, time.UTC)
+	stamp := func(at time.Time) yamlgen.Value {
+		return yamlgen.Tagged{Tag: yamlgen.TagTimestamp, V: yamlgen.Timestamp{V: at}}
+	}
+	binary := func(b ...byte) yamlgen.Value {
+		return yamlgen.Tagged{Tag: yamlgen.TagBinary, V: yamlgen.Binary{V: b}}
+	}
+
+	for _, tc := range []struct {
+		name string
+		a, b yamlgen.Value
+	}{
+		{"an integer and the string that spells it", yamlgen.Int{V: 1}, yamlgen.Str{V: "1"}},
+		{"an integer and a float of one value", yamlgen.Int{V: 1}, yamlgen.Float{V: 1}},
+		{"zero and negative zero", yamlgen.Float{V: 0}, yamlgen.Float{V: math.Copysign(0, -1)}},
+		{"null and the string null", yamlgen.Null{}, yamlgen.Str{V: "null"}},
+		{"a boolean and the string that spells it", yamlgen.Bool{V: true}, yamlgen.Str{V: "true"}},
+		{"binary and the string of its base64", binary(0), yamlgen.Str{V: "AA=="}},
+		{"one binary twice", binary(0, 1, 2), binary(0, 1, 2)},
+		{"one instant in two zones", stamp(instant), stamp(instant.In(time.FixedZone("", -5*60*60)))},
+		{"two instants", stamp(instant), stamp(instant.Add(time.Second))},
+		{"a timestamp and the string that names it", stamp(instant), yamlgen.Str{V: "2001-12-15T02:59:43.1Z"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := yamlgen.Map{Pairs: []yamlgen.Pair{
+				{Key: tc.a, Val: yamlgen.Str{V: "a"}},
+				{Key: tc.b, Val: yamlgen.Str{V: "b"}},
+			}}
+			w := yamlgen.Write(m, yamlgen.Style{NullSpelling: "null", Quoting: yamlgen.QuotePlain})
+
+			// Each side is held to its own outcome, so a document refused for
+			// some other reason cannot pass as "two keys".
+			var got any
+			err := codec.Unmarshal([]byte(w.Text), &got)
+			if yamlgen.SameKey(tc.a, tc.b) {
+				assert.ErrorIs(t, err, yamlerrors.ErrDuplicateKey,
+					"SameKey calls them one key, and the library read %q as %#v", w.Text, got)
+
+				return
+			}
+
+			assert.NoError(t, err, "SameKey calls them two keys, and the library refused %q", w.Text)
+		})
 	}
 }
 
