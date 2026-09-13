@@ -243,11 +243,13 @@ func TestJSONTokensFoldAMerge(t *testing.T) {
 // ⚠️ The corpus does not reach these: no document in it stands an alias or an
 // anchor as a mapping key over a float whose two spellings differ, so
 // TestJSONTokensRebuildWhatToJSONWrites agreed while the two converters named
-// an alias key differently. The rows are written out here for that reason.
+// an alias key differently. That is how the rows came to be written out, and
+// they stay: ToJSON writes the tokens now, so they pin the one name both hand
+// a caller.
 //
-// The last two rows are a defect the two converters share -- a property in
-// front of a key should not change the key's name -- and are pinned as they
-// stand so that a fix on either side reports itself here.
+// The last two rows are a defect -- a property in front of a key should not
+// change the key's name -- and are pinned as they stand so that a fix reports
+// itself here.
 func TestJSONTokensSpellAKeyAsToJSONDoes(t *testing.T) {
 	for name, tc := range map[string]struct{ src, key string }{
 		"a bare key":      {"1e3: x\n", "1000.0"},

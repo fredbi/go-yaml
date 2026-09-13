@@ -107,8 +107,9 @@ type JSONTokens struct {
 	opts []parser.Option
 	err  error
 
-	// budget bounds how many tokens one document may hand over, and is 0 for
-	// no bound. An alias writes what its anchor names again, so a document a
+	// budget bounds how many tokens one document may make, and is 0 for no
+	// bound. A later document of the stream is converted and thrown away, and
+	// counts against it too. An alias writes what its anchor names again, so a document a
 	// few hundred bytes long can name more values than there is memory for.
 	budget int
 	// oneDocument says a stream holding more than one document is refused
@@ -150,7 +151,9 @@ type jsonPathFrame struct {
 // than being given one this package invented.
 //
 // A stream of several documents converts its first, which is the one
-// [Unmarshal] reads, and reads the rest without handing them over.
+// [Unmarshal] reads. The rest are converted too and none of them is handed
+// over, so a stream whose later documents cannot be converted is refused, as
+// [ToJSON] refuses it.
 //
 // opts are passed to the parse. [github.com/go-openapi/go-yaml/parser.WithJSONCompatible]
 // is always on and cannot be turned off.
@@ -278,6 +281,10 @@ func (s *JSONTokens) Tokens() iter.Seq[JSONToken] {
 			// they do through [ToJSON]. It stands at the start of the source,
 			// which is the only place a document that wrote nothing can point
 			// at, and keeps every token of a stream carrying a position.
+			//
+			// The walk may stand in a later document, which emit hands nothing
+			// over from, and this null belongs to the first.
+			t.ended = false
 			t.emit(JSONToken{Kind: JSONNull, At: token.Position{Line: 1, Column: 1}})
 		}
 	}

@@ -76,7 +76,7 @@ func (t *jsonTokener) collectMerge(node ast.Node, at parser.Step) bool {
 }
 
 // failMerge refuses what a "<<" names, or the key the mapping repeats where it
-// repeats one, as jsonWriter.failMerge does.
+// repeats one.
 func (t *jsonTokener) failMerge(frame *tokenMapFrame, err error) {
 	if frame.node != nil {
 		if repeat := refuseDuplicateKeys(frame.node); repeat != nil {

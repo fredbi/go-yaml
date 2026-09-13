@@ -38,8 +38,10 @@ type jsonTokener struct {
 	// applies to, so the document to convert is the one past the directives.
 	// ended says the walk stands outside it. rooted says a root value has
 	// opened, and extraRoot holds a second one until it hands something over.
-	firstDoc  int
-	ended     bool
+	firstDoc int
+	ended    bool
+	// doc is the document the walk stands in, which count restarts at.
+	doc       int
 	rooted    bool
 	extraRoot ast.Node
 
@@ -207,18 +209,18 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 		t.rooted = true
 	}
 
-	// A later document of the stream is still read, so that a stream this
-	// converter cannot read is refused rather than half-answered, and none of
-	// it goes over.
+	// A later document of the stream is converted as the first is, so that one
+	// this converter cannot read is refused rather than half-answered, and emit
+	// hands none of it over. The budget bounds each document on its own, so a
+	// later one counts its tokens from nothing.
+	if at.Document != t.doc {
+		t.doc, t.count = at.Document, 0
+	}
 	t.ended = at.Document != t.firstDoc
-	if t.ended {
-		if t.state.oneDocument && at.Document > t.firstDoc {
-			t.fail(yamlerrors.NewNotJSON("a stream of several documents has no single JSON root", node.GetToken()))
+	if t.ended && t.state.oneDocument && at.Document > t.firstDoc {
+		t.fail(yamlerrors.NewNotJSON("a stream of several documents has no single JSON root", node.GetToken()))
 
-			return false
-		}
-
-		return true
+		return false
 	}
 
 	if frame := t.frame(); frame != nil && frame.mergeValue {
@@ -274,7 +276,7 @@ func (t *jsonTokener) Enter(node ast.Node, at parser.Step) bool {
 }
 
 func (t *jsonTokener) Leave(node ast.Node, at parser.Step) {
-	if t.stopped || at.Document != t.firstDoc {
+	if t.stopped {
 		return
 	}
 
@@ -365,6 +367,12 @@ func (t *jsonTokener) emit(tok JSONToken) {
 		m := &t.omaps[len(t.omaps)-1]
 		m.toks = append(m.toks, tok)
 
+		return
+	}
+
+	if t.ended {
+		// A later document is converted to be refused where it cannot be, and
+		// none of it goes over.
 		return
 	}
 

@@ -226,7 +226,7 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 
 	resolved, ok := t.taggedValue(n, mark.key)
 	if t.stopped {
-		// taggedValue reads the tag's verdict as jsonWriter does, so a tag
+		// taggedValue reads the tag's verdict as tagReader does, so a tag
 		// naming a kind its node is not is refused here and the held tokens go
 		// nowhere.
 		if len(t.omaps) > 0 && t.omaps[len(t.omaps)-1].node == n {
@@ -267,10 +267,10 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 }
 
 // taggedValue is the JSON a tagged scalar is worth, and whether the tag names a
-// scalar type at all. It is [jsonWriter.taggedValue]'s reading, reported
+// scalar type at all. It is [tagReader.taggedValue]'s reading, reported
 // through this converter's error state.
 func (t *jsonTokener) taggedValue(n *ast.TagNode, key bool) ([]byte, bool) {
-	w := jsonWriter{}
+	w := tagReader{}
 	text, ok := w.taggedValue(n, key)
 	if w.err != nil {
 		t.fail(w.err)

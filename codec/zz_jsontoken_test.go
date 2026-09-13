@@ -78,14 +78,16 @@ func collectJSONTokens(src []byte, opts ...parser.Option) ([]JSONToken, error) {
 	return toks, s.Err()
 }
 
-// TestJSONTokensRebuildWhatToJSONWrites holds the token converter against the
-// byte converter over every document of the corpus.
+// TestJSONTokensRebuildWhatToJSONWrites holds ToJSON's text against a rebuild
+// of the tokens it is written from, over every document of the corpus.
 //
-// The two are separate readings of one document -- ToJSON records the text each
-// anchor wrote and answers a merge by reading its own output back, where the
-// token converter follows ast.AliasNode.Target and asks ast.MergeOf -- so this
-// is a comparison and not a restatement. Where they disagree, one of them is
-// wrong.
+// ⚠️ It compared two readings of a document until ToJSON became one of them.
+// ToJSON walked the document, recorded the text each anchor wrote and answered
+// a merge by reading its own output back, where the token converter follows
+// ast.AliasNode.Target and asks ast.MergeOf; that walk is gone. The comparison
+// still holds the separators -- the commas and colons no token carries --
+// written twice, in rebuildJSON here and in appendJSONToken, over every
+// document the corpus has.
 func TestJSONTokensRebuildWhatToJSONWrites(t *testing.T) {
 	var compared, refused, malformed, heldOut int
 

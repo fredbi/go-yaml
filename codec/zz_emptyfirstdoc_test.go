@@ -21,7 +21,7 @@ import (
 // has content, so it was the empty one they parted company over.
 //
 // ✅ Settled on 2026-09-13 in favor of the decoder's reading: ToJSON converts
-// the first document whatever it holds. jsonWriter counted the document bodies
+// the first document whatever it holds. ToJSON counted the document bodies
 // it saw, and a document written as nothing between its markers hands over no
 // node, so the count never moved for it. parser.Step.Document now says which
 // document a node belongs to, and the writer reads that instead.

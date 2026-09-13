@@ -19,8 +19,9 @@ import (
 // valueBuilder folds a document into Go values as the parse reaches each node,
 // so that a document is read once rather than built into a tree and walked.
 //
-// It is codec.jsonWriter's walk with a different fold: the same Enter and Leave
-// over the same nodes, keeping Go values where the converter keeps JSON text.
+// It is codec.jsonTokener's walk with a different fold: the same Enter and
+// Leave over the same nodes, keeping Go values where the converter keeps JSON
+// tokens.
 // Four things differ, and they are what a JSON writer has no use for -- a
 // number too wide for a machine word stays a *big.Int or *big.Float, a
 // "!!timestamp" becomes a time.Time, "!!binary" becomes []byte, and an infinity
@@ -210,7 +211,7 @@ func (b *valueBuilder) closeProperty(frame buildFrame) (any, error) {
 	if !frame.got {
 		// A tag on a scalar hands nothing over -- parseScalarValue builds the
 		// value without going through parseToken -- so it is read from the node
-		// here, as jsonWriter.closeTag does. An anchor between a tag and its
+		// here, as jsonTokener.closeTag does. An anchor between a tag and its
 		// scalar is the same shape. A property standing on nothing reads as the
 		// empty node.
 		v, err := b.propertyValue(frame.node)
