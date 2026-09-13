@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/go-openapi/testify/v2/assert"
 	"github.com/go-openapi/testify/v2/require"
 
 	"github.com/go-openapi/go-yaml/ast"
@@ -24,9 +25,13 @@ import (
 // and 27 documents no caller had touched came back wrong or were refused before
 // this census was kept.
 //
-// The 30 recorded were there before any of that, measured on 2026-09-11. A lone
-// "-" comes back as "- " among them.
-var withoutCommentsCensus = struct{ tested, differing int }{tested: 12708, differing: 30}
+// The 30 recorded on 2026-09-11 were there before any of that, and all 30 held
+// one shape: a block sequence whose values carry no token of their own, written
+// as layout where it should have been copied. A lone "-" came back "- " and
+// "---\n-\n" came back "---- \n".
+// TestVerbatimRebuildsABlockSequenceOfImplicitNulls holds those shapes now, and
+// the count has stood at 0 since 2026-09-13.
+var withoutCommentsCensus = struct{ tested, differing int }{tested: 12708, differing: 0}
 
 func TestVerbatimRebuildsTheCorpusParsedWithoutComments(t *testing.T) {
 	t.Parallel()
@@ -58,4 +63,51 @@ func TestVerbatimRebuildsTheCorpusParsedWithoutComments(t *testing.T) {
 		tested, withoutCommentsCensus.tested)
 	mustHold(t, "the count of documents that do not come back byte for byte",
 		differing, withoutCommentsCensus.differing, tested, withoutCommentsCensus.tested)
+}
+
+// TestVerbatimRebuildsABlockSequenceOfImplicitNulls holds the sequence whose
+// values all carry no token of their own.
+//
+// walkSourceTokens reaches a block sequence's "-" through entryFor, and a parse
+// without parser.WithComments records no SequenceNode.Entries. Where the values
+// carry no token either, the walk handed over nothing and sourceExtent found no
+// extent, so writeInPlaceOf took the sequence for a node a caller had put in: it
+// wrote the layout render "- " and set dropping, which took the document's own
+// "-", the break in front of it and the comment on its line. "---\n-\n" came
+// back "---- \n", one plain scalar where the document wrote a marker and a
+// sequence.
+//
+// A sibling entry that holds text hides it, and so does a property on the entry:
+// either one gives the sequence an extent.
+func TestVerbatimRebuildsABlockSequenceOfImplicitNulls(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{
+		"-",
+		"-\n",
+		"-\n-\n",
+		"---\n-\n",
+		"---\n- \n",
+		"%YAML 1.1\n---\n-\n",
+		"a:\n  -\n",
+		"- # c\n",
+		"-\n# c\n",
+		"---\n# c\n-\n",
+		"- a\n-\n",
+		"-\n- b\n",
+		"- &x\n",
+		"- !!null\n",
+		"- {}\n-\n",
+	} {
+		t.Run(src, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := parser.ParseBytes([]byte(src))
+			require.NoError(t, err)
+
+			var out bytes.Buffer
+			require.NoError(t, ast.NewRenderer(ast.WithSource([]byte(src))).VerbatimFile(&out, file))
+			assert.Equal(t, src, out.String())
+		})
+	}
 }

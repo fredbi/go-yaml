@@ -192,6 +192,15 @@ func walkSourceTokens(n Node, fn func(*token.Token)) {
 		if v.IsFlowStyle {
 			hand(v.Start)
 		}
+		// A parse without parser.WithComments records no Entries, so the loop
+		// below reaches no "-" at all. Where the values carry no token either --
+		// "-" over nothing is a sequence of one implicit null -- the sequence
+		// would cover no text, and writeInPlaceOf would take it for a node a
+		// caller put in and write it as layout. Its first "-" is the one token
+		// left to hand over.
+		if !v.IsFlowStyle && len(v.Entries) == 0 && len(v.Values) > 0 {
+			hand(v.Start)
+		}
 		for i, value := range v.Values {
 			if entry := entryFor(v, i); !v.IsFlowStyle && entry != nil {
 				hand(entry.Start)
