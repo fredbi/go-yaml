@@ -103,110 +103,16 @@ func standsOnNothing(node ast.Node) bool {
 	}
 }
 
-// emitScalarNode hands a scalar over, spelled as [ToJSON] writes it.
+// emitScalarNode hands a scalar over as the one token it is worth.
 //
-// The spelling is not decided again here: appendScalarNode is the one reading
-// of what a scalar is worth in JSON, and this reads its answer back as a token.
-// A string is taken from the node instead, which saves quoting it only to
-// unquote it.
+// scalarToken reads what a scalar is worth in JSON and appendJSONToken spells
+// it. This wrote the JSON text here and read it back to name the token's kind,
+// so the converter parsed a spelling it had just written: a string went through
+// json.Marshal to be quoted and json.Unmarshal to be unquoted again.
 func (t *jsonTokener) emitScalarNode(node ast.Node, at token.Position) {
-	switch n := node.(type) {
-	case *ast.StringNode:
-		t.emit(JSONToken{Kind: JSONString, Value: n.Value, At: at})
-
-		return
-	case *ast.LiteralNode:
-		if n.Value == nil {
-			t.emit(JSONToken{Kind: JSONNull, At: at})
-
-			return
-		}
-		t.emit(JSONToken{Kind: JSONString, Value: n.Value.Value, At: at})
-
-		return
-	}
-
-	// The text goes into a buffer the tokener keeps, since a document is mostly
-	// scalars and a fresh one each was a third of what the conversion allocated.
-	t.scratch = appendScalarNode(t.scratch[:0], node)
-	if sourceDigits(node, t.scratch) {
-		// The number is spelled as the document wrote it, so the token takes the
-		// source's own string rather than a copy of the buffer.
-		t.emit(JSONToken{Kind: JSONNumber, Value: node.GetToken().Value, At: at})
-
-		return
-	}
-	t.emitJSONText(t.scratch, at)
-}
-
-// sourceDigits reports whether text, the JSON written for a number node, is the
-// text the document wrote for it.
-//
-// Only a number: "true" and "null" read the same as their source too, and are
-// not numbers.
-func sourceDigits(node ast.Node, text []byte) bool {
-	switch node.(type) {
-	case *ast.IntegerNode, *ast.FloatNode:
-		tk := node.GetToken()
-
-		return tk != nil && string(text) == tk.Value
-	default:
-		return false
-	}
-}
-
-// emitJSONText hands over the tokens carrying one piece of JSON.
-//
-// The text is what this library writes for a scalar, so the shapes are the ones
-// it writes and not every shape JSON has: a quoted string, a number, true,
-// false, null, and the array of byte values a "!!binary" is written as.
-func (t *jsonTokener) emitJSONText(text []byte, at token.Position) {
-	switch {
-	case len(text) == 0:
-		t.emit(JSONToken{Kind: JSONNull, At: at})
-	case text[0] == '"':
-		t.emit(JSONToken{Kind: JSONString, Value: unquoted(text), At: at})
-	case text[0] == '[':
-		// A "!!binary" is written as the numbers of its bytes, which the value
-		// encoder does too, so it is an array and not one token.
-		t.open(JSONArrayStart, at)
-		for _, digits := range splitJSONBytes(text) {
-			t.emit(JSONToken{Kind: JSONNumber, Value: digits, At: at})
-		}
-		t.close(JSONArrayEnd, at)
-	case string(text) == "true":
-		t.emit(JSONToken{Kind: JSONBool, Bool: true, At: at})
-	case string(text) == "false":
-		t.emit(JSONToken{Kind: JSONBool, At: at})
-	case string(text) == "null":
-		t.emit(JSONToken{Kind: JSONNull, At: at})
-	default:
-		t.emit(JSONToken{Kind: JSONNumber, Value: string(text), At: at})
-	}
-}
-
-// splitJSONBytes reads the numbers out of the array appendJSONBytes wrote.
-func splitJSONBytes(text []byte) []string {
-	if len(text) < 2 {
-		return nil
-	}
-	body := string(text[1 : len(text)-1])
-	if body == "" {
-		return nil
-	}
-
-	var out []string
-	for from := 0; ; {
-		at := from
-		for at < len(body) && body[at] != ',' {
-			at++
-		}
-		out = append(out, body[from:at])
-		if at == len(body) {
-			return out
-		}
-		from = at + 1
-	}
+	tok := scalarToken(node)
+	tok.At = at
+	t.emit(tok)
 }
 
 // closeTag hands over what a tag says its node is worth.
@@ -245,7 +151,7 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 	if mark.key {
 		name := t.keyName(n)
 		if ok {
-			name = unquoted(resolved)
+			name = resolved.name()
 		}
 		t.emitKeyNamed(name, t.keyAt(n.Value, at.At))
 
@@ -256,27 +162,30 @@ func (t *jsonTokener) closeTag(n *ast.TagNode, at parser.Step) {
 	case ok:
 		// The tag says what the value is whatever its node wrote, so what was
 		// held back is dropped.
-		t.emitJSONText(resolved, at.At)
+		resolved.At = at.At
+		t.emit(resolved)
 	case mark.heldSet:
 		// The tag names a kind and its node is a scalar, which stands as it is.
 		t.emit(mark.held)
 	case mark.suppressed && t.count == mark.at:
 		// A tag standing on a scalar the walk did not reach.
-		t.emitJSONText(appendJSONScalar(nil, jsonScalarOf(n.Value)), at.At)
+		tok := valueToken(jsonScalarOf(n.Value))
+		tok.At = at.At
+		t.emit(tok)
 	}
 }
 
 // taggedValue is the JSON a tagged scalar is worth, and whether the tag names a
 // scalar type at all. It is [tagReader.taggedValue]'s reading, reported
 // through this converter's error state.
-func (t *jsonTokener) taggedValue(n *ast.TagNode, key bool) ([]byte, bool) {
+func (t *jsonTokener) taggedValue(n *ast.TagNode, key bool) (JSONToken, bool) {
 	w := tagReader{}
-	text, ok := w.taggedValue(n, key)
+	tok, ok := w.taggedValue(n, key)
 	if w.err != nil {
 		t.fail(w.err)
 	}
 
-	return text, ok
+	return tok, ok
 }
 
 // aliasTarget is the node an alias names.
@@ -339,7 +248,8 @@ func (t *jsonTokener) emitTree(node ast.Node, at token.Position) {
 		t.expanding = t.expanding[:len(t.expanding)-1]
 	case *ast.TagNode:
 		if resolved, ok := t.taggedValue(n, false); ok {
-			t.emitJSONText(resolved, at)
+			resolved.At = at
+			t.emit(resolved)
 
 			return
 		}
@@ -526,7 +436,7 @@ func (t *jsonTokener) keyAt(node ast.Node, wrapper token.Position) token.Positio
 // A tag under the anchor says what the value is, and [jsonTokener.taggedValue]
 // reads it as ToJSON does: "&a !!float 1e3: x" names the entry 1000.0 and
 // "&a !!timestamp 2001-12-14: x" names it 2001-12-14T00:00:00Z. Read through
-// appendScalarNode instead, the tag was dropped and the key named 1000 and
+// scalarToken instead, the tag was dropped and the key named 1000 and
 // 2001-12-14.
 func (t *jsonTokener) wrappedKeyName(node ast.Node) string {
 	inner := t.throughWrappers(node)
@@ -535,11 +445,11 @@ func (t *jsonTokener) wrappedKeyName(node ast.Node) string {
 	}
 	if tag, isTag := inner.(*ast.TagNode); isTag {
 		if resolved, ok := t.taggedValue(tag, true); ok {
-			return unquoted(resolved)
+			return resolved.name()
 		}
 	}
 
-	return unquoted(appendScalarNode(nil, inner))
+	return scalarToken(inner).name()
 }
 
 // throughWrappers is the node a key's "?", anchors and aliases stand around.

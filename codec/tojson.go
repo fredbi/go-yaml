@@ -126,67 +126,88 @@ type tagReader struct {
 	err error
 }
 
-// appendScalarNode writes a scalar node as JSON, reading the node's own fields
-// rather than the any GetValue boxes them into.
+// scalarToken is the JSON one scalar node is worth, as the token that carries
+// it.
 //
+// It reads the node's own fields rather than the any GetValue boxes them into.
 // Boxing a string costs an allocation apiece, and a document is mostly strings:
 // ast.StringNode.GetValue was 9% of everything a conversion allocated.
-func appendScalarNode(out []byte, n ast.Node) []byte {
+func scalarToken(n ast.Node) JSONToken {
 	switch t := n.(type) {
 	case *ast.StringNode:
-		return appendJSONString(out, t.Value)
+		return JSONToken{Kind: JSONString, Value: t.Value}
 	case *ast.NullNode:
-		return append(out, "null"...)
+		return JSONToken{Kind: JSONNull}
 	case *ast.BoolNode:
-		return strconv.AppendBool(out, t.Value)
+		return JSONToken{Kind: JSONBool, Bool: t.Value}
 	case *ast.InfinityNode, *ast.NanNode:
-		return append(out, "null"...)
+		return JSONToken{Kind: JSONNull}
 	case *ast.FloatNode:
 		if tk := t.GetToken(); tk != nil {
 			// The digits the document wrote, where JSON spells a number the
 			// same way. Reading them into a float64 and writing them back
 			// rounds to what one holds: "0.1234567890123456789012345" came out
 			// as 0.12345678901234568, seventeen digits of twenty-five, on a
-			// value JSON can carry whole. Written through, nothing is lost and
-			// nothing is parsed.
+			// value JSON can carry whole. The token takes the source's own
+			// string, so nothing is parsed and nothing is copied.
 			if isJSONNumber(tk.Value) {
-				return append(out, tk.Value...)
+				return numberToken(tk.Value)
 			}
 			if text, ok := decimalJSON(tk.Value, tk.Type); ok {
-				return append(out, text...)
+				return numberToken(text)
 			}
 			if f, ok := token.ParseFloat(tk.Value, tk.Type); ok {
-				return appendJSONFloat64(out, f)
+				return float64Token(f)
 			}
 		}
 
-		return appendJSONFloat(out, jsonScalarOf(t))
+		return floatToken(jsonScalarOf(t))
 	case *ast.IntegerNode:
 		if tk := t.GetToken(); tk != nil {
 			if isJSONNumber(tk.Value) {
 				// The digits the document wrote, where JSON spells the integer
 				// the same way. "-0" is a JSON number and reading it through
 				// strconv writes it back as "0", which is a different literal.
-				return append(out, tk.Value...)
+				return numberToken(tk.Value)
 			}
 			if u, negative, ok := token.ParseWholeNumber(tk.Value, tk.Type); ok {
+				digits := strconv.FormatUint(u, 10)
 				if negative && u != 0 {
-					out = append(out, '-')
+					digits = "-" + digits
 				}
 
-				return strconv.AppendUint(out, u, 10)
+				return numberToken(digits)
 			}
 		}
 
-		return appendJSONScalar(out, jsonScalarOf(t))
+		return valueToken(jsonScalarOf(t))
 	case *ast.LiteralNode:
 		if t.Value == nil {
-			return append(out, "null"...)
+			return JSONToken{Kind: JSONNull}
 		}
 
-		return appendJSONString(out, t.Value.Value)
+		return JSONToken{Kind: JSONString, Value: t.Value.Value}
 	default:
-		return appendJSONScalar(out, jsonScalarOf(n))
+		return valueToken(jsonScalarOf(n))
+	}
+}
+
+// numberToken is a number carrying digits already spelled as JSON spells them.
+func numberToken(digits string) JSONToken {
+	return JSONToken{Kind: JSONNumber, Value: digits}
+}
+
+// name is the string a mapping holds an entry under where this token stands as
+// its key. JSON names a member with a string, so a number is named by the
+// digits it is written with and a bool by its word.
+func (tok JSONToken) name() string {
+	switch tok.Kind {
+	case JSONKey, JSONString, JSONNumber:
+		return tok.Value
+	case JSONBool:
+		return strconv.FormatBool(tok.Bool)
+	default:
+		return "null"
 	}
 }
 
@@ -227,60 +248,59 @@ func keyText(node ast.Node) string {
 // value, as a bare key is -- "!!float 1e3" names its entry 1000.0, as "1e3"
 // does -- so a float there is read into a value first, where a float standing
 // as a value is written from its digits.
-func (w *tagReader) taggedValue(t *ast.TagNode, key bool) ([]byte, bool) {
+func (w *tagReader) taggedValue(t *ast.TagNode, key bool) (JSONToken, bool) {
 	res := t.Resolve()
 
 	switch res.Verdict {
 	case ast.TagUnresolved:
 		// A local tag, a foreign one, or a name YAML's repository does not
 		// define. The node is written by its kind.
-		return nil, false
+		return JSONToken{}, false
 	case ast.TagKindMismatch:
 		w.fail(yamlerrors.NewSyntax(
 			fmt.Sprintf("%s does not support this kind of node", res.Tag), t.GetToken()))
 
-		return nil, false
+		return JSONToken{}, false
 	case ast.TagValueMismatch:
 		if res.Lax {
 			// parser.WithLaxTags: the characters the scalar was written with
 			// stand in for the value the tag could not make of them.
-			return appendJSONString(nil, res.Text), true
+			return JSONToken{Kind: JSONString, Value: res.Text}, true
 		}
 
 		w.fail(yamlerrors.NewSyntax(
 			fmt.Sprintf("cannot read %q as %s", res.Text, res.Tag), t.Value.GetToken()))
 
-		return nil, false
+		return JSONToken{}, false
 	}
 
 	if res.Empty {
 		// The tag stands on no value and takes its own default, which is what
 		// the decoder gives for the same document.
-		return tagZeroJSON(res.Tag), true
+		return tagZeroToken(res.Tag), true
 	}
 
-	var written []byte
 	switch res.Tag {
 	case token.StringTag:
-		written = appendJSONString(nil, res.Text)
+		return JSONToken{Kind: JSONString, Value: res.Text}, true
 	case token.IntegerTag:
-		written = appendJSONScalar(nil, taggedInteger(res.Text, res.Schema))
+		return valueToken(taggedInteger(res.Text, res.Schema)), true
 	case token.FloatTag:
 		if base, ok := token.FloatBase(res.Text, res.Schema); ok && !key {
 			if text, ok := decimalJSON(res.Text, base); ok {
-				written = text
-
-				break
+				return numberToken(text), true
 			}
 		}
-		written = appendJSONFloat(nil, taggedFloat(res.Text, res.Schema))
+
+		return floatToken(taggedFloat(res.Text, res.Schema)), true
 	case token.BooleanTag:
 		b, _ := token.ParseBool(strings.ToLower(res.Text))
-		written = strconv.AppendBool(nil, b)
+
+		return JSONToken{Kind: JSONBool, Bool: b}, true
 	case token.NullTag:
-		written = []byte("null")
+		return JSONToken{Kind: JSONNull}, true
 	case token.BinaryTag:
-		written = appendJSONBinary(nil, res.Text)
+		return binaryToken(res.Text), true
 	case token.TimestampTag:
 		// JSON has no date, so a timestamp is written as a string -- and as the
 		// instant it names rather than as the text that spelled it.
@@ -289,58 +309,43 @@ func (w *tagReader) taggedValue(t *ast.TagNode, key bool) ([]byte, bool) {
 		// it, a date with no time at all and a zone as short as "-5", none of
 		// which RFC 3339 spells, so one instant written two ways converted two
 		// ways. The value converter writes the time.Time the decoder builds,
-		// which is RFC 3339, and tagZeroJSON already writes that for a
+		// which is RFC 3339, and tagZeroToken already writes that for a
 		// "!!timestamp" standing on no value -- so the text was the odd one
 		// out inside this library before it was a question about the field.
 		//
 		// Resolve has read it already, so this cannot fail.
 		stamp, _ := ast.ParseTimestamp(res.Text)
-		written = appendJSONString(nil, stamp.Format(time.RFC3339Nano))
+
+		return JSONToken{Kind: JSONString, Value: stamp.Format(time.RFC3339Nano)}, true
 	default:
 		// A tag naming a kind -- !!seq, !!map, !!set, !!omap, !!merge. The node
 		// writes itself.
-		return nil, false
+		return JSONToken{}, false
 	}
-
-	return written, true
 }
 
-// tagZeroJSON is the JSON for a tag standing on no value: the value its type
+// tagZeroToken is the JSON for a tag standing on no value: the value its type
 // starts at, written as the decoder's own zero would be.
-func tagZeroJSON(tag token.ReservedTagKeyword) []byte {
+func tagZeroToken(tag token.ReservedTagKeyword) JSONToken {
 	switch tag {
 	case token.IntegerTag:
-		return []byte("0")
+		return numberToken("0")
 	case token.FloatTag:
-		return []byte("0.0")
+		return numberToken("0.0")
 	case token.BooleanTag:
-		return []byte("false")
+		return JSONToken{Kind: JSONBool}
 	case token.StringTag:
-		return []byte(`""`)
+		return JSONToken{Kind: JSONString}
 	case token.BinaryTag:
 		// "!!binary" with nothing after it is the empty byte string, which
 		// base64 spells as no characters at all.
-		return []byte(`""`)
+		return JSONToken{Kind: JSONString}
 	case token.TimestampTag:
 		// The zero time, as encoding/json writes a time.Time.
-		return []byte(`"` + time.Time{}.Format(time.RFC3339Nano) + `"`)
+		return JSONToken{Kind: JSONString, Value: time.Time{}.Format(time.RFC3339Nano)}
 	default:
-		return []byte("null")
+		return JSONToken{Kind: JSONNull}
 	}
-}
-
-// unquoted is the text of a JSON string, or the JSON itself where it is not
-// one. "null" is the word, not the empty string a JSON null reads as.
-func unquoted(text []byte) string {
-	if len(text) == 0 || text[0] != '"' {
-		return string(text)
-	}
-	var s string
-	if err := json.Unmarshal(text, &s); err != nil {
-		return string(text)
-	}
-
-	return s
 }
 
 // anchorName reads the name off an anchor or an alias.
@@ -459,9 +464,9 @@ func jsonScalarOf(n ast.Node) any {
 	return nil
 }
 
-// appendJSONScalar writes one YAML scalar as JSON.
+// valueToken is the JSON one Go value is worth.
 //
-// A number is written as a number, whatever width it takes. JSON bounds neither
+// A number keeps its digits whatever width it takes. JSON bounds neither
 // integers nor floats -- RFC 8259 §6 leaves the range to the reader -- so a
 // value too wide for a machine word arrives as a *big.Int or a *big.Float and
 // goes out with its digits intact. What a reader makes of it is the reader's:
@@ -469,68 +474,67 @@ func jsonScalarOf(n ast.Node) any {
 // 1e-324 to zero, and a reader that wants either uses json.Number.
 //
 // Infinity and NaN are the exception, and not because of width: JSON has no
-// spelling for them at all. They are written as null, which is what
-// encoding/json refuses to write.
-func appendJSONScalar(out []byte, v any) []byte {
+// spelling for them at all. They become null, which is what encoding/json
+// refuses to write.
+//
+// The types are the closed set a scalar node and a tag hand over -- what
+// ast.ScalarNode.GetValue returns, and what taggedInteger and taggedFloat read.
+// Anything else is null.
+func valueToken(v any) JSONToken {
 	switch t := v.(type) {
 	case nil:
-		return append(out, "null"...)
+		return JSONToken{Kind: JSONNull}
 	case string:
-		return appendJSONString(out, t)
+		return JSONToken{Kind: JSONString, Value: t}
 	case bool:
-		return strconv.AppendBool(out, t)
+		return JSONToken{Kind: JSONBool, Bool: t}
 	case int:
-		return strconv.AppendInt(out, int64(t), 10)
+		return numberToken(strconv.FormatInt(int64(t), 10))
 	case int64:
-		return strconv.AppendInt(out, t, 10)
+		return numberToken(strconv.FormatInt(t, 10))
 	case uint64:
-		return strconv.AppendUint(out, t, 10)
+		return numberToken(strconv.FormatUint(t, 10))
 	case float64:
 		if math.IsInf(t, 0) || math.IsNaN(t) {
-			return append(out, "null"...)
+			return JSONToken{Kind: JSONNull}
 		}
 
-		return strconv.AppendFloat(out, t, 'g', -1, 64)
+		return numberToken(strconv.FormatFloat(t, 'g', -1, 64))
 	case *big.Int:
-		return append(out, t.String()...)
+		return numberToken(t.String())
 	case *big.Float:
 		if t.IsInf() {
-			return append(out, "null"...)
+			return JSONToken{Kind: JSONNull}
 		}
 
-		return t.Append(out, 'g', -1)
-	case []byte:
-		return appendJSONBytes(out, t)
+		return numberToken(t.Text('g', -1))
 	default:
-		text, err := json.Marshal(t)
-		if err != nil {
-			return append(out, "null"...)
-		}
-
-		return append(out, text...)
+		return JSONToken{Kind: JSONNull}
 	}
 }
 
-// appendJSONFloat writes a value YAML read as a float.
+// floatToken is valueToken for a value YAML read as a float.
 //
 // JSON has one number type, so 1.0 and 1 are the same value -- but a document
 // that wrote a float and converts back to YAML should still hold one, and a
 // bare "1" reads as an integer. The fractional part is kept for that.
-func appendJSONFloat(out []byte, v any) []byte {
-	at := len(out)
+func floatToken(v any) JSONToken {
+	tok := valueToken(v)
+	if tok.Kind == JSONNumber {
+		tok.Value = withFraction(tok.Value)
+	}
 
-	return withFraction(appendJSONScalar(out, v), at)
+	return tok
 }
 
-// appendJSONFloat64 is appendJSONFloat for a value already read as a float64,
-// which is every float a document writes that one can hold.
-func appendJSONFloat64(out []byte, f float64) []byte {
+// float64Token is floatToken for a value already read as a float64, which is
+// every float a document writes that one can hold.
+func float64Token(f float64) JSONToken {
 	if math.IsInf(f, 0) || math.IsNaN(f) {
-		return append(out, "null"...)
+		return JSONToken{Kind: JSONNull}
 	}
-	at := len(out)
 
-	return withFraction(strconv.AppendFloat(out, f, 'g', -1, 64), at)
+	return numberToken(withFraction(strconv.FormatFloat(f, 'g', -1, 64)))
 }
 
 // isJSONNumber reports whether text is a number JSON spells the same way.
@@ -585,16 +589,16 @@ func isJSONNumber(text string) bool {
 // and respelled -- ".5e10" as 5e+09 -- and one past 1e±1000, which the decoder
 // reads as an infinity or zero, was written as null or 0.0. YAML 1.1's base-60
 // floats and its octal, hex and binary integers still go through their value.
-func decimalJSON(text string, typ token.Type) ([]byte, bool) {
+func decimalJSON(text string, typ token.Type) (string, bool) {
 	if typ != token.FloatType && typ != token.IntegerType {
-		return nil, false
+		return "", false
 	}
 	spelled, ok := jsonNumberText(text)
 	if !ok {
-		return nil, false
+		return "", false
 	}
 
-	return withFraction([]byte(spelled), 0), true
+	return withFraction(spelled), true
 }
 
 // jsonNumberText rewrites a YAML decimal float as JSON spells it: no "+", no
@@ -655,22 +659,21 @@ func digitsFrom(text string, i int) int {
 	return i
 }
 
-// withFraction keeps what was written from at looking like a float.
-func withFraction(out []byte, at int) []byte {
-	for _, c := range out[at:] {
-		switch c {
-		case '.', 'e', 'E', 'n': // n for the null an infinity writes
-			return out
+// withFraction keeps digits looking like a float.
+func withFraction(digits string) string {
+	for i := range len(digits) {
+		switch digits[i] {
+		case '.', 'e', 'E':
+			return digits
 		}
 	}
 
-	return append(out, ".0"...)
+	return digits + ".0"
 }
 
-// appendJSONBinary writes the bytes a "!!binary" scalar holds.
-// appendJSONBinary writes a "!!binary" scalar as the base64 string the document
-// carries, in canonical form: the same characters with the line breaks RFC 2045
-// allows taken out.
+// binaryToken is a "!!binary" scalar as the base64 string the document carries,
+// in canonical form: the same characters with the line breaks RFC 2045 allows
+// taken out.
 //
 // JSON has no binary type and no way to spell arbitrary bytes -- a JSON string
 // is UTF-8 -- so the encoded text is what travels, which is what
@@ -681,13 +684,13 @@ func withFraction(out []byte, at int) []byte {
 //
 // It was a sequence of the numbers before -- "!!binary aGVsbG8=" gave
 // [104,101,108,108,111] -- which no other JSON writer produces.
-func appendJSONBinary(out []byte, text string) []byte {
+func binaryToken(text string) JSONToken {
 	canonical := withoutBase64Breaks(text)
 	if _, err := base64.StdEncoding.DecodeString(canonical); err != nil {
-		return appendJSONString(out, text)
+		return JSONToken{Kind: JSONString, Value: text}
 	}
 
-	return appendJSONString(out, canonical)
+	return JSONToken{Kind: JSONString, Value: canonical}
 }
 
 // withoutBase64Breaks returns text with the line breaks and spacing RFC 2045
@@ -708,20 +711,6 @@ func withoutBase64Breaks(text string) string {
 	}
 
 	return b.String()
-}
-
-// appendJSONBytes writes a byte slice the way the value encoder does: a
-// sequence of the numbers, not a base64 string.
-func appendJSONBytes(out []byte, raw []byte) []byte {
-	out = append(out, '[')
-	for i, b := range raw {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = strconv.AppendUint(out, uint64(b), 10)
-	}
-
-	return append(out, ']')
 }
 
 // appendJSONString writes a JSON string. Anything needing an escape goes

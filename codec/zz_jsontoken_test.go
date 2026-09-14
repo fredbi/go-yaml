@@ -79,58 +79,53 @@ func collectJSONTokens(src []byte, opts ...parser.Option) ([]JSONToken, error) {
 }
 
 // TestJSONTokensRebuildWhatToJSONWrites holds ToJSON's text against a rebuild
-// of the tokens it is written from, over every document of the corpus.
+// of the tokens it is written from, and against JSON itself, over every
+// document of the corpus.
 //
 // ⚠️ It compared two readings of a document until ToJSON became one of them.
 // ToJSON walked the document, recorded the text each anchor wrote and answered
 // a merge by reading its own output back, where the token converter follows
-// ast.AliasNode.Target and asks ast.MergeOf; that walk is gone. The comparison
-// still holds the separators -- the commas and colons no token carries --
-// written twice, in rebuildJSON here and in appendJSONToken, over every
-// document the corpus has.
+// ast.AliasNode.Target and asks ast.MergeOf; that walk is gone. What is left to
+// compare is the separators -- the commas and colons no token carries --
+// written twice, in rebuildJSON here and in appendJSONToken.
+//
+// json.Valid is the assertion that outlived the two readings. ToJSON used to
+// write text that is no JSON document at all for two shapes, and both were
+// skipped here rather than asserted: an explicit "? <<" merge key, which wrote
+// a key with no value, and an anchor the parse read as a node of its own, which
+// wrote two root values. The emitter refuses the second and names the first
+// "<<", so every document ToJSON accepts is a JSON document and the skip is
+// gone.
 func TestJSONTokensRebuildWhatToJSONWrites(t *testing.T) {
-	var compared, refused, malformed, heldOut int
+	var compared, refused int
 
 	for _, src := range corpusSources() {
 		want, wantErr := ToJSON([]byte(src.text))
 		toks, gotErr := collectJSONTokens([]byte(src.text))
 
 		if wantErr != nil {
-			assert.Errorf(t, gotErr, "%s: ToJSON refused %q and the tokens did not", src.name, src.text)
+			if assert.Errorf(t, gotErr, "%s: ToJSON refused %q and the tokens did not", src.name, src.text) {
+				// One emitter refuses once, so the two carry one message. They
+				// refused 97 corpus documents with different messages while
+				// each walked the document itself -- "a mapping entry holds one
+				// value" against the parse error that followed it.
+				assert.Equalf(t, wantErr.Error(), gotErr.Error(), "%s: %q", src.name, src.text)
+			}
 			refused++
-
-			continue
-		}
-		if !json.Valid(want) {
-			// ToJSON wrote something that is not a JSON document, so it is no
-			// answer to hold the tokens against -- not even on whether they
-			// converted at all. Two shapes reach here: an explicit "? <<" merge
-			// key, which defect 50 records as unresolved on both paths, and an
-			// anchor the parse read as a node of its own, which makes ToJSON
-			// write two root values where the tokens refuse the document.
-			malformed++
 
 			continue
 		}
 		if !assert.NoErrorf(t, gotErr, "%s: ToJSON converted %q and the tokens did not", src.name, src.text) {
 			continue
 		}
+		assert.Truef(t, json.Valid(want),
+			"%s: ToJSON wrote %q for %q, which is not a JSON document", src.name, want, src.text)
 
-		got := string(rebuildJSON(toks))
-		if reason, held := jsonTokenHoldOuts[src.text]; held {
-			assert.NotEqualf(t, string(want), got,
-				"%s: %q agrees now, so %s has closed: delete the hold-out", src.name, src.text, reason)
-			heldOut++
-
-			continue
-		}
-
-		assert.Equalf(t, string(want), got, "%s: %q", src.name, src.text)
+		assert.Equalf(t, string(want), string(rebuildJSON(toks)), "%s: %q", src.name, src.text)
 		compared++
 	}
 
-	t.Logf("%d documents converted alike, %d refused alike, %d skipped where ToJSON wrote no JSON document, %d held out",
-		compared, refused, malformed, heldOut)
+	t.Logf("%d documents converted alike, %d refused alike", compared, refused)
 }
 
 // TestATagDecidesWhetherAnInfinityConverts holds both converters to one answer
@@ -202,18 +197,4 @@ func TestATagDecidesWhetherAnInfinityConverts(t *testing.T) {
 		assert.Equal(t, `{"k":".inf"}`, fromBytes)
 		assert.Equal(t, `{"k":".inf"}`, fromTokens)
 	})
-}
-
-// jsonTokenHoldOuts are the documents the two converters disagree about, with
-// the defect that explains each.
-//
-// Keyed on the source text and not on the corpus name, because a regeneration
-// renames every seed. Asserted the other way about -- a held-out document that
-// starts agreeing fails -- so the entry reports the fix instead of outliving it.
-var jsonTokenHoldOuts = map[string]string{
-	// Empty. Defect 108 was the one entry -- an alias to an anchored "!!omap"
-	// lost the tag, so the tokens wrote the sequence where ToJSON wrote the
-	// object -- and 92676c3 closed it. The map stays because the mechanism is
-	// the useful part: an entry asserts the disagreement, so a held-out
-	// document that starts agreeing fails and says which defect closed.
 }

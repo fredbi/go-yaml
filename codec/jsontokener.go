@@ -76,9 +76,6 @@ type jsonTokener struct {
 	// a key, which is one token whatever it holds, and a tag naming a scalar
 	// type, which says what its node is worth whatever the node wrote.
 	suppress int
-	// scratch is where emitScalarNode writes a scalar's JSON before reading it
-	// back as a token.
-	scratch []byte
 }
 
 // pushMap opens the frame of a mapping being handed over, reusing the room the
