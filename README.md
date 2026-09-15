@@ -58,9 +58,12 @@ the source where it once allocated 89.2x.
 
 Conformance is a primary concern. Every number below comes from a suite in this repository.
 
-- **The [YAML Test Suite](https://github.com/yaml/yaml-test-suite): 372 of 372 scoreable cases**
-  through the decoder, and 272 of 274 through `ToJSON`.
-- **A grammar-generated corpus**, much wider than the suite: 14,684 cases over 605 buckets, checked
+- **The [YAML Test Suite](https://github.com/yaml/yaml-test-suite)**, 402 cases. The parser scores
+  393 of them — the 9 that state no expectation are excluded — and agrees with all 393. The decoder
+  scores 370 and decodes all 370 as expected; `ToJSON` and `ToJSONTokens` score 274 and agree on 271.
+  The three they differ on are answers this library gives on purpose, listed in
+  `conformance/json_test.go`.
+- **A grammar-generated corpus**, much wider than the suite: 21,843 cases over 605 buckets, checked
   against a reference parser rather than against ourselves.
 
 What it supports:
@@ -86,7 +89,7 @@ and none of them is reached yet. Read the section as a statement of intent, not 
 |---|---|
 | **2x faster than yaml/v3**, and better where the document favours us | 1.29x |
 | **5 to 10x less memory** | 4.5x fewer bytes, 12.9x fewer allocations |
-| **Every path at 100% of the YAML Test Suite**, not the decoder alone | `ToJSON` at 272 of 274 |
+| **Every path at 100% of the YAML Test Suite**, not the decoder alone | every path agrees on every case it can score; 3 of `ToJSON`'s 274 are declared departures |
 | **Streaming, with a bounded memory footprint** — parse a document without holding it, so a caller can transform nodes as they arrive and find positions without building a tree | a parse reads the whole document |
 | **Verbatim reconstruction** — render a document back byte for byte. A prospect rather than scheduled work; it is why the tree keeps each token's source text and position | nothing renders a document back |
 

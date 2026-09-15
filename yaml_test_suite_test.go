@@ -30,10 +30,10 @@ import (
 // below is a document the parser refuses, and the two lists no longer overlap
 // at all.
 //
-// Three of these are decoder defects. The other twenty-nine are cases this
-// harness cannot score, and they are worth separating because a count that
-// mixes them says the decoder is at 92% when the cases it can actually decide
-// put it at 99.2%.
+// None of these is a decoder defect. Twenty-nine are cases this harness cannot
+// score and three are answers this library gives on purpose, and they are worth
+// separating from a defect because a count that mixes them says the decoder is
+// at 92% when the cases it can actually decide put it at 100.0%.
 const (
 	// The fixture states its expectation as out.yaml -- a canonical YAML
 	// document -- and carries no in.json for this harness to compare against.
@@ -74,23 +74,29 @@ const (
 	reasonBinaryCanonical = "a !!binary writes canonical base64, where the fixture keeps its line breaks"
 )
 
-// The two fixtures the decoder does not match, neither of them a defect.
+// The three fixtures the decoder does not match, none of them a defect. ToJSON
+// and ToJSONTokens diverge on the same three, scored in the conformance
+// package by jsonLedger and jsonTokenLedger.
 //
-//  1. trailing-line-of-spaces/01 is not a defect. "foo: |\n  x\n   ", which
-//     ends without a line break, decodes to "x\n " here and the fixture's
-//     in.json records "x\n \n". The specification's grammar produces "x\n ":
+//  1. trailing-line-of-spaces/01. "foo: |\n  x\n   ", which ends without a
+//     line break, decodes to "x\n " here and the fixture's in.json records
+//     "x\n \n". The specification's grammar produces "x\n ":
 //     b-chomped-last(clip) ::= b-as-line-feed | <end-of-stream>, so a literal
 //     scalar running to the end of the stream ends without the break clipping
 //     appends to a line that has one. go.yaml.in/yaml/v3 and PyYAML both read
 //     "x\n " as well, and the sibling fixture 00 -- the same document with a
 //     final break -- decodes to "x\n \n" here and everywhere.
 //
-//  2. construct-binary was here for the same kind of reason and is not any
-//     more. "!!binary" resolved to []byte, json.Marshal wrote those bytes back
-//     as base64 without the line breaks the literal block carried, and the
-//     fixture's in.json records the scalar text. A "!!binary" reads into a
-//     [codec.Base64] now -- the encoded text, canonical -- which is what the
-//     fixture records, so the case decodes as expected.
+//  2. construct-binary. A "!!binary" reads into a [codec.Base64] -- the
+//     encoded text, canonical -- where the fixture's in.json keeps the line
+//     breaks RFC 2045 permits inside an encoded stream. The characters are the
+//     same and the breaks are not, so the bytes agree and the JSON text does
+//     not. It resolved to []byte before, and json.Marshal wrote those bytes
+//     back as base64 with no breaks either, so the case has never matched.
+//
+//  3. spec-example-2-26-ordered-mappings. The fixture writes an "!!omap" as
+//     the array of one-entry objects the document spells it with, and the
+//     decoder reads it as the ordered map the tag names.
 
 // decodeLedger records every case that does not decode to its expected JSON,
 // with why.
