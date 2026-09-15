@@ -76,7 +76,9 @@ What it supports:
 
 What it will not support:
 
-- **encodings other than UTF-8.** UTF-16 and UTF-32 are rejected.
+- **encodings other than UTF-8.** UTF-16 and UTF-32 are rejected. This is a deliberate departure from
+  [§5.1](https://yaml.org/spec/1.2.2/#51-character-set), which asks a processor to accept UTF-16 as well,
+  and it is one of very few. Invalid UTF-8 is refused rather than repaired.
 - **the YAML 1.1 tags `!!pair` and `!!value`** (2005).
 - **documents larger than 2^31-1 bytes**, that is 2.1 GB.
 

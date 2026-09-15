@@ -2151,6 +2151,11 @@ func sliceSiblings(values []Node) func(int) Node {
 // [ErrMove], and a node removed from inside a line -- an entry of a flow
 // collection -- returns [ErrRemove].
 //
+// On an error, how much was written to w is not defined. The copy hands each
+// stretch to w as it reaches it, so [ErrMove], [ErrRemove] and [ErrInsert] stop
+// partway through a document that is already partly written. Render into a
+// buffer and copy it on success where a caller needs all or nothing.
+//
 // ⚠️ Provisional, and not what [Renderer.Render] does on its own: that lays a
 // whole tree out by its depth, which is what an encoder wants and what a tree
 // with no source has to have.
@@ -2178,6 +2183,8 @@ func (r *Renderer) Verbatim(w io.Writer, n Node) error {
 
 // VerbatimFile writes a whole file back as it was read, the text around its
 // documents included.
+//
+// On an error, how much was written to w is not defined, as in [Renderer.Verbatim].
 func (r *Renderer) VerbatimFile(w io.Writer, f *File) error {
 	if r.src == nil || f == nil {
 		return nil
