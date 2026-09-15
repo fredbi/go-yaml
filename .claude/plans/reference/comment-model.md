@@ -155,7 +155,8 @@ token → ast → parser, printer → codec → yaml (facade)
   call sites outside `ast` follow (`decode.go` 2, `encode.go` 5, `internal/format` 1,
   `parser/node.go` 5, `parser/parser.go` 3).
 - 📝 🏁 **Ledgers stay flat:** round-trip 306/306, renderer 306/306, acceptance 393/393, decoder
-  372/372. The comment tests in `parser/` are the fine-grained net — `TestParseExplicitKeyComments`
+  372/372 -- the counts as they stood when this was written; 2026-09-15 reads 308/308, 308/308, 393/393
+  and 370/370, the denominators having moved and not the agreement. The comment tests in `parser/` are the fine-grained net — `TestParseExplicitKeyComments`
   and the head/line/foot cases.
 
 ### 2. Collapse what the gap forced

@@ -1,5 +1,7 @@
 > [!NOTE]
-> Last revision: 2026-09-02 (moved, tested, surface cut; the re-measure is what is left)
+> Last revision: 2026-09-07 (**the scaffolding is gone**: `internal/lab` and `internal/refparser` were
+> deleted, so every path this plan names is historical. See item 11)
+> Previous: 2026-09-02 (moved, tested, surface cut; the re-measure is what is left)
 
 # Promoting the lab parser to `parser`
 
@@ -108,16 +110,52 @@ None of these block a full-scan `Parse`. All three shape what `Walk` may promise
 
 ### After
 
-9. ✅ ⚡ **Port the analysis measurements.** `arena_test.go`, `comments_test.go`, `parser_bench_test.go`,
-   `retention_test.go` and `scaling_test.go` still measure `refparser`, because they use the old
-   `New(seq, mode)` shape. They are labelled as reference figures; the shipped parser needs its own.
+9. ✅ ⚡ **Port the analysis measurements** (2026-09-07). `comments_test.go`, `retention_test.go`,
+   `scaling_test.go`, `churnsites_test.go` and `gcnoise_test.go` now measure the shipped parser.
+   Three did not survive the port, all for the same reason — they measured a stage the parser no
+   longer has: `arena_test.go` read `refparser.ArenaStats`, which is not exposed; `parser_bench_test.go`
+   timed the construct-from-tokens stage, and `TestStageAttribution` lost its middle column with it,
+   because the parser reads from the scanner and there is no constructor to stop at.
 10. 📝 ⚡ **Re-measure against the fork point** and update [3-performance.md](3-performance.md), which
    currently quotes `lab.ToJSONWalk` and `internal/lab` paths.
-11. ✅ **The oracle's fate: keep it.** Decided 2026-09-02, after the promotion settled. `internal/refparser`
-    is dead to the library -- `go list -deps` finds it in no public package -- and alive as the yardstick:
-    the 18,554-case comparison, and the "before" figures in `internal/analysis`. The AST node recycling and
-    the scanner work still ahead are what a live yardstick catches. Retiring it later means freezing the
-    expected dumps as golden files first, so the comparison survives without it.
+11. ⛔ **The oracle's fate: retired** (2026-09-07), reversing the 2026-09-02 decision to keep it.
+    `internal/lab` and `internal/refparser` are deleted, merged after the conformance fixes so the
+    delete never had to be resolved against that branch's own 143 insertions in `equivalence_test.go`. Measuring against an earlier copy of ourselves
+    earns nothing now that `perlref`, `libfyaml`, `goyaml` and `grammar.NewRecognizer` each answer at
+    their own layer, and a frozen copy only accumulates divergences that have to be classified by hand --
+    `divergesOnPurpose` reached six entries and the last was added the day the packages went.
+    - ⚠️ **The stated condition was not met.** This item said retiring it means freezing the expected
+      dumps as golden files first, so the 18,554-case comparison survives without it. That was skipped
+      deliberately, not overlooked: the comparison it preserves is parser-against-old-parser, which is
+      the thing being retired.
+    - ⚠️ **What is actually uncovered**, stated precisely rather than as "the net is gone", because two
+      other plans were promising this gate as their safety net and one of them still is:
+
+      | the gate saw | what sees it now |
+      |---|---|
+      | walk against tree | `codec.TestWalkMatchesTheStream`, 13,382 documents, `differ=0` |
+      | what a document means | the yamlgen properties and the four outside sources |
+      | which complaints the parser can make | `TestTheCorpusDrawsEveryComplaint`, 64 over 4,967 refusals |
+      | tree shape and token positions | `parser.TestTheWalkHandsOverTheSameTree`, 417 documents |
+      | **which document draws which complaint** | 35 hand-written `yamlcorpus.Refusals` entries; **none of the 4,967 generated** |
+
+    - ✅ **The tree row is closed** (2026-09-07, `e885495`, on master). `TestTheWalkHandsOverTheSameTree`
+      hashes what a walk hands a visitor — node type, the step's depth, index and key, line and column,
+      byte span, value — and asserts the digest. 64 hex characters where the original condition of this
+      item asked for a stored tree dump.
+      - 📌 **Its reach was measured, not assumed**, by reverting two real fixes: `28f926d`, which decides
+        the node a `:` keys on, **moves** the digest; `a6cc538`, which measures an entry with no key from
+        its own colon, leaves it **identical**. So it catches a change that alters every tree the same
+        way and misses one that alters a shape nobody wrote down. Adding documents does not fix that —
+        none of the 91 hand-written shapes in `yamlcorpus` holds that shape either. See item 19 of
+        [4-test-suite-generator.md](4-test-suite-generator.md) for where that led.
+      - 📌 **417 documents, against the gate's 18,554**, and the difference is the generated corpus,
+        which cannot be in it: regenerating reshuffles all 14,000 seeds and the digest would move for
+        reasons that have nothing to do with the parser. So it is narrower than what it replaces and the
+        widest thing that does not churn. Re-baseline it the way `parserComplaints` is re-baselined.
+      - ⚠️ **What is still open is the last row**: which of the 4,967 generated refusals says what. The
+        set is asserted and the mapping is not, so a change that swapped two messages between two
+        documents would pass.
 12. ⏸ **Parked: letting a caller control the buffering.** `Pin`, `Save` and the rest are internal and the
     parser drives them; a caller chooses `Parse` (a permanent pin) or `Walk` (the tail following the
     descent) and nothing else. Exposing them -- to pin once a path search matches, say -- waits on `Walk`'s

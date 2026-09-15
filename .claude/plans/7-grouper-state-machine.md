@@ -74,7 +74,8 @@ explicit key it was given.
     ? {? a: 1}      [1:4] could not find flow map content
     : 2
 
-`internal/refparser` refuses them too, so this is inherited rather than introduced. A mapping may be a key
+`internal/refparser` refused them too when it was measured, so this is inherited rather than introduced;
+that copy was deleted on 2026-09-07, so the claim is a record and not something to re-run. A mapping may be a key
 in YAML 1.2, so these documents are legal. Filed in [2-correctness.md](2-correctness.md) action 1, which
 already holds the neighbouring refusals -- an explicit key whose node begins on the next line, and the
 empty-node cases -- but did not have this one.
@@ -125,9 +126,52 @@ allocate per entry.
    holds 60,001 tokens and allocates 235 chunks recycling none. A state machine does not fix that on its
    own -- but a collection written as a *value* cannot be a key, and a machine that knows which it is
    reading could release at the ':'. Measure before and after.
-3. 📝 🏁 **Keep the gate green throughout.** `TestLabParserMatchesProduction` compares against
-   `internal/refparser` over 18,554 cases and is what makes a rewrite of this size safe. It is also blind
-   to error wording, so port with the parser's own suite running too -- 17,747 subtests.
+3. ⚠️ 🏁 **The gate this action rested on is gone, and its replacement is a tenth the width.**
+   `TestLabParserMatchesProduction` compared the parser against `internal/refparser` over 18,554 cases;
+   both packages were deleted on 2026-09-07 (`9f1c15a`), once the conformance fixes were in.
+   `parser.TestTheWalkHandsOverTheSameTree` replaces it (`bb89e09`, on `conformance-3`): it hashes what a
+   walk hands a visitor -- node type, the step's depth, index and key, line and column, byte span, value --
+   and pins the digest over 417 documents, 323 walked and 94 refused. The generated corpus cannot be in it,
+   because regenerating reshuffles all 14,000 seeds and the digest would move for reasons that are not the
+   parser's; so its sources are the YAML Test Suite and the synthetic generators in `internal/corpus`.
+
+   **Measured reach, 2026-09-07.** Deterministic over three runs. It bites on a wide change: reverting
+   `parser/token.go` to `28f926d^` -- the 7.4.2 fix that decides which node a `:` keys on -- fails the
+   digest. It does **not** bite on a narrow one: reverting `a6cc538`, the fix measuring an entry with no key
+   from its own colon, leaves the digest identical, though `- : |1` over `   x` demonstrably reads `"  x\n"`
+   again with it out. No document among the 417 holds an entry with no key carrying a block scalar.
+
+   So it catches the class it was built for -- every column moved by one, a node type renamed -- and misses
+   the shape-specific faults.
+
+   ⚠️ **And the corpus does not cover that miss, which is what I first wrote here and it was wrong.**
+   Measured the same day on a worktree at master with `internal/scanner/map.go` alone reverted to
+   `a6cc538^`: `TestRenderReachesAFixedPoint` -- the property that **found** that defect at 40,000 draws a
+   few hours earlier -- passes at 40,000 and still passes at 300,000, while the hand-written pin
+   `parser.TestABlockScalarUnderAnEmptyKeyIsMeasuredFromItsColon` fails. The axes added after the find,
+   `NumberLeadingZero` and `RedeclareDirectives`, reshuffled rapid's byte stream and the shape fell out of
+   the draw. A regeneration can lose a find, not only turn a green tree red, and nothing reports that
+   direction -- the suite goes green and reads as progress.
+
+   **So the three checks divide three ways and none substitutes for another:** the corpus *finds* shapes
+   nobody wrote down, on the seed stream of the day; a pin *holds* one once found, across every
+   regeneration; the digest says the tree is the same tree, over documents that do not move.
+
+   **Whether that is enough behind a grouper rewrite is a decision for this stream, not something to
+   inherit.** If it is not, the honest options are a digest keyed on a *frozen* slice of the corpus, or
+   accepting that the rewrite is guarded by answers rather than by trees. Adding more fixed documents is
+   not one of them: none of `yamlcorpus`'s 91 hand-written shapes holds an entry with no key carrying a
+   block scalar either.
+   - ✅ **Partly answered on 2026-09-07** (`bb89e09`). `parser.TestTheWalkHandsOverTheSameTree` hashes
+     what a walk hands a visitor — node type, the step's depth, index and key, line and column, byte span,
+     value — and asserts the digest. That is the same-tree check, over **417 documents** rather than
+     18,554: the fuzz seeds are excluded because regenerating the corpus reshuffles all 14,000 and the
+     digest would move for reasons that are not the parser's. So a rewrite of this size now has an
+     equivalence check on tree shape and token positions, on a tenth of the documents.
+   - ⚠️ **Still to decide before starting**: whether 417 fixed documents is enough for a rewrite of the
+     grouper, and what to do about per-document error wording — the complaint *set* is asserted over
+     4,967 generated refusals, the mapping of document to message is not. Both are judgement calls this
+     stream should make rather than inherit.
 4. 📝 ⚡ **Re-measure after each pass ports.** The 6.8% is a visit count, not a timing. Whether it shows in
    wall-clock is unknown: the passes are simple loops over a slice already in cache, and the token packing
    taught us that a large-looking saving can measure at nothing.

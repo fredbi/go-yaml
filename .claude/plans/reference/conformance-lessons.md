@@ -236,3 +236,96 @@ Each of these cost something to learn.
   whole session, and saying so out loud got it fixed.
 - **`yaml.Unmarshal` into one value stops at the first document.** A probe meant to exercise a cross-document
   alias nearly recorded a clean result without ever reading the second document. Use `yaml.NewDecoder` and loop.
+
+---
+
+## What the 2026-09-08 round taught — three blind spots and four guards
+
+A day of work with the parser session, ten commits, eight defects. The defects are in
+[generator-gaps-log.md](generator-gaps-log.md); what follows is the method, which outlasts them.
+
+### Three ways a harness reports health it has not measured
+
+1. **An unstated meaning checks nothing.** `Written.MeansUnclear` was set for any document holding a `<<`,
+   on the honest ground that a merging reader and a 1.2 reader are both right. Every value property opens
+   with `if w.MeansUnclear { return }`, so **no merge document had been checked for anything but parsing**
+   for as long as the merge axis had existed. The first replay after each reading got an answer of its own
+   found a defect that was older than the change revealing it. Declining feels careful; applied to a family
+   it removes that family from every property at once, and nothing reports the removal.
+
+2. **A rule's accepting side has no self-check.** The break rules build documents that ought to be refused,
+   and that direction checks itself: a missed refusal shows up as a document read. A **valid** document
+   wrongly refused looks exactly like a document the library refuses. Three of the four key-naming faults
+   closed that week were missing a valid document, not a broken one — two block collection keys that
+   differ, a collection key respelt, two distinct anchored nodes as keys. `Constructs` counts the accepting
+   shapes now; "two alias keys" read 1 in the YAML Test Suite and **0 in 21,749 cases**.
+
+3. **A comparison is blind wherever both sides share a model.** The merge fold matched an own key to a
+   merged one by text, so an own `Float{1}` overrode a merged `Str{"1.0"}` where 3.2.1.1 keeps three
+   entries. `TestWalkMatchesTheStream` could not see it — both paths key by name — and neither could a
+   stated meaning, because `Map.Decoded` keys by name for the same reason the decoder does. **Agreement
+   measures consistency; it is evidence only where the two sides were built from different models.** For
+   that shape no oracle can be asked at all: libfyaml cannot hash a collection key, `yaml/v3` refuses the
+   pair as a duplicate, `perlref` answers syntax only. The specification is the only judge left.
+
+### A guard should fail when the world changes, not when someone remembers
+
+Four instances, arrived at independently by both sessions in one week:
+
+- a **hold-out keyed on the difference** stops matching when the two sides agree —
+  `blockCollectionKeysCollide` skipped zero cases the day the fix landed and was deleted;
+- an **allowance declared by the document** rather than by the tag closes when the documents stop being read;
+- `TestEveryUncorroboratedMeaningIsNamed` fails **in both directions**: a new uncorroborated `Means` fails
+  until somebody names the production, and a *stale* entry fails when an implementation starts reading the
+  shape — and a shape becoming readable is exactly what a fix does;
+- `Divergence.Pin` plus the tally's staleness check.
+
+A guard that needs someone to remember it is a comment with a test's authority.
+
+### Four kinds of comment, and only one of them a count settles
+
+- **permitted** describes the code. `merge` said a key collision was "not avoided" — true, and reached by
+  nothing: 110 merges over 4,000 drawn values shared a key **zero** times, because `mergeFrom` named its
+  keys `merged0..3` and the own keys came from `Strings()`.
+- **happens** is a claim, and a count settles it. `Keys()` says it draws a collection "one key in 24" and
+  measures 1 in 25 over 1,483 keys — so the merge sentence was a specific fault, not general rot.
+- **correct** states a rule the code implements, and no count settles that one: the code can implement the
+  rule faithfully over the wrong notion of the thing. `indexOfKey` implements precedence exactly, over
+  key-as-text.
+- **deliberately cannot** says a shape is out of reach and why. It is the only kind that protects against a
+  well-meaning improvement, and there is no test to write in its place. `mergeFrom` and `legacyMap` carry
+  one each.
+
+### A range can narrow a rule above it without moving any label
+
+All 62 declared features were reachable while a whole-valued float was not — `value/float` says a float was
+written, not which one, so no feature histogram could have found it. `Keys()` and `floats()` both drew from a
+continuous range; the corpus held 5 whole-valued float keys in 21,686 cases and none carrying a property,
+which is why the anchored-float defect was unreachable rather than rare.
+
+Two lists answer "can the draw reach this", and the split matters: **`yamlcorpus.Constructs`** counts what a
+document *contains*, in the bytes; **`yamlgen/draws_test.go`** counts how two nodes *relate*, over the values,
+because a merged key colliding with an own key is invisible in the text.
+
+### Silence and contradiction are not the same darkness
+
+15 of 70 enumerated shapes are accepted by the grammar and read by neither `yaml/v3` nor libfyaml, in three
+clusters: the directives nobody implements, a tag over text it does not fit, and the flow collection-key
+region — **which is exactly the §7.4.2 question `yamlgen.Strict` has parked since 2026-09-07**. The park and
+the darkness turned out to be the same region.
+
+But they are dark two different ways. `{{"": 0}}` is **silence**: both implementations decline *after*
+parsing, because neither can hold a collection as a key, and nobody contradicts the grammar. A flow mapping
+key spanning two lines is **contested**: three implementations refuse it *in the parser*, deliberately —
+ours at `parser/token.go:849` with a comment reading 7.4.2 — against the recognizer and the reference parser,
+which accept it. The first wants the prose read; the second wants the grammar questioned. Only the first
+leaves a meaning unopposed.
+
+### Two housekeeping facts
+
+- **The register is under-read.** Twice in one afternoon both sessions re-derived a measurement already
+  written down in `Strict`'s "a flow mapping key spanning two lines", including the tell that separates a
+  parse refusal from a binding declining to hold a collection key. Read the entry before measuring the shape
+  it names.
+- **The memory store is shared between sessions on this project.** Whatever one session writes under
+  `.claude/projects/*/memory/`, the other reads.

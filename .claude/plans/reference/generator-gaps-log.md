@@ -395,3 +395,124 @@ fourteen cases the readings disagree about rather than all eleven thousand.
 📌 **Run the property tests deep before believing them.** All three defects above are invisible at the
 default hundred draws. The `!!str` render needs fifty thousand; the version directive needed one specific
 generated document out of eleven thousand; the tag contradictions needed a family nobody had written.
+
+---
+
+## Round 6 — a key is a node, 2026-09-08
+
+The largest single round. Ten commits, eight defects, and every one of them in a region the generator had
+never written into. What it could not say, in the order it was fixed.
+
+### It could not say what a merge document means
+
+`Written.MeansUnclear` was set for any `<<`, so the corpus stated nothing and every value property returned
+early. The library resolving `<<` under the version the document declares (`8acf11b`) made both readings
+answerable: `Map.Decoded` gives the core answer, a key spelled `<<`, and `readings.legacyMap` performs the
+1.1 merge. A merge document carries two meanings now, like `1_000` and `yes`.
+
+**Found immediately:** a tab where a space would separate `<<` from its `:` stops the entry merging.
+`"<<:\t{m: 1}"` comes back as a key named `<<` where `"<<: {m: 1}"` and `"<<:  {m: 1}"` merge — the tab, not
+the width, and before the `:` as well. It was there on master at `2abdd2f` too, where everything merged.
+6.1's s-white rule, one indicator on from where `a0182a6` fixed it for a node's properties.
+
+**Predicted wrong:** three pins were expected to flip and none did. Every one of those defects survives
+under `%YAML 1.1`; they carry the directive now. The claim that
+`TestDefectAMergeKeyAloneInFlowEscapesTheDuplicateCheck` would *dissolve* was furthest off — under the core
+reading the tree refuses `{<<: {x: 1}, <<}` with `duplicate key "<<"` and **the walk reads it, dropping the
+first entry's mapping**.
+
+### It could not write a key's properties at all
+
+`keyIn` knew a merge key, a collection, a `Str` and the plain scalars, and **panicked** on everything else —
+`simpleScalar: unknown value yamlgen.Tagged`. So `&x a: 1`, `!!str a: 2` and `*x : 3` were documents this
+generator could not produce. Writing them needs `keyRunsIntoTheColon`: an anchor name is `ns-char+` less the
+flow indicators and a tag URI is `ns-uri-char+`, and `:` is in both, so `*a1: 1` names the anchor `a1:`.
+
+Three of our own predicates were asking a key's own type and missed a key wearing an anchor —
+`holdsAMappingAsAKey`, `features_test`'s `holdsACollectionKey`, and `readings.legacyKey`, which `&a1 0o0`
+under `%YAML 1.1` caught.
+
+**Four defects on the first runs**, all documents the grammar accepts:
+
+| | |
+|---|---|
+| a float key behind a property loses its `.0` | `&a1 1.0: x` is keyed `"1"` on the walk and `"1.0"` on the tree; an alias loses it in the long form too |
+| a propertied implicit key over a block scalar is refused | `&a1 k: >-` gives `value is not allowed in this context`; the `?` form reads |
+| a tagged empty key, three ways | verbatim loses the mapping, tag-before-anchor is refused, anchor+tag is refused below another entry |
+| a tag on any key empties a struct field | `!!str x: 1` leaves a field tagged `x` unset; a `map[string]any` holds it |
+
+⚠️ The last two are **pinned and not drawn**: the tagger still leaves keys untagged, because a ledger entry
+wide enough to excuse them would excuse every document holding a tagged key — one drawn node in seven.
+
+### It could not produce a duplicate that mattered
+
+`drawMap` dedupes with `keyFamily` on purpose, so every duplicate is one a rule puts there, and the only rule
+needed a mapping of two entries and overwrote the second key. A collection key was reached by luck: **24 of
+2,000 drawn values**. Two appending rules fire on every mapping now, one recycling a key the mapping holds
+and one building a collection key and writing it twice. **78 broken documents became 444**, and the
+recognizer refuses none of them.
+
+### It could not reach three shapes its own ranges excluded
+
+- a **whole-valued float**: `Keys()` and `floats()` both drew from a continuous range, so the corpus held 5
+  in 21,686 cases and none carrying a property. One key in three and one float in twelve now.
+- **two distinct anchored nodes as keys**: 1 in the YAML Test Suite, **0 in 21,749 cases**. `aliasAKey`
+  appends a second alias key naming a different anchor.
+- **a merge sharing a key with the mapping holding it**: 110 merges over 4,000 values, **0** sharing.
+  `mergeFrom` takes an own *string* key now — string only, because naming from `KeyText` would collide a
+  `Float{1}` with a `Str{"1.0"}`, which this library merges and 3.2.1.1 makes two keys.
+
+That last correction sent the parser session looking and found **defect 69**: the merge fold matches by text,
+so an own `Float{1}` overrides a merged `Str{"1.0"}`. A `MapSlice` keeps both nodes and the fold overrides
+one; a Go map has already lost one before the fold runs.
+
+### What was ruled
+
+`{<<: {x: 1}, <<}`, which cost an afternoon. Under the core schema the two entries are one key spelled `<<`
+twice and the duplicate check answers; under `%YAML 1.1` the merge key requires its `:`, so a `<<` written as
+a flow entry's key alone is invalid merge syntax. Refused under both readings, for two different reasons, and
+**one character settles it**: write the second entry `<<: ` and every path already refuses the document.
+
+Three implementations gave three answers on the isolated half (`{a: 1, <<}` under 1.1): `yaml/v3` refuses,
+libfyaml reads it and drops the entry silently, and this library read it and kept `<<` as an ordinary key
+beside the merged entries — the only answer where the same two characters resolve to the merge type in one
+entry and to a string in another.
+
+---
+
+## Round 7 — a plain scalar the emitter will not write, 2026-09-10
+
+### It could not write a plain scalar starting with "." or "-"
+
+`internal/scanner/document.go`'s `scanDocumentEnd` tested that three dots stood at column 1 and nothing else,
+so `...x` scanned as a `DocumentEnd` and the string `x`, and `...: 1` lost the key `...`. `scanDocumentStart`
+had checked the character after `---` all along, so `---x` and `---: 1` were right. The reference parser reads
+`...x` as one scalar, `=VAL :...x`.
+
+The suite could not reach it. `emit.go:1147`:
+
+```go
+var plainSafe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_ .-]*$`)
+```
+
+A plain scalar has to open with a letter or an underscore, so the emitter never writes one opening with a dot
+or a dash. `awkwardStrings` does carry `"---"`, `"..."`, `"a---b"` and `"a...b"` — the first two are quoted on
+the way out, and the last two open with `a`, where dots in the middle are harmless. The defect lived in a
+shape the emitter refuses to produce.
+
+`plainSafe`'s own comment states the trade and is right to: *"Being conservative here can only cost coverage
+of plain scalars; being wrong here would mean generating documents whose expected value we got wrong, and then
+blaming the library for it."* Widening the regexp buys reader coverage at the price of the certainty the whole
+suite rests on.
+
+📌 The pattern: **the suite only ever asks the reader about documents its own emitter writes.** Round 6's
+lesson was a gate blind to what it does not compare; this one is narrower and harder to see — emitter and
+reader share a model, and a shape the emitter will not spell is a shape the reader is never asked about. See
+[[a-comparison-is-blind-where-both-sides-share-a-model]].
+
+### What this argues for
+
+A **reading** corpus, separate from the round trip: hand-written documents whose value is stated, fed to the
+reader alone, with no emitter in front of it. The generator can seed it — `Reduce` already prints a document
+and its meaning — but the entries have to be able to hold spellings `canPlain` refuses. `...x`, `---x`,
+`...:`, `- a`, `? a` and `: a` are all in `awkwardStrings` today and all reach the reader only in quotes.

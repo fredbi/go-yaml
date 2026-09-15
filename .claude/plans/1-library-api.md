@@ -100,7 +100,7 @@ it points at a feature wired to the wrong place.
    mine.) **Built 2026-09-07** — `parser/anchors.go`, `ast.AliasNode.Target`, `ast.DocumentNode.Anchors`,
    `parser.WithAnchors`. The design below held with one correction: a recursive alias resolves rather than
    erroring, since YAML's representation is a graph and only a consumer that has to write a tree refuses
-   the cycle. See achievement 0 of [stream 2](2-correctness.md).
+   the cycle. See achievement 1 of [stream 2](2-correctness.md).
 
    The decoder memoized anchors and checked aliases, and **every consumer had to repeat that dance**.
    It moved into the parser:
@@ -223,10 +223,14 @@ it points at a feature wired to the wrong place.
      nil guard first.
    - The alternative is correcting the comment, which leaves the progressive API needing a hook of its own.
 
-   ✅ **The refactor has a safety net already.**   ✅ **The refactor has a safety net already.** `TestLabParserMatchesProduction` compares trees node by node
-   over **18,555 cases**, so an accumulator built on the progressive API must produce exactly today's tree
-   or the gate fails. The conformance fixes live in the grouping passes, which is where a quiet regression
-   would come from, and this is what catches it.
+   ✅ **The refactor has a safety net, and it is not the one this said.** `TestLabParserMatchesProduction`
+   compared trees node by node over 18,555 cases against `internal/refparser`; both are deleted as of
+   2026-09-07 (see [6-parser-promotion.md](6-parser-promotion.md) item 11). What guards this refactor now
+   is better suited to it: `codec.TestWalkMatchesTheStream` runs the walking path and the tree path over
+   the corpus and the fuzz seeds — **13,382 documents, differ=0** — so an accumulator built on the
+   progressive API must produce exactly what the tree does or that goes red. It compares the two paths the
+   refactor touches rather than the parser against a frozen copy of itself, which is the comparison that
+   matters here.
 
 3. 📝 **Design the streaming parser API.** `parser.New(seq iter.Seq[token.Token], mode, opts...)` plus
    `Parse()` is the shape the internals now have; what a *caller* streams through is undecided. It needs to
@@ -236,7 +240,8 @@ it points at a feature wired to the wrong place.
      **cheap scan that locates nodes by JSON pointer** without building the tree, and `go-swagger` needs an
      **on-the-fly transformer a spec loader wraps** — rewriting nodes as they arrive rather than
      materializing the document and editing it.
-4. 📝 **A token iterator over `codec.ToJSON`.** Fred, 2026-09-06. `ToJSON` writes one buffer; a
+4. ⏳ **A token iterator over `codec.ToJSON`.** Fred, 2026-09-06. **Moved to its own stream 2026-09-08 —
+   see [stream 11](11-json-tokens.md), which holds the design, the consumer analysis and the port.** `ToJSON` writes one buffer; a
    `ToJSONTokens` handing over small JSON tokens as the walk reaches them -- the shape `encoding/json/v2`
    takes -- costs the converter nothing it does not already do, since it is already a `parser.Visitor` that
    holds only the output and the anchors named so far.
@@ -256,6 +261,49 @@ it points at a feature wired to the wrong place.
 6. 📝 **Settle the scanner entry points.** `scanner.Init(string)` against the planned `[]byte` and
    `io.Reader` pair. Blocked behind the tokenizer redesign in [stream 3](3-performance.md), which will
    change them anyway.
+
+7. ✅ **`MapSlice` is an ordered map, and `!!omap` builds one.** Fred's design, 2026-09-10; landed the same day in
+   four commits on `fix/conformance-fixes`.
+
+   | commit | what |
+   |---|---|
+   | `84d113a` | `MapSlice` as a struct with unique comparable keys, the iterators, `NewMapSlice` |
+   | `a3b957c` | `!!omap` reads as `MapSliceSeq` on all four readers, and writes back tagged |
+   | `ee0a1d4` | the JSON encode style quotes a member name that is not a string |
+   | `07741bf` | `MarshalJSON`/`UnmarshalJSON` on the three types, and the recognition order |
+
+   **The shape.** `MapItem{Key, Value any}` with a comparable key; `MapSlice` and `MapSliceSeq` are two struct
+   types over the same fields, so `MapSlice(seq)` converts and the destination a caller declares decides
+   whether the encoder writes a plain mapping or `!!omap [{x: 1}, {b: 2}]`. `Len`, `At`, `Get`, `Set`,
+   `Delete`, `Keys`, `Values`, `All`, `ToMap`, `MarshalJSON`, `UnmarshalJSON`. No index map, at Fred's call:
+   `Set` scans.
+
+   **Three things the design did not foresee:**
+
+   - 📌 **A malformed `!!omap` is refused, not passed through.** Fred, 2026-09-10: "the usual rule for
+     malformed tags -- parser reports the documents and the loader refuses these." A sequence that is not
+     one-entry mappings parses and no reader builds a value. I had shipped leniency first, on a comment in
+     `yamlgen.TagOMap` dated **2026-09-13** -- three days ahead of every commit in the repository. Re-measured
+     on 2026-09-10: `go.yaml.in/yaml/v3` v3.0.5 and libfyaml 1.0.0b1 pass `!!omap` through *every* shape, a
+     conforming one included, so neither builds an ordered map and neither reports a repeated key. Neither had
+     a position to cite.
+   - 📌 **`Written.MeansUnclear`, not a narrower draw.** Refusing meant the corpus could no longer state a
+     value for a malformed `!!omap`. Narrowing `yamlgen.TagFor` changes the *document population* and cascades
+     -- two regenerations, the census losing its "two alias keys" shape, the complaint list moving, the
+     verbatim-descent ratchet over its cap. `malformedOrderedMap` in `features.go` keeps the documents and
+     declines to state a meaning, as `keysOnACollection` already did. One regeneration, same cases.
+   - 📌 **`codec.JSON()` was writing invalid JSON**, found on the way to `MarshalJSON`: a key that is not a
+     string went out as YAML spells it, `{1: "a"}`. `jsonKeyNode` takes the name from `ast.KeyName`, which is
+     `ToJSON`'s own reading through `keyText`, so there is one rule for a member name.
+
+   **What it closed:** the `ToMap` panic on an unhashable key, the `k: v: v` encode, the `MapSlice` half of
+   [stream 2](2-correctness.md) defect 91, row 53 (`!!omap` carried and ignored), and a fifth place a merge
+   was resolved -- `decodeMapSlice` refused every merge that overrode a key, defect 40's fault on the one path
+   it had not been fixed on.
+
+   **Still open beside it:** [stream 2](2-correctness.md) row 3, the container rule. The walk names every key
+   with `mapKeyString`, so `!!omap [{1: a}]` reads `uint64(1)` on the tree and `"1"` on the walk;
+   `orderedMapOfWalked`'s doc records that as row 3's and not the tag's.
 
 ## Open items
 
@@ -324,6 +372,16 @@ it points at a feature wired to the wrong place.
     alias where it is read, so the node arrives carrying `ast.AliasNode.Target`. Nothing was patched
     separately; three call sites in `codec/decode.go` and two in `ast/render.go` read the field and keep the
     caller's map as the fallback for a tree built by hand.
+- ✅ **`codec.WithParserOptions` gives the decoder a route to the parser's own surface.** Added 2026-09-13
+  on Fred's call. The decode options say what a caller wants of the *decode*, and the decoder turns some of
+  them into parser options on the caller's behalf — `AllowDuplicateMapKey`, `CommentToMap` — but the rest of
+  `parser`'s surface had no way through. The one that needed it is `parser.WithYAMLVersion`: a `%YAML 1.1`
+  directive in the document was the only route into the 1.1 schema, so a document without one could not be
+  read under it at all. Appended last and in order, so a caller's option wins where two set the same field;
+  nothing can be taken back that way, since every option a decode option asks for only turns something on.
+  - 📌 **Both decode paths take theirs from `Decoder.parserOptions`**, so the walk and the tree agree. That
+    is asserted rather than assumed — an option reaching one path and not the other would be worse than no
+    option at all.
 - 📝 **Upstream #659** — `Path` skips commented content. Untouched.
 
 ## Achievements

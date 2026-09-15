@@ -75,8 +75,9 @@ The parser holds no anchor-to-node map, and under a walk it does not resolve ali
 writes it again; `codec.ToJSON` keeps `named`/`anchored` maps of its own. So the node arena stashes
 nothing and the frontier stays at 8-33 whatever the document does with anchors.
 
-`closeAnchor`'s `Save` therefore protects tokens that nothing currently reads -- removing it leaves
-`./parser`, `./internal/lab` and `./codec` green. It is kept because it is what a resolver would
+`closeAnchor`'s `Save` therefore protects tokens that nothing currently reads -- removing it left
+`./parser`, `./internal/lab` and `./codec` green when this was measured (`internal/lab` was deleted on
+2026-09-07). It is kept because it is what a resolver would
 need, and because the tests that cover anchors use documents small enough to fit one chunk, so they
 could not catch its removal either way. **Do not read those green tests as evidence the Save is
 dead.**
